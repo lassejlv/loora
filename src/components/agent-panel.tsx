@@ -1,7 +1,9 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { useChat } from '@ai-sdk/react'
+import { useLoginWithChatGPT } from '@opencoredev/loginwithchatgpt-react'
 import { DefaultChatTransport, lastAssistantMessageIsCompleteWithToolCalls } from 'ai'
 import {
+  BookOpenIcon,
   CheckIcon,
   ChevronRightIcon,
   KeyRoundIcon,
@@ -25,9 +27,19 @@ import { Textarea } from '#/components/ui/textarea'
 import type { CanvasActions } from '#/lib/canvas'
 import type { Shape } from '#/lib/canvas'
 import { snapshotCanvas } from '#/lib/snapshot'
+import { CHATGPT_PREFERRED, GEMINI_MODELS } from '#/lib/models'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '#/components/ui/select'
 
 const KEY_STORAGE = 'loora:gemini-key'
 const LEGACY_KEY_STORAGE = 'canvasx:gemini-key'
+const PROVIDER_STORAGE = 'loora:provider'
+const MODEL_STORAGE = 'loora:model'
 
 type ChatState = ReturnType<typeof useChat>
 
@@ -55,12 +67,55 @@ export function AgentPanel({
 }) {
   const [hasKey, setHasKey] = useState(() => getKey().length > 0)
   const [input, setInput] = useState('')
+  const lwc = useLoginWithChatGPT()
+  const [provider, setProviderState] = useState<'gemini' | 'chatgpt'>(() =>
+    typeof window !== 'undefined' && localStorage.getItem(PROVIDER_STORAGE) === 'chatgpt'
+      ? 'chatgpt'
+      : 'gemini',
+  )
+  const setProvider = (p: 'gemini' | 'chatgpt') => {
+    setProviderState(p)
+    localStorage.setItem(PROVIDER_STORAGE, p)
+  }
+
+  // Fall back to whichever provider is actually connected.
+  const ready = { gemini: hasKey, chatgpt: lwc.isAuthenticated }
+  const activeProvider = ready[provider] ? provider : ready.gemini ? 'gemini' : ready.chatgpt ? 'chatgpt' : provider
+  const hasAuth = ready.gemini || ready.chatgpt
+  const activeProviderRef = useRef(activeProvider)
+  activeProviderRef.current = activeProvider
+
+  // Model choice per provider, hardcoded lists for now.
+  const [modelChoice, setModelChoice] = useState<Record<string, string>>(() => {
+    try {
+      return JSON.parse(localStorage.getItem(MODEL_STORAGE) ?? '{}')
+    } catch {
+      return {}
+    }
+  })
+
+  const modelOptions = activeProvider === 'chatgpt' ? CHATGPT_PREFERRED : GEMINI_MODELS
+  const activeModel = modelOptions.includes(modelChoice[activeProvider])
+    ? modelChoice[activeProvider]
+    : modelOptions[0]
+  const activeModelRef = useRef(activeModel)
+  activeModelRef.current = activeModel
+
+  const pickModel = (m: string) => {
+    const next = { ...modelChoice, [activeProvider]: m }
+    setModelChoice(next)
+    localStorage.setItem(MODEL_STORAGE, JSON.stringify(next))
+  }
 
   const { messages, sendMessage, addToolOutput, status, stop, error } = useChat({
     transport: new DefaultChatTransport({
       api: '/api/chat',
       headers: () => ({ 'x-gemini-key': getKey() }),
-      body: () => ({ shapes: shapesRef.current }),
+      body: () => ({
+        shapes: shapesRef.current,
+        provider: activeProviderRef.current,
+        model: activeModelRef.current,
+      }),
     }),
     sendAutomaticallyWhen: lastAssistantMessageIsCompleteWithToolCalls,
     onToolCall({ toolCall }) {
@@ -124,18 +179,24 @@ export function AgentPanel({
           />
           <h2 className="text-sm font-semibold">Agent</h2>
         </div>
-        <KeyPopover hasKey={hasKey} onSaved={() => setHasKey(getKey().length > 0)} />
+        <ConnectPopover
+          hasKey={hasKey}
+          onSaved={() => setHasKey(getKey().length > 0)}
+          lwc={lwc}
+          provider={provider}
+          setProvider={setProvider}
+        />
       </header>
 
       <Conversation className="min-h-0 flex-1">
         <ConversationContent className="gap-4">
           {messages.length === 0 && (
             <ConversationEmptyState
-              title={hasKey ? 'Direct the canvas' : 'Connect Gemini'}
+              title={hasAuth ? 'Direct the canvas' : 'Connect a model'}
               description={
-                hasKey
+                hasAuth
                   ? 'Try "add a title that says Hello" or "make three blue squares in a row".'
-                  : 'Add your Gemini API key (top right) to start. It stays in this browser.'
+                  : 'Connect a Gemini API key or your ChatGPT account (top right) to start.'
               }
             />
           )}
@@ -198,17 +259,33 @@ export function AgentPanel({
               }
             }}
             rows={3}
-            placeholder={hasKey ? 'Describe a change…' : 'Add your API key first'}
-            disabled={!hasKey}
+            placeholder={hasAuth ? 'Describe a change…' : 'Connect a model first'}
+            disabled={!hasAuth}
             className="resize-none"
           />
-          <div className="flex justify-end">
+          <div className="flex items-center justify-between gap-2">
+            <Select value={activeModel ?? ''} onValueChange={(v) => v && pickModel(v as string)}>
+              <SelectTrigger
+                size="sm"
+                className="h-7 max-w-44 border-none bg-transparent px-1.5 font-mono text-[11px] text-muted-foreground shadow-none"
+                disabled={modelOptions.length === 0}
+              >
+                <SelectValue>{activeModel ?? 'no models'}</SelectValue>
+              </SelectTrigger>
+              <SelectContent>
+                {modelOptions.map((m) => (
+                  <SelectItem key={m} value={m}>
+                    <span className="font-mono text-xs">{m}</span>
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
             {status === 'streaming' || status === 'submitted' ? (
               <Button type="button" variant="outline" size="sm" onClick={() => stop()}>
                 Stop
               </Button>
             ) : (
-              <Button type="submit" size="sm" disabled={!hasKey || !input.trim()}>
+              <Button type="submit" size="sm" disabled={!hasAuth || !input.trim()}>
                 Send
               </Button>
             )}
@@ -239,6 +316,7 @@ const TOOL_META = {
   createShape: { icon: PlusIcon, label: 'Create' },
   updateShape: { icon: PenLineIcon, label: 'Update' },
   deleteShape: { icon: Trash2Icon, label: 'Delete' },
+  loadSkill: { icon: BookOpenIcon, label: 'Skill' },
 } as const
 
 function describeShape(s: Partial<Shape> | undefined) {
@@ -263,6 +341,9 @@ function toolSummary(name: string, part: ToolPart, shapes: Shape[]) {
   if (name === 'deleteShape') {
     // after deletion the shape is gone from state; fall back to the tool output
     return describeShape(target ?? (part.output as Partial<Shape>)) || String(input.id ?? '')
+  }
+  if (name === 'loadSkill') {
+    return String(input.name ?? '')
   }
   return ''
 }
@@ -330,7 +411,12 @@ function QuestionCard({
   )
 }
 
-const PAST_TENSE = { createShape: 'Created', updateShape: 'Updated', deleteShape: 'Deleted' } as const
+const PAST_TENSE = {
+  createShape: 'Created',
+  updateShape: 'Updated',
+  deleteShape: 'Deleted',
+  loadSkill: 'Loaded skill',
+} as const
 
 function ToolGroup({
   parts,
@@ -541,21 +627,64 @@ function ToolRow({
   )
 }
 
-function KeyPopover({ hasKey, onSaved }: { hasKey: boolean; onSaved: () => void }) {
+function ConnectPopover({
+  hasKey,
+  onSaved,
+  lwc,
+  provider,
+  setProvider,
+}: {
+  hasKey: boolean
+  onSaved: () => void
+  lwc: ReturnType<typeof useLoginWithChatGPT>
+  provider: 'gemini' | 'chatgpt'
+  setProvider: (p: 'gemini' | 'chatgpt') => void
+}) {
   const [open, setOpen] = useState(false)
   const [value, setValue] = useState('')
+  const connected = hasKey || lwc.isAuthenticated
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger
         render={
-          <Button variant={hasKey ? 'ghost' : 'outline'} size="sm">
+          <Button variant={connected ? 'ghost' : 'outline'} size="sm">
             <KeyRoundIcon data-slot="icon" />
-            {hasKey ? null : 'API key'}
+            {connected ? null : 'Connect'}
           </Button>
         }
       />
-      <PopoverContent align="end" className="w-80">
+      <PopoverContent align="end" className="flex w-80 flex-col gap-4">
+        <div className="flex flex-col gap-1.5">
+          <span className="text-sm font-medium">Model</span>
+          <div className="flex gap-1 rounded-lg bg-secondary p-0.5">
+            {(['gemini', 'chatgpt'] as const).map((p) => (
+              <button
+                key={p}
+                type="button"
+                onClick={() => setProvider(p)}
+                className={cn(
+                  'flex flex-1 items-center justify-center gap-1.5 rounded-md py-1 text-xs',
+                  provider === p ? 'bg-card font-medium shadow-sm' : 'text-muted-foreground',
+                )}
+              >
+                {p === 'gemini' ? 'Gemini' : 'ChatGPT'}
+                <span
+                  className={cn(
+                    'size-1.5 rounded-full',
+                    (p === 'gemini' ? hasKey : lwc.isAuthenticated)
+                      ? 'bg-success'
+                      : 'bg-muted-foreground/40',
+                  )}
+                />
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <ChatGPTSection lwc={lwc} />
+
+        <div className="h-px bg-border" />
           <form
             className="flex flex-col gap-2"
             onSubmit={(e) => {
@@ -601,5 +730,68 @@ function KeyPopover({ hasKey, onSaved }: { hasKey: boolean; onSaved: () => void 
           </form>
       </PopoverContent>
     </Popover>
+  )
+}
+
+function ChatGPTSection({ lwc }: { lwc: ReturnType<typeof useLoginWithChatGPT> }) {
+  if (lwc.isAuthenticated) {
+    return (
+      <div className="flex items-center gap-2">
+        <div className="min-w-0 flex-1">
+          <p className="text-sm font-medium">ChatGPT</p>
+          <p className="truncate text-xs text-muted-foreground">{lwc.user?.email ?? 'Connected'}</p>
+        </div>
+        <Button variant="ghost" size="sm" onClick={() => lwc.logout()}>
+          Disconnect
+        </Button>
+      </div>
+    )
+  }
+
+  if (lwc.status === 'pending' || lwc.status === 'connecting') {
+    return (
+      <div className="flex flex-col gap-2">
+        <p className="text-sm font-medium">ChatGPT</p>
+        {lwc.userCode ? (
+          <>
+            <p className="text-xs text-muted-foreground">
+              Enter this code on the OpenAI page that opened:
+            </p>
+            <div className="flex items-center gap-2">
+              <code className="rounded-md border bg-secondary px-2 py-1 font-mono text-sm tracking-widest">
+                {lwc.userCode}
+              </code>
+              <Button variant="outline" size="sm" onClick={() => lwc.copyCode()}>
+                Copy
+              </Button>
+              {lwc.verificationUrl && (
+                <Button variant="ghost" size="sm" onClick={() => lwc.reopen()}>
+                  Reopen
+                </Button>
+              )}
+            </div>
+          </>
+        ) : null}
+        <p className="cx-shimmer w-fit text-xs">Waiting for approval…</p>
+      </div>
+    )
+  }
+
+  return (
+    <div className="flex flex-col gap-2">
+      <p className="text-sm font-medium">ChatGPT</p>
+      <p className="text-xs text-muted-foreground">
+        Signs in with your ChatGPT account via OpenAI&apos;s device flow. loora sends your prompts
+        and canvas snapshots through your ChatGPT plan; only a session cookie is stored here.
+      </p>
+      {(lwc.status === 'error' || lwc.status === 'expired') && (
+        <p className="text-xs text-destructive-foreground">
+          {lwc.status === 'expired' ? 'Login expired - try again.' : 'Login failed - try again.'}
+        </p>
+      )}
+      <Button size="sm" variant="outline" className="w-fit" onClick={() => lwc.login()}>
+        Continue with ChatGPT
+      </Button>
+    </div>
   )
 }

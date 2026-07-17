@@ -16,8 +16,12 @@
   },
   "dependencies": {
     "@ai-sdk/google": "^4.0.18",
+    "@ai-sdk/openai": "^4.0.16",
     "@ai-sdk/react": "^4.0.34",
     "@base-ui/react": "^1.6.0",
+    "@opencoredev/loginwithchatgpt-ai": "^0.2.0",
+    "@opencoredev/loginwithchatgpt-react": "^0.2.0",
+    "@opencoredev/loginwithchatgpt-server": "^0.2.0",
     "@streamdown/cjk": "^1.0.3",
     "@streamdown/code": "^1.1.1",
     "@streamdown/math": "^1.0.2",
