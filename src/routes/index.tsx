@@ -3,6 +3,7 @@ import { createFileRoute } from '@tanstack/react-router'
 import {
   CircleIcon,
   CopyIcon,
+  DownloadIcon,
   FrameIcon,
   HandIcon,
   MousePointer2Icon,
@@ -13,6 +14,7 @@ import {
   TypeIcon,
 } from 'lucide-react'
 import { Canvas, type Tool } from '#/components/canvas'
+import { snapshotCanvas } from '#/lib/snapshot'
 import { AgentPanel } from '#/components/agent-panel'
 import { PALETTE, shapeId, type CanvasActions, type Shape } from '#/lib/canvas'
 import { Button } from '#/components/ui/button'
@@ -161,6 +163,17 @@ function App() {
 
   const actions: CanvasActions = { createShape, createShapes, updateShape, deleteShape }
 
+  const exportPng = useCallback(async () => {
+    const all = shapesRef.current
+    const targets = selectedIds.length > 0 ? all.filter((s) => selectedIds.includes(s.id)) : all
+    const url = await snapshotCanvas(targets, { pixelRatio: 2 })
+    if (!url) return
+    const a = document.createElement('a')
+    a.href = url
+    a.download = 'loora.png'
+    a.click()
+  }, [selectedIds])
+
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       const target = e.target as HTMLElement
@@ -200,6 +213,19 @@ function App() {
           onCreate={(s) => mutate((prev) => [...prev, s])}
           onUpdate={updateShape}
         />
+
+        <div className="absolute top-4 right-4">
+          <Button
+            variant="ghost"
+            size="sm"
+            title={selectedIds.length > 0 ? 'Export selection as PNG' : 'Export canvas as PNG'}
+            onClick={exportPng}
+            disabled={shapes.length === 0}
+          >
+            <DownloadIcon data-slot="icon" />
+            Export
+          </Button>
+        </div>
 
         <div className="pointer-events-none absolute inset-x-0 top-4 flex justify-center">
           <span className="text-sm font-semibold tracking-tight">

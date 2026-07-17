@@ -26,8 +26,11 @@ function shapeSvg(s: Shape): string {
   return `${label}<rect x="${s.x}" y="${s.y}" width="${s.w}" height="${s.h}" rx="${s.radius ?? 0}" fill="${esc(s.fill)}"${stroke}${opacity}/>`
 }
 
-// Rasterize the current shapes to a PNG data URL so the agent can see the canvas.
-export async function snapshotCanvas(shapes: Shape[]): Promise<string | null> {
+// Rasterize shapes to a PNG data URL (agent snapshots and file export).
+export async function snapshotCanvas(
+  shapes: Shape[],
+  { pixelRatio = 1 }: { pixelRatio?: number } = {},
+): Promise<string | null> {
   if (shapes.length === 0) return null
 
   const pad = 40
@@ -37,7 +40,7 @@ export async function snapshotCanvas(shapes: Shape[]): Promise<string | null> {
   const maxY = Math.max(...shapes.map((s) => s.y + s.h)) + pad
   const w = maxX - minX
   const h = maxY - minY
-  const scale = Math.min(1, 1600 / Math.max(w, h))
+  const scale = Math.min(1, 1600 / Math.max(w, h)) * pixelRatio
 
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${minX} ${minY} ${w} ${h}" width="${Math.round(w * scale)}" height="${Math.round(h * scale)}"><rect x="${minX}" y="${minY}" width="${w}" height="${h}" fill="#f1f0ec"/>${renderOrder(
     shapes,
