@@ -5,6 +5,8 @@ import {
   AlignLeftIcon,
   AlignRightIcon,
   BringToFrontIcon,
+  CheckIcon,
+  ChevronDownIcon,
   CircleIcon,
   CopyIcon,
   DownloadIcon,
@@ -20,7 +22,25 @@ import {
   TypeIcon,
 } from 'lucide-react'
 import { Canvas, type Tool } from '#/components/canvas'
+import {
+  deleteDocStorage,
+  docId,
+  loadDocs,
+  loadShapes,
+  saveDocs,
+  saveShapes,
+  type DocMeta,
+} from '#/lib/docs'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '#/components/ui/dropdown-menu'
 import { LayersPanel } from '#/components/layers-panel'
+import { HistoryPopover } from '#/components/history-panel'
+import { deleteHistory } from '#/lib/history'
 import { snapshotCanvas } from '#/lib/snapshot'
 import { AgentPanel } from '#/components/agent-panel'
 import { PALETTE, shapeId, type CanvasActions, type Shape } from '#/lib/canvas'
@@ -29,8 +49,71 @@ import { cn } from '#/lib/utils'
 
 export const Route = createFileRoute('/')({ component: App, ssr: false })
 
-const SHAPES_STORAGE = 'loora:shapes'
-const LEGACY_SHAPES_STORAGE = 'canvasx:shapes'
+function DocSwitcher({
+  docs,
+  activeId,
+  onSwitch,
+  onNew,
+  onRename,
+  onDelete,
+}: {
+  docs: DocMeta[]
+  activeId: string
+  onSwitch: (id: string) => void
+  onNew: () => void
+  onRename: (name: string) => void
+  onDelete: () => void
+}) {
+  const [renaming, setRenaming] = useState(false)
+  const active = docs.find((d) => d.id === activeId)
+
+  if (renaming) {
+    return (
+      <input
+        autoFocus
+        defaultValue={active?.name}
+        className="pointer-events-auto w-40 rounded border bg-card px-1.5 py-0.5 text-sm outline-none"
+        onBlur={(e) => {
+          const name = e.target.value.trim()
+          if (name) onRename(name)
+          setRenaming(false)
+        }}
+        onKeyDown={(e) => {
+          e.stopPropagation()
+          if (e.key === 'Enter' || e.key === 'Escape') e.currentTarget.blur()
+        }}
+      />
+    )
+  }
+
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <button
+          type="button"
+          className="pointer-events-auto flex items-center gap-1 rounded-md px-1.5 py-0.5 text-sm text-muted-foreground hover:bg-secondary hover:text-foreground"
+        >
+          {active?.name ?? 'Untitled'}
+          <ChevronDownIcon className="size-3.5" />
+        </button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="center" className="pointer-events-auto w-52">
+        {docs.map((d) => (
+          <DropdownMenuItem key={d.id} onClick={() => onSwitch(d.id)}>
+            <span className="min-w-0 flex-1 truncate">{d.name}</span>
+            {d.id === activeId && <CheckIcon className="size-3.5" />}
+          </DropdownMenuItem>
+        ))}
+        <DropdownMenuSeparator />
+        <DropdownMenuItem onClick={onNew}>New document</DropdownMenuItem>
+        <DropdownMenuItem onClick={() => setRenaming(true)}>Rename</DropdownMenuItem>
+        <DropdownMenuItem variant="destructive" onClick={onDelete}>
+          Delete document
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  )
+}
 
 const TOOLS: { tool: Tool; icon: typeof SquareIcon; key: string; label: string }[] = [
   { tool: 'select', icon: MousePointer2Icon, key: 'v', label: 'Select' },
@@ -42,15 +125,8 @@ const TOOLS: { tool: Tool; icon: typeof SquareIcon; key: string; label: string }
 ]
 
 function App() {
-  const [shapes, setShapes] = useState<Shape[]>(() => {
-    try {
-      return JSON.parse(
-        localStorage.getItem(SHAPES_STORAGE) ?? localStorage.getItem(LEGACY_SHAPES_STORAGE) ?? '[]',
-      )
-    } catch {
-      return []
-    }
-  })
+  const [{ docs, activeId }, setDocState] = useState(loadDocs)
+  const [shapes, setShapes] = useState<Shape[]>(() => loadShapes(activeId))
   const [selectedIds, setSelectedIds] = useState<string[]>([])
   const [tool, setTool] = useState<Tool>('select')
   const [layersOpen, setLayersOpen] = useState(() => localStorage.getItem('loora:layers') !== '0')
@@ -70,8 +146,57 @@ function App() {
   const [, bumpHistory] = useState(0)
 
   useEffect(() => {
-    localStorage.setItem(SHAPES_STORAGE, JSON.stringify(shapes))
-  }, [shapes])
+    saveShapes(activeId, shapes)
+  }, [shapes, activeId])
+
+  const resetHistory = () => {
+    past.current = []
+    future.current = []
+    lastMutation.current = 0
+  }
+
+  const switchDoc = (id: string) => {
+    if (id === activeId) return
+    setDocState((s) => {
+      saveDocs(s.docs, id)
+      return { ...s, activeId: id }
+    })
+    setShapes(loadShapes(id))
+    setSelectedIds([])
+    resetHistory()
+  }
+
+  const newDoc = () => {
+    const doc = { id: docId(), name: `Untitled ${docs.length + 1}` }
+    const next = [...docs, doc]
+    saveShapes(doc.id, [])
+    saveDocs(next, doc.id)
+    setDocState({ docs: next, activeId: doc.id })
+    setShapes([])
+    setSelectedIds([])
+    resetHistory()
+  }
+
+  const renameDoc = (name: string) => {
+    const next = docs.map((d) => (d.id === activeId ? { ...d, name } : d))
+    saveDocs(next, activeId)
+    setDocState({ docs: next, activeId })
+  }
+
+  const deleteDoc = () => {
+    deleteDocStorage(activeId)
+    deleteHistory(activeId)
+    let next = docs.filter((d) => d.id !== activeId)
+    if (next.length === 0) {
+      next = [{ id: docId(), name: 'Untitled' }]
+      saveShapes(next[0].id, [])
+    }
+    saveDocs(next, next[0].id)
+    setDocState({ docs: next, activeId: next[0].id })
+    setShapes(loadShapes(next[0].id))
+    setSelectedIds([])
+    resetHistory()
+  }
 
   const mutate = useCallback((fn: (prev: Shape[]) => Shape[]) => {
     setShapes((prev) => {
@@ -335,7 +460,15 @@ function App() {
           </div>
         )}
 
-        <div className="absolute top-4 right-4">
+        <div className="absolute top-4 right-4 flex items-center gap-1">
+          <HistoryPopover
+            docId={activeId}
+            shapesRef={shapesRef}
+            onRestore={(restored) => {
+              mutate(() => restored)
+              setSelectedIds([])
+            }}
+          />
           <Button
             variant="ghost"
             size="sm"
@@ -348,10 +481,19 @@ function App() {
           </Button>
         </div>
 
-        <div className="pointer-events-none absolute inset-x-0 top-4 flex justify-center">
+        <div className="pointer-events-none absolute inset-x-0 top-4 flex items-center justify-center gap-2">
           <span className="text-sm font-semibold tracking-tight">
             loora<span className="text-cx-accent">.</span>
           </span>
+          <span className="text-muted-foreground/50">/</span>
+          <DocSwitcher
+            docs={docs}
+            activeId={activeId}
+            onSwitch={switchDoc}
+            onNew={newDoc}
+            onRename={renameDoc}
+            onDelete={deleteDoc}
+          />
         </div>
 
         <div className="absolute top-1/2 left-4 flex -translate-y-1/2 flex-col gap-1 rounded-xl border bg-card p-1 shadow-sm">
