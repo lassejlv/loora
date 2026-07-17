@@ -28,6 +28,7 @@ import { Textarea } from '#/components/ui/textarea'
 import type { CanvasActions } from '#/lib/canvas'
 import type { Shape } from '#/lib/canvas'
 import { snapshotCanvas } from '#/lib/snapshot'
+import { commitIfChanged } from '#/lib/history'
 import { CHATGPT_PREFERRED, GEMINI_MODELS } from '#/lib/models'
 import {
   Select,
@@ -64,9 +65,11 @@ function getKey() {
 export function AgentPanel({
   actions,
   shapesRef,
+  docId,
 }: {
   actions: CanvasActions
   shapesRef: React.RefObject<Shape[]>
+  docId: string
 }) {
   const [hasKey, setHasKey] = useState(() => getKey().length > 0)
   const [input, setInput] = useState('')
@@ -258,6 +261,8 @@ export function AgentPanel({
             if (!input.trim()) return
             const text = input
             setInput('')
+            // safety checkpoint: restorable from History if the agent goes wrong
+            commitIfChanged(docId, `Before: ${text.slice(0, 60)}`, shapesRef.current)
             const snapshot = await snapshotCanvas(shapesRef.current)
             sendMessage({
               text,

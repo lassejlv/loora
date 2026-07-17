@@ -12,6 +12,7 @@ import {
   DownloadIcon,
   FrameIcon,
   HandIcon,
+  LogOutIcon,
   MousePointer2Icon,
   PanelLeftIcon,
   Redo2Icon,
@@ -46,8 +47,26 @@ import { AgentPanel } from '#/components/agent-panel'
 import { PALETTE, shapeId, type CanvasActions, type Shape } from '#/lib/canvas'
 import { Button } from '#/components/ui/button'
 import { cn } from '#/lib/utils'
+import { AuthScreen } from '#/components/auth-screen'
+import { authClient } from '#/lib/auth-client'
 
 export const Route = createFileRoute('/')({ component: App, ssr: false })
+
+function App() {
+  const { data: session, isPending } = authClient.useSession()
+
+  if (isPending) {
+    return (
+      <main className="grid min-h-screen place-items-center bg-cx-canvas">
+        <p className="cx-shimmer text-sm">Opening your canvas…</p>
+      </main>
+    )
+  }
+
+  if (!session) return <AuthScreen />
+
+  return <Editor />
+}
 
 function DocSwitcher({
   docs,
@@ -124,12 +143,12 @@ const TOOLS: { tool: Tool; icon: typeof SquareIcon; key: string; label: string }
   { tool: 'hand', icon: HandIcon, key: 'h', label: 'Hand' },
 ]
 
-function App() {
+function Editor() {
   const [{ docs, activeId }, setDocState] = useState(loadDocs)
   const [shapes, setShapes] = useState<Shape[]>(() => loadShapes(activeId))
   const [selectedIds, setSelectedIds] = useState<string[]>([])
   const [tool, setTool] = useState<Tool>('select')
-  const [layersOpen, setLayersOpen] = useState(() => localStorage.getItem('loora:layers') !== '0')
+  const [layersOpen, setLayersOpen] = useState(() => localStorage.getItem('loora:layers') === '1')
   const toggleLayers = (open: boolean) => {
     setLayersOpen(open)
     localStorage.setItem('loora:layers', open ? '1' : '0')
@@ -479,6 +498,15 @@ function App() {
             <DownloadIcon data-slot="icon" />
             Export
           </Button>
+          <Button
+            variant="ghost"
+            size="icon"
+            aria-label="Sign out"
+            title="Sign out"
+            onClick={() => authClient.signOut()}
+          >
+            <LogOutIcon data-slot="icon" />
+          </Button>
         </div>
 
         <div className="pointer-events-none absolute inset-x-0 top-4 flex items-center justify-center gap-2">
@@ -699,7 +727,7 @@ function App() {
         )}
       </main>
 
-      <AgentPanel actions={actions} shapesRef={shapesRef} />
+      <AgentPanel actions={actions} shapesRef={shapesRef} docId={activeId} />
     </div>
   )
 }

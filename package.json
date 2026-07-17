@@ -12,13 +12,17 @@
     "preview": "vite preview",
     "start": "bun run .output/server/index.mjs",
     "test": "vitest run",
-    "generate-routes": "tsr generate"
+    "generate-routes": "tsr generate",
+    "db:generate": "bun --env-file=.env run drizzle-kit generate",
+    "db:migrate": "bun --env-file=.env run drizzle-kit migrate",
+    "db:studio": "bun --env-file=.env run drizzle-kit studio"
   },
   "dependencies": {
     "@ai-sdk/google": "^4.0.18",
     "@ai-sdk/openai": "^4.0.16",
     "@ai-sdk/react": "^4.0.34",
     "@base-ui/react": "^1.6.0",
+    "@neondatabase/serverless": "^1.1.0",
     "@opencoredev/loginwithchatgpt-ai": "^0.2.0",
     "@opencoredev/loginwithchatgpt-react": "^0.2.0",
     "@opencoredev/loginwithchatgpt-server": "^0.2.0",
@@ -34,9 +38,11 @@
     "@tanstack/react-start": "latest",
     "@tanstack/router-plugin": "^1.132.0",
     "ai": "^7.0.31",
+    "better-auth": "^1.6.23",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "cmdk": "^1.1.1",
+    "drizzle-orm": "^0.45.2",
     "lucide-react": "^0.577.0",
     "nanoid": "^6.0.0",
     "nitro": "^3.0.260610-beta",
@@ -55,17 +61,18 @@
   "devDependencies": {
     "@tailwindcss/typography": "^0.5.16",
     "@tanstack/devtools-vite": "latest",
+    "@tanstack/router-cli": "^1.132.0",
     "@testing-library/dom": "^10.4.1",
     "@testing-library/react": "^16.3.0",
     "@types/node": "^22.10.2",
     "@types/react": "^19.2.0",
     "@types/react-dom": "^19.2.0",
     "@vitejs/plugin-react": "^6.0.1",
+    "drizzle-kit": "^0.31.10",
     "jsdom": "^28.1.0",
     "typescript": "^6.0.2",
     "vite": "^8.0.0",
-    "vitest": "^4.1.5",
-    "@tanstack/router-cli": "^1.132.0"
+    "vitest": "^4.1.5"
   },
   "pnpm": {
     "onlyBuiltDependencies": [

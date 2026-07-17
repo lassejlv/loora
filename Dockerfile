@@ -15,6 +15,7 @@ COPY . .
 # Keep .gitignore in the image context so Tailwind v4 produces
 # matching CSS hashes for client and SSR builds.
 RUN bun run build
+RUN bun build src/db/migrate.ts --target=bun --outfile=.output/migrate.mjs
 
 FROM oven/bun:1.3.14-slim AS runtime
 WORKDIR /app
@@ -24,8 +25,9 @@ ENV HOST=0.0.0.0
 ENV PORT=3000
 
 COPY --from=build /app/.output ./.output
+COPY --from=build /app/drizzle ./drizzle
 
 USER bun
 EXPOSE 3000
 
-CMD ["bun", "run", ".output/server/index.mjs"]
+CMD ["sh", "-c", "bun run .output/migrate.mjs && exec bun run .output/server/index.mjs"]

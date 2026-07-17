@@ -7,6 +7,7 @@ import { z } from 'zod'
 import type { Shape } from '#/lib/canvas'
 import { chatgptAuth } from '#/lib/chatgpt-auth'
 import { CHATGPT_PREFERRED, GEMINI_MODELS } from '#/lib/models'
+import { requireSession } from '#/lib/auth'
 import frontendDesignSkill from '#/skills/frontend-design.md?raw'
 
 const SKILLS = {
@@ -58,6 +59,10 @@ export const Route = createFileRoute('/api/chat')({
   server: {
     handlers: {
       POST: async ({ request }) => {
+        if (!(await requireSession(request))) {
+          return Response.json({ error: 'Unauthorized' }, { status: 401 })
+        }
+
         const { messages, shapes, provider, model: requestedModel } = (await request.json()) as {
           messages: UIMessage[]
           shapes: Shape[]

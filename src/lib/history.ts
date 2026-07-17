@@ -51,6 +51,14 @@ export function commitDoc(docId: string, message: string, shapes: Shape[]): Comm
   return next
 }
 
+// Auto-checkpoint: skip when the canvas is empty or identical to the latest commit.
+export function commitIfChanged(docId: string, message: string, shapes: Shape[]) {
+  if (shapes.length === 0) return
+  const latest = loadHistory(docId)[0]
+  if (latest && JSON.stringify(latest.shapes) === JSON.stringify(shapes)) return
+  commitDoc(docId, message, shapes)
+}
+
 export function deleteHistory(docId: string) {
   localStorage.removeItem(key(docId))
 }

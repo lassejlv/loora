@@ -12,6 +12,7 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as ApiChatRouteImport } from './routes/api.chat'
 import { Route as ApiChatgptSplatRouteImport } from './routes/api.chatgpt.$'
+import { Route as ApiAuthSplatRouteImport } from './routes/api.auth.$'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
@@ -28,34 +29,43 @@ const ApiChatgptSplatRoute = ApiChatgptSplatRouteImport.update({
   path: '/api/chatgpt/$',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiAuthSplatRoute = ApiAuthSplatRouteImport.update({
+  id: '/api/auth/$',
+  path: '/api/auth/$',
+  getParentRoute: () => rootRouteImport,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/api/chat': typeof ApiChatRoute
+  '/api/auth/$': typeof ApiAuthSplatRoute
   '/api/chatgpt/$': typeof ApiChatgptSplatRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/api/chat': typeof ApiChatRoute
+  '/api/auth/$': typeof ApiAuthSplatRoute
   '/api/chatgpt/$': typeof ApiChatgptSplatRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/api/chat': typeof ApiChatRoute
+  '/api/auth/$': typeof ApiAuthSplatRoute
   '/api/chatgpt/$': typeof ApiChatgptSplatRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/api/chat' | '/api/chatgpt/$'
+  fullPaths: '/' | '/api/chat' | '/api/auth/$' | '/api/chatgpt/$'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/api/chat' | '/api/chatgpt/$'
-  id: '__root__' | '/' | '/api/chat' | '/api/chatgpt/$'
+  to: '/' | '/api/chat' | '/api/auth/$' | '/api/chatgpt/$'
+  id: '__root__' | '/' | '/api/chat' | '/api/auth/$' | '/api/chatgpt/$'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   ApiChatRoute: typeof ApiChatRoute
+  ApiAuthSplatRoute: typeof ApiAuthSplatRoute
   ApiChatgptSplatRoute: typeof ApiChatgptSplatRoute
 }
 
@@ -82,12 +92,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiChatgptSplatRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/auth/$': {
+      id: '/api/auth/$'
+      path: '/api/auth/$'
+      fullPath: '/api/auth/$'
+      preLoaderRoute: typeof ApiAuthSplatRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   ApiChatRoute: ApiChatRoute,
+  ApiAuthSplatRoute: ApiAuthSplatRoute,
   ApiChatgptSplatRoute: ApiChatgptSplatRoute,
 }
 export const routeTree = rootRouteImport
