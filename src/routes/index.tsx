@@ -163,6 +163,25 @@ function App() {
     setSelectedIds(copies.map((c) => c.id))
   }, [mutate, selectedIds])
 
+  // In-memory clipboard; repeated pastes cascade by +16 each.
+  const clipboard = useRef<{ shapes: Shape[]; pastes: number }>({ shapes: [], pastes: 0 })
+
+  const copySelected = useCallback(() => {
+    const targets = shapesRef.current.filter((s) => selectedIds.includes(s.id))
+    if (targets.length > 0) clipboard.current = { shapes: targets, pastes: 0 }
+  }, [selectedIds])
+
+  const paste = useCallback(() => {
+    const { shapes: clip } = clipboard.current
+    if (clip.length === 0) return
+    clipboard.current.pastes += 1
+    const offset = 16 * clipboard.current.pastes
+    const copies = clip.map((s) => ({ ...s, id: shapeId(), x: s.x + offset, y: s.y + offset }))
+    mutate((prev) => [...prev, ...copies])
+    setSelectedIds(copies.map((c) => c.id))
+    setTool('select')
+  }, [mutate])
+
   const actions: CanvasActions = { createShape, createShapes, updateShape, deleteShape }
 
   const reorder = useCallback(
@@ -221,6 +240,19 @@ function App() {
         duplicateSelected()
         return
       }
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'c') {
+        copySelected()
+        return
+      }
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'v') {
+        paste()
+        return
+      }
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'x') {
+        copySelected()
+        deleteSelected()
+        return
+      }
       if (e.key === ']' || e.key === '}') {
         e.preventDefault()
         reorder(e.shiftKey ? 'front' : 'forward')
@@ -235,10 +267,19 @@ function App() {
       if (t && !e.metaKey && !e.ctrlKey) setTool(t.tool)
       if (e.key === 'Delete' || e.key === 'Backspace') deleteSelected()
       if (e.key === 'Escape') setSelectedIds([])
+      if (e.key.startsWith('Arrow') && selectedIds.length > 0) {
+        e.preventDefault()
+        const step = e.shiftKey ? 10 : 1
+        const dx = e.key === 'ArrowLeft' ? -step : e.key === 'ArrowRight' ? step : 0
+        const dy = e.key === 'ArrowUp' ? -step : e.key === 'ArrowDown' ? step : 0
+        mutate((prev) =>
+          prev.map((s) => (selectedIds.includes(s.id) ? { ...s, x: s.x + dx, y: s.y + dy } : s)),
+        )
+      }
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [deleteSelected, duplicateSelected, undo, redo, reorder])
+  }, [deleteSelected, duplicateSelected, undo, redo, reorder, copySelected, paste, selectedIds, mutate])
 
   const selectedShapes = shapes.filter((s) => selectedIds.includes(s.id))
   const selected = selectedShapes[0]
