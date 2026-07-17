@@ -12,9 +12,9 @@ interface View {
 
 interface CanvasProps {
   shapes: Shape[]
-  selectedId: string | null
+  selectedIds: string[]
   tool: Tool
-  onSelect: (id: string | null) => void
+  onSelect: (ids: string[]) => void
   onToolChange: (tool: Tool) => void
   onCreate: (shape: Shape) => void
   onUpdate: (id: string, patch: Partial<Shape>) => void
@@ -22,8 +22,9 @@ interface CanvasProps {
 
 type Drag =
   | { mode: 'pan'; startX: number; startY: number; view: View }
-  | { mode: 'move'; id: string; startX: number; startY: number; ox: number; oy: number }
+  | { mode: 'move'; startX: number; startY: number; origins: { id: string; ox: number; oy: number }[] }
   | { mode: 'draw'; type: ShapeType; startX: number; startY: number; x: number; y: number; w: number; h: number }
+  | { mode: 'marquee'; additive: boolean; startX: number; startY: number; x: number; y: number; w: number; h: number }
   | { mode: 'resize'; id: string; corner: number; start: Shape }
 
 const HANDLE_CORNERS = [
@@ -35,7 +36,7 @@ const HANDLE_CORNERS = [
 
 export function Canvas({
   shapes,
-  selectedId,
+  selectedIds,
   tool,
   onSelect,
   onToolChange,
@@ -75,10 +76,30 @@ export function Canvas({
     if (tool === 'select') {
       const target = (e.target as Element).closest('[data-shape-id]')
       const id = target?.getAttribute('data-shape-id') ?? null
-      onSelect(id)
       if (id) {
-        const s = shapes.find((sh) => sh.id === id)!
-        setDragBoth({ mode: 'move', id, startX: pt.x, startY: pt.y, ox: s.x, oy: s.y })
+        if (e.shiftKey) {
+          onSelect(
+            selectedIds.includes(id) ? selectedIds.filter((i) => i !== id) : [...selectedIds, id],
+          )
+          return
+        }
+        const ids = selectedIds.includes(id) ? selectedIds : [id]
+        if (ids !== selectedIds) onSelect(ids)
+        const origins = shapes
+          .filter((s) => ids.includes(s.id))
+          .map((s) => ({ id: s.id, ox: s.x, oy: s.y }))
+        setDragBoth({ mode: 'move', startX: pt.x, startY: pt.y, origins })
+      } else {
+        setDragBoth({
+          mode: 'marquee',
+          additive: e.shiftKey,
+          startX: pt.x,
+          startY: pt.y,
+          x: pt.x,
+          y: pt.y,
+          w: 0,
+          h: 0,
+        })
       }
       return
     }
@@ -89,7 +110,7 @@ export function Canvas({
 
   const startResize = (e: React.PointerEvent, corner: number) => {
     e.stopPropagation()
-    const s = shapes.find((sh) => sh.id === selectedId)
+    const s = selectedIds.length === 1 ? shapes.find((sh) => sh.id === selectedIds[0]) : undefined
     if (!s) return
     svgRef.current!.setPointerCapture(e.pointerId)
     setDragBoth({ mode: 'resize', id: s.id, corner, start: s })
@@ -104,11 +125,12 @@ export function Canvas({
     }
     const pt = toScene(e.clientX, e.clientY)
     if (d.mode === 'move') {
-      onUpdate(d.id, {
-        x: Math.round(d.ox + pt.x - d.startX),
-        y: Math.round(d.oy + pt.y - d.startY),
-      })
-    } else if (d.mode === 'draw') {
+      const dx = pt.x - d.startX
+      const dy = pt.y - d.startY
+      for (const o of d.origins) {
+        onUpdate(o.id, { x: Math.round(o.ox + dx), y: Math.round(o.oy + dy) })
+      }
+    } else if (d.mode === 'draw' || d.mode === 'marquee') {
       const next = {
         ...d,
         x: Math.min(d.startX, pt.x),
@@ -155,9 +177,20 @@ export function Canvas({
         ...(d.type === 'frame' ? { text: 'Frame' } : {}),
       }
       onCreate(shape)
-      onSelect(shape.id)
+      onSelect([shape.id])
       onToolChange('select')
       if (d.type === 'text') setEditingId(shape.id)
+    }
+    if (d?.mode === 'marquee') {
+      // Frames must be fully enclosed to be caught; other shapes just intersect.
+      const hits = shapes
+        .filter((s) =>
+          s.type === 'frame'
+            ? s.x >= d.x && s.y >= d.y && s.x + s.w <= d.x + d.w && s.y + s.h <= d.y + d.h
+            : s.x < d.x + d.w && s.x + s.w > d.x && s.y < d.y + d.h && s.y + s.h > d.y,
+        )
+        .map((s) => s.id)
+      onSelect(d.additive ? [...new Set([...selectedIds, ...hits])] : hits)
     }
     setDragBoth(null)
   }
@@ -178,7 +211,8 @@ export function Canvas({
     }
   }
 
-  const selected = shapes.find((s) => s.id === selectedId)
+  const selectedShapes = shapes.filter((s) => selectedIds.includes(s.id))
+  const single = selectedShapes.length === 1 ? selectedShapes[0] : undefined
   const editing = shapes.find((s) => s.id === editingId)
   const dot = 24 * view.scale
   const cursor =
@@ -225,36 +259,41 @@ export function Canvas({
           <ShapeView key={s.id} shape={s} hideText={s.id === editingId} />
         ))}
 
-        {drag?.mode === 'draw' && (drag.w > 4 || drag.h > 4) && (
+        {(drag?.mode === 'draw' || drag?.mode === 'marquee') && (drag.w > 4 || drag.h > 4) && (
           <rect
             x={drag.x}
             y={drag.y}
             width={drag.w}
             height={drag.h}
-            fill="none"
+            fill={drag.mode === 'marquee' ? 'rgba(36, 64, 230, 0.06)' : 'none'}
             stroke="var(--cx-accent)"
             strokeWidth={1 / view.scale}
             strokeDasharray={`${4 / view.scale} ${3 / view.scale}`}
           />
         )}
 
-        {selected && !editingId && (
-          <g>
+        {!editingId &&
+          selectedShapes.map((s) => (
             <rect
-              x={selected.x}
-              y={selected.y}
-              width={selected.w}
-              height={selected.h}
+              key={s.id}
+              x={s.x}
+              y={s.y}
+              width={s.w}
+              height={s.h}
               fill="none"
               stroke="var(--cx-accent)"
               strokeWidth={1.5 / view.scale}
               pointerEvents="none"
             />
+          ))}
+
+        {single && !editingId && (
+          <g>
             {HANDLE_CORNERS.map(([cx, cy], i) => (
               <rect
                 key={i}
-                x={selected.x + cx * selected.w - 4 / view.scale}
-                y={selected.y + cy * selected.h - 4 / view.scale}
+                x={single.x + cx * single.w - 4 / view.scale}
+                y={single.y + cy * single.h - 4 / view.scale}
                 width={8 / view.scale}
                 height={8 / view.scale}
                 fill="#ffffff"
@@ -265,14 +304,14 @@ export function Canvas({
               />
             ))}
             <text
-              x={selected.x}
-              y={selected.y + selected.h + 16 / view.scale}
+              x={single.x}
+              y={single.y + single.h + 16 / view.scale}
               fontSize={11 / view.scale}
               fontFamily="var(--font-mono)"
               fill="var(--cx-accent)"
               pointerEvents="none"
             >
-              {`${selected.x}, ${selected.y} · ${selected.w} × ${selected.h}`}
+              {`${single.x}, ${single.y} · ${single.w} × ${single.h}`}
             </text>
           </g>
         )}

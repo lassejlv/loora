@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { createFileRoute } from '@tanstack/react-router'
 import {
   CircleIcon,
+  CopyIcon,
   FrameIcon,
   HandIcon,
   MousePointer2Icon,
@@ -41,7 +42,7 @@ function App() {
       return []
     }
   })
-  const [selectedId, setSelectedId] = useState<string | null>(null)
+  const [selectedIds, setSelectedIds] = useState<string[]>([])
   const [tool, setTool] = useState<Tool>('select')
 
   const shapesRef = useRef(shapes)
@@ -117,11 +118,33 @@ function App() {
     (id: string) => {
       const exists = shapesRef.current.some((s) => s.id === id)
       mutate((prev) => prev.filter((s) => s.id !== id))
-      setSelectedId((sel) => (sel === id ? null : sel))
+      setSelectedIds((sel) => sel.filter((i) => i !== id))
       return exists
     },
     [mutate],
   )
+
+  const deleteSelected = useCallback(() => {
+    setSelectedIds((sel) => {
+      if (sel.length > 0) mutate((prev) => prev.filter((s) => !sel.includes(s.id)))
+      return []
+    })
+  }, [mutate])
+
+  const updateSelected = useCallback(
+    (ids: string[], patch: Partial<Omit<Shape, 'id'>>) => {
+      mutate((prev) => prev.map((s) => (ids.includes(s.id) ? { ...s, ...patch } : s)))
+    },
+    [mutate],
+  )
+
+  const duplicateSelected = useCallback(() => {
+    const targets = shapesRef.current.filter((s) => selectedIds.includes(s.id))
+    if (targets.length === 0) return
+    const copies = targets.map((s) => ({ ...s, id: shapeId(), x: s.x + 16, y: s.y + 16 }))
+    mutate((prev) => [...prev, ...copies])
+    setSelectedIds(copies.map((c) => c.id))
+  }, [mutate, selectedIds])
 
   const actions: CanvasActions = { createShape, updateShape, deleteShape }
 
@@ -135,25 +158,31 @@ function App() {
         else undo()
         return
       }
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'd') {
+        e.preventDefault()
+        duplicateSelected()
+        return
+      }
       const t = TOOLS.find((x) => x.key === e.key.toLowerCase())
       if (t && !e.metaKey && !e.ctrlKey) setTool(t.tool)
-      if ((e.key === 'Delete' || e.key === 'Backspace') && selectedId) deleteShape(selectedId)
-      if (e.key === 'Escape') setSelectedId(null)
+      if (e.key === 'Delete' || e.key === 'Backspace') deleteSelected()
+      if (e.key === 'Escape') setSelectedIds([])
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [selectedId, deleteShape, undo, redo])
+  }, [deleteSelected, duplicateSelected, undo, redo])
 
-  const selected = shapes.find((s) => s.id === selectedId)
+  const selectedShapes = shapes.filter((s) => selectedIds.includes(s.id))
+  const selected = selectedShapes[0]
 
   return (
     <div className="flex h-full">
       <main className="relative min-w-0 flex-1">
         <Canvas
           shapes={shapes}
-          selectedId={selectedId}
+          selectedIds={selectedIds}
           tool={tool}
-          onSelect={setSelectedId}
+          onSelect={setSelectedIds}
           onToolChange={setTool}
           onCreate={(s) => mutate((prev) => [...prev, s])}
           onUpdate={updateShape}
@@ -214,10 +243,10 @@ function App() {
                   selected.fill === color && 'ring-2 ring-cx-accent ring-offset-1',
                 )}
                 style={{ backgroundColor: color }}
-                onClick={() => updateShape(selected.id, { fill: color })}
+                onClick={() => updateSelected(selectedIds, { fill: color })}
               />
             ))}
-            {selected.type !== 'text' && (
+            {selectedShapes.some((s) => s.type !== 'text') && (
               <>
                 <div className="mx-1 h-4 w-px bg-border" />
                 <button
@@ -228,7 +257,7 @@ function App() {
                     'relative size-5 rounded-full border border-black/15 bg-white transition-transform hover:scale-110',
                     !selected.stroke && 'ring-2 ring-cx-accent ring-offset-1',
                   )}
-                  onClick={() => updateShape(selected.id, { stroke: undefined, strokeWidth: undefined })}
+                  onClick={() => updateSelected(selectedIds, { stroke: undefined, strokeWidth: undefined })}
                 >
                   <span className="absolute inset-0.5 rotate-45 border-t border-red-400" />
                 </button>
@@ -243,12 +272,12 @@ function App() {
                       selected.stroke === color && 'ring-2 ring-cx-accent ring-offset-1',
                     )}
                     style={{ border: `2.5px solid ${color}` }}
-                    onClick={() => updateShape(selected.id, { stroke: color, strokeWidth: selected.strokeWidth ?? 2 })}
+                    onClick={() => updateSelected(selectedIds, { stroke: color, strokeWidth: selected.strokeWidth ?? 2 })}
                   />
                 ))}
               </>
             )}
-            {(selected.type === 'rect' || selected.type === 'frame') && (
+            {selectedShapes.some((s) => s.type === 'rect' || s.type === 'frame') && (
               <>
                 <div className="mx-1 h-4 w-px bg-border" />
                 <label className="flex items-center gap-1 font-mono text-[11px] text-muted-foreground">
@@ -257,7 +286,7 @@ function App() {
                     type="number"
                     min={0}
                     value={selected.radius ?? 0}
-                    onChange={(e) => updateShape(selected.id, { radius: Math.max(0, Number(e.target.value)) })}
+                    onChange={(e) => updateSelected(selectedIds, { radius: Math.max(0, Number(e.target.value)) })}
                     className="w-11 rounded border bg-background px-1 py-0.5 text-foreground"
                   />
                 </label>
@@ -272,7 +301,7 @@ function App() {
                 max={100}
                 value={Math.round((selected.opacity ?? 1) * 100)}
                 onChange={(e) =>
-                  updateShape(selected.id, {
+                  updateSelected(selectedIds, {
                     opacity: Math.min(100, Math.max(0, Number(e.target.value))) / 100,
                   })
                 }
@@ -283,8 +312,18 @@ function App() {
             <Button
               variant="ghost"
               size="icon-sm"
-              aria-label="Delete shape"
-              onClick={() => deleteShape(selected.id)}
+              aria-label="Duplicate selection (⌘D)"
+              title="Duplicate (⌘D)"
+              onClick={duplicateSelected}
+            >
+              <CopyIcon data-slot="icon" />
+            </Button>
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              aria-label="Delete selection"
+              title="Delete"
+              onClick={deleteSelected}
             >
               <Trash2Icon data-slot="icon" />
             </Button>
