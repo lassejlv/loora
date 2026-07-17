@@ -1,0 +1,20 @@
+{
+  "projectName": "canvasx",
+  "mode": "file-router",
+  "typescript": true,
+  "tailwind": true,
+  "packageManager": "bun",
+  "git": false,
+  "install": true,
+  "addOnOptions": {},
+  "includeExamples": false,
+  "envVarValues": {},
+  "routerOnly": false,
+  "version": 1,
+  "addOns": true,
+  "intent": true,
+  "framework": "react",
+  "chosenAddOns": [
+    "shadcn"
+  ]
+}
