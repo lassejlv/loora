@@ -99,6 +99,19 @@ function App() {
     [mutate],
   )
 
+  const createShapes = useCallback(
+    (batch: Omit<Shape, 'id'>[]) => {
+      const full = batch.map((shape) => ({
+        fontSize: shape.type === 'text' ? 20 : undefined,
+        ...shape,
+        id: shapeId(),
+      }))
+      mutate((prev) => [...prev, ...full])
+      return full
+    },
+    [mutate],
+  )
+
   const updateShape = useCallback(
     (id: string, patch: Partial<Omit<Shape, 'id'>>) => {
       let updated: Shape | null = null
@@ -146,7 +159,7 @@ function App() {
     setSelectedIds(copies.map((c) => c.id))
   }, [mutate, selectedIds])
 
-  const actions: CanvasActions = { createShape, updateShape, deleteShape }
+  const actions: CanvasActions = { createShape, createShapes, updateShape, deleteShape }
 
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {

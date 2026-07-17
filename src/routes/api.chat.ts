@@ -33,6 +33,21 @@ const shapePatch = {
   fontSize: z.number().describe('font size in px (text shapes only)'),
 }
 
+const newShapeSchema = z.object({
+  type: z.enum(['rect', 'ellipse', 'text', 'frame']),
+  x: shapePatch.x,
+  y: shapePatch.y,
+  w: shapePatch.w,
+  h: shapePatch.h,
+  fill: shapePatch.fill,
+  stroke: shapePatch.stroke.optional(),
+  strokeWidth: shapePatch.strokeWidth.optional(),
+  radius: shapePatch.radius.optional(),
+  opacity: shapePatch.opacity.optional(),
+  text: shapePatch.text.optional(),
+  fontSize: shapePatch.fontSize.optional(),
+})
+
 export const Route = createFileRoute('/api/chat')({
   server: {
     handlers: {
@@ -92,7 +107,7 @@ export const Route = createFileRoute('/api/chat')({
             'Coordinates: x/y is the top-left corner, y grows downward. The visible canvas is roughly 1200x800 around the origin.',
             'Palette to prefer: #1a1917 ink, #ffffff white, #2440e6 ultramarine, #e8442e vermilion, #f5c518 yellow, #23a25d green. Other CSS colors are allowed when asked.',
             'Text shapes render their text at fontSize (default 20) in the fill color; size the box to fit.',
-            'When laying out multiple shapes, space them deliberately - aligned edges, consistent gaps.',
+            'When laying out multiple shapes, space them deliberately - aligned edges, consistent gaps. Use createShapes (batch) to add them all in one call.',
             'Keep replies to one or two short sentences; the user sees the canvas change live.',
             '',
             'Current canvas shapes (JSON):',
@@ -103,21 +118,13 @@ export const Route = createFileRoute('/api/chat')({
           tools: {
             // All tools execute on the client against canvas state.
             createShape: {
-              description: 'Add a shape to the canvas. Returns the created shape with its id.',
-              inputSchema: z.object({
-                type: z.enum(['rect', 'ellipse', 'text', 'frame']),
-                x: shapePatch.x,
-                y: shapePatch.y,
-                w: shapePatch.w,
-                h: shapePatch.h,
-                fill: shapePatch.fill,
-                stroke: shapePatch.stroke.optional(),
-                strokeWidth: shapePatch.strokeWidth.optional(),
-                radius: shapePatch.radius.optional(),
-                opacity: shapePatch.opacity.optional(),
-                text: shapePatch.text.optional(),
-                fontSize: shapePatch.fontSize.optional(),
-              }),
+              description: 'Add a single shape to the canvas. Returns the created shape with its id.',
+              inputSchema: newShapeSchema,
+            },
+            createShapes: {
+              description:
+                'Add many shapes to the canvas in one call. Always prefer this over repeated createShape when adding more than one shape. Returns the created shapes with their ids.',
+              inputSchema: z.object({ shapes: z.array(newShapeSchema).min(1).max(100) }),
             },
             updateShape: {
               description: 'Update properties of an existing shape by id.',

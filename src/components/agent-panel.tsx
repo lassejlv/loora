@@ -131,6 +131,9 @@ export function AgentPanel({
         case 'createShape':
           respond(actions.createShape(input as never))
           break
+        case 'createShapes':
+          respond(actions.createShapes((input as { shapes: Omit<Shape, 'id'>[] }).shapes))
+          break
         case 'updateShape': {
           const { id, ...patch } = input as { id: string } & Partial<Shape>
           const updated = actions.updateShape(id, patch)
@@ -314,6 +317,7 @@ interface ToolPart {
 
 const TOOL_META = {
   createShape: { icon: PlusIcon, label: 'Create' },
+  createShapes: { icon: PlusIcon, label: 'Create' },
   updateShape: { icon: PenLineIcon, label: 'Update' },
   deleteShape: { icon: Trash2Icon, label: 'Delete' },
   loadSkill: { icon: BookOpenIcon, label: 'Skill' },
@@ -330,6 +334,10 @@ function toolSummary(name: string, part: ToolPart, shapes: Shape[]) {
   const input = part.input ?? {}
   if (name === 'createShape') {
     return `${describeShape(input as Partial<Shape>)} at (${input.x}, ${input.y})`
+  }
+  if (name === 'createShapes') {
+    const batch = (input.shapes as Partial<Shape>[] | undefined) ?? []
+    return `${batch.length} shapes`
   }
   const target = shapes.find((s) => s.id === input.id)
   if (name === 'updateShape') {
@@ -413,6 +421,7 @@ function QuestionCard({
 
 const PAST_TENSE = {
   createShape: 'Created',
+  createShapes: 'Created',
   updateShape: 'Updated',
   deleteShape: 'Deleted',
   loadSkill: 'Loaded skill',
@@ -435,8 +444,12 @@ function ToolGroup({
 
   const counts = new Map<string, number>()
   for (const p of parts) {
-    const verb = PAST_TENSE[p.type.slice(5) as keyof typeof PAST_TENSE]
-    if (verb) counts.set(verb, (counts.get(verb) ?? 0) + 1)
+    const name = p.type.slice(5)
+    const verb = PAST_TENSE[name as keyof typeof PAST_TENSE]
+    // a batch call counts as its number of shapes, not 1
+    const weight =
+      name === 'createShapes' ? ((p.input?.shapes as unknown[] | undefined)?.length ?? 1) : 1
+    if (verb) counts.set(verb, (counts.get(verb) ?? 0) + weight)
   }
   const summary = [...counts.entries()].map(([verb, n]) => `${verb} ${n}`).join(' · ')
   const busy = parts.some(

@@ -32,6 +32,7 @@ export const PALETTE = [
 
 export interface CanvasActions {
   createShape: (shape: Omit<Shape, 'id'> & { id?: string }) => Shape
+  createShapes: (shapes: Omit<Shape, 'id'>[]) => Shape[]
   updateShape: (id: string, patch: Partial<Omit<Shape, 'id'>>) => Shape | null
   deleteShape: (id: string) => boolean
 }
