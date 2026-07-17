@@ -1,6 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { createFileRoute } from '@tanstack/react-router'
 import {
+  AlignCenterIcon,
+  AlignLeftIcon,
+  AlignRightIcon,
   BringToFrontIcon,
   CircleIcon,
   CopyIcon,
@@ -396,6 +399,54 @@ function App() {
                     style={{ border: `2.5px solid ${color}` }}
                     onClick={() => updateSelected(selectedIds, { stroke: color, strokeWidth: selected.strokeWidth ?? 2 })}
                   />
+                ))}
+              </>
+            )}
+            {selected.type === 'text' && (
+              <>
+                <div className="mx-1 h-4 w-px bg-border" />
+                <label className="flex items-center gap-1 font-mono text-[11px] text-muted-foreground">
+                  S
+                  <input
+                    type="number"
+                    min={6}
+                    value={selected.fontSize ?? 20}
+                    onChange={(e) =>
+                      updateSelected(selectedIds, { fontSize: Math.max(6, Number(e.target.value)) })
+                    }
+                    className="w-11 rounded border bg-background px-1 py-0.5 text-foreground"
+                  />
+                </label>
+                <select
+                  aria-label="Font weight"
+                  value={selected.fontWeight ?? 400}
+                  onChange={(e) => updateSelected(selectedIds, { fontWeight: Number(e.target.value) })}
+                  className="rounded border bg-background px-1 py-0.5 font-mono text-[11px] text-foreground"
+                >
+                  <option value={400}>Regular</option>
+                  <option value={500}>Medium</option>
+                  <option value={600}>Semibold</option>
+                  <option value={700}>Bold</option>
+                </select>
+                {(
+                  [
+                    ['left', AlignLeftIcon],
+                    ['center', AlignCenterIcon],
+                    ['right', AlignRightIcon],
+                  ] as const
+                ).map(([align, Icon]) => (
+                  <Button
+                    key={align}
+                    variant="ghost"
+                    size="icon-sm"
+                    aria-label={`Align ${align}`}
+                    className={cn(
+                      (selected.align ?? 'left') === align && 'bg-cx-accent/10 text-cx-accent',
+                    )}
+                    onClick={() => updateSelected(selectedIds, { align })}
+                  >
+                    <Icon data-slot="icon" />
+                  </Button>
                 ))}
               </>
             )}

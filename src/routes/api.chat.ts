@@ -31,6 +31,10 @@ const shapePatch = {
   opacity: z.number().min(0).max(1).describe('0-1, default 1'),
   text: z.string().describe('text content, or the frame name for frames'),
   fontSize: z.number().describe('font size in px (text shapes only)'),
+  fontWeight: z
+    .number()
+    .describe('font weight for text shapes: 400, 500, 600, or 700 (default 400)'),
+  align: z.enum(['left', 'center', 'right']).describe('text alignment within the box (text shapes only)'),
 }
 
 const newShapeSchema = z.object({
@@ -46,6 +50,8 @@ const newShapeSchema = z.object({
   opacity: shapePatch.opacity.optional(),
   text: shapePatch.text.optional(),
   fontSize: shapePatch.fontSize.optional(),
+  fontWeight: shapePatch.fontWeight.optional(),
+  align: shapePatch.align.optional(),
 })
 
 export const Route = createFileRoute('/api/chat')({
@@ -118,6 +124,8 @@ export const Route = createFileRoute('/api/chat')({
                 opacity: shapePatch.opacity.optional(),
                 text: shapePatch.text.optional(),
                 fontSize: shapePatch.fontSize.optional(),
+                fontWeight: shapePatch.fontWeight.optional(),
+                align: shapePatch.align.optional(),
               }),
             },
             deleteShape: {
@@ -181,7 +189,7 @@ export const Route = createFileRoute('/api/chat')({
             'The user message may include a PNG snapshot of the current canvas. Use it to judge layout, overlap, and balance before and after your edits.',
             'Coordinates: x/y is the top-left corner, y grows downward. The visible canvas is roughly 1200x800 around the origin.',
             'Palette to prefer: #1a1917 ink, #ffffff white, #2440e6 ultramarine, #e8442e vermilion, #f5c518 yellow, #23a25d green. Other CSS colors are allowed when asked.',
-            'Text shapes render their text at fontSize (default 20) in the fill color; size the box to fit.',
+            'Text shapes render at fontSize (default 20) with fontWeight (400-700) and align (left/center/right), in the fill color. Text wraps at the box width w and supports newlines - size the box for the content. Use weight and size for hierarchy: e.g. 32/700 titles, 14/400 body.',
             'When laying out multiple shapes, space them deliberately - aligned edges, consistent gaps. Use createShapes (batch) to add them all in one call.',
             'Verify loop: after finishing the edits for a design task, call viewCanvas to see the actual result. If you spot problems (overlap, misalignment, cramped spacing, poor contrast), fix them and check again. Skip verification for trivial single-shape edits.',
             'Keep replies to one or two short sentences; the user sees the canvas change live.',

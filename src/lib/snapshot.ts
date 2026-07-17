@@ -1,5 +1,5 @@
 import type { Shape } from './canvas'
-import { renderOrder } from './canvas'
+import { LINE_HEIGHT, layoutText, renderOrder } from './canvas'
 
 function esc(s: string) {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
@@ -17,7 +17,15 @@ function shapeSvg(s: Shape): string {
   }
   if (s.type === 'text') {
     const size = s.fontSize ?? 20
-    return `<text x="${s.x}" y="${s.y + size}" font-size="${size}" font-family="sans-serif" fill="${esc(s.fill)}"${opacity}>${esc(s.text ?? '')}</text>`
+    const anchorX = s.align === 'center' ? s.x + s.w / 2 : s.align === 'right' ? s.x + s.w : s.x
+    const anchor = s.align === 'center' ? 'middle' : s.align === 'right' ? 'end' : 'start'
+    const spans = layoutText(s)
+      .map(
+        (line, i) =>
+          `<tspan x="${anchorX}" y="${s.y + size + i * size * LINE_HEIGHT}">${esc(line)}</tspan>`,
+      )
+      .join('')
+    return `<text font-size="${size}" font-weight="${s.fontWeight ?? 400}" text-anchor="${anchor}" font-family="sans-serif" fill="${esc(s.fill)}"${opacity}>${spans}</text>`
   }
   const label =
     s.type === 'frame'

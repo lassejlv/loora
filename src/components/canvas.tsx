@@ -1,6 +1,6 @@
 import { useRef, useState } from 'react'
 import type { Shape, ShapeType } from '#/lib/canvas'
-import { renderOrder, shapeId } from '#/lib/canvas'
+import { LINE_HEIGHT, layoutText, renderOrder, shapeId } from '#/lib/canvas'
 
 export type Tool = 'select' | 'hand' | ShapeType
 
@@ -396,13 +396,15 @@ export function Canvas({
             width={Math.max(editing.w, 40)}
             height={Math.max(editing.h, 32)}
           >
-            <input
+            <textarea
               autoFocus
               defaultValue={editing.text}
-              className="h-full w-full bg-transparent outline-none"
+              className="h-full w-full resize-none bg-transparent outline-none"
               style={{
-                font: `${editing.fontSize ?? 20}px var(--font-sans)`,
+                font: `${editing.fontWeight ?? 400} ${editing.fontSize ?? 20}px var(--font-sans)`,
+                lineHeight: LINE_HEIGHT,
                 color: editing.fill,
+                textAlign: editing.align ?? 'left',
               }}
               onBlur={(e) => {
                 onUpdate(editing.id, { text: e.target.value })
@@ -410,7 +412,7 @@ export function Canvas({
               }}
               onKeyDown={(e) => {
                 e.stopPropagation()
-                if (e.key === 'Enter' || e.key === 'Escape') e.currentTarget.blur()
+                if (e.key === 'Escape') e.currentTarget.blur()
               }}
               onPointerDown={(e) => e.stopPropagation()}
             />
@@ -451,18 +453,26 @@ function ShapeView({ shape: s, hideText }: { shape: Shape; hideText?: boolean })
     )
   }
   if (s.type === 'text') {
+    const fontSize = s.fontSize ?? 20
+    const anchorX = s.align === 'center' ? s.x + s.w / 2 : s.align === 'right' ? s.x + s.w : s.x
     return (
-      <text
-        data-shape-id={s.id}
-        opacity={s.opacity}
-        x={s.x}
-        y={s.y + (s.fontSize ?? 20)}
-        fontSize={s.fontSize ?? 20}
-        fontFamily="var(--font-sans)"
-        fill={hideText ? 'transparent' : s.fill}
-      >
-        {s.text}
-      </text>
+      <g data-shape-id={s.id} opacity={s.opacity}>
+        {/* invisible hit area so empty space in the box is clickable */}
+        <rect x={s.x} y={s.y} width={s.w} height={s.h} fill="transparent" />
+        <text
+          fontSize={fontSize}
+          fontWeight={s.fontWeight ?? 400}
+          fontFamily="var(--font-sans)"
+          fill={hideText ? 'transparent' : s.fill}
+          textAnchor={s.align === 'center' ? 'middle' : s.align === 'right' ? 'end' : 'start'}
+        >
+          {layoutText(s).map((line, i) => (
+            <tspan key={i} x={anchorX} y={s.y + fontSize + i * fontSize * LINE_HEIGHT}>
+              {line}
+            </tspan>
+          ))}
+        </text>
+      </g>
     )
   }
   if (s.type === 'frame') {
