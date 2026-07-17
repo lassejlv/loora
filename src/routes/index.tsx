@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { createFileRoute } from '@tanstack/react-router'
 import {
+  BringToFrontIcon,
   CircleIcon,
   CopyIcon,
   DownloadIcon,
@@ -8,6 +9,7 @@ import {
   HandIcon,
   MousePointer2Icon,
   Redo2Icon,
+  SendToBackIcon,
   SquareIcon,
   Undo2Icon,
   Trash2Icon,
@@ -163,6 +165,36 @@ function App() {
 
   const actions: CanvasActions = { createShape, createShapes, updateShape, deleteShape }
 
+  const reorder = useCallback(
+    (dir: 'forward' | 'backward' | 'front' | 'back') => {
+      const sel = new Set(selectedIds)
+      if (sel.size === 0) return
+      mutate((prev) => {
+        const arr = [...prev]
+        if (dir === 'front' || dir === 'back') {
+          const chosen = arr.filter((s) => sel.has(s.id))
+          const rest = arr.filter((s) => !sel.has(s.id))
+          return dir === 'front' ? [...rest, ...chosen] : [...chosen, ...rest]
+        }
+        if (dir === 'forward') {
+          for (let i = arr.length - 2; i >= 0; i--) {
+            if (sel.has(arr[i].id) && !sel.has(arr[i + 1].id)) {
+              ;[arr[i], arr[i + 1]] = [arr[i + 1], arr[i]]
+            }
+          }
+        } else {
+          for (let i = 1; i < arr.length; i++) {
+            if (sel.has(arr[i].id) && !sel.has(arr[i - 1].id)) {
+              ;[arr[i], arr[i - 1]] = [arr[i - 1], arr[i]]
+            }
+          }
+        }
+        return arr
+      })
+    },
+    [mutate, selectedIds],
+  )
+
   const exportPng = useCallback(async () => {
     const all = shapesRef.current
     const targets = selectedIds.length > 0 ? all.filter((s) => selectedIds.includes(s.id)) : all
@@ -189,6 +221,16 @@ function App() {
         duplicateSelected()
         return
       }
+      if (e.key === ']' || e.key === '}') {
+        e.preventDefault()
+        reorder(e.shiftKey ? 'front' : 'forward')
+        return
+      }
+      if (e.key === '[' || e.key === '{') {
+        e.preventDefault()
+        reorder(e.shiftKey ? 'back' : 'backward')
+        return
+      }
       const t = TOOLS.find((x) => x.key === e.key.toLowerCase())
       if (t && !e.metaKey && !e.ctrlKey) setTool(t.tool)
       if (e.key === 'Delete' || e.key === 'Backspace') deleteSelected()
@@ -196,7 +238,7 @@ function App() {
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [deleteSelected, duplicateSelected, undo, redo])
+  }, [deleteSelected, duplicateSelected, undo, redo, reorder])
 
   const selectedShapes = shapes.filter((s) => selectedIds.includes(s.id))
   const selected = selectedShapes[0]
@@ -348,6 +390,24 @@ function App() {
               />
             </label>
             <div className="mx-1 h-4 w-px bg-border" />
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              aria-label="Bring forward (], shift-click for front)"
+              title="Bring forward (] · ⇧ front)"
+              onClick={(e) => reorder(e.shiftKey ? 'front' : 'forward')}
+            >
+              <BringToFrontIcon data-slot="icon" />
+            </Button>
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              aria-label="Send backward ([, shift-click for back)"
+              title="Send backward ([ · ⇧ back)"
+              onClick={(e) => reorder(e.shiftKey ? 'back' : 'backward')}
+            >
+              <SendToBackIcon data-slot="icon" />
+            </Button>
             <Button
               variant="ghost"
               size="icon-sm"
