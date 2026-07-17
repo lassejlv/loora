@@ -92,30 +92,7 @@ export const Route = createFileRoute('/api/chat')({
           )
         }
 
-        const result = streamText({
-          model,
-          system: [
-            'You are the design agent inside loora, a minimal canvas tool.',
-            'Only touch the canvas when the user explicitly asks for a change. Greetings, questions, or chit-chat get a plain text reply with zero tool calls.',
-            'Never delete or overwrite existing shapes unless the user asked for exactly that. When a request is ambiguous, use the askQuestion tool instead of guessing.',
-            'Make the minimal set of changes that fulfills the request - no extra decoration, no unrequested layouts.',
-            'Skills: before any substantial design task (a screen, a page layout, a multi-shape composition), call loadSkill with "frontend-design" and follow its guidance. Skip it for trivial edits.',
-            'You manipulate the canvas only through tools. Shapes are rect, ellipse, text, or frame.',
-            'Frames are artboards: white containers that render behind other shapes. Design inside a frame when one exists (or create one for a screen/page design, e.g. 375x812 mobile or 1440x900 desktop). The frame name lives in its "text" field.',
-            'Shapes support stroke (border color + strokeWidth), radius (rounded corners on rect/frame), and opacity (0-1). Use them: a rect with radius 8 and a subtle stroke reads as a button or card.',
-            'The user message may include a PNG snapshot of the current canvas. Use it to judge layout, overlap, and balance before and after your edits.',
-            'Coordinates: x/y is the top-left corner, y grows downward. The visible canvas is roughly 1200x800 around the origin.',
-            'Palette to prefer: #1a1917 ink, #ffffff white, #2440e6 ultramarine, #e8442e vermilion, #f5c518 yellow, #23a25d green. Other CSS colors are allowed when asked.',
-            'Text shapes render their text at fontSize (default 20) in the fill color; size the box to fit.',
-            'When laying out multiple shapes, space them deliberately - aligned edges, consistent gaps. Use createShapes (batch) to add them all in one call.',
-            'Keep replies to one or two short sentences; the user sees the canvas change live.',
-            '',
-            'Current canvas shapes (JSON):',
-            JSON.stringify(shapes ?? []),
-          ].join('\n'),
-          messages: await convertToModelMessages(messages),
-          stopWhen: stepCountIs(10),
-          tools: {
+        const tools = {
             // All tools execute on the client against canvas state.
             createShape: {
               description: 'Add a single shape to the canvas. Returns the created shape with its id.',
@@ -148,6 +125,29 @@ export const Route = createFileRoute('/api/chat')({
                 'Remove a shape from the canvas by id. The user is asked to confirm each deletion and may decline.',
               inputSchema: z.object({ id: z.string() }),
             },
+            viewCanvas: {
+              description:
+                'Render the current canvas to an image and look at it. Call this after finishing edits for a design task to verify the result, then fix any problems you see.',
+              // Non-empty schema: Gemini rejects function declarations with zero properties.
+              inputSchema: z.object({
+                focus: z.string().optional().describe('what you are checking, e.g. "spacing of the header"'),
+              }),
+              toModelOutput: ({ output }: { output: { image?: string; empty?: boolean } }) => {
+                if (!output?.image) {
+                  return { type: 'text' as const, value: 'The canvas is empty.' }
+                }
+                return {
+                  type: 'content' as const,
+                  value: [
+                    {
+                      type: 'file' as const,
+                      data: { type: 'data' as const, data: output.image.split(',')[1] },
+                      mediaType: 'image/png',
+                    },
+                  ],
+                }
+              },
+            },
             loadSkill: {
               description:
                 'Load a skill: expert instructions to follow for the current task. Read the returned text and apply it. Available skills: ' +
@@ -165,10 +165,42 @@ export const Route = createFileRoute('/api/chat')({
                 options: z.array(z.string()).min(2).max(4),
               }),
             },
-          },
+        }
+
+        const result = streamText({
+          model,
+          system: [
+            'You are the design agent inside loora, a minimal canvas tool.',
+            'Only touch the canvas when the user explicitly asks for a change. Greetings, questions, or chit-chat get a plain text reply with zero tool calls.',
+            'Never delete or overwrite existing shapes unless the user asked for exactly that. When a request is ambiguous, use the askQuestion tool instead of guessing.',
+            'Make the minimal set of changes that fulfills the request - no extra decoration, no unrequested layouts.',
+            'Skills: before any substantial design task (a screen, a page layout, a multi-shape composition), call loadSkill with "frontend-design" and follow its guidance. Skip it for trivial edits.',
+            'You manipulate the canvas only through tools. Shapes are rect, ellipse, text, or frame.',
+            'Frames are artboards: white containers that render behind other shapes. Design inside a frame when one exists (or create one for a screen/page design, e.g. 375x812 mobile or 1440x900 desktop). The frame name lives in its "text" field.',
+            'Shapes support stroke (border color + strokeWidth), radius (rounded corners on rect/frame), and opacity (0-1). Use them: a rect with radius 8 and a subtle stroke reads as a button or card.',
+            'The user message may include a PNG snapshot of the current canvas. Use it to judge layout, overlap, and balance before and after your edits.',
+            'Coordinates: x/y is the top-left corner, y grows downward. The visible canvas is roughly 1200x800 around the origin.',
+            'Palette to prefer: #1a1917 ink, #ffffff white, #2440e6 ultramarine, #e8442e vermilion, #f5c518 yellow, #23a25d green. Other CSS colors are allowed when asked.',
+            'Text shapes render their text at fontSize (default 20) in the fill color; size the box to fit.',
+            'When laying out multiple shapes, space them deliberately - aligned edges, consistent gaps. Use createShapes (batch) to add them all in one call.',
+            'Verify loop: after finishing the edits for a design task, call viewCanvas to see the actual result. If you spot problems (overlap, misalignment, cramped spacing, poor contrast), fix them and check again. Skip verification for trivial single-shape edits.',
+            'Keep replies to one or two short sentences; the user sees the canvas change live.',
+            '',
+            'Current canvas shapes (JSON):',
+            JSON.stringify(shapes ?? []),
+          ].join('\n'),
+          messages: await convertToModelMessages(messages, { tools }),
+          stopWhen: stepCountIs(10),
+          tools,
+          // Kill hung upstream calls instead of leaving the client spinning forever.
+          abortSignal: AbortSignal.timeout(120_000),
+          onError: ({ error }) => console.error('[chat] stream error:', error),
         })
 
-        return result.toUIMessageStreamResponse()
+        return result.toUIMessageStreamResponse({
+          onError: (error) =>
+            error instanceof Error ? error.message : 'The model request failed.',
+        })
       },
     },
   },

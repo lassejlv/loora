@@ -5,6 +5,7 @@ import { DefaultChatTransport, lastAssistantMessageIsCompleteWithToolCalls } fro
 import {
   BookOpenIcon,
   CheckIcon,
+  EyeIcon,
   ChevronRightIcon,
   KeyRoundIcon,
   PenLineIcon,
@@ -50,6 +51,8 @@ function isThinking(status: ChatState['status'], messages: ChatState['messages']
   const last = messages[messages.length - 1]
   if (!last || last.role !== 'assistant') return true
   const lastPart = last.parts[last.parts.length - 1]
+  // reasoning has its own indicator; text means visible output has started
+  if (lastPart?.type === 'reasoning') return false
   return !(lastPart?.type === 'text' && lastPart.text.length > 0)
 }
 
@@ -140,6 +143,11 @@ export function AgentPanel({
           respond(updated ?? { error: `No shape with id ${id}` })
           break
         }
+        case 'viewCanvas':
+          snapshotCanvas(shapesRef.current).then((image) =>
+            respond(image ? { image } : { empty: true }),
+          )
+          break
         // deleteShape is NOT handled here: it waits for user confirmation in the UI.
       }
     },
@@ -203,12 +211,20 @@ export function AgentPanel({
               }
             />
           )}
-          {messages.map((message) => (
+          {messages.map((message, mi) => (
             <Message from={message.role} key={message.id}>
               <MessageContent>
-                {toBlocks(message.parts).map((block, i) =>
+                {toBlocks(message.parts).map((block, i, blocks) =>
                   block.kind === 'text' ? (
                     <span key={i}>{block.text}</span>
+                  ) : block.kind === 'reasoning' ? (
+                    mi === messages.length - 1 &&
+                    i === blocks.length - 1 &&
+                    (status === 'streaming' || status === 'submitted') ? (
+                      <p key={i} className="cx-shimmer w-fit text-sm">
+                        Reasoning…
+                      </p>
+                    ) : null
                   ) : block.kind === 'question' ? (
                     <QuestionCard key={i} part={block.part} onAnswer={answerQuestion} />
                   ) : (
@@ -321,6 +337,7 @@ const TOOL_META = {
   updateShape: { icon: PenLineIcon, label: 'Update' },
   deleteShape: { icon: Trash2Icon, label: 'Delete' },
   loadSkill: { icon: BookOpenIcon, label: 'Skill' },
+  viewCanvas: { icon: EyeIcon, label: 'Verify' },
 } as const
 
 function describeShape(s: Partial<Shape> | undefined) {
@@ -353,11 +370,15 @@ function toolSummary(name: string, part: ToolPart, shapes: Shape[]) {
   if (name === 'loadSkill') {
     return String(input.name ?? '')
   }
+  if (name === 'viewCanvas') {
+    return 'looking at the canvas'
+  }
   return ''
 }
 
 type Block =
   | { kind: 'text'; text: string }
+  | { kind: 'reasoning' }
   | { kind: 'tools'; parts: ToolPart[] }
   | { kind: 'question'; part: ToolPart }
 
@@ -368,6 +389,8 @@ function toBlocks(parts: { type: string }[]): Block[] {
   for (const part of parts) {
     if (part.type === 'text') {
       blocks.push({ kind: 'text', text: (part as unknown as { text: string }).text })
+    } else if (part.type === 'reasoning') {
+      blocks.push({ kind: 'reasoning' })
     } else if (part.type === 'tool-askQuestion') {
       blocks.push({ kind: 'question', part: part as ToolPart })
     } else if (part.type.startsWith('tool-')) {
@@ -425,6 +448,7 @@ const PAST_TENSE = {
   updateShape: 'Updated',
   deleteShape: 'Deleted',
   loadSkill: 'Loaded skill',
+  viewCanvas: 'Verified',
 } as const
 
 function ToolGroup({
