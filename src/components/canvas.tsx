@@ -22,7 +22,12 @@ interface CanvasProps {
 
 type Drag =
   | { mode: 'pan'; startX: number; startY: number; view: View }
-  | { mode: 'move'; startX: number; startY: number; origins: { id: string; ox: number; oy: number }[] }
+  | {
+      mode: 'move'
+      startX: number
+      startY: number
+      origins: { id: string; ox: number; oy: number; w: number; h: number }[]
+    }
   | { mode: 'draw'; type: ShapeType; startX: number; startY: number; x: number; y: number; w: number; h: number }
   | { mode: 'marquee'; additive: boolean; startX: number; startY: number; x: number; y: number; w: number; h: number }
   | { mode: 'resize'; id: string; corner: number; start: Shape }
@@ -46,6 +51,7 @@ export function Canvas({
   const svgRef = useRef<SVGSVGElement>(null)
   const [view, setView] = useState<View>({ x: 0, y: 0, scale: 1 })
   const [drag, setDrag] = useState<Drag | null>(null)
+  const [guides, setGuides] = useState<{ v: number[]; h: number[] }>({ v: [], h: [] })
   const [editingId, setEditingId] = useState<string | null>(null)
   const dragRef = useRef<Drag | null>(null)
   dragRef.current = drag
@@ -87,7 +93,7 @@ export function Canvas({
         if (ids !== selectedIds) onSelect(ids)
         const origins = shapes
           .filter((s) => ids.includes(s.id))
-          .map((s) => ({ id: s.id, ox: s.x, oy: s.y }))
+          .map((s) => ({ id: s.id, ox: s.x, oy: s.y, w: s.w, h: s.h }))
         setDragBoth({ mode: 'move', startX: pt.x, startY: pt.y, origins })
       } else {
         setDragBoth({
@@ -125,8 +131,42 @@ export function Canvas({
     }
     const pt = toScene(e.clientX, e.clientY)
     if (d.mode === 'move') {
-      const dx = pt.x - d.startX
-      const dy = pt.y - d.startY
+      let dx = pt.x - d.startX
+      let dy = pt.y - d.startY
+
+      // Snap the selection bounding box to edges/centers of other shapes.
+      const movingIds = new Set(d.origins.map((o) => o.id))
+      const left = Math.min(...d.origins.map((o) => o.ox)) + dx
+      const top = Math.min(...d.origins.map((o) => o.oy)) + dy
+      const right = Math.max(...d.origins.map((o) => o.ox + o.w)) + dx
+      const bottom = Math.max(...d.origins.map((o) => o.oy + o.h)) + dy
+      const threshold = 6 / view.scale
+      const others = shapes.filter((s) => !movingIds.has(s.id))
+
+      let bestX: { corr: number; line: number } | null = null
+      let bestY: { corr: number; line: number } | null = null
+      for (const s of others) {
+        for (const c of [s.x, s.x + s.w / 2, s.x + s.w]) {
+          for (const t of [left, (left + right) / 2, right]) {
+            const corr = c - t
+            if (Math.abs(corr) <= threshold && (!bestX || Math.abs(corr) < Math.abs(bestX.corr))) {
+              bestX = { corr, line: c }
+            }
+          }
+        }
+        for (const c of [s.y, s.y + s.h / 2, s.y + s.h]) {
+          for (const t of [top, (top + bottom) / 2, bottom]) {
+            const corr = c - t
+            if (Math.abs(corr) <= threshold && (!bestY || Math.abs(corr) < Math.abs(bestY.corr))) {
+              bestY = { corr, line: c }
+            }
+          }
+        }
+      }
+      if (bestX) dx += bestX.corr
+      if (bestY) dy += bestY.corr
+      setGuides({ v: bestX ? [bestX.line] : [], h: bestY ? [bestY.line] : [] })
+
       for (const o of d.origins) {
         onUpdate(o.id, { x: Math.round(o.ox + dx), y: Math.round(o.oy + dy) })
       }
@@ -193,6 +233,7 @@ export function Canvas({
       onSelect(d.additive ? [...new Set([...selectedIds, ...hits])] : hits)
     }
     setDragBoth(null)
+    setGuides({ v: [], h: [] })
   }
 
   const onWheel = (e: React.WheelEvent) => {
@@ -211,6 +252,13 @@ export function Canvas({
     }
   }
 
+  const svgRect = svgRef.current?.getBoundingClientRect()
+  const scene = {
+    left: -view.x / view.scale,
+    top: -view.y / view.scale,
+    right: ((svgRect?.width ?? 2000) - view.x) / view.scale,
+    bottom: ((svgRect?.height ?? 2000) - view.y) / view.scale,
+  }
   const selectedShapes = shapes.filter((s) => selectedIds.includes(s.id))
   const single = selectedShapes.length === 1 ? selectedShapes[0] : undefined
   const editing = shapes.find((s) => s.id === editingId)
@@ -286,6 +334,31 @@ export function Canvas({
               pointerEvents="none"
             />
           ))}
+
+        {guides.v.map((x) => (
+          <line
+            key={`v${x}`}
+            x1={x}
+            y1={scene.top}
+            x2={x}
+            y2={scene.bottom}
+            stroke="#e8442e"
+            strokeWidth={1 / view.scale}
+            pointerEvents="none"
+          />
+        ))}
+        {guides.h.map((y) => (
+          <line
+            key={`h${y}`}
+            x1={scene.left}
+            y1={y}
+            x2={scene.right}
+            y2={y}
+            stroke="#e8442e"
+            strokeWidth={1 / view.scale}
+            pointerEvents="none"
+          />
+        ))}
 
         {single && !editingId && (
           <g>
