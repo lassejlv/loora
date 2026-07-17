@@ -11,6 +11,7 @@ import {
   FrameIcon,
   HandIcon,
   MousePointer2Icon,
+  PanelLeftIcon,
   Redo2Icon,
   SendToBackIcon,
   SquareIcon,
@@ -19,6 +20,7 @@ import {
   TypeIcon,
 } from 'lucide-react'
 import { Canvas, type Tool } from '#/components/canvas'
+import { LayersPanel } from '#/components/layers-panel'
 import { snapshotCanvas } from '#/lib/snapshot'
 import { AgentPanel } from '#/components/agent-panel'
 import { PALETTE, shapeId, type CanvasActions, type Shape } from '#/lib/canvas'
@@ -51,6 +53,11 @@ function App() {
   })
   const [selectedIds, setSelectedIds] = useState<string[]>([])
   const [tool, setTool] = useState<Tool>('select')
+  const [layersOpen, setLayersOpen] = useState(() => localStorage.getItem('loora:layers') !== '0')
+  const toggleLayers = (open: boolean) => {
+    setLayersOpen(open)
+    localStorage.setItem('loora:layers', open ? '1' : '0')
+  }
 
   const shapesRef = useRef(shapes)
   shapesRef.current = shapes
@@ -289,6 +296,20 @@ function App() {
 
   return (
     <div className="flex h-full">
+      {layersOpen && (
+        <LayersPanel
+          shapes={shapes}
+          selectedIds={selectedIds}
+          onSelect={setSelectedIds}
+          onReorderList={(orderedIds) =>
+            mutate((prev) =>
+              [...prev].sort((a, b) => orderedIds.indexOf(a.id) - orderedIds.indexOf(b.id)),
+            )
+          }
+          onRenameFrame={(id, name) => updateShape(id, { text: name })}
+          onClose={() => toggleLayers(false)}
+        />
+      )}
       <main className="relative min-w-0 flex-1">
         <Canvas
           shapes={shapes}
@@ -299,6 +320,20 @@ function App() {
           onCreate={(s) => mutate((prev) => [...prev, s])}
           onUpdate={updateShape}
         />
+
+        {!layersOpen && (
+          <div className="absolute top-4 left-4">
+            <Button
+              variant="ghost"
+              size="icon"
+              aria-label="Show layers"
+              title="Layers"
+              onClick={() => toggleLayers(true)}
+            >
+              <PanelLeftIcon data-slot="icon" />
+            </Button>
+          </div>
+        )}
 
         <div className="absolute top-4 right-4">
           <Button
