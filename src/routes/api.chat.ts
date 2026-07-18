@@ -6,6 +6,8 @@ import { z } from 'zod'
 import type { Shape } from '#/lib/canvas'
 import { GEMINI_MODEL } from '#/lib/models'
 import { requireSession } from '#/lib/auth'
+import { chatgptAuth } from '#/lib/chatgpt-auth'
+import { createChatGPTProxyProvider } from '@opencoredev/loginwithchatgpt-ai'
 import { DESIGN_SKILL_PROMPT } from '#/skills/design-skills'
 import { desc, eq } from 'drizzle-orm'
 import { db } from '#/db'
@@ -59,7 +61,13 @@ const componentCodeSchema = z
 
 function messagesForModel(messages: UIMessage[]): UIMessage[] {
   return messages.flatMap((message) => {
-    const parts = message.parts.filter((part) => part.type !== 'tool-loadSkill')
+    const parts = message.parts.filter((part) => {
+      if (part.type === 'tool-loadSkill' || part.type === 'step-start') return false
+      if (part.type === 'text' || part.type === 'reasoning') {
+        return 'text' in part && typeof part.text === 'string' && part.text.trim().length > 0
+      }
+      return true
+    })
     return parts.length > 0 ? [{ ...message, parts }] : []
   })
 }
@@ -73,24 +81,48 @@ export const Route = createFileRoute('/api/chat')({
           return Response.json({ error: 'Unauthorized' }, { status: 401 })
         }
 
-        const { messages, shapes } = (await request.json()) as {
+        const { messages, shapes, model: requestedModel } = (await request.json()) as {
           messages: UIMessage[]
           shapes: Shape[]
+          model?: string
         }
 
-        const apiKey = process.env.GEMINI_API_KEY
-        if (!apiKey) {
-          return Response.json({ error: 'Gemini is not configured on the server.' }, { status: 503 })
+        // "gemini" (default) runs on the server key; anything else is a
+        // ChatGPT model slug proxied through the user's own ChatGPT session.
+        let model
+        if (requestedModel && requestedModel !== 'gemini') {
+          const chatgptSession = await chatgptAuth.getSession(request)
+          if (chatgptSession.status !== 'authenticated') {
+            return Response.json(
+              { error: 'Connect your ChatGPT account to use ChatGPT models.' },
+              { status: 403 },
+            )
+          }
+          const chatgpt = createChatGPTProxyProvider({ fetch: chatgptAuth.proxyFetch(request) })
+          model = chatgpt(requestedModel)
+        } else {
+          const apiKey = process.env.GEMINI_API_KEY
+          if (!apiKey) {
+            return Response.json(
+              { error: 'Gemini is not configured on the server.' },
+              { status: 503 },
+            )
+          }
+          const google = createGoogleGenerativeAI({ apiKey })
+          model = google(GEMINI_MODEL)
         }
-        const google = createGoogleGenerativeAI({ apiKey })
-        const model = google(GEMINI_MODEL)
 
-        const assets = await db
-          .select({ id: asset.id, name: asset.name, mediaType: asset.mediaType })
-          .from(asset)
-          .where(eq(asset.userId, session.user.id))
-          .orderBy(desc(asset.createdAt))
-          .limit(100)
+        let assets: { id: string; name: string; mediaType: string }[] = []
+        try {
+          assets = await db
+            .select({ id: asset.id, name: asset.name, mediaType: asset.mediaType })
+            .from(asset)
+            .where(eq(asset.userId, session.user.id))
+            .orderBy(desc(asset.createdAt))
+            .limit(100)
+        } catch (error) {
+          console.error('[chat] Failed to load assets:', error)
+        }
 
         const tools = {
             // All tools execute on the client against canvas state.
@@ -100,7 +132,7 @@ export const Route = createFileRoute('/api/chat')({
             },
             createShapes: {
               description:
-                'Add many shapes to the canvas in one call. Always prefer this over repeated createShape when adding more than one shape. Returns the created shapes with their ids.',
+                'Add many shapes to the canvas in one call. Always prefer this over repeated createShape when adding more than one shape. Prefer this for marketing sites, landing pages, and wireframes (frames + rects + text). Returns the created shapes with their ids.',
               inputSchema: z.object({ shapes: z.array(newShapeSchema).min(1).max(100) }),
             },
             updateShape: {
@@ -152,7 +184,7 @@ export const Route = createFileRoute('/api/chat')({
             },
             createComponent: {
               description:
-                'Add a live interactive React component to the canvas (forms, toggles, charts, mini apps, real UI). Renders in a sandboxed frame. Use this instead of static shapes whenever the user asks for something interactive or a real working UI. Returns the created shape id.',
+                'Add a live interactive React component (forms, toggles, charts, mini apps). Only when the user explicitly wants working interactivity — not for ordinary websites, landing pages, or mockups (use createShapes for those). Code must define function App() with no imports/exports. Returns the created shape id.',
               inputSchema: z.object({
                 name: z.string().describe('short human label, e.g. "Signup form"'),
                 code: componentCodeSchema,
@@ -201,7 +233,8 @@ export const Route = createFileRoute('/api/chat')({
             'Palette to prefer: #1a1917 ink, #ffffff white, #2440e6 ultramarine, #e8442e vermilion, #f5c518 yellow, #23a25d green. Other CSS colors are allowed when asked.',
             'Text shapes render at fontSize (default 20) with fontWeight (400-700) and align (left/center/right), in the fill color. Text wraps at the box width w and supports newlines - size the box for the content. Use weight and size for hierarchy: e.g. 32/700 titles, 14/400 body.',
             'When laying out multiple shapes, space them deliberately - aligned edges, consistent gaps. Use createShapes (batch) to add them all in one call.',
-            'Interactive components: createComponent adds a live React component rendered in a sandboxed iframe. The code must be self-contained JSX that defines `function App()` - hooks (useState, useEffect, useRef, useMemo, useCallback, useReducer) are already in scope, Tailwind utility classes work, no imports/exports/external libraries. Write real, polished, working UI. Size w/h to fit the content. In canvas snapshots components appear as dashed placeholders - their live rendering is only visible to the user, so do not try to visually verify component internals.',
+            'For websites, landing pages, and visual mockups: build with frames + shapes + text via createShapes. Do not use createComponent unless the user explicitly asks for a working interactive widget.',
+            'Interactive components: createComponent adds a live React component in a sandboxed iframe. Self-contained JSX defining `function App()` only - hooks (useState, useEffect, useRef, useMemo, useCallback, useReducer) are in scope, Tailwind works, no imports/exports/external libraries. Keep code focused and under ~200 lines. Snapshots show components as dashed placeholders, so do not visually verify component internals.',
             'Image shapes place uploaded assets: type "image" with src set to an asset URL from the Assets list below. Never invent asset URLs; if no fitting asset exists, say so or use styled shapes instead.',
             '',
             'Assets available (JSON):',
@@ -215,8 +248,15 @@ export const Route = createFileRoute('/api/chat')({
           messages: await convertToModelMessages(messagesForModel(messages), { tools }),
           stopWhen: stepCountIs(10),
           tools,
-          // Kill hung upstream calls instead of leaving the client spinning forever.
-          abortSignal: AbortSignal.timeout(60_000),
+          // Gemini 3 defaults to medium thinking; low starts tool calls sooner for canvas work.
+          providerOptions: {
+            google: {
+              thinkingConfig: { thinkingLevel: 'low' },
+            },
+          },
+          // Design tasks (multi-shape layouts, components) routinely need >60s; a short abort
+          // surfaces to the client as an empty successful stream and trips empty-response retries.
+          abortSignal: AbortSignal.timeout(180_000),
           onError: ({ error }) => console.error('[chat] stream error:', error),
         })
 

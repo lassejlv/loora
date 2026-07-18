@@ -176,6 +176,18 @@ export const asset = pgTable(
   (table) => [index('asset_user_id_idx').on(table.userId, table.createdAt)],
 )
 
+// Login-with-ChatGPT sessions (tokens encrypted at rest by the handler).
+// Keyed by the handler's opaque session id, not by app user.
+export const chatgptSession = pgTable('chatgpt_session', {
+  key: text('key').primaryKey(),
+  value: jsonb('value').notNull(),
+  expiresAt: timestamp('expires_at'),
+  updatedAt: timestamp('updated_at')
+    .defaultNow()
+    .$onUpdate(() => new Date())
+    .notNull(),
+})
+
 export const userRelations = relations(user, ({ many }) => ({
   sessions: many(session),
   accounts: many(account),

@@ -55,7 +55,7 @@ describe('AgentPanel empty response recovery', () => {
     vi.restoreAllMocks()
   })
 
-  it('retries once when a successful stream contains no assistant output', async () => {
+  it('retries once via regenerate when a successful stream contains no assistant output', async () => {
     const chatFetch = vi
       .spyOn(globalThis, 'fetch')
       .mockResolvedValueOnce(stream({ type: 'start' }))
@@ -90,5 +90,48 @@ describe('AgentPanel empty response recovery', () => {
 
     await waitFor(() => expect(chatFetch).toHaveBeenCalledTimes(2))
     expect(await screen.findByText('Done.')).toBeTruthy()
+
+    const secondBody = JSON.parse((chatFetch.mock.calls[1]?.[1] as RequestInit)?.body as string)
+    // regenerate must drop the empty assistant turn instead of resubmitting it
+    expect(secondBody.trigger).toBe('regenerate-message')
+  })
+
+  it('retries when the server aborts mid-stream (looks like an empty success)', async () => {
+    const chatFetch = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(
+        stream({ type: 'start' }, { type: 'abort', reason: 'TimeoutError: The operation timed out.' }),
+      )
+      .mockResolvedValueOnce(
+        stream(
+          { type: 'start' },
+          { type: 'text-start', id: 'answer' },
+          { type: 'text-delta', id: 'answer', delta: 'Built.' },
+          { type: 'text-end', id: 'answer' },
+          { type: 'finish' },
+        ),
+      )
+
+    const shapesRef = { current: [] as Shape[] }
+    const actions: CanvasActions = {
+      createShape: vi.fn(),
+      createShapes: vi.fn(),
+      updateShape: vi.fn(),
+      deleteShape: vi.fn(),
+    }
+
+    render(
+      <SidebarProvider>
+        <AgentPanel actions={actions} shapesRef={shapesRef} docId="test" />
+      </SidebarProvider>,
+    )
+
+    const input = await screen.findByPlaceholderText('Describe a change…')
+    await waitFor(() => expect((input as HTMLTextAreaElement).disabled).toBe(false))
+    fireEvent.change(input, { target: { value: 'Make a portfolio website' } })
+    fireEvent.submit(input.closest('form')!)
+
+    await waitFor(() => expect(chatFetch).toHaveBeenCalledTimes(2))
+    expect(await screen.findByText('Built.')).toBeTruthy()
   })
 })

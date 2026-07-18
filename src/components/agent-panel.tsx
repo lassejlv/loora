@@ -45,6 +45,16 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '#/components/ui/dropdown-menu'
+import {
+  Dialog,
+  DialogDescription,
+  DialogHeader,
+  DialogPanel,
+  DialogPopup,
+  DialogTitle,
+} from '#/components/ui/dialog'
+import { LoginWithChatGPT, useLoginWithChatGPT } from '@opencoredev/loginwithchatgpt-react'
+import { createChatGPTProxyProvider } from '@opencoredev/loginwithchatgpt-ai'
 
 type ChatState = ReturnType<typeof useChat>
 type ChatSummary = { id: string; title: string; updatedAt: number }
@@ -118,6 +128,13 @@ export function AgentPanel({
   ready?: boolean
 }) {
   const [input, setInput] = useState('')
+  const [model, setModel] = useState(() => localStorage.getItem('loora:model') ?? 'gemini')
+  const modelRef = useRef(model)
+  modelRef.current = model
+  const changeModel = (next: string) => {
+    setModel(next)
+    localStorage.setItem('loora:model', next)
+  }
   const [chatReady, setChatReady] = useState(false)
   const [stallError, setStallError] = useState<string | null>(null)
   const [chats, setChats] = useState<ChatSummary[]>([])
@@ -129,117 +146,123 @@ export function AgentPanel({
   const composerRef = useRef<HTMLTextAreaElement>(null)
   const activeChat = chats.find((chat) => chat.id === activeChatId)
 
-  const { messages, setMessages, sendMessage, addToolOutput, status, stop, error } = useChat({
-    transport: new DefaultChatTransport({
-      api: '/api/chat',
-      body: () => ({
-        shapes: shapesRef.current,
+  const { messages, setMessages, sendMessage, regenerate, addToolOutput, status, stop, error } =
+    useChat({
+      transport: new DefaultChatTransport({
+        api: '/api/chat',
+        body: () => ({
+          shapes: shapesRef.current,
+          model: modelRef.current,
+        }),
       }),
-    }),
-    sendAutomaticallyWhen: lastAssistantMessageIsCompleteWithToolCalls,
-    onFinish({ message, isAbort, isError }) {
-      if (isAbort || isError || hasAssistantOutput(message)) {
-        emptyResponseRetries.current = 0
-        return
-      }
-
-      if (emptyResponseRetries.current === 0) {
-        emptyResponseRetries.current = 1
-        setStallError('The agent returned an empty response. Retrying…')
-        queueMicrotask(() => retryEmptyResponse.current())
-        return
-      }
-
-      setStallError('The agent returned two empty responses. Try again.')
-    },
-    onToolCall({ toolCall }) {
-      if (toolCall.dynamic) return
-      const input = toolCall.input as Record<string, unknown>
-      const respond = (output: unknown) =>
-        addToolOutput({
-          tool: toolCall.toolName,
-          toolCallId: toolCall.toolCallId,
-          output,
-        } as Parameters<typeof addToolOutput>[0])
-      const fail = (message: string) =>
-        addToolOutput({
-          tool: toolCall.toolName,
-          toolCallId: toolCall.toolCallId,
-          state: 'output-error',
-          errorText: message,
-        } as Parameters<typeof addToolOutput>[0])
-
-      try {
-        switch (toolCall.toolName) {
-          case 'createShape':
-            respond(actions.createShape(input as never))
-            break
-          case 'createShapes':
-            respond(actions.createShapes((input as { shapes: Omit<Shape, 'id'>[] }).shapes))
-            break
-          case 'updateShape': {
-            const { id, ...patch } = input as { id: string } & Partial<Shape>
-            const updated = actions.updateShape(id, patch)
-            respond(updated ?? { error: `No shape with id ${id}` })
-            break
-          }
-          case 'createComponent': {
-            const { name, code, x, y, w, h } = input as {
-              name: string
-              code: string
-              x: number
-              y: number
-              w: number
-              h: number
-            }
-            const created = actions.createShape({
-              type: 'component',
-              x,
-              y,
-              w,
-              h,
-              fill: '#ffffff',
-              text: name,
-              code,
-            })
-            respond({ id: created.id, name })
-            break
-          }
-          case 'updateComponent': {
-            const { id, name, code, ...bounds } = input as {
-              id: string
-              name?: string
-              code?: string
-            } & Partial<Shape>
-            const updated = actions.updateShape(id, {
-              ...bounds,
-              ...(name != null ? { text: name } : {}),
-              ...(code != null ? { code } : {}),
-            })
-            respond(updated ? { id, updated: true } : { error: `No component with id ${id}` })
-            break
-          }
-          case 'viewCanvas':
-            void snapshotCanvas(shapesRef.current)
-              .then((image) => respond(image ? { image } : { empty: true }))
-              .catch(() => fail('Could not capture the canvas.'))
-            break
-          case 'deleteShape':
-          case 'askQuestion':
-            // These tools wait for the user in their inline controls.
-            break
-          default:
-            fail(`Unsupported tool: ${toolCall.toolName}`)
+      sendAutomaticallyWhen: lastAssistantMessageIsCompleteWithToolCalls,
+      onFinish({ message, isAbort, isError }) {
+        if (isAbort || isError || hasAssistantOutput(message)) {
+          emptyResponseRetries.current = 0
+          return
         }
-      } catch (error) {
-        fail(error instanceof Error ? error.message : 'The canvas tool failed.')
-      }
-    },
-  })
+
+        // Server-side aborts arrive as a successful empty stream (isAbort stays false).
+        // Regenerate drops the empty assistant turn; sendMessage() would resubmit it.
+        if (emptyResponseRetries.current === 0) {
+          emptyResponseRetries.current = 1
+          setStallError('The agent returned an empty response. Retrying…')
+          queueMicrotask(() => retryEmptyResponse.current())
+          return
+        }
+
+        setStallError(
+          'The agent timed out or returned empty twice. Try a smaller request, or try again.',
+        )
+      },
+      onToolCall({ toolCall }) {
+        if (toolCall.dynamic) return
+        const input = toolCall.input as Record<string, unknown>
+        const respond = (output: unknown) =>
+          addToolOutput({
+            tool: toolCall.toolName,
+            toolCallId: toolCall.toolCallId,
+            output,
+          } as Parameters<typeof addToolOutput>[0])
+        const fail = (message: string) =>
+          addToolOutput({
+            tool: toolCall.toolName,
+            toolCallId: toolCall.toolCallId,
+            state: 'output-error',
+            errorText: message,
+          } as Parameters<typeof addToolOutput>[0])
+
+        try {
+          switch (toolCall.toolName) {
+            case 'createShape':
+              respond(actions.createShape(input as never))
+              break
+            case 'createShapes':
+              respond(actions.createShapes((input as { shapes: Omit<Shape, 'id'>[] }).shapes))
+              break
+            case 'updateShape': {
+              const { id, ...patch } = input as { id: string } & Partial<Shape>
+              const updated = actions.updateShape(id, patch)
+              respond(updated ?? { error: `No shape with id ${id}` })
+              break
+            }
+            case 'createComponent': {
+              const { name, code, x, y, w, h } = input as {
+                name: string
+                code: string
+                x: number
+                y: number
+                w: number
+                h: number
+              }
+              const created = actions.createShape({
+                type: 'component',
+                x,
+                y,
+                w,
+                h,
+                fill: '#ffffff',
+                text: name,
+                code,
+              })
+              respond({ id: created.id, name })
+              break
+            }
+            case 'updateComponent': {
+              const { id, name, code, ...bounds } = input as {
+                id: string
+                name?: string
+                code?: string
+              } & Partial<Shape>
+              const updated = actions.updateShape(id, {
+                ...bounds,
+                ...(name != null ? { text: name } : {}),
+                ...(code != null ? { code } : {}),
+              })
+              respond(updated ? { id, updated: true } : { error: `No component with id ${id}` })
+              break
+            }
+            case 'viewCanvas':
+              void snapshotCanvas(shapesRef.current)
+                .then((image) => respond(image ? { image } : { empty: true }))
+                .catch(() => fail('Could not capture the canvas.'))
+              break
+            case 'deleteShape':
+            case 'askQuestion':
+              // These tools wait for the user in their inline controls.
+              break
+            default:
+              fail(`Unsupported tool: ${toolCall.toolName}`)
+          }
+        } catch (error) {
+          fail(error instanceof Error ? error.message : 'The canvas tool failed.')
+        }
+      },
+    })
 
   retryEmptyResponse.current = () => {
     setStallError(null)
-    void sendMessage()
+    void regenerate()
   }
 
   const messagesRef = useRef(messages)
@@ -251,10 +274,12 @@ export function AgentPanel({
 
   useEffect(() => {
     if (status !== 'submitted' && status !== 'streaming') return
+    // Gemini may think for a long stretch before the first stream token; keep this
+    // above typical design-task time-to-first-tool so we don't abort healthy work.
     const timeout = window.setTimeout(() => {
       void stop()
-      setStallError('The agent stopped after 45 seconds without progress. Try again.')
-    }, 45_000)
+      setStallError('The agent stopped after 2 minutes without progress. Try again.')
+    }, 120_000)
     return () => window.clearTimeout(timeout)
   }, [messages, status, stop])
 
@@ -507,11 +532,7 @@ export function AgentPanel({
             className="w-full"
           />
           <PromptInputFooter>
-            <span className="flex items-center gap-1 text-xs text-muted-foreground">
-              <Kbd>⏎</Kbd> send
-              <span className="text-muted-foreground/60">·</span>
-              <Kbd>⇧⏎</Kbd> newline
-            </span>
+            <ModelPicker model={model} onModelChange={changeModel} />
             <PromptInputSubmit
               status={status}
               onStop={() => stop()}
@@ -525,6 +546,109 @@ export function AgentPanel({
         </PromptInput>
       </div>
     </Sidebar>
+  )
+}
+
+function modelLabel(model: string) {
+  return model === 'gemini' ? 'Gemini Flash' : model
+}
+
+// Composer footer model switcher. Gemini runs on the server key; ChatGPT
+// models run through the user's own connected ChatGPT subscription.
+function ModelPicker({
+  model,
+  onModelChange,
+}: {
+  model: string
+  onModelChange: (model: string) => void
+}) {
+  const { status, user, isAuthenticated, logout } = useLoginWithChatGPT()
+  const [models, setModels] = useState<string[]>([])
+  const [connectOpen, setConnectOpen] = useState(false)
+
+  useEffect(() => {
+    if (!isAuthenticated) {
+      setModels([])
+      if (model !== 'gemini') onModelChange('gemini')
+      return
+    }
+    createChatGPTProxyProvider()
+      .listModels()
+      .then(setModels)
+      .catch((error) => console.error('[chatgpt] Failed to list models:', error))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isAuthenticated])
+
+  return (
+    <>
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <button
+            type="button"
+            className="flex items-center gap-1 rounded-md px-1.5 py-1 text-xs text-muted-foreground outline-none hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+          >
+            {modelLabel(model)}
+            <ChevronDownIcon className="size-3" />
+          </button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="start" className="w-60">
+          <DropdownMenuLabel className="text-xs text-muted-foreground">Model</DropdownMenuLabel>
+          <DropdownMenuItem onSelect={() => onModelChange('gemini')}>
+            <span className="min-w-0 flex-1 truncate">Gemini Flash</span>
+            {model === 'gemini' && <CheckIcon className="text-foreground" />}
+          </DropdownMenuItem>
+          <DropdownMenuSeparator />
+          <DropdownMenuLabel className="text-xs text-muted-foreground">
+            {isAuthenticated ? `ChatGPT · ${user?.email ?? 'connected'}` : 'ChatGPT'}
+          </DropdownMenuLabel>
+          {isAuthenticated ? (
+            <>
+              {models.map((slug) => (
+                <DropdownMenuItem key={slug} onSelect={() => onModelChange(slug)}>
+                  <span className="min-w-0 flex-1 truncate">{slug}</span>
+                  {model === slug && <CheckIcon className="text-foreground" />}
+                </DropdownMenuItem>
+              ))}
+              {models.length === 0 && (
+                <DropdownMenuItem disabled>Loading models…</DropdownMenuItem>
+              )}
+              <DropdownMenuSeparator />
+              <DropdownMenuItem
+                variant="destructive"
+                onSelect={() => {
+                  onModelChange('gemini')
+                  void logout()
+                }}
+              >
+                Disconnect ChatGPT
+              </DropdownMenuItem>
+            </>
+          ) : (
+            <DropdownMenuItem onSelect={() => setConnectOpen(true)} disabled={status === 'loading'}>
+              Connect ChatGPT account…
+            </DropdownMenuItem>
+          )}
+        </DropdownMenuContent>
+      </DropdownMenu>
+
+      <Dialog open={connectOpen} onOpenChange={setConnectOpen}>
+        <DialogPopup className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Connect ChatGPT</DialogTitle>
+            <DialogDescription>
+              Sign in with your ChatGPT account to run the agent on your own subscription's
+              models.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogPanel className="flex justify-center pb-6">
+            <LoginWithChatGPT
+              consent={{ appName: 'loora' }}
+              onAuthenticated={() => setConnectOpen(false)}
+            />
+          </DialogPanel>
+        </DialogPopup>
+      </Dialog>
+    </>
   )
 }
 
