@@ -9,6 +9,7 @@ import {
 import type { Shape } from '#/lib/canvas'
 import { renderOrder } from '#/lib/canvas'
 import { Button } from '#/components/ui/button'
+import { DrawerClose } from '#/components/ui/drawer'
 import { cn } from '#/lib/utils'
 
 const TYPE_ICONS = {
@@ -30,14 +31,12 @@ export function LayersPanel({
   onSelect,
   onReorderList,
   onRenameFrame,
-  onClose,
 }: {
   shapes: Shape[]
   selectedIds: string[]
   onSelect: (ids: string[]) => void
   onReorderList: (orderedIds: string[]) => void
   onRenameFrame: (id: string, name: string) => void
-  onClose: () => void
 }) {
   // top-most layer first
   const display = [...renderOrder(shapes)].reverse()
@@ -58,12 +57,12 @@ export function LayersPanel({
   }
 
   return (
-    <aside className="flex w-56 shrink-0 flex-col border-l bg-card">
+    <aside className="flex h-full min-h-0 w-full flex-col">
       <header className="flex items-center justify-between border-b px-3 py-2.5">
         <h2 className="text-sm font-semibold">Layers</h2>
-        <Button variant="ghost" size="icon-xs" aria-label="Close layers" onClick={onClose}>
+        <DrawerClose render={<Button variant="ghost" size="icon-xs" aria-label="Close layers" />}>
           <XIcon data-slot="icon" />
-        </Button>
+        </DrawerClose>
       </header>
       <div className="min-h-0 flex-1 overflow-y-auto p-1.5">
         {display.length === 0 && (

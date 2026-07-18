@@ -1,12 +1,10 @@
 import '@tanstack/react-start'
 import { createFileRoute } from '@tanstack/react-router'
 import { createGoogleGenerativeAI } from '@ai-sdk/google'
-import { createChatGPTProxyProvider } from '@opencoredev/loginwithchatgpt-ai'
-import { convertToModelMessages, stepCountIs, streamText, type LanguageModel, type UIMessage } from 'ai'
+import { convertToModelMessages, stepCountIs, streamText, type UIMessage } from 'ai'
 import { z } from 'zod'
 import type { Shape } from '#/lib/canvas'
-import { chatgptAuth } from '#/lib/chatgpt-auth'
-import { CHATGPT_PREFERRED, GEMINI_MODELS } from '#/lib/models'
+import { GEMINI_MODEL } from '#/lib/models'
 import { requireSession } from '#/lib/auth'
 import frontendDesignSkill from '#/skills/frontend-design.md?raw'
 
@@ -63,45 +61,17 @@ export const Route = createFileRoute('/api/chat')({
           return Response.json({ error: 'Unauthorized' }, { status: 401 })
         }
 
-        const { messages, shapes, provider, model: requestedModel } = (await request.json()) as {
+        const { messages, shapes } = (await request.json()) as {
           messages: UIMessage[]
           shapes: Shape[]
-          provider?: 'gemini' | 'chatgpt'
-          model?: string
         }
 
-        let model: LanguageModel
-        if (provider === 'chatgpt') {
-          // Model availability is per ChatGPT account - discover, then pick.
-          const models = await chatgptAuth.getModels(request)
-          if (!models || models.length === 0) {
-            return Response.json(
-              { error: 'Not signed in with ChatGPT. Connect your account in settings.' },
-              { status: 401 },
-            )
-          }
-          const slug =
-            requestedModel &&
-            (models.includes(requestedModel) || CHATGPT_PREFERRED.includes(requestedModel))
-              ? requestedModel
-              : (CHATGPT_PREFERRED.find((m) => models.includes(m)) ?? models[0])
-          const chatgpt = createChatGPTProxyProvider({ fetch: chatgptAuth.proxyFetch(request) })
-          model = chatgpt(slug)
-        } else {
-          const apiKey = request.headers.get('x-gemini-key')
-          if (!apiKey) {
-            return Response.json(
-              { error: 'Missing Gemini API key. Add one in settings.' },
-              { status: 401 },
-            )
-          }
-          const google = createGoogleGenerativeAI({ apiKey })
-          model = google(
-            requestedModel && GEMINI_MODELS.includes(requestedModel)
-              ? requestedModel
-              : GEMINI_MODELS[0],
-          )
+        const apiKey = process.env.GEMINI_API_KEY
+        if (!apiKey) {
+          return Response.json({ error: 'Gemini is not configured on the server.' }, { status: 503 })
         }
+        const google = createGoogleGenerativeAI({ apiKey })
+        const model = google(GEMINI_MODEL)
 
         const tools = {
             // All tools execute on the client against canvas state.

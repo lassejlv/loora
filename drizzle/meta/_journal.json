@@ -8,6 +8,27 @@
       "when": 1784331718442,
       "tag": "0000_exotic_living_lightning",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1784336852523,
+      "tag": "0001_rich_wind_dancer",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1784337208800,
+      "tag": "0002_tiresome_amphibian",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1784337828855,
+      "tag": "0003_condemned_black_panther",
+      "breakpoints": true
     }
   ]
 }

@@ -1,13 +1,14 @@
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useChat } from '@ai-sdk/react'
-import { useLoginWithChatGPT } from '@opencoredev/loginwithchatgpt-react'
-import { DefaultChatTransport, lastAssistantMessageIsCompleteWithToolCalls } from 'ai'
+import { DefaultChatTransport, lastAssistantMessageIsCompleteWithToolCalls, type UIMessage } from 'ai'
+import { nanoid } from 'nanoid'
 import {
   BookOpenIcon,
   CheckIcon,
+  ChevronDownIcon,
   EyeIcon,
   ChevronRightIcon,
-  KeyRoundIcon,
+  MessageSquareIcon,
   PenLineIcon,
   PlusIcon,
   Trash2Icon,
@@ -15,8 +16,6 @@ import {
 } from 'lucide-react'
 import { cn } from '#/lib/utils'
 import { Button } from '#/components/ui/button'
-import { Input } from '#/components/ui/input'
-import { Popover, PopoverContent, PopoverTrigger } from '#/components/ui/popover'
 import {
   Conversation,
   ConversationContent,
@@ -29,21 +28,32 @@ import type { CanvasActions } from '#/lib/canvas'
 import type { Shape } from '#/lib/canvas'
 import { snapshotCanvas } from '#/lib/snapshot'
 import { commitIfChanged } from '#/lib/history'
-import { CHATGPT_PREFERRED, GEMINI_MODELS } from '#/lib/models'
+import { Sidebar } from '#/components/ui/sidebar'
+import { orpc } from '#/lib/orpc-client'
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '#/components/ui/select'
-
-const KEY_STORAGE = 'loora:gemini-key'
-const LEGACY_KEY_STORAGE = 'canvasx:gemini-key'
-const PROVIDER_STORAGE = 'loora:provider'
-const MODEL_STORAGE = 'loora:model'
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '#/components/ui/dropdown-menu'
 
 type ChatState = ReturnType<typeof useChat>
+type ChatSummary = { id: string; title: string; updatedAt: number }
+
+function messagesForStorage(messages: UIMessage[]): UIMessage[] {
+  return messages.map((message) => ({
+    ...message,
+    parts: message.parts.flatMap((part) => {
+      if (part.type === 'file') return []
+      if (part.type === 'tool-viewCanvas' && part.state === 'output-available') {
+        return [{ ...part, output: { viewed: true } }]
+      }
+      return [part]
+    }),
+  }))
+}
 
 // Shimmer until the assistant starts producing visible text (covers tool rounds too).
 function isThinking(status: ChatState['status'], messages: ChatState['messages']) {
@@ -57,9 +67,9 @@ function isThinking(status: ChatState['status'], messages: ChatState['messages']
   return !(lastPart?.type === 'text' && lastPart.text.length > 0)
 }
 
-function getKey() {
-  if (typeof window === 'undefined') return ''
-  return localStorage.getItem(KEY_STORAGE) ?? localStorage.getItem(LEGACY_KEY_STORAGE) ?? ''
+function titleFromPrompt(prompt: string) {
+  const title = prompt.trim().replace(/\s+/g, ' ')
+  return title.length > 48 ? `${title.slice(0, 47)}…` : title
 }
 
 export function AgentPanel({
@@ -71,56 +81,19 @@ export function AgentPanel({
   shapesRef: React.RefObject<Shape[]>
   docId: string
 }) {
-  const [hasKey, setHasKey] = useState(() => getKey().length > 0)
   const [input, setInput] = useState('')
-  const lwc = useLoginWithChatGPT()
-  const [provider, setProviderState] = useState<'gemini' | 'chatgpt'>(() =>
-    typeof window !== 'undefined' && localStorage.getItem(PROVIDER_STORAGE) === 'chatgpt'
-      ? 'chatgpt'
-      : 'gemini',
-  )
-  const setProvider = (p: 'gemini' | 'chatgpt') => {
-    setProviderState(p)
-    localStorage.setItem(PROVIDER_STORAGE, p)
-  }
+  const [chatReady, setChatReady] = useState(false)
+  const [chats, setChats] = useState<ChatSummary[]>([])
+  const [activeChatId, setActiveChatId] = useState<string | null>(null)
+  const chatsRef = useRef(chats)
+  chatsRef.current = chats
+  const activeChat = chats.find((chat) => chat.id === activeChatId)
 
-  // Fall back to whichever provider is actually connected.
-  const ready = { gemini: hasKey, chatgpt: lwc.isAuthenticated }
-  const activeProvider = ready[provider] ? provider : ready.gemini ? 'gemini' : ready.chatgpt ? 'chatgpt' : provider
-  const hasAuth = ready.gemini || ready.chatgpt
-  const activeProviderRef = useRef(activeProvider)
-  activeProviderRef.current = activeProvider
-
-  // Model choice per provider, hardcoded lists for now.
-  const [modelChoice, setModelChoice] = useState<Record<string, string>>(() => {
-    try {
-      return JSON.parse(localStorage.getItem(MODEL_STORAGE) ?? '{}')
-    } catch {
-      return {}
-    }
-  })
-
-  const modelOptions = activeProvider === 'chatgpt' ? CHATGPT_PREFERRED : GEMINI_MODELS
-  const activeModel = modelOptions.includes(modelChoice[activeProvider])
-    ? modelChoice[activeProvider]
-    : modelOptions[0]
-  const activeModelRef = useRef(activeModel)
-  activeModelRef.current = activeModel
-
-  const pickModel = (m: string) => {
-    const next = { ...modelChoice, [activeProvider]: m }
-    setModelChoice(next)
-    localStorage.setItem(MODEL_STORAGE, JSON.stringify(next))
-  }
-
-  const { messages, sendMessage, addToolOutput, status, stop, error } = useChat({
+  const { messages, setMessages, sendMessage, addToolOutput, status, stop, error } = useChat({
     transport: new DefaultChatTransport({
       api: '/api/chat',
-      headers: () => ({ 'x-gemini-key': getKey() }),
       body: () => ({
         shapes: shapesRef.current,
-        provider: activeProviderRef.current,
-        model: activeModelRef.current,
       }),
     }),
     sendAutomaticallyWhen: lastAssistantMessageIsCompleteWithToolCalls,
@@ -156,6 +129,97 @@ export function AgentPanel({
     },
   })
 
+  const messagesRef = useRef(messages)
+  messagesRef.current = messages
+
+  useEffect(() => {
+    let cancelled = false
+    setChatReady(false)
+    setChats([])
+    setActiveChatId(null)
+    setMessages([])
+
+    void (async () => {
+      try {
+        let stored = await orpc.chat.list({ designId: docId })
+        if (stored.length === 0) {
+          const created = await orpc.chat.create({
+            id: `chat:${docId}`,
+            designId: docId,
+            title: 'New chat',
+          })
+          stored = [created]
+        }
+        if (!cancelled) {
+          setChats(stored)
+          setActiveChatId(stored[0].id)
+        }
+      } catch (error) {
+        console.error('[chat] Failed to list chats:', error)
+      }
+    })()
+
+    return () => {
+      cancelled = true
+    }
+  }, [docId, setMessages])
+
+  useEffect(() => {
+    if (!activeChatId) return
+    let cancelled = false
+    setChatReady(false)
+    setMessages([])
+
+    orpc.chat
+      .get({ id: activeChatId })
+      .then(({ messages: stored }) => {
+        if (!cancelled) {
+          setMessages(stored as UIMessage[])
+          setChatReady(true)
+        }
+      })
+      .catch((error) => console.error('[chat] Failed to load chat:', error))
+
+    return () => {
+      cancelled = true
+    }
+  }, [activeChatId, setMessages])
+
+  useEffect(() => {
+    if (!chatReady || !activeChatId || !activeChat) return
+    const timeout = window.setTimeout(() => {
+      void orpc.chat
+        .save({
+          id: activeChatId,
+          title: activeChat.title,
+          messages: messagesForStorage(messages),
+        })
+        .catch((error) => console.error('[chat] Failed to save chat:', error))
+    }, 500)
+    return () => window.clearTimeout(timeout)
+  }, [activeChat, activeChatId, chatReady, messages])
+
+  useEffect(() => {
+    if (!chatReady || !activeChatId) return
+    const chatId = activeChatId
+    return () => {
+      const title = chatsRef.current.find((chat) => chat.id === chatId)?.title ?? 'New chat'
+      void orpc.chat
+        .save({ id: chatId, title, messages: messagesForStorage(messagesRef.current) })
+        .catch((error) => console.error('[chat] Failed to save chat:', error))
+    }
+  }, [activeChatId, chatReady])
+
+  const createChat = async () => {
+    const created = await orpc.chat.create({
+      id: `chat_${nanoid()}`,
+      designId: docId,
+      title: 'New chat',
+    })
+    setChats((current) => [created, ...current])
+    setActiveChatId(created.id)
+  }
+
   const answerQuestion = (toolCallId: string, answer: string) => {
     addToolOutput({
       tool: 'askQuestion',
@@ -181,37 +245,54 @@ export function AgentPanel({
   }
 
   return (
-    <aside className="flex w-85 shrink-0 flex-col border-r bg-card">
-      <header className="flex items-center justify-between border-b px-4 py-3">
-        <div className="flex items-center gap-2">
-          <span
-            className={`size-1.5 rounded-full ${
-              status === 'streaming' || status === 'submitted'
-                ? 'animate-pulse bg-cx-accent'
-                : 'bg-muted-foreground/40'
-            }`}
-          />
-          <h2 className="text-sm font-semibold">Agent</h2>
-        </div>
-        <ConnectPopover
-          hasKey={hasKey}
-          onSaved={() => setHasKey(getKey().length > 0)}
-          lwc={lwc}
-          provider={provider}
-          setProvider={setProvider}
-        />
+    <Sidebar
+      variant="floating"
+      className="[&_[data-slot=sidebar-inner]]:overflow-hidden [&_[data-slot=sidebar-inner]]:rounded-2xl [&_[data-slot=sidebar-inner]]:shadow-sm"
+    >
+      <header className="flex items-center border-b px-3 py-2.5">
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <button
+              type="button"
+              disabled={status === 'streaming' || status === 'submitted' || !activeChat}
+              className="flex min-w-0 max-w-full items-center gap-2 rounded-md px-2 py-1 text-left text-sm font-semibold outline-none hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none"
+            >
+              <span
+                className={cn(
+                  'size-1.5 shrink-0 rounded-full',
+                  status === 'streaming' || status === 'submitted'
+                    ? 'animate-pulse bg-cx-accent'
+                    : 'bg-muted-foreground/40',
+                )}
+              />
+              <span className="truncate">{activeChat?.title ?? 'Loading…'}</span>
+              <ChevronDownIcon className="size-3.5 shrink-0 text-muted-foreground" />
+            </button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="start" className="w-64">
+            <DropdownMenuLabel className="text-xs text-muted-foreground">Chats</DropdownMenuLabel>
+            {chats.map((chat) => (
+              <DropdownMenuItem key={chat.id} onSelect={() => setActiveChatId(chat.id)}>
+                <MessageSquareIcon />
+                <span className="min-w-0 flex-1 truncate">{chat.title}</span>
+                {chat.id === activeChatId && <CheckIcon className="text-foreground" />}
+              </DropdownMenuItem>
+            ))}
+            <DropdownMenuSeparator />
+            <DropdownMenuItem onSelect={() => void createChat()}>
+              <PlusIcon />
+              New chat
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
       </header>
 
       <Conversation className="min-h-0 flex-1">
         <ConversationContent className="gap-4">
           {messages.length === 0 && (
             <ConversationEmptyState
-              title={hasAuth ? 'Direct the canvas' : 'Connect a model'}
-              description={
-                hasAuth
-                  ? 'Try "add a title that says Hello" or "make three blue squares in a row".'
-                  : 'Connect a Gemini API key or your ChatGPT account (top right) to start.'
-              }
+              title="Direct the canvas"
+              description='Try "add a title that says Hello" or "make three blue squares in a row".'
             />
           )}
           {messages.map((message, mi) => (
@@ -247,7 +328,7 @@ export function AgentPanel({
           )}
           {error && (
             <p className="text-xs text-destructive-foreground">
-              {error.message || 'Request failed. Check your API key.'}
+              {error.message || 'Request failed.'}
             </p>
           )}
         </ConversationContent>
@@ -261,8 +342,23 @@ export function AgentPanel({
             if (!input.trim()) return
             const text = input
             setInput('')
+            if (activeChat?.title === 'New chat') {
+              const title = titleFromPrompt(text)
+              setChats((current) =>
+                current.map((chat) => (chat.id === activeChatId ? { ...chat, title } : chat)),
+              )
+            }
             // safety checkpoint: restorable from History if the agent goes wrong
             commitIfChanged(docId, `Before: ${text.slice(0, 60)}`, shapesRef.current)
+            void orpc.history
+              .commit({
+                id: `c${nanoid()}`,
+                designId: docId,
+                message: `Before: ${text.slice(0, 60)}`,
+                shapes: shapesRef.current,
+                skipIfUnchanged: true,
+              })
+              .catch((error) => console.error('[history] Failed to save checkpoint:', error))
             const snapshot = await snapshotCanvas(shapesRef.current)
             sendMessage({
               text,
@@ -283,40 +379,24 @@ export function AgentPanel({
               }
             }}
             rows={3}
-            placeholder={hasAuth ? 'Describe a change…' : 'Connect a model first'}
-            disabled={!hasAuth}
+            placeholder="Describe a change…"
+            disabled={!chatReady}
             className="resize-none"
           />
-          <div className="flex items-center justify-between gap-2">
-            <Select value={activeModel ?? ''} onValueChange={(v) => v && pickModel(v as string)}>
-              <SelectTrigger
-                size="sm"
-                className="h-7 max-w-44 border-none bg-transparent px-1.5 font-mono text-[11px] text-muted-foreground shadow-none"
-                disabled={modelOptions.length === 0}
-              >
-                <SelectValue>{activeModel ?? 'no models'}</SelectValue>
-              </SelectTrigger>
-              <SelectContent>
-                {modelOptions.map((m) => (
-                  <SelectItem key={m} value={m}>
-                    <span className="font-mono text-xs">{m}</span>
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+          <div className="flex justify-end">
             {status === 'streaming' || status === 'submitted' ? (
               <Button type="button" variant="outline" size="sm" onClick={() => stop()}>
                 Stop
               </Button>
             ) : (
-              <Button type="submit" size="sm" disabled={!hasAuth || !input.trim()}>
+              <Button type="submit" size="sm" disabled={!chatReady || !input.trim()}>
                 Send
               </Button>
             )}
           </div>
         </form>
       </div>
-    </aside>
+    </Sidebar>
   )
 }
 
@@ -665,175 +745,6 @@ function ToolRow({
       {awaitingConfirm && !hideConfirm && (
         <DeleteConfirm part={part} shapesRef={shapesRef} onResolveDelete={onResolveDelete} />
       )}
-    </div>
-  )
-}
-
-function ConnectPopover({
-  hasKey,
-  onSaved,
-  lwc,
-  provider,
-  setProvider,
-}: {
-  hasKey: boolean
-  onSaved: () => void
-  lwc: ReturnType<typeof useLoginWithChatGPT>
-  provider: 'gemini' | 'chatgpt'
-  setProvider: (p: 'gemini' | 'chatgpt') => void
-}) {
-  const [open, setOpen] = useState(false)
-  const [value, setValue] = useState('')
-  const connected = hasKey || lwc.isAuthenticated
-
-  return (
-    <Popover open={open} onOpenChange={setOpen}>
-      <PopoverTrigger
-        render={
-          <Button variant={connected ? 'ghost' : 'outline'} size="sm">
-            <KeyRoundIcon data-slot="icon" />
-            {connected ? null : 'Connect'}
-          </Button>
-        }
-      />
-      <PopoverContent align="end" className="flex w-80 flex-col gap-4">
-        <div className="flex flex-col gap-1.5">
-          <span className="text-sm font-medium">Model</span>
-          <div className="flex gap-1 rounded-lg bg-secondary p-0.5">
-            {(['gemini', 'chatgpt'] as const).map((p) => (
-              <button
-                key={p}
-                type="button"
-                onClick={() => setProvider(p)}
-                className={cn(
-                  'flex flex-1 items-center justify-center gap-1.5 rounded-md py-1 text-xs',
-                  provider === p ? 'bg-card font-medium shadow-sm' : 'text-muted-foreground',
-                )}
-              >
-                {p === 'gemini' ? 'Gemini' : 'ChatGPT'}
-                <span
-                  className={cn(
-                    'size-1.5 rounded-full',
-                    (p === 'gemini' ? hasKey : lwc.isAuthenticated)
-                      ? 'bg-success'
-                      : 'bg-muted-foreground/40',
-                  )}
-                />
-              </button>
-            ))}
-          </div>
-        </div>
-
-        <ChatGPTSection lwc={lwc} />
-
-        <div className="h-px bg-border" />
-          <form
-            className="flex flex-col gap-2"
-            onSubmit={(e) => {
-              e.preventDefault()
-              localStorage.setItem(KEY_STORAGE, value.trim())
-              setValue('')
-              onSaved()
-              setOpen(false)
-            }}
-          >
-            <label className="text-sm font-medium" htmlFor="gemini-key">
-              Gemini API key
-            </label>
-            <Input
-              id="gemini-key"
-              type="password"
-              placeholder={hasKey ? 'Replace saved key' : 'AIza…'}
-              value={value}
-              onChange={(e) => setValue(e.target.value)}
-            />
-            <p className="text-xs text-muted-foreground">
-              Stored only in this browser&apos;s local storage. Get one at aistudio.google.com.
-            </p>
-            <div className="flex justify-end gap-2">
-              {hasKey && (
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => {
-                    localStorage.removeItem(KEY_STORAGE)
-                    onSaved()
-                    setOpen(false)
-                  }}
-                >
-                  Remove key
-                </Button>
-              )}
-              <Button type="submit" size="sm" disabled={!value.trim()}>
-                Save
-              </Button>
-            </div>
-          </form>
-      </PopoverContent>
-    </Popover>
-  )
-}
-
-function ChatGPTSection({ lwc }: { lwc: ReturnType<typeof useLoginWithChatGPT> }) {
-  if (lwc.isAuthenticated) {
-    return (
-      <div className="flex items-center gap-2">
-        <div className="min-w-0 flex-1">
-          <p className="text-sm font-medium">ChatGPT</p>
-          <p className="truncate text-xs text-muted-foreground">{lwc.user?.email ?? 'Connected'}</p>
-        </div>
-        <Button variant="ghost" size="sm" onClick={() => lwc.logout()}>
-          Disconnect
-        </Button>
-      </div>
-    )
-  }
-
-  if (lwc.status === 'pending' || lwc.status === 'connecting') {
-    return (
-      <div className="flex flex-col gap-2">
-        <p className="text-sm font-medium">ChatGPT</p>
-        {lwc.userCode ? (
-          <>
-            <p className="text-xs text-muted-foreground">
-              Enter this code on the OpenAI page that opened:
-            </p>
-            <div className="flex items-center gap-2">
-              <code className="rounded-md border bg-secondary px-2 py-1 font-mono text-sm tracking-widest">
-                {lwc.userCode}
-              </code>
-              <Button variant="outline" size="sm" onClick={() => lwc.copyCode()}>
-                Copy
-              </Button>
-              {lwc.verificationUrl && (
-                <Button variant="ghost" size="sm" onClick={() => lwc.reopen()}>
-                  Reopen
-                </Button>
-              )}
-            </div>
-          </>
-        ) : null}
-        <p className="cx-shimmer w-fit text-xs">Waiting for approval…</p>
-      </div>
-    )
-  }
-
-  return (
-    <div className="flex flex-col gap-2">
-      <p className="text-sm font-medium">ChatGPT</p>
-      <p className="text-xs text-muted-foreground">
-        Signs in with your ChatGPT account via OpenAI&apos;s device flow. loora sends your prompts
-        and canvas snapshots through your ChatGPT plan; only a session cookie is stored here.
-      </p>
-      {(lwc.status === 'error' || lwc.status === 'expired') && (
-        <p className="text-xs text-destructive-foreground">
-          {lwc.status === 'expired' ? 'Login expired - try again.' : 'Login failed - try again.'}
-        </p>
-      )}
-      <Button size="sm" variant="outline" className="w-fit" onClick={() => lwc.login()}>
-        Continue with ChatGPT
-      </Button>
     </div>
   )
 }

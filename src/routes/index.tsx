@@ -10,6 +10,7 @@ import {
   CircleIcon,
   CopyIcon,
   DownloadIcon,
+  EllipsisIcon,
   FrameIcon,
   HandIcon,
   LogOutIcon,
@@ -49,6 +50,9 @@ import { Button } from '#/components/ui/button'
 import { cn } from '#/lib/utils'
 import { AuthScreen } from '#/components/auth-screen'
 import { authClient } from '#/lib/auth-client'
+import { SidebarProvider, SidebarTrigger } from '#/components/ui/sidebar'
+import { orpc } from '#/lib/orpc-client'
+import { Drawer, DrawerPopup, DrawerTrigger } from '#/components/ui/drawer'
 
 export const Route = createFileRoute('/')({ component: App, ssr: false })
 
@@ -63,9 +67,18 @@ function App() {
     )
   }
 
-  if (!session) return <AuthScreen />
+  if (!session) {
+    return (
+      <>
+        <div aria-hidden="true" className="pointer-events-none select-none" inert>
+          <Editor preview />
+        </div>
+        <AuthScreen />
+      </>
+    )
+  }
 
-  return <Editor />
+  return <Editor userId={session.user.id} />
 }
 
 function DocSwitcher({
@@ -143,12 +156,26 @@ const TOOLS: { tool: Tool; icon: typeof SquareIcon; key: string; label: string }
   { tool: 'hand', icon: HandIcon, key: 'h', label: 'Hand' },
 ]
 
-function Editor() {
-  const [{ docs, activeId }, setDocState] = useState(loadDocs)
-  const [shapes, setShapes] = useState<Shape[]>(() => loadShapes(activeId))
+function Editor({ preview = false, userId }: { preview?: boolean; userId?: string }) {
+  const cacheOwner = preview ? null : localStorage.getItem('loora:cache-user')
+  const cacheOwnedByAnotherUser = Boolean(userId && cacheOwner && cacheOwner !== userId)
+  const [{ docs, activeId }, setDocState] = useState(() => {
+    if (preview) return { docs: [{ id: 'preview', name: 'Untitled' }], activeId: 'preview' }
+    if (cacheOwnedByAnotherUser) {
+      const id = docId()
+      return { docs: [{ id, name: 'Untitled' }], activeId: id }
+    }
+    return loadDocs()
+  })
+  const [shapes, setShapes] = useState<Shape[]>(() =>
+    preview || cacheOwnedByAnotherUser ? [] : loadShapes(activeId),
+  )
   const [selectedIds, setSelectedIds] = useState<string[]>([])
   const [tool, setTool] = useState<Tool>('select')
-  const [layersOpen, setLayersOpen] = useState(() => localStorage.getItem('loora:layers') === '1')
+  const [databaseReady, setDatabaseReady] = useState(false)
+  const [layersOpen, setLayersOpen] = useState(() =>
+    preview ? false : localStorage.getItem('loora:layers') === '1',
+  )
   const toggleLayers = (open: boolean) => {
     setLayersOpen(open)
     localStorage.setItem('loora:layers', open ? '1' : '0')
@@ -156,6 +183,47 @@ function Editor() {
 
   const shapesRef = useRef(shapes)
   shapesRef.current = shapes
+
+  useEffect(() => {
+    if (preview) return
+    let cancelled = false
+
+    const hydrateFromDatabase = async () => {
+      try {
+        const remote = await orpc.design.list()
+        if (cancelled) return
+
+        if (remote.length === 0) {
+          await Promise.all(
+            docs.map((doc) =>
+              orpc.design.save({ id: doc.id, name: doc.name, shapes: loadShapes(doc.id) }),
+            ),
+          )
+          saveDocs(docs, activeId)
+        } else {
+          const remoteDocs = remote.map(({ id, name }) => ({ id, name }))
+          const nextActive = remote.some((doc) => doc.id === activeId) ? activeId : remote[0].id
+          for (const doc of remote) saveShapes(doc.id, doc.shapes)
+          saveDocs(remoteDocs, nextActive)
+          setDocState({ docs: remoteDocs, activeId: nextActive })
+          setShapes(remote.find((doc) => doc.id === nextActive)?.shapes ?? [])
+          setSelectedIds([])
+        }
+
+        if (!cancelled) {
+          if (userId) localStorage.setItem('loora:cache-user', userId)
+          setDatabaseReady(true)
+        }
+      } catch (error) {
+        console.error('[designs] Failed to load designs:', error)
+      }
+    }
+
+    void hydrateFromDatabase()
+    return () => {
+      cancelled = true
+    }
+  }, [preview, userId])
 
   // Undo history: mutations within 800ms coalesce into one step
   // (a drag, a typed number, an agent burst each become a single undo).
@@ -165,8 +233,23 @@ function Editor() {
   const [, bumpHistory] = useState(0)
 
   useEffect(() => {
+    if (preview) return
     saveShapes(activeId, shapes)
-  }, [shapes, activeId])
+  }, [shapes, activeId, preview])
+
+  useEffect(() => {
+    if (preview || !databaseReady) return
+    const active = docs.find((doc) => doc.id === activeId)
+    if (!active) return
+
+    const timeout = window.setTimeout(() => {
+      void orpc.design
+        .save({ id: active.id, name: active.name, shapes })
+        .catch((error) => console.error('[designs] Failed to save design:', error))
+    }, 500)
+
+    return () => window.clearTimeout(timeout)
+  }, [activeId, databaseReady, docs, preview, shapes])
 
   const resetHistory = () => {
     past.current = []
@@ -176,6 +259,12 @@ function Editor() {
 
   const switchDoc = (id: string) => {
     if (id === activeId) return
+    const active = docs.find((doc) => doc.id === activeId)
+    if (databaseReady && active) {
+      void orpc.design
+        .save({ id: active.id, name: active.name, shapes: shapesRef.current })
+        .catch((error) => console.error('[designs] Failed to save design:', error))
+    }
     setDocState((s) => {
       saveDocs(s.docs, id)
       return { ...s, activeId: id }
@@ -186,6 +275,12 @@ function Editor() {
   }
 
   const newDoc = () => {
+    const active = docs.find((doc) => doc.id === activeId)
+    if (databaseReady && active) {
+      void orpc.design
+        .save({ id: active.id, name: active.name, shapes: shapesRef.current })
+        .catch((error) => console.error('[designs] Failed to save design:', error))
+    }
     const doc = { id: docId(), name: `Untitled ${docs.length + 1}` }
     const next = [...docs, doc]
     saveShapes(doc.id, [])
@@ -203,6 +298,11 @@ function Editor() {
   }
 
   const deleteDoc = () => {
+    if (databaseReady) {
+      void orpc.design
+        .delete({ id: activeId })
+        .catch((error) => console.error('[designs] Failed to delete design:', error))
+    }
     deleteDocStorage(activeId)
     deleteHistory(activeId)
     let next = docs.filter((d) => d.id !== activeId)
@@ -380,6 +480,7 @@ function Editor() {
   }, [selectedIds])
 
   useEffect(() => {
+    if (preview) return
     const onKeyDown = (e: KeyboardEvent) => {
       const target = e.target as HTMLElement
       if (target.closest('input, textarea, [contenteditable]')) return
@@ -433,14 +534,17 @@ function Editor() {
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [deleteSelected, duplicateSelected, undo, redo, reorder, copySelected, paste, selectedIds, mutate])
+  }, [deleteSelected, duplicateSelected, undo, redo, reorder, copySelected, paste, selectedIds, mutate, preview])
 
   const selectedShapes = shapes.filter((s) => selectedIds.includes(s.id))
   const selected = selectedShapes[0]
 
   return (
-    <div className="flex h-full">
-      <AgentPanel actions={actions} shapesRef={shapesRef} docId={activeId} />
+    <SidebarProvider
+      className="h-full min-h-0 bg-cx-canvas"
+      style={{ '--sidebar-width': '21.25rem' } as React.CSSProperties}
+    >
+      <AgentPanel key={activeId} actions={actions} shapesRef={shapesRef} docId={activeId} />
 
       <main className="relative min-w-0 flex-1">
         <Canvas
@@ -454,17 +558,33 @@ function Editor() {
         />
 
         <div className="absolute top-4 right-4 flex items-center gap-1">
-          {!layersOpen && (
-            <Button
-              variant="ghost"
-              size="icon"
-              aria-label="Show layers"
-              title="Layers"
-              onClick={() => toggleLayers(true)}
+          <SidebarTrigger aria-label="Toggle agent" title="Toggle agent" />
+          <Drawer open={layersOpen} onOpenChange={toggleLayers} position="bottom">
+            <DrawerTrigger
+              render={
+                <Button variant="ghost" size="icon" aria-label="Show layers" title="Layers" />
+              }
             >
               <PanelRightIcon data-slot="icon" />
-            </Button>
-          )}
+            </DrawerTrigger>
+            <DrawerPopup
+              position="bottom"
+              variant="inset"
+              className="h-[min(60svh,32rem)]"
+            >
+              <LayersPanel
+                shapes={shapes}
+                selectedIds={selectedIds}
+                onSelect={setSelectedIds}
+                onReorderList={(orderedIds) =>
+                  mutate((prev) =>
+                    [...prev].sort((a, b) => orderedIds.indexOf(a.id) - orderedIds.indexOf(b.id)),
+                  )
+                }
+                onRenameFrame={(id, name) => updateShape(id, { text: name })}
+              />
+            </DrawerPopup>
+          </Drawer>
           <HistoryPopover
             docId={activeId}
             shapesRef={shapesRef}
@@ -473,25 +593,24 @@ function Editor() {
               setSelectedIds([])
             }}
           />
-          <Button
-            variant="ghost"
-            size="sm"
-            title={selectedIds.length > 0 ? 'Export selection as PNG' : 'Export canvas as PNG'}
-            onClick={exportPng}
-            disabled={shapes.length === 0}
-          >
-            <DownloadIcon data-slot="icon" />
-            Export
-          </Button>
-          <Button
-            variant="ghost"
-            size="icon"
-            aria-label="Sign out"
-            title="Sign out"
-            onClick={() => authClient.signOut()}
-          >
-            <LogOutIcon data-slot="icon" />
-          </Button>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="ghost" size="icon" aria-label="More actions" title="More actions">
+                <EllipsisIcon data-slot="icon" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-48">
+              <DropdownMenuItem onClick={exportPng} disabled={shapes.length === 0}>
+                <DownloadIcon data-slot="icon" />
+                {selectedIds.length > 0 ? 'Export selection' : 'Export canvas'}
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem variant="destructive" onClick={() => authClient.signOut()}>
+                <LogOutIcon data-slot="icon" />
+                Sign out
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
 
         <div className="pointer-events-none absolute inset-x-0 top-4 flex items-center justify-center gap-2">
@@ -509,7 +628,7 @@ function Editor() {
           />
         </div>
 
-        <div className="absolute top-1/2 left-4 flex -translate-y-1/2 flex-col gap-1 rounded-xl border bg-card p-1 shadow-sm">
+        <div className="absolute top-1/2 right-4 flex -translate-y-1/2 flex-col gap-1 rounded-xl border bg-card p-1 shadow-sm">
           {TOOLS.map(({ tool: t, icon: Icon, key, label }) => (
             <Button
               key={t}
@@ -712,20 +831,6 @@ function Editor() {
         )}
       </main>
 
-      {layersOpen && (
-        <LayersPanel
-          shapes={shapes}
-          selectedIds={selectedIds}
-          onSelect={setSelectedIds}
-          onReorderList={(orderedIds) =>
-            mutate((prev) =>
-              [...prev].sort((a, b) => orderedIds.indexOf(a.id) - orderedIds.indexOf(b.id)),
-            )
-          }
-          onRenameFrame={(id, name) => updateShape(id, { text: name })}
-          onClose={() => toggleLayers(false)}
-        />
-      )}
-    </div>
+    </SidebarProvider>
   )
 }

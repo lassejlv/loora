@@ -21,7 +21,6 @@ export function AuthScreen() {
   const [error, setError] = useState('')
 
   return (
-    <main className="min-h-screen bg-cx-canvas">
       <Dialog open onOpenChange={() => {}}>
         <DialogPopup className="max-w-sm" showCloseButton={false} bottomStickOnMobile={false}>
           <DialogHeader>
@@ -104,6 +103,5 @@ export function AuthScreen() {
           </DialogPanel>
         </DialogPopup>
       </Dialog>
-    </main>
   )
 }

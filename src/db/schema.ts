@@ -1,5 +1,17 @@
 import { relations } from 'drizzle-orm'
-import { boolean, index, pgTable, text, timestamp } from 'drizzle-orm/pg-core'
+import {
+  boolean,
+  foreignKey,
+  index,
+  integer,
+  jsonb,
+  pgTable,
+  primaryKey,
+  text,
+  timestamp,
+} from 'drizzle-orm/pg-core'
+import type { UIMessage } from 'ai'
+import type { Shape } from '#/lib/canvas'
 
 export const user = pgTable('user', {
   id: text('id').primaryKey(),
@@ -75,9 +87,80 @@ export const verification = pgTable(
   (table) => [index('verification_identifier_idx').on(table.identifier)],
 )
 
+export const design = pgTable(
+  'design',
+  {
+    id: text('id').notNull(),
+    userId: text('user_id')
+      .notNull()
+      .references(() => user.id, { onDelete: 'cascade' }),
+    name: text('name').notNull(),
+    shapes: jsonb('shapes').$type<Shape[]>().default([]).notNull(),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+    updatedAt: timestamp('updated_at')
+      .defaultNow()
+      .$onUpdate(() => new Date())
+      .notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.id, table.userId] }),
+    index('design_user_id_idx').on(table.userId),
+  ],
+)
+
+export const designVersion = pgTable(
+  'design_version',
+  {
+    id: text('id').notNull(),
+    designId: text('design_id').notNull(),
+    userId: text('user_id').notNull(),
+    message: text('message').notNull(),
+    shapes: jsonb('shapes').$type<Shape[]>().notNull(),
+    added: integer('added').notNull(),
+    removed: integer('removed').notNull(),
+    changed: integer('changed').notNull(),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.id, table.userId] }),
+    foreignKey({
+      columns: [table.designId, table.userId],
+      foreignColumns: [design.id, design.userId],
+      name: 'design_version_design_fk',
+    }).onDelete('cascade'),
+    index('design_version_design_idx').on(table.userId, table.designId, table.createdAt),
+  ],
+)
+
+export const designChat = pgTable(
+  'design_chat',
+  {
+    id: text('id').notNull(),
+    designId: text('design_id').notNull(),
+    userId: text('user_id').notNull(),
+    title: text('title').default('New chat').notNull(),
+    messages: jsonb('messages').$type<UIMessage[]>().default([]).notNull(),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+    updatedAt: timestamp('updated_at')
+      .defaultNow()
+      .$onUpdate(() => new Date())
+      .notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.id, table.userId] }),
+    foreignKey({
+      columns: [table.designId, table.userId],
+      foreignColumns: [design.id, design.userId],
+      name: 'design_chat_design_fk',
+    }).onDelete('cascade'),
+    index('design_chat_design_idx').on(table.userId, table.designId, table.updatedAt),
+  ],
+)
+
 export const userRelations = relations(user, ({ many }) => ({
   sessions: many(session),
   accounts: many(account),
+  designs: many(design),
 }))
 
 export const sessionRelations = relations(session, ({ one }) => ({
@@ -86,4 +169,8 @@ export const sessionRelations = relations(session, ({ one }) => ({
 
 export const accountRelations = relations(account, ({ one }) => ({
   user: one(user, { fields: [account.userId], references: [user.id] }),
+}))
+
+export const designRelations = relations(design, ({ one }) => ({
+  user: one(user, { fields: [design.userId], references: [user.id] }),
 }))
