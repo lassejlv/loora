@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { AnimatePresence, motion, useReducedMotion } from 'motion/react'
 import { createFileRoute } from '@tanstack/react-router'
 import {
   AlignCenterIcon,
@@ -58,6 +59,16 @@ import { authClient } from '#/lib/auth-client'
 import { SidebarProvider } from '#/components/ui/sidebar'
 import { orpc } from '#/lib/orpc-client'
 import { Drawer, DrawerPopup } from '#/components/ui/drawer'
+import {
+  AlertDialog,
+  AlertDialogClose,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogPopup,
+  AlertDialogTitle,
+} from '#/components/ui/alert-dialog'
+import { fadeUp, uiTransition } from '#/lib/motion'
 
 export const Route = createFileRoute('/')({ component: App, ssr: false })
 
@@ -102,6 +113,7 @@ function DocSwitcher({
   onDelete: () => void
 }) {
   const [renaming, setRenaming] = useState(false)
+  const [confirmDelete, setConfirmDelete] = useState(false)
   const active = docs.find((d) => d.id === activeId)
 
   if (renaming) {
@@ -124,31 +136,57 @@ function DocSwitcher({
   }
 
   return (
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <button
-          type="button"
-          className="pointer-events-auto flex items-center gap-1 rounded-md px-1.5 py-0.5 text-sm text-muted-foreground hover:bg-secondary hover:text-foreground"
-        >
-          {active?.name ?? 'Untitled'}
-          <ChevronDownIcon className="size-3.5" />
-        </button>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="center" className="pointer-events-auto w-52">
-        {docs.map((d) => (
-          <DropdownMenuItem key={d.id} onClick={() => onSwitch(d.id)}>
-            <span className="min-w-0 flex-1 truncate">{d.name}</span>
-            {d.id === activeId && <CheckIcon className="size-3.5" />}
+    <>
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <button
+            type="button"
+            className="pointer-events-auto flex items-center gap-1 rounded-md px-1.5 py-0.5 text-sm text-muted-foreground hover:bg-secondary hover:text-foreground"
+          >
+            {active?.name ?? 'Untitled'}
+            <ChevronDownIcon className="size-3.5" />
+          </button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="center" className="pointer-events-auto w-52">
+          {docs.map((d) => (
+            <DropdownMenuItem key={d.id} onClick={() => onSwitch(d.id)}>
+              <span className="min-w-0 flex-1 truncate">{d.name}</span>
+              {d.id === activeId && <CheckIcon className="size-3.5" />}
+            </DropdownMenuItem>
+          ))}
+          <DropdownMenuSeparator />
+          <DropdownMenuItem onClick={onNew}>New document</DropdownMenuItem>
+          <DropdownMenuItem onClick={() => setRenaming(true)}>Rename</DropdownMenuItem>
+          <DropdownMenuItem variant="destructive" onClick={() => setConfirmDelete(true)}>
+            Delete document
           </DropdownMenuItem>
-        ))}
-        <DropdownMenuSeparator />
-        <DropdownMenuItem onClick={onNew}>New document</DropdownMenuItem>
-        <DropdownMenuItem onClick={() => setRenaming(true)}>Rename</DropdownMenuItem>
-        <DropdownMenuItem variant="destructive" onClick={onDelete}>
-          Delete document
-        </DropdownMenuItem>
-      </DropdownMenuContent>
-    </DropdownMenu>
+        </DropdownMenuContent>
+      </DropdownMenu>
+
+      <AlertDialog open={confirmDelete} onOpenChange={setConfirmDelete}>
+        <AlertDialogPopup className="max-w-sm" bottomStickOnMobile={false}>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete document?</AlertDialogTitle>
+            <AlertDialogDescription>
+              “{active?.name ?? 'Untitled'}” and its chats, history, and canvas will be removed. This
+              can’t be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogClose render={<Button variant="outline" />}>Cancel</AlertDialogClose>
+            <Button
+              variant="destructive"
+              onClick={() => {
+                onDelete()
+                setConfirmDelete(false)
+              }}
+            >
+              Delete
+            </Button>
+          </AlertDialogFooter>
+        </AlertDialogPopup>
+      </AlertDialog>
+    </>
   )
 }
 
@@ -581,6 +619,9 @@ function Editor({ preview = false, userId }: { preview?: boolean; userId?: strin
 
   const selectedShapes = shapes.filter((s) => selectedIds.includes(s.id))
   const selected = selectedShapes[0]
+  const reduceMotion = useReducedMotion()
+  const barMotion = fadeUp(reduceMotion)
+  const barTransition = uiTransition(reduceMotion)
 
   return (
     <SidebarProvider
@@ -732,8 +773,17 @@ function Editor({ preview = false, userId }: { preview?: boolean; userId?: strin
           </Button>
         </div>
 
-        {selected && (
-          <div className="absolute bottom-5 left-1/2 flex -translate-x-1/2 items-center gap-1.5 rounded-full border bg-card px-3 py-2 shadow-sm">
+        <div className="absolute bottom-5 left-1/2 -translate-x-1/2">
+          <AnimatePresence>
+            {selected && (
+              <motion.div
+                key="selection-bar"
+                className="flex items-center gap-1.5 rounded-full border bg-card px-3 py-2 shadow-sm"
+                initial={barMotion.initial}
+                animate={barMotion.animate}
+                exit={barMotion.exit}
+                transition={barTransition}
+              >
             {PALETTE.map((color) => (
               <button
                 key={color}
@@ -894,8 +944,10 @@ function Editor({ preview = false, userId }: { preview?: boolean; userId?: strin
             >
               <Trash2Icon data-slot="icon" />
             </Button>
-          </div>
-        )}
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </div>
       </main>
 
     </SidebarProvider>

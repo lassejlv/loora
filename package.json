@@ -46,6 +46,7 @@
     "cmdk": "^1.1.1",
     "drizzle-orm": "^0.45.2",
     "lucide-react": "^0.577.0",
+    "motion": "^12.42.2",
     "nanoid": "^6.0.0",
     "nitro": "^3.0.260610-beta",
     "radix-ui": "^1.6.2",

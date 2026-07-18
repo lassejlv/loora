@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { AnimatePresence, motion, useReducedMotion } from 'motion/react'
 import { useChat } from '@ai-sdk/react'
 import { DefaultChatTransport, lastAssistantMessageIsCompleteWithToolCalls, type UIMessage } from 'ai'
 import { nanoid } from 'nanoid'
@@ -35,6 +36,8 @@ import type { Shape } from '#/lib/canvas'
 import { snapshotCanvas } from '#/lib/snapshot'
 import { commitIfChanged } from '#/lib/history'
 import { Sidebar } from '#/components/ui/sidebar'
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '#/components/ui/collapsible'
+import { interruptIn, interruptTransition } from '#/lib/motion'
 import { orpc } from '#/lib/orpc-client'
 import {
   DropdownMenu,
@@ -750,8 +753,16 @@ function QuestionCard({
     )
   }
 
+  const reduceMotion = useReducedMotion()
+  const enter = interruptIn(reduceMotion)
+
   return (
-    <div className="flex flex-col gap-2 rounded-lg border bg-background px-3 py-2.5">
+    <motion.div
+      className="flex flex-col gap-2 rounded-lg border bg-background px-3 py-2.5"
+      initial={enter.initial}
+      animate={enter.animate}
+      transition={interruptTransition(reduceMotion)}
+    >
       <p className="text-xs">{question}</p>
       <div className="flex flex-wrap gap-1.5">
         {options.map((option) => (
@@ -765,7 +776,7 @@ function QuestionCard({
           </Button>
         ))}
       </div>
-    </div>
+    </motion.div>
   )
 }
 
@@ -790,6 +801,9 @@ function ToolGroup({
   onResolveDelete: (toolCallId: string, allow: boolean, id: string) => void
 }) {
   const [open, setOpen] = useState(false)
+  const reduceMotion = useReducedMotion()
+  const enter = interruptIn(reduceMotion)
+  const transition = interruptTransition(reduceMotion)
 
   if (parts.length === 1) {
     return <ToolRow part={parts[0]} shapesRef={shapesRef} onResolveDelete={onResolveDelete} />
@@ -815,42 +829,56 @@ function ToolGroup({
 
   return (
     <div className="flex flex-col gap-1.5">
-      <button
-        type="button"
-        onClick={() => setOpen((o) => !o)}
-        className="flex w-full items-center gap-2 text-left text-xs"
-        aria-expanded={open}
-      >
-        <ChevronRightIcon
-          className={cn('size-3.5 shrink-0 text-muted-foreground transition-transform', open && 'rotate-90')}
-        />
-        <span className="font-medium">{summary}</span>
-        <span className="ml-auto shrink-0">
-          {failed ? (
-            <XIcon className="size-3.5 text-destructive-foreground" />
-          ) : busy ? (
-            <span className="size-1.5 animate-pulse rounded-full bg-cx-accent" />
-          ) : pendingDeletes.length === 0 ? (
-            <CheckIcon className="size-3.5 text-muted-foreground" />
-          ) : null}
-        </span>
-      </button>
-
-      {open && (
-        <div className="flex flex-col gap-1 border-l pl-3">
-          {parts.map((p) => (
-            <ToolRow key={p.toolCallId} part={p} shapesRef={shapesRef} onResolveDelete={onResolveDelete} hideConfirm />
-          ))}
-        </div>
-      )}
+      <Collapsible open={open} onOpenChange={setOpen}>
+        <CollapsibleTrigger className="flex w-full items-center gap-2 text-left text-xs">
+          <ChevronRightIcon
+            className={cn('size-3.5 shrink-0 text-muted-foreground transition-transform', open && 'rotate-90')}
+          />
+          <span className="font-medium">{summary}</span>
+          <span className="ml-auto shrink-0">
+            {failed ? (
+              <XIcon className="size-3.5 text-destructive-foreground" />
+            ) : busy ? (
+              <span className="size-1.5 animate-pulse rounded-full bg-cx-accent" />
+            ) : pendingDeletes.length === 0 ? (
+              <CheckIcon className="size-3.5 text-muted-foreground" />
+            ) : null}
+          </span>
+        </CollapsibleTrigger>
+        <CollapsibleContent>
+          <div className="flex flex-col gap-1 border-l pl-3 pt-1.5">
+            {parts.map((p) => (
+              <ToolRow key={p.toolCallId} part={p} shapesRef={shapesRef} onResolveDelete={onResolveDelete} hideConfirm />
+            ))}
+          </div>
+        </CollapsibleContent>
+      </Collapsible>
 
       {/* confirmations stay visible even when the group is collapsed */}
-      {pendingDeletes.length === 1 && (
-        <DeleteConfirm part={pendingDeletes[0]} shapesRef={shapesRef} onResolveDelete={onResolveDelete} />
-      )}
-      {pendingDeletes.length > 1 && (
-        <BatchDeleteConfirm parts={pendingDeletes} shapesRef={shapesRef} onResolveDelete={onResolveDelete} />
-      )}
+      <AnimatePresence>
+        {pendingDeletes.length === 1 && (
+          <motion.div
+            key={pendingDeletes[0].toolCallId}
+            initial={enter.initial}
+            animate={enter.animate}
+            exit={enter.exit}
+            transition={transition}
+          >
+            <DeleteConfirm part={pendingDeletes[0]} shapesRef={shapesRef} onResolveDelete={onResolveDelete} />
+          </motion.div>
+        )}
+        {pendingDeletes.length > 1 && (
+          <motion.div
+            key="batch-delete"
+            initial={enter.initial}
+            animate={enter.animate}
+            exit={enter.exit}
+            transition={transition}
+          >
+            <BatchDeleteConfirm parts={pendingDeletes} shapesRef={shapesRef} onResolveDelete={onResolveDelete} />
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   )
 }
@@ -959,6 +987,8 @@ function ToolRow({
   const failed = part.state === 'output-error' || Boolean((part.output as { error?: string })?.error)
   const awaitingConfirm = name === 'deleteShape' && part.state === 'input-available'
   const done = part.state === 'output-available'
+  const reduceMotion = useReducedMotion()
+  const enter = interruptIn(reduceMotion)
 
   return (
     <div className="flex flex-col gap-1.5">
@@ -986,9 +1016,19 @@ function ToolRow({
         </span>
       </div>
 
-      {awaitingConfirm && !hideConfirm && (
-        <DeleteConfirm part={part} shapesRef={shapesRef} onResolveDelete={onResolveDelete} />
-      )}
+      <AnimatePresence>
+        {awaitingConfirm && !hideConfirm && (
+          <motion.div
+            key={part.toolCallId}
+            initial={enter.initial}
+            animate={enter.animate}
+            exit={enter.exit}
+            transition={interruptTransition(reduceMotion)}
+          >
+            <DeleteConfirm part={part} shapesRef={shapesRef} onResolveDelete={onResolveDelete} />
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   )
 }
