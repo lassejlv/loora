@@ -7,6 +7,7 @@ import type { getSession } from '#/lib/auth'
 import type { Shape } from '#/lib/canvas'
 import type { UIMessage } from 'ai'
 import { assetKey, s3 } from '#/lib/storage'
+import { DAILY_LIMIT_USD, WEEKLY_LIMIT_USD, getUsage } from '#/lib/ai-limits'
 
 type Session = Awaited<ReturnType<typeof getSession>>
 
@@ -32,6 +33,8 @@ const shapeSchema = z.object({
   align: z.enum(['left', 'center', 'right']).optional(),
   src: z.string().max(2048).optional(),
   code: z.string().max(100_000).optional(),
+  html: z.string().max(200_000).optional(),
+  groupId: z.string().max(128).optional(),
 })
 
 const requireUser = os.$context<ORPCContext>().middleware(async ({ context, next }) => {
@@ -341,6 +344,16 @@ const deleteAsset = protectedProcedure
     return { deleted: deleted.length > 0 }
   })
 
+const getUsageStatus = protectedProcedure.handler(async ({ context }) => {
+  const usage = await getUsage(context.user.id)
+  return {
+    dailyUsd: usage.dailyUsd,
+    weeklyUsd: usage.weeklyUsd,
+    dailyLimitUsd: DAILY_LIMIT_USD,
+    weeklyLimitUsd: WEEKLY_LIMIT_USD,
+  }
+})
+
 export const appRouter = {
   design: {
     list: listDesigns,
@@ -362,5 +375,8 @@ export const appRouter = {
     list: listAssets,
     upload: uploadAsset,
     delete: deleteAsset,
+  },
+  usage: {
+    get: getUsageStatus,
   },
 }
