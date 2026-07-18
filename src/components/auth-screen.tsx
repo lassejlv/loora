@@ -1,5 +1,6 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { authClient } from '#/lib/auth-client'
+import { orpc } from '#/lib/orpc-client'
 import { Button } from '#/components/ui/button'
 import { Input } from '#/components/ui/input'
 import {
@@ -19,6 +20,20 @@ export function AuthScreen() {
   const [password, setPassword] = useState('')
   const [pending, setPending] = useState(false)
   const [error, setError] = useState('')
+  const [googleOAuthEnabled, setGoogleOAuthEnabled] = useState(false)
+
+  useEffect(() => {
+    let cancelled = false
+    orpc.auth
+      .config()
+      .then((config) => {
+        if (!cancelled) setGoogleOAuthEnabled(config.googleOAuthEnabled)
+      })
+      .catch(() => {})
+    return () => {
+      cancelled = true
+    }
+  }, [])
 
   return (
       <Dialog open onOpenChange={() => {}}>
@@ -98,6 +113,40 @@ export function AuthScreen() {
                     {pending ? 'Working…' : mode === 'sign-in' ? 'Login' : 'Create account'}
                   </Button>
                 </form>
+                {googleOAuthEnabled ? (
+                  <>
+                    <div className="my-4 flex items-center gap-3" aria-hidden="true">
+                      <span className="h-px flex-1 bg-border" />
+                      <span className="text-xs text-muted-foreground">or</span>
+                      <span className="h-px flex-1 bg-border" />
+                    </div>
+                    <Button
+                      className="w-full"
+                      disabled={pending}
+                      type="button"
+                      variant="outline"
+                      onClick={async () => {
+                        setPending(true)
+                        setError('')
+                        try {
+                          const result = await authClient.signIn.social({
+                            provider: 'google',
+                            callbackURL: '/',
+                          })
+                          if (result.error) {
+                            setError(result.error.message ?? 'Google authentication failed')
+                          }
+                        } catch {
+                          setError('Google authentication failed')
+                        } finally {
+                          setPending(false)
+                        }
+                      }}
+                    >
+                      Continue with Google
+                    </Button>
+                  </>
+                ) : null}
               </TabsPanel>
             </Tabs>
           </DialogPanel>

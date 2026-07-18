@@ -11,7 +11,7 @@
     "build": "vite build",
     "preview": "vite preview",
     "start": "bun run .output/server/index.mjs",
-    "test": "vitest run",
+    "test": "bun test --preload ./src/test/setup.ts",
     "generate-routes": "tsr generate",
     "db:generate": "bun --env-file=.env run drizzle-kit generate",
     "db:migrate": "bun --env-file=.env run drizzle-kit migrate",
@@ -76,8 +76,7 @@
     "playwright-core": "^1.61.1",
     "postgres": "^3.4.9",
     "typescript": "^6.0.3",
-    "vite": "^8.1.5",
-    "vitest": "^4.1.10"
+    "vite": "^8.1.5"
   },
   "pnpm": {
     "onlyBuiltDependencies": [

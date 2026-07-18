@@ -1,25 +1,24 @@
-// @vitest-environment jsdom
-
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { afterEach, beforeEach, describe, expect, it, mock } from 'bun:test'
 import { SidebarProvider } from '#/components/ui/sidebar'
 import type { CanvasActions, Shape } from '#/lib/canvas'
 
-const orpc = vi.hoisted(() => ({
+const orpc = {
   chat: {
-    list: vi.fn(),
-    create: vi.fn(),
-    get: vi.fn(),
-    save: vi.fn(),
+    list: mock(),
+    create: mock(),
+    get: mock(),
+    save: mock(),
   },
-  history: { commit: vi.fn() },
-}))
+  history: { commit: mock() },
+}
 
-vi.mock('#/lib/orpc-client', () => ({ orpc }))
-vi.mock('#/lib/history', () => ({ commitIfChanged: vi.fn() }))
-vi.mock('#/lib/snapshot', () => ({ snapshotCanvas: vi.fn().mockResolvedValue(null) }))
+mock.module('#/lib/orpc-client', () => ({ orpc }))
+mock.module('#/lib/history', () => ({ commitIfChanged: mock() }))
+mock.module('#/lib/snapshot', () => ({ snapshotCanvas: mock().mockResolvedValue(null) }))
 
-import { AgentPanel } from './agent-panel'
+const { AgentPanel } = await import('./agent-panel')
+const originalFetch = globalThis.fetch
 
 function stream(...chunks: object[]) {
   const body = [...chunks.map((chunk) => `data: ${JSON.stringify(chunk)}\n\n`), 'data: [DONE]\n\n'].join('')
@@ -35,10 +34,10 @@ describe('AgentPanel empty response recovery', () => {
 
     Object.defineProperty(window, 'matchMedia', {
       configurable: true,
-      value: vi.fn().mockImplementation(() => ({
+      value: mock(() => ({
         matches: false,
-        addEventListener: vi.fn(),
-        removeEventListener: vi.fn(),
+        addEventListener: mock(),
+        removeEventListener: mock(),
       })),
     })
     Object.defineProperty(window, 'ResizeObserver', {
@@ -52,12 +51,13 @@ describe('AgentPanel empty response recovery', () => {
   })
 
   afterEach(() => {
-    vi.restoreAllMocks()
+    cleanup()
+    globalThis.fetch = originalFetch
+    mock.restore()
   })
 
   it('retries once via regenerate when a successful stream contains no assistant output', async () => {
-    const chatFetch = vi
-      .spyOn(globalThis, 'fetch')
+    const chatFetch = mock()
       .mockResolvedValueOnce(stream({ type: 'start' }))
       .mockResolvedValueOnce(
         stream(
@@ -68,13 +68,14 @@ describe('AgentPanel empty response recovery', () => {
           { type: 'finish' },
         ),
       )
+    globalThis.fetch = chatFetch as unknown as typeof fetch
 
     const shapesRef = { current: [] as Shape[] }
     const actions: CanvasActions = {
-      createShape: vi.fn(),
-      createShapes: vi.fn(),
-      updateShape: vi.fn(),
-      deleteShape: vi.fn(),
+      createShape: mock(),
+      createShapes: mock(),
+      updateShape: mock(),
+      deleteShape: mock(),
     }
 
     render(
@@ -97,8 +98,7 @@ describe('AgentPanel empty response recovery', () => {
   })
 
   it('retries when the server aborts mid-stream (looks like an empty success)', async () => {
-    const chatFetch = vi
-      .spyOn(globalThis, 'fetch')
+    const chatFetch = mock()
       .mockResolvedValueOnce(
         stream({ type: 'start' }, { type: 'abort', reason: 'TimeoutError: The operation timed out.' }),
       )
@@ -111,13 +111,14 @@ describe('AgentPanel empty response recovery', () => {
           { type: 'finish' },
         ),
       )
+    globalThis.fetch = chatFetch as unknown as typeof fetch
 
     const shapesRef = { current: [] as Shape[] }
     const actions: CanvasActions = {
-      createShape: vi.fn(),
-      createShapes: vi.fn(),
-      updateShape: vi.fn(),
-      deleteShape: vi.fn(),
+      createShape: mock(),
+      createShapes: mock(),
+      updateShape: mock(),
+      deleteShape: mock(),
     }
 
     render(

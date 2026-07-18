@@ -13,7 +13,9 @@ import { Route as IndexRouteImport } from './routes/index'
 import { Route as ApiChatRouteImport } from './routes/api.chat'
 import { Route as ApiAssetIdRouteImport } from './routes/api.asset.$id'
 import { Route as ApiAuthSplatRouteImport } from './routes/api.auth.$'
+import { Route as ApiHandoffTokenRouteImport } from './routes/api.handoff.$token'
 import { Route as ApiRpcSplatRouteImport } from './routes/api.rpc.$'
+import { Route as ApiHandoffTokenAssetIdRouteImport } from './routes/api.handoff.$token.asset.$id'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
@@ -35,10 +37,20 @@ const ApiAuthSplatRoute = ApiAuthSplatRouteImport.update({
   path: '/api/auth/$',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiHandoffTokenRoute = ApiHandoffTokenRouteImport.update({
+  id: '/api/handoff/$token',
+  path: '/api/handoff/$token',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ApiRpcSplatRoute = ApiRpcSplatRouteImport.update({
   id: '/api/rpc/$',
   path: '/api/rpc/$',
   getParentRoute: () => rootRouteImport,
+} as any)
+const ApiHandoffTokenAssetIdRoute = ApiHandoffTokenAssetIdRouteImport.update({
+  id: '/asset/$id',
+  path: '/asset/$id',
+  getParentRoute: () => ApiHandoffTokenRoute,
 } as any)
 
 export interface FileRoutesByFullPath {
@@ -46,14 +58,18 @@ export interface FileRoutesByFullPath {
   '/api/chat': typeof ApiChatRoute
   '/api/asset/$id': typeof ApiAssetIdRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
+  '/api/handoff/$token': typeof ApiHandoffTokenRouteWithChildren
   '/api/rpc/$': typeof ApiRpcSplatRoute
+  '/api/handoff/$token/asset/$id': typeof ApiHandoffTokenAssetIdRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/api/chat': typeof ApiChatRoute
   '/api/asset/$id': typeof ApiAssetIdRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
+  '/api/handoff/$token': typeof ApiHandoffTokenRouteWithChildren
   '/api/rpc/$': typeof ApiRpcSplatRoute
+  '/api/handoff/$token/asset/$id': typeof ApiHandoffTokenAssetIdRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -61,20 +77,38 @@ export interface FileRoutesById {
   '/api/chat': typeof ApiChatRoute
   '/api/asset/$id': typeof ApiAssetIdRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
+  '/api/handoff/$token': typeof ApiHandoffTokenRouteWithChildren
   '/api/rpc/$': typeof ApiRpcSplatRoute
+  '/api/handoff/$token/asset/$id': typeof ApiHandoffTokenAssetIdRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/api/chat' | '/api/asset/$id' | '/api/auth/$' | '/api/rpc/$'
+  fullPaths:
+    | '/'
+    | '/api/chat'
+    | '/api/asset/$id'
+    | '/api/auth/$'
+    | '/api/handoff/$token'
+    | '/api/rpc/$'
+    | '/api/handoff/$token/asset/$id'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/api/chat' | '/api/asset/$id' | '/api/auth/$' | '/api/rpc/$'
+  to:
+    | '/'
+    | '/api/chat'
+    | '/api/asset/$id'
+    | '/api/auth/$'
+    | '/api/handoff/$token'
+    | '/api/rpc/$'
+    | '/api/handoff/$token/asset/$id'
   id:
     | '__root__'
     | '/'
     | '/api/chat'
     | '/api/asset/$id'
     | '/api/auth/$'
+    | '/api/handoff/$token'
     | '/api/rpc/$'
+    | '/api/handoff/$token/asset/$id'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -82,6 +116,7 @@ export interface RootRouteChildren {
   ApiChatRoute: typeof ApiChatRoute
   ApiAssetIdRoute: typeof ApiAssetIdRoute
   ApiAuthSplatRoute: typeof ApiAuthSplatRoute
+  ApiHandoffTokenRoute: typeof ApiHandoffTokenRouteWithChildren
   ApiRpcSplatRoute: typeof ApiRpcSplatRoute
 }
 
@@ -115,6 +150,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiAuthSplatRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/handoff/$token': {
+      id: '/api/handoff/$token'
+      path: '/api/handoff/$token'
+      fullPath: '/api/handoff/$token'
+      preLoaderRoute: typeof ApiHandoffTokenRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/rpc/$': {
       id: '/api/rpc/$'
       path: '/api/rpc/$'
@@ -122,14 +164,34 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiRpcSplatRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/handoff/$token/asset/$id': {
+      id: '/api/handoff/$token/asset/$id'
+      path: '/asset/$id'
+      fullPath: '/api/handoff/$token/asset/$id'
+      preLoaderRoute: typeof ApiHandoffTokenAssetIdRouteImport
+      parentRoute: typeof ApiHandoffTokenRoute
+    }
   }
 }
+
+interface ApiHandoffTokenRouteChildren {
+  ApiHandoffTokenAssetIdRoute: typeof ApiHandoffTokenAssetIdRoute
+}
+
+const ApiHandoffTokenRouteChildren: ApiHandoffTokenRouteChildren = {
+  ApiHandoffTokenAssetIdRoute: ApiHandoffTokenAssetIdRoute,
+}
+
+const ApiHandoffTokenRouteWithChildren = ApiHandoffTokenRoute._addFileChildren(
+  ApiHandoffTokenRouteChildren,
+)
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   ApiChatRoute: ApiChatRoute,
   ApiAssetIdRoute: ApiAssetIdRoute,
   ApiAuthSplatRoute: ApiAuthSplatRoute,
+  ApiHandoffTokenRoute: ApiHandoffTokenRouteWithChildren,
   ApiRpcSplatRoute: ApiRpcSplatRoute,
 }
 export const routeTree = rootRouteImport

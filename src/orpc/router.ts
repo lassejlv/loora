@@ -3,11 +3,18 @@ import { ORPCError, os } from '@orpc/server'
 import { z } from 'zod'
 import { db } from '#/db'
 import { asset, design, designChat, designVersion } from '#/db/schema'
-import type { getSession } from '#/lib/auth'
+import { googleOAuthEnabled, type getSession } from '#/lib/auth'
 import type { Shape } from '#/lib/canvas'
 import type { UIMessage } from 'ai'
 import { assetKey, s3 } from '#/lib/storage'
-import { DAILY_LIMIT_USD, WEEKLY_LIMIT_USD, getUsage } from '#/lib/ai-limits'
+import { createHandoffToken } from '#/lib/handoff-token'
+import {
+  DAILY_LIMIT_USD,
+  WEEKLY_LIMIT_USD,
+  getUsage,
+  listUserUsage,
+  resetUsage,
+} from '#/lib/ai-limits'
 
 type Session = Awaited<ReturnType<typeof getSession>>
 
@@ -43,6 +50,14 @@ const requireUser = os.$context<ORPCContext>().middleware(async ({ context, next
 })
 
 const protectedProcedure = os.$context<ORPCContext>().use(requireUser)
+
+const requireAdmin = os.$context<ORPCContext>().middleware(async ({ context, next }) => {
+  if (!context.session) throw new ORPCError('UNAUTHORIZED')
+  if (!context.session.user.isAdmin) throw new ORPCError('FORBIDDEN')
+  return next({ context: { user: context.session.user } })
+})
+
+const adminProcedure = os.$context<ORPCContext>().use(requireAdmin)
 
 function shapeDiff(previous: Shape[], next: Shape[]) {
   const previousById = new Map(previous.map((shape) => [shape.id, shape]))
@@ -108,6 +123,18 @@ const deleteDesign = protectedProcedure
       .returning({ id: design.id })
 
     return { deleted: deleted.length > 0 }
+  })
+
+const createDesignHandoff = protectedProcedure
+  .input(z.object({ designId: z.string().min(1).max(128) }))
+  .handler(async ({ context, input }) => {
+    const [found] = await db
+      .select({ id: design.id })
+      .from(design)
+      .where(and(eq(design.id, input.designId), eq(design.userId, context.user.id)))
+      .limit(1)
+    if (!found) throw new ORPCError('NOT_FOUND')
+    return createHandoffToken(input.designId, context.user.id)
   })
 
 const listVersions = protectedProcedure
@@ -354,11 +381,25 @@ const getUsageStatus = protectedProcedure.handler(async ({ context }) => {
   }
 })
 
+const getAuthConfig = os.handler(() => ({ googleOAuthEnabled }))
+
+const listUsersWithUsage = adminProcedure.handler(() => listUserUsage())
+
+const resetUserUsage = adminProcedure
+  .input(z.object({ userId: z.string().min(1).max(128) }))
+  .handler(async ({ input }) => ({ deleted: await resetUsage(input.userId) }))
+
 export const appRouter = {
+  auth: {
+    config: getAuthConfig,
+  },
   design: {
     list: listDesigns,
     save: saveDesign,
     delete: deleteDesign,
+  },
+  handoff: {
+    create: createDesignHandoff,
   },
   history: {
     list: listVersions,
@@ -378,5 +419,9 @@ export const appRouter = {
   },
   usage: {
     get: getUsageStatus,
+  },
+  admin: {
+    listUsers: listUsersWithUsage,
+    resetUsage: resetUserUsage,
   },
 }

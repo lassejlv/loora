@@ -57,6 +57,13 @@
       "when": 1784397711457,
       "tag": "0007_lyrical_sway",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1784405052176,
+      "tag": "0008_fresh_harpoon",
+      "breakpoints": true
     }
   ]
 }

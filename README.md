@@ -18,6 +18,14 @@ Set these values in `.env`:
 - `BETTER_AUTH_URL`: the public app origin, usually `http://localhost:3000` locally
 - `GEMINI_API_KEY`: the server-managed Gemini key used by the design agent
 
+Google login is enabled only when both of these optional values are set:
+
+- `GOOGLE_CLIENT_ID`
+- `GOOGLE_CLIENT_SECRET`
+
+Register `${BETTER_AUTH_URL}/api/auth/callback/google` as an authorized redirect URI in Google
+Cloud (for example, `http://localhost:3000/api/auth/callback/google` locally).
+
 Create the Better Auth tables and start the app:
 
 ```bash

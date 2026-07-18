@@ -56,6 +56,7 @@ import { HistoryPopover } from '#/components/history-panel'
 import { deleteHistory } from '#/lib/history'
 import { snapshotCanvas } from '#/lib/snapshot'
 import { AgentPanel } from '#/components/agent-panel'
+import { ExportDialog } from '#/components/export-dialog'
 import { PALETTE, shapeId, type CanvasActions, type Shape } from '#/lib/canvas'
 import { Button } from '#/components/ui/button'
 import { cn } from '#/lib/utils'
@@ -237,6 +238,7 @@ function Editor({ preview = false, userId }: { preview?: boolean; userId?: strin
   }
   const [assetsOpen, setAssetsOpen] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
+  const [exportOpen, setExportOpen] = useState(false)
 
   const shapesRef = useRef(shapes)
   shapesRef.current = shapes
@@ -586,17 +588,6 @@ function Editor({ preview = false, userId }: { preview?: boolean; userId?: strin
     [mutate, selectedIds],
   )
 
-  const exportPng = useCallback(async () => {
-    const all = shapesRef.current
-    const targets = selectedIds.length > 0 ? all.filter((s) => selectedIds.includes(s.id)) : all
-    const url = await snapshotCanvas(targets, { pixelRatio: 2 })
-    if (!url) return
-    const a = document.createElement('a')
-    a.href = url
-    a.download = 'loora.png'
-    a.click()
-  }, [selectedIds])
-
   useEffect(() => {
     if (preview) return
     const onKeyDown = (e: KeyboardEvent) => {
@@ -778,9 +769,9 @@ function Editor({ preview = false, userId }: { preview?: boolean; userId?: strin
                 Assets
               </DropdownMenuCheckboxItem>
               <DropdownMenuSeparator />
-              <DropdownMenuItem onClick={exportPng} disabled={shapes.length === 0}>
+              <DropdownMenuItem onClick={() => setExportOpen(true)} disabled={shapes.length === 0}>
                 <DownloadIcon data-slot="icon" />
-                {selectedIds.length > 0 ? 'Export selection' : 'Export canvas'}
+                Export and hand off
               </DropdownMenuItem>
               <DropdownMenuSeparator />
               <DropdownMenuItem onClick={() => setSettingsOpen(true)}>
@@ -1084,6 +1075,16 @@ function Editor({ preview = false, userId }: { preview?: boolean; userId?: strin
             )}
           </AnimatePresence>
         </div>
+
+        <ExportDialog
+          key={activeId}
+          open={exportOpen}
+          onOpenChange={setExportOpen}
+          doc={docs.find((doc) => doc.id === activeId) ?? { id: activeId, name: 'Untitled' }}
+          shapes={shapes}
+          selectedIds={selectedIds}
+          databaseReady={databaseReady}
+        />
       </main>
 
     </SidebarProvider>

@@ -89,6 +89,7 @@ export function Canvas({
   // Component shape currently in "interact" mode: its iframe receives pointer
   // events instead of the canvas. Entered by double-click, left by clicking out.
   const [interactiveId, setInteractiveId] = useState<string | null>(null)
+  const [editingFrameId, setEditingFrameId] = useState<string | null>(null)
   const dragRef = useRef<Drag | null>(null)
   dragRef.current = drag
 
@@ -110,6 +111,7 @@ export function Canvas({
     // Clicks inside an interactive iframe never reach the canvas, so any
     // pointer down that lands here means the user clicked outside it.
     if (interactiveId) setInteractiveId(null)
+    if (editingFrameId) setEditingFrameId(null)
     ;(e.currentTarget as Element).setPointerCapture(e.pointerId)
     const pt = toScene(e.clientX, e.clientY)
 
@@ -436,6 +438,12 @@ export function Canvas({
         if (s?.type === 'text') setEditingId(s.id)
         if (s?.type === 'component') {
           setInteractiveId(s.id)
+          setEditingFrameId(null)
+          onSelect([])
+        }
+        if (s?.type === 'frame' && s.html) {
+          setEditingFrameId(s.id)
+          setInteractiveId(null)
           onSelect([])
         }
       }}
@@ -454,6 +462,8 @@ export function Canvas({
             shape={s}
             hideText={s.id === editingId}
             interactive={s.id === interactiveId}
+            editable={s.id === editingFrameId}
+            onHtmlChange={(html) => onUpdate(s.id, { html })}
           />
         ))}
 
@@ -578,10 +588,14 @@ const ShapeView = memo(function ShapeView({
   shape: s,
   hideText,
   interactive,
+  editable,
+  onHtmlChange,
 }: {
   shape: Shape
   hideText?: boolean
   interactive?: boolean
+  editable?: boolean
+  onHtmlChange?: (html: string) => void
 }) {
   const box: React.CSSProperties = {
     position: 'absolute',
@@ -662,7 +676,7 @@ const ShapeView = memo(function ShapeView({
             color: 'var(--color-muted-foreground)',
           }}
         >
-          {s.text ?? 'Frame'}
+          {`${s.text ?? 'Frame'}${s.html ? editable ? ' · editing (click outside to exit)' : ' · double-click to edit HTML' : ''}`}
         </div>
         <div
           className="h-full w-full"
@@ -673,7 +687,7 @@ const ShapeView = memo(function ShapeView({
             overflow: s.html ? 'hidden' : undefined,
           }}
         >
-          {s.html && <FrameBody html={s.html} />}
+          {s.html && <FrameBody html={s.html} editable={editable} onChange={onHtmlChange} />}
         </div>
       </div>
     )
