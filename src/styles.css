@@ -200,35 +200,56 @@ body {
 }
 
 .cx-shimmer {
-  background: linear-gradient(
-    90deg,
-    var(--color-muted-foreground) 0%,
-    var(--color-muted-foreground) 38%,
-    var(--cx-ink) 50%,
-    var(--color-muted-foreground) 62%,
-    var(--color-muted-foreground) 100%
-  );
-  background-size: 200% 100%;
-  -webkit-background-clip: text;
-  background-clip: text;
-  color: transparent;
-  animation: cx-shimmer 1.6s linear infinite;
+  color: var(--color-muted-foreground);
+  animation: cx-shimmer 1.4s ease-in-out infinite;
+}
+
+.cx-agent-thinking [data-char] {
+  display: inline-block;
+  color: var(--color-muted-foreground);
+  opacity: 0.42;
+  animation: cx-agent-thinking 1.25s ease-in-out infinite;
+  animation-delay: calc(var(--cx-char-index) * 55ms);
+}
+
+.cx-agent-thinking-dots {
+  color: var(--color-muted-foreground);
+  opacity: 0.55;
+}
+
+@keyframes cx-agent-thinking {
+  0%,
+  55%,
+  100% {
+    color: var(--color-muted-foreground);
+    opacity: 0.42;
+  }
+  24% {
+    color: var(--foreground);
+    opacity: 1;
+  }
 }
 
 @keyframes cx-shimmer {
-  from {
-    background-position: 200% 0;
+  0%,
+  100% {
+    opacity: 0.45;
   }
-  to {
-    background-position: -200% 0;
+  50% {
+    opacity: 1;
   }
 }
 
 @media (prefers-reduced-motion: reduce) {
   .cx-shimmer {
     animation: none;
-    background: none;
+    opacity: 1;
     color: var(--color-muted-foreground);
+  }
+
+  .cx-agent-thinking [data-char] {
+    animation: none;
+    opacity: 1;
   }
 }
 

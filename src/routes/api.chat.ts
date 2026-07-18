@@ -6,17 +6,6 @@ import { z } from 'zod'
 import type { Shape } from '#/lib/canvas'
 import { GEMINI_MODEL } from '#/lib/models'
 import { requireSession } from '#/lib/auth'
-import frontendDesignSkill from '#/skills/frontend-design.md?raw'
-
-const SKILLS = {
-  'frontend-design': {
-    description:
-      "Anthropic's frontend design guide: distinctive palette, type, and layout choices, plus calibration against generic AI-generated looks.",
-    content: frontendDesignSkill,
-  },
-} as const
-
-type SkillName = keyof typeof SKILLS
 
 const shapePatch = {
   x: z.number().describe('left edge in canvas units'),
@@ -52,6 +41,13 @@ const newShapeSchema = z.object({
   fontWeight: shapePatch.fontWeight.optional(),
   align: shapePatch.align.optional(),
 })
+
+function messagesForModel(messages: UIMessage[]): UIMessage[] {
+  return messages.flatMap((message) => {
+    const parts = message.parts.filter((part) => part.type !== 'tool-loadSkill')
+    return parts.length > 0 ? [{ ...message, parts }] : []
+  })
+}
 
 export const Route = createFileRoute('/api/chat')({
   server: {
@@ -131,15 +127,6 @@ export const Route = createFileRoute('/api/chat')({
                 }
               },
             },
-            loadSkill: {
-              description:
-                'Load a skill: expert instructions to follow for the current task. Read the returned text and apply it. Available skills: ' +
-                Object.entries(SKILLS)
-                  .map(([name, s]) => `${name} (${s.description})`)
-                  .join('; '),
-              inputSchema: z.object({ name: z.enum(['frontend-design']) }),
-              execute: async ({ name }: { name: SkillName }) => SKILLS[name].content,
-            },
             askQuestion: {
               description:
                 'Ask the user a question when a request is ambiguous or a design decision is theirs to make. Provide 2-4 short options. When a sensible default exists, include "Decide for me" as the last option and pick the default yourself if chosen.',
@@ -157,7 +144,9 @@ export const Route = createFileRoute('/api/chat')({
             'Only touch the canvas when the user explicitly asks for a change. Greetings, questions, or chit-chat get a plain text reply with zero tool calls.',
             'Never delete or overwrite existing shapes unless the user asked for exactly that. When a request is ambiguous, use the askQuestion tool instead of guessing.',
             'Make the minimal set of changes that fulfills the request - no extra decoration, no unrequested layouts.',
-            'Skills: before any substantial design task (a screen, a page layout, a multi-shape composition), call loadSkill with "frontend-design" and follow its guidance. Skip it for trivial edits.',
+            'For substantial designs, first form a compact internal plan for palette, type hierarchy, layout, and one memorable signature element. Do not expose the plan unless the user asks.',
+            'Ground every design in the subject and audience. Avoid generic AI defaults: decorative gradients, arbitrary numbered sections, excessive cards, random motion, and filler copy.',
+            'Use deliberate alignment, spacing, hierarchy, contrast, and plain useful copy. Spend visual boldness in one place and keep the rest disciplined.',
             'You manipulate the canvas only through tools. Shapes are rect, ellipse, text, or frame.',
             'Frames are artboards: white containers that render behind other shapes. Design inside a frame when one exists (or create one for a screen/page design, e.g. 375x812 mobile or 1440x900 desktop). The frame name lives in its "text" field.',
             'Shapes support stroke (border color + strokeWidth), radius (rounded corners on rect/frame), and opacity (0-1). Use them: a rect with radius 8 and a subtle stroke reads as a button or card.',
@@ -172,11 +161,11 @@ export const Route = createFileRoute('/api/chat')({
             'Current canvas shapes (JSON):',
             JSON.stringify(shapes ?? []),
           ].join('\n'),
-          messages: await convertToModelMessages(messages, { tools }),
+          messages: await convertToModelMessages(messagesForModel(messages), { tools }),
           stopWhen: stepCountIs(10),
           tools,
           // Kill hung upstream calls instead of leaving the client spinning forever.
-          abortSignal: AbortSignal.timeout(120_000),
+          abortSignal: AbortSignal.timeout(60_000),
           onError: ({ error }) => console.error('[chat] stream error:', error),
         })
 

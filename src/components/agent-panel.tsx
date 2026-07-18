@@ -43,16 +43,16 @@ type ChatState = ReturnType<typeof useChat>
 type ChatSummary = { id: string; title: string; updatedAt: number }
 
 function messagesForStorage(messages: UIMessage[]): UIMessage[] {
-  return messages.map((message) => ({
-    ...message,
-    parts: message.parts.flatMap((part) => {
-      if (part.type === 'file') return []
+  return messages.flatMap((message) => {
+    const parts = message.parts.flatMap((part) => {
+      if (part.type === 'file' || part.type === 'tool-loadSkill') return []
       if (part.type === 'tool-viewCanvas' && part.state === 'output-available') {
         return [{ ...part, output: { viewed: true } }]
       }
       return [part]
-    }),
-  }))
+    })
+    return parts.length > 0 ? [{ ...message, parts }] : []
+  })
 }
 
 // Shimmer until the assistant starts producing visible text (covers tool rounds too).
@@ -72,6 +72,25 @@ function titleFromPrompt(prompt: string) {
   return title.length > 48 ? `${title.slice(0, 47)}…` : title
 }
 
+function AgentThinking({ label = 'Thinking' }: { label?: string }) {
+  return (
+    <p className="cx-agent-thinking w-fit text-sm" role="status" aria-label={`${label}…`}>
+      <span aria-hidden="true">
+        {[...label].map((character, index) => (
+          <span
+            key={`${character}-${index}`}
+            data-char
+            style={{ '--cx-char-index': index } as React.CSSProperties}
+          >
+            {character}
+          </span>
+        ))}
+        <span className="cx-agent-thinking-dots">…</span>
+      </span>
+    </p>
+  )
+}
+
 export function AgentPanel({
   actions,
   shapesRef,
@@ -83,6 +102,7 @@ export function AgentPanel({
 }) {
   const [input, setInput] = useState('')
   const [chatReady, setChatReady] = useState(false)
+  const [stallError, setStallError] = useState<string | null>(null)
   const [chats, setChats] = useState<ChatSummary[]>([])
   const [activeChatId, setActiveChatId] = useState<string | null>(null)
   const chatsRef = useRef(chats)
@@ -106,31 +126,57 @@ export function AgentPanel({
           toolCallId: toolCall.toolCallId,
           output,
         } as Parameters<typeof addToolOutput>[0])
-      switch (toolCall.toolName) {
-        case 'createShape':
-          respond(actions.createShape(input as never))
-          break
-        case 'createShapes':
-          respond(actions.createShapes((input as { shapes: Omit<Shape, 'id'>[] }).shapes))
-          break
-        case 'updateShape': {
-          const { id, ...patch } = input as { id: string } & Partial<Shape>
-          const updated = actions.updateShape(id, patch)
-          respond(updated ?? { error: `No shape with id ${id}` })
-          break
+      const fail = (message: string) =>
+        addToolOutput({
+          tool: toolCall.toolName,
+          toolCallId: toolCall.toolCallId,
+          state: 'output-error',
+          errorText: message,
+        } as Parameters<typeof addToolOutput>[0])
+
+      try {
+        switch (toolCall.toolName) {
+          case 'createShape':
+            respond(actions.createShape(input as never))
+            break
+          case 'createShapes':
+            respond(actions.createShapes((input as { shapes: Omit<Shape, 'id'>[] }).shapes))
+            break
+          case 'updateShape': {
+            const { id, ...patch } = input as { id: string } & Partial<Shape>
+            const updated = actions.updateShape(id, patch)
+            respond(updated ?? { error: `No shape with id ${id}` })
+            break
+          }
+          case 'viewCanvas':
+            void snapshotCanvas(shapesRef.current)
+              .then((image) => respond(image ? { image } : { empty: true }))
+              .catch(() => fail('Could not capture the canvas.'))
+            break
+          case 'deleteShape':
+          case 'askQuestion':
+            // These tools wait for the user in their inline controls.
+            break
+          default:
+            fail(`Unsupported tool: ${toolCall.toolName}`)
         }
-        case 'viewCanvas':
-          snapshotCanvas(shapesRef.current).then((image) =>
-            respond(image ? { image } : { empty: true }),
-          )
-          break
-        // deleteShape is NOT handled here: it waits for user confirmation in the UI.
+      } catch (error) {
+        fail(error instanceof Error ? error.message : 'The canvas tool failed.')
       }
     },
   })
 
   const messagesRef = useRef(messages)
   messagesRef.current = messages
+
+  useEffect(() => {
+    if (status !== 'submitted' && status !== 'streaming') return
+    const timeout = window.setTimeout(() => {
+      void stop()
+      setStallError('The agent stopped after 45 seconds without progress. Try again.')
+    }, 45_000)
+    return () => window.clearTimeout(timeout)
+  }, [messages, status, stop])
 
   useEffect(() => {
     let cancelled = false
@@ -305,9 +351,7 @@ export function AgentPanel({
                     mi === messages.length - 1 &&
                     i === blocks.length - 1 &&
                     (status === 'streaming' || status === 'submitted') ? (
-                      <p key={i} className="cx-shimmer w-fit text-sm">
-                        Reasoning…
-                      </p>
+                      <AgentThinking key={i} label="Reasoning" />
                     ) : null
                   ) : block.kind === 'question' ? (
                     <QuestionCard key={i} part={block.part} onAnswer={answerQuestion} />
@@ -324,11 +368,11 @@ export function AgentPanel({
             </Message>
           ))}
           {isThinking(status, messages) && (
-            <p className="cx-shimmer w-fit text-sm">Thinking…</p>
+            <AgentThinking />
           )}
-          {error && (
+          {(stallError || error) && (
             <p className="text-xs text-destructive-foreground">
-              {error.message || 'Request failed.'}
+              {stallError || error?.message || 'Request failed.'}
             </p>
           )}
         </ConversationContent>
@@ -342,6 +386,7 @@ export function AgentPanel({
             if (!input.trim()) return
             const text = input
             setInput('')
+            setStallError(null)
             if (activeChat?.title === 'New chat') {
               const title = titleFromPrompt(text)
               setChats((current) =>
