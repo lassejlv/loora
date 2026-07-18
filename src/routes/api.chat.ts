@@ -5,6 +5,10 @@ import { convertToModelMessages, stepCountIs, streamText, type UIMessage } from 
 import { z } from 'zod'
 import type { Shape } from '#/lib/canvas'
 import { DEFAULT_MODEL, type ModelKey } from '#/lib/models'
+import {
+  modelSupportsImageInput,
+  withoutImageParts,
+} from '#/lib/ai-image-inputs'
 import { checkLimits, recordUsage } from '#/lib/ai-limits'
 import { requireSession } from '#/lib/auth'
 import { DESIGN_SKILL_PROMPT } from '#/skills/design-skills'
@@ -67,7 +71,7 @@ const componentCodeSchema = z
 
 // Server-only mapping; never send these ids to the client.
 const WAFER_MODEL_IDS: Record<ModelKey, string> = {
-  mini: 'Kimi-K2.6',
+  mini: 'MiniMax-M3',
   max: 'GLM-5.2',
   'max-fast': 'glm5.2-fast',
 }
@@ -81,8 +85,8 @@ function sanitizeModelNames(text: string): string {
   return out
 }
 
-function messagesForModel(messages: UIMessage[]): UIMessage[] {
-  return messages.flatMap((message) => {
+function messagesForModel(messages: UIMessage[], imageInputsEnabled: boolean): UIMessage[] {
+  return withoutImageParts(messages, imageInputsEnabled).flatMap((message) => {
     const parts = message.parts.filter((part) => {
       if (part.type === 'tool-loadSkill' || part.type === 'step-start') return false
       if (part.type === 'text' || part.type === 'reasoning') {
@@ -125,6 +129,7 @@ export const Route = createFileRoute('/api/chat')({
         const key: ModelKey =
           modelKey && modelKey in WAFER_MODEL_IDS ? (modelKey as ModelKey) : DEFAULT_MODEL
         const model = wafer(WAFER_MODEL_IDS[key])
+        const imageInputsEnabled = modelSupportsImageInput(key)
 
         const limitError = await checkLimits(session.user.id)
         if (limitError) {
@@ -180,13 +185,20 @@ export const Route = createFileRoute('/api/chat')({
               inputSchema: z.object({ id: z.string() }),
             },
             viewCanvas: {
-              description:
-                'Render the current canvas to an image and look at it. Call this after finishing edits for a design task to verify the result, then fix any problems you see.',
+              description: imageInputsEnabled
+                ? 'Render the current canvas to an image and look at it. Call this after finishing edits for a design task to verify the result, then fix any problems you see.'
+                : 'Canvas image viewing is temporarily unavailable. Use the current canvas shapes JSON instead.',
               // Non-empty schema: some providers reject function declarations with zero properties.
               inputSchema: z.object({
                 focus: z.string().optional().describe('what you are checking, e.g. "spacing of the header"'),
               }),
               toModelOutput: ({ output }: { output: { image?: string; empty?: boolean } }) => {
+                if (!imageInputsEnabled) {
+                  return {
+                    type: 'text' as const,
+                    value: 'Canvas image viewing is temporarily disabled. Use the current canvas shapes JSON.',
+                  }
+                }
                 if (!output?.image) {
                   return { type: 'text' as const, value: 'The canvas is empty.' }
                 }
@@ -249,7 +261,9 @@ export const Route = createFileRoute('/api/chat')({
             'Frames are artboards: white containers that render behind other shapes. Design inside a frame when one exists (or create one for a screen/page design, e.g. 375x812 mobile or 1440x900 desktop). The frame name lives in its "text" field.',
             'Frames can carry a full HTML body via the "html" field: real HTML rendered live inside the frame. THIS IS THE PREFERRED WAY to build websites, landing pages, app screens, and rich mockups — one frame with html beats dozens of positioned shapes. Tailwind v3 utility classes work; add a <style> block or inline styles for anything beyond utilities. Scripts are stripped. The body renders in an isolated scope sized to the frame, so design mobile frames at mobile widths and desktop frames at desktop widths. Images: only asset URLs from the Assets list, as <img src="/api/asset/...">. Update a design by sending the complete new html via updateShape.',
             'Shapes support stroke (border color + strokeWidth), radius (rounded corners on rect/frame), and opacity (0-1). Use them: a rect with radius 8 and a subtle stroke reads as a button or card.',
-            'The user message may include a PNG snapshot of the current canvas. Use it to judge layout, overlap, and balance before and after your edits.',
+            imageInputsEnabled
+              ? 'The user message may include a PNG snapshot of the current canvas. Use it to judge layout, overlap, and balance before and after your edits.'
+              : 'Image input is temporarily disabled. Rely on the current canvas shapes JSON and do not call viewCanvas.',
             'Coordinates: x/y is the top-left corner, y grows downward. The visible canvas is roughly 1200x800 around the origin.',
             'Palette to prefer: #1a1917 ink, #ffffff white, #2440e6 ultramarine, #e8442e vermilion, #f5c518 yellow, #23a25d green. Other CSS colors are allowed when asked.',
             'Text shapes render at fontSize (default 20) with fontWeight (400-700) and align (left/center/right), in the fill color. Text wraps at the box width w and supports newlines - size the box for the content. Use weight and size for hierarchy: e.g. 32/700 titles, 14/400 body.',
@@ -260,7 +274,9 @@ export const Route = createFileRoute('/api/chat')({
             '',
             'Assets available (JSON):',
             JSON.stringify(assets.map((a) => ({ name: a.name, mediaType: a.mediaType, src: `/api/asset/${a.id}` }))),
-            'Verify loop: after finishing the edits for a design task, call viewCanvas to see the actual result. If you spot problems (overlap, misalignment, cramped spacing, poor contrast), fix them and check again. Skip verification for trivial single-shape edits.',
+            imageInputsEnabled
+              ? 'Verify loop: after finishing the edits for a design task, call viewCanvas to see the actual result. If you spot problems (overlap, misalignment, cramped spacing, poor contrast), fix them and check again. Skip verification for trivial single-shape edits.'
+              : 'Canvas image verification is temporarily disabled. Do not call viewCanvas.',
             'Keep replies to one or two short sentences; the user sees the canvas change live.',
             '',
             'Current canvas shapes (JSON):',
@@ -269,7 +285,10 @@ export const Route = createFileRoute('/api/chat')({
               ? `The user currently has these shape ids selected: ${JSON.stringify(selectedIds)}. When the request says "this", "these", or "the selected", it refers to those shapes.`
               : '',
           ].join('\n'),
-          messages: await convertToModelMessages(messagesForModel(messages), { tools }),
+          messages: await convertToModelMessages(
+            messagesForModel(messages, imageInputsEnabled),
+            { tools },
+          ),
           stopWhen: stepCountIs(10),
           tools,
           // Design tasks (multi-shape layouts, components) routinely need >60s; a short abort

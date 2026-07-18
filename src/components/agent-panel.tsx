@@ -40,6 +40,7 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '#/component
 import { interruptIn, interruptTransition } from '#/lib/motion'
 import { orpc } from '#/lib/orpc-client'
 import { DEFAULT_MODEL, MODELS } from '#/lib/models'
+import { modelSupportsImageInput } from '#/lib/ai-image-inputs'
 import { sanitizeHtml } from '#/lib/sanitize'
 import {
   DropdownMenu,
@@ -131,6 +132,7 @@ export function AgentPanel({
   })
   const modelRef = useRef(model)
   modelRef.current = model
+  const imageInputsEnabled = modelSupportsImageInput(model)
   const changeModel = (next: string) => {
     setModel(next)
     if (typeof localStorage !== 'undefined') localStorage.setItem('loora:model', next)
@@ -252,6 +254,10 @@ export function AgentPanel({
               break
             }
             case 'viewCanvas':
+              if (!modelSupportsImageInput(modelRef.current)) {
+                respond({ unavailable: true })
+                break
+              }
               void snapshotCanvas(shapesRef.current)
                 .then((image) => respond(image ? { image } : { empty: true }))
                 .catch(() => fail('Could not capture the canvas.'))
@@ -496,7 +502,7 @@ export function AgentPanel({
 
       <div className="border-t p-3">
         <PromptInput
-          accept="image/*"
+          accept={imageInputsEnabled ? 'image/*' : 'application/x-loora-disabled'}
           onSubmit={async ({ text, files }) => {
             const trimmed = text.trim()
             if (!trimmed || !chatReady || status === 'streaming' || status === 'submitted') return
@@ -520,15 +526,17 @@ export function AgentPanel({
                 skipIfUnchanged: true,
               })
               .catch((error) => console.error('[history] Failed to save checkpoint:', error))
-            const snapshot = await snapshotCanvas(shapesRef.current)
+            const snapshot = imageInputsEnabled ? await snapshotCanvas(shapesRef.current) : null
             sendMessage({
               text: trimmed,
-              files: [
-                ...files,
-                ...(snapshot
-                  ? [{ type: 'file' as const, mediaType: 'image/png', url: snapshot }]
-                  : []),
-              ],
+              files: imageInputsEnabled
+                ? [
+                    ...files,
+                    ...(snapshot
+                      ? [{ type: 'file' as const, mediaType: 'image/png', url: snapshot }]
+                      : []),
+                  ]
+                : [],
             })
           }}
         >

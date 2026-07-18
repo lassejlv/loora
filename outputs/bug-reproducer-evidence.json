@@ -1,0 +1,22 @@
+{
+  "status": "NOT_REPRODUCED",
+  "reason": "A live Wafer A/B request accepted both text-only and PNG input. The reported intermittent model_request_rejected error was not reproduced, so image input is not claimed as the proven root cause. Image input is now capability-gated per model, with MiniMax-M3 enabled and GLM models blocked.",
+  "before": {
+    "command": ["bun", "--env-file=.env", "/private/tmp/loora-wafer-repro.mjs"],
+    "exit_code": 0,
+    "timed_out": false,
+    "duration_ms": null,
+    "stdout": "text-only: HTTP 200, request 052f8e3f946b\nwith-png: HTTP 200, request 1e3e173858de",
+    "stderr": ""
+  },
+  "after": {
+    "command": ["bun", "run", "test"],
+    "exit_code": 0,
+    "timed_out": false,
+    "duration_ms": 1058,
+    "stdout": "39 tests passed, 0 failed, 100 assertions",
+    "stderr": ""
+  },
+  "same_command": false,
+  "full_suite": "passed"
+}
