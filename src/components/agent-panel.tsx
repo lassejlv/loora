@@ -181,7 +181,7 @@ export function AgentPanel({
   }
 
   return (
-    <aside className="flex w-85 shrink-0 flex-col border-l bg-card">
+    <aside className="flex w-85 shrink-0 flex-col border-r bg-card">
       <header className="flex items-center justify-between border-b px-4 py-3">
         <div className="flex items-center gap-2">
           <span

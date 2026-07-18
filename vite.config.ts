@@ -10,7 +10,7 @@ const config = defineConfig({
   plugins: [
     devtools(),
     tailwindcss(),
-    tanstackStart(),
+    tanstackStart({ router: { quoteStyle: "single" }}),
     nitro({ preset: 'bun' }),
     viteReact(),
   ],

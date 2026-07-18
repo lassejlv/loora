@@ -14,7 +14,7 @@ import {
   HandIcon,
   LogOutIcon,
   MousePointer2Icon,
-  PanelLeftIcon,
+  PanelRightIcon,
   Redo2Icon,
   SendToBackIcon,
   SquareIcon,
@@ -440,20 +440,8 @@ function Editor() {
 
   return (
     <div className="flex h-full">
-      {layersOpen && (
-        <LayersPanel
-          shapes={shapes}
-          selectedIds={selectedIds}
-          onSelect={setSelectedIds}
-          onReorderList={(orderedIds) =>
-            mutate((prev) =>
-              [...prev].sort((a, b) => orderedIds.indexOf(a.id) - orderedIds.indexOf(b.id)),
-            )
-          }
-          onRenameFrame={(id, name) => updateShape(id, { text: name })}
-          onClose={() => toggleLayers(false)}
-        />
-      )}
+      <AgentPanel actions={actions} shapesRef={shapesRef} docId={activeId} />
+
       <main className="relative min-w-0 flex-1">
         <Canvas
           shapes={shapes}
@@ -465,8 +453,8 @@ function Editor() {
           onUpdate={updateShape}
         />
 
-        {!layersOpen && (
-          <div className="absolute top-4 left-4">
+        <div className="absolute top-4 right-4 flex items-center gap-1">
+          {!layersOpen && (
             <Button
               variant="ghost"
               size="icon"
@@ -474,12 +462,9 @@ function Editor() {
               title="Layers"
               onClick={() => toggleLayers(true)}
             >
-              <PanelLeftIcon data-slot="icon" />
+              <PanelRightIcon data-slot="icon" />
             </Button>
-          </div>
-        )}
-
-        <div className="absolute top-4 right-4 flex items-center gap-1">
+          )}
           <HistoryPopover
             docId={activeId}
             shapesRef={shapesRef}
@@ -727,7 +712,20 @@ function Editor() {
         )}
       </main>
 
-      <AgentPanel actions={actions} shapesRef={shapesRef} docId={activeId} />
+      {layersOpen && (
+        <LayersPanel
+          shapes={shapes}
+          selectedIds={selectedIds}
+          onSelect={setSelectedIds}
+          onReorderList={(orderedIds) =>
+            mutate((prev) =>
+              [...prev].sort((a, b) => orderedIds.indexOf(a.id) - orderedIds.indexOf(b.id)),
+            )
+          }
+          onRenameFrame={(id, name) => updateShape(id, { text: name })}
+          onClose={() => toggleLayers(false)}
+        />
+      )}
     </div>
   )
 }

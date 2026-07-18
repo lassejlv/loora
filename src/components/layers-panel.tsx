@@ -58,7 +58,7 @@ export function LayersPanel({
   }
 
   return (
-    <aside className="flex w-56 shrink-0 flex-col border-r bg-card">
+    <aside className="flex w-56 shrink-0 flex-col border-l bg-card">
       <header className="flex items-center justify-between border-b px-3 py-2.5">
         <h2 className="text-sm font-semibold">Layers</h2>
         <Button variant="ghost" size="icon-xs" aria-label="Close layers" onClick={onClose}>
