@@ -22,20 +22,31 @@ export function costMicroUsd(model: ModelKey, inputTokens: number, outputTokens:
 }
 
 // Rolling windows: last 24h and last 7d.
-export async function getUsage(userId: string) {
+export async function getUsageStatus(userId: string) {
   const now = Date.now()
   const dayAgo = new Date(now - 24 * 60 * 60 * 1000)
   const weekAgo = new Date(now - 7 * 24 * 60 * 60 * 1000)
   const [row] = await db
     .select({
+      usageMultiplier: user.usageMultiplier,
       daily: sql<number>`coalesce(sum(${aiUsage.costMicroUsd}) filter (where ${aiUsage.createdAt} >= ${dayAgo}), 0)::bigint`,
       weekly: sql<number>`coalesce(sum(${aiUsage.costMicroUsd}), 0)::bigint`,
     })
-    .from(aiUsage)
-    .where(and(eq(aiUsage.userId, userId), gte(aiUsage.createdAt, weekAgo)))
+    .from(user)
+    .leftJoin(
+      aiUsage,
+      and(eq(aiUsage.userId, user.id), gte(aiUsage.createdAt, weekAgo)),
+    )
+    .where(eq(user.id, userId))
+    .groupBy(user.id)
+
+  const usageMultiplier = row?.usageMultiplier ?? 1
   return {
     dailyUsd: Number(row?.daily ?? 0) / MICRO,
     weeklyUsd: Number(row?.weekly ?? 0) / MICRO,
+    usageMultiplier,
+    dailyLimitUsd: DAILY_LIMIT_USD * usageMultiplier,
+    weeklyLimitUsd: WEEKLY_LIMIT_USD * usageMultiplier,
   }
 }
 
@@ -49,6 +60,7 @@ export async function listUserUsage() {
       name: user.name,
       email: user.email,
       isAdmin: user.isAdmin,
+      usageMultiplier: user.usageMultiplier,
       daily: sql<number>`coalesce(sum(${aiUsage.costMicroUsd}) filter (where ${aiUsage.createdAt} >= ${dayAgo}), 0)::bigint`,
       weekly: sql<number>`coalesce(sum(${aiUsage.costMicroUsd}), 0)::bigint`,
     })
@@ -64,6 +76,8 @@ export async function listUserUsage() {
     ...account,
     dailyUsd: Number(daily) / MICRO,
     weeklyUsd: Number(weekly) / MICRO,
+    dailyLimitUsd: DAILY_LIMIT_USD * account.usageMultiplier,
+    weeklyLimitUsd: WEEKLY_LIMIT_USD * account.usageMultiplier,
   }))
 }
 
@@ -77,11 +91,11 @@ export async function resetUsage(userId: string) {
 }
 
 export async function checkLimits(userId: string): Promise<string | null> {
-  const usage = await getUsage(userId)
-  if (usage.dailyUsd >= DAILY_LIMIT_USD) {
+  const usage = await getUsageStatus(userId)
+  if (usage.dailyUsd >= usage.dailyLimitUsd) {
     return 'Daily AI limit reached. It resets as usage from the last 24 hours ages out.'
   }
-  if (usage.weeklyUsd >= WEEKLY_LIMIT_USD) {
+  if (usage.weeklyUsd >= usage.weeklyLimitUsd) {
     return 'Weekly AI limit reached. It resets as usage from the last 7 days ages out.'
   }
   return null

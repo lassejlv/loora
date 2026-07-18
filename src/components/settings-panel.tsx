@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { LogOutIcon } from 'lucide-react'
 import { Button } from '#/components/ui/button'
+import { Input } from '#/components/ui/input'
 import { Tabs, TabsList, TabsPanel, TabsTab } from '#/components/ui/tabs'
 import {
   Progress,
@@ -24,9 +25,14 @@ interface AdminUserUsage {
   name: string
   email: string
   isAdmin: boolean
+  usageMultiplier: number
   dailyUsd: number
   weeklyUsd: number
+  dailyLimitUsd: number
+  weeklyLimitUsd: number
 }
+
+const MULTIPLIER_PRESETS = [1, 5, 10, 20] as const
 
 function UsageMeter({ label, used, limit }: { label: string; used: number; limit: number }) {
   const leftPct = Math.max(0, Math.round((1 - used / limit) * 100))
@@ -92,13 +98,20 @@ function AdminTab() {
   const [users, setUsers] = useState<AdminUserUsage[] | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [resetting, setResetting] = useState<string | null>(null)
+  const [savingMultiplier, setSavingMultiplier] = useState<string | null>(null)
+  const [multiplierDrafts, setMultiplierDrafts] = useState<Record<string, string>>({})
 
   useEffect(() => {
     let cancelled = false
     orpc.admin
       .listUsers()
       .then((data) => {
-        if (!cancelled) setUsers(data)
+        if (!cancelled) {
+          setUsers(data)
+          setMultiplierDrafts(
+            Object.fromEntries(data.map((account) => [account.id, String(account.usageMultiplier)])),
+          )
+        }
       })
       .catch(() => {
         if (!cancelled) setError('Could not load users.')
@@ -127,6 +140,36 @@ function AdminTab() {
     }
   }
 
+  async function handleMultiplier(account: AdminUserUsage, multiplier: number) {
+    if (!Number.isInteger(multiplier) || multiplier < 1 || multiplier > 1_000_000) {
+      setError('Usage multiplier must be a whole number between 1 and 1,000,000.')
+      return
+    }
+
+    setSavingMultiplier(account.id)
+    setError(null)
+    try {
+      const updated = await orpc.admin.setUsageMultiplier({ userId: account.id, multiplier })
+      setUsers((current) =>
+        current?.map((user) =>
+          user.id === account.id
+            ? {
+                ...user,
+                usageMultiplier: updated.usageMultiplier,
+                dailyLimitUsd: updated.dailyLimitUsd,
+                weeklyLimitUsd: updated.weeklyLimitUsd,
+              }
+            : user,
+        ) ?? null,
+      )
+      setMultiplierDrafts((current) => ({ ...current, [account.id]: String(multiplier) }))
+    } catch {
+      setError(`Could not update limits for ${account.email}.`)
+    } finally {
+      setSavingMultiplier(null)
+    }
+  }
+
   if (!users && !error) {
     return <p className="cx-shimmer text-xs">Loading users…</p>
   }
@@ -136,7 +179,7 @@ function AdminTab() {
       <div>
         <h2 className="text-sm font-semibold">Admin</h2>
         <p className="mt-1 text-xs text-muted-foreground">
-          Reset a user&apos;s daily and weekly AI usage.
+          Raise a user&apos;s limits or reset their daily and weekly AI usage.
         </p>
       </div>
       {error ? <p className="text-xs text-destructive-foreground">{error}</p> : null}
@@ -157,17 +200,59 @@ function AdminTab() {
               </p>
               <p className="truncate text-xs text-muted-foreground">{account.email}</p>
               <p className="mt-1 font-mono text-[11px] text-muted-foreground">
-                ${account.dailyUsd.toFixed(4)} today · ${account.weeklyUsd.toFixed(4)} this week
+                {`$${account.dailyUsd.toFixed(4)} / $${account.dailyLimitUsd.toFixed(2)} today · $${account.weeklyUsd.toFixed(4)} / $${account.weeklyLimitUsd.toFixed(2)} this week`}
               </p>
             </div>
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={resetting === account.id}
-              onClick={() => handleReset(account)}
-            >
-              {resetting === account.id ? 'Resetting…' : 'Reset usage'}
-            </Button>
+            <div className="flex flex-col gap-2 sm:items-end">
+              <div className="flex flex-wrap gap-1">
+                {MULTIPLIER_PRESETS.map((multiplier) => (
+                  <Button
+                    key={multiplier}
+                    size="xs"
+                    variant={account.usageMultiplier === multiplier ? 'secondary' : 'outline'}
+                    disabled={savingMultiplier === account.id}
+                    onClick={() => handleMultiplier(account, multiplier)}
+                  >
+                    {multiplier}×
+                  </Button>
+                ))}
+              </div>
+              <div className="flex gap-2">
+                <Input
+                  aria-label={`Custom usage multiplier for ${account.email}`}
+                  className="h-7 w-24 text-xs"
+                  min={1}
+                  max={1_000_000}
+                  step={1}
+                  type="number"
+                  value={multiplierDrafts[account.id] ?? String(account.usageMultiplier)}
+                  onChange={(event) =>
+                    setMultiplierDrafts((current) => ({
+                      ...current,
+                      [account.id]: event.target.value,
+                    }))
+                  }
+                />
+                <Button
+                  size="xs"
+                  variant="outline"
+                  disabled={savingMultiplier === account.id}
+                  onClick={() =>
+                    handleMultiplier(account, Number(multiplierDrafts[account.id]))
+                  }
+                >
+                  {savingMultiplier === account.id ? 'Saving…' : 'Apply'}
+                </Button>
+                <Button
+                  variant="outline"
+                  size="xs"
+                  disabled={resetting === account.id}
+                  onClick={() => handleReset(account)}
+                >
+                  {resetting === account.id ? 'Resetting…' : 'Reset usage'}
+                </Button>
+              </div>
+            </div>
           </div>
         ))}
         {users?.length === 0 ? (

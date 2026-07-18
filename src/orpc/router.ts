@@ -2,7 +2,7 @@ import { and, asc, desc, eq } from 'drizzle-orm'
 import { ORPCError, os } from '@orpc/server'
 import { z } from 'zod'
 import { db } from '#/db'
-import { asset, design, designChat, designVersion } from '#/db/schema'
+import { asset, design, designChat, designVersion, user } from '#/db/schema'
 import { googleOAuthEnabled, type getSession } from '#/lib/auth'
 import type { Shape } from '#/lib/canvas'
 import type { UIMessage } from 'ai'
@@ -11,7 +11,7 @@ import { createHandoffToken } from '#/lib/handoff-token'
 import {
   DAILY_LIMIT_USD,
   WEEKLY_LIMIT_USD,
-  getUsage,
+  getUsageStatus,
   listUserUsage,
   resetUsage,
 } from '#/lib/ai-limits'
@@ -371,15 +371,9 @@ const deleteAsset = protectedProcedure
     return { deleted: deleted.length > 0 }
   })
 
-const getUsageStatus = protectedProcedure.handler(async ({ context }) => {
-  const usage = await getUsage(context.user.id)
-  return {
-    dailyUsd: usage.dailyUsd,
-    weeklyUsd: usage.weeklyUsd,
-    dailyLimitUsd: DAILY_LIMIT_USD,
-    weeklyLimitUsd: WEEKLY_LIMIT_USD,
-  }
-})
+const getCurrentUsage = protectedProcedure.handler(({ context }) =>
+  getUsageStatus(context.user.id),
+)
 
 const getAuthConfig = os.handler(() => ({ googleOAuthEnabled }))
 
@@ -388,6 +382,28 @@ const listUsersWithUsage = adminProcedure.handler(() => listUserUsage())
 const resetUserUsage = adminProcedure
   .input(z.object({ userId: z.string().min(1).max(128) }))
   .handler(async ({ input }) => ({ deleted: await resetUsage(input.userId) }))
+
+const setUserUsageMultiplier = adminProcedure
+  .input(
+    z.object({
+      userId: z.string().min(1).max(128),
+      multiplier: z.number().int().min(1).max(1_000_000),
+    }),
+  )
+  .handler(async ({ input }) => {
+    const [updated] = await db
+      .update(user)
+      .set({ usageMultiplier: input.multiplier, updatedAt: new Date() })
+      .where(eq(user.id, input.userId))
+      .returning({ userId: user.id, usageMultiplier: user.usageMultiplier })
+
+    if (!updated) throw new ORPCError('NOT_FOUND')
+    return {
+      ...updated,
+      dailyLimitUsd: DAILY_LIMIT_USD * updated.usageMultiplier,
+      weeklyLimitUsd: WEEKLY_LIMIT_USD * updated.usageMultiplier,
+    }
+  })
 
 export const appRouter = {
   auth: {
@@ -418,10 +434,11 @@ export const appRouter = {
     delete: deleteAsset,
   },
   usage: {
-    get: getUsageStatus,
+    get: getCurrentUsage,
   },
   admin: {
     listUsers: listUsersWithUsage,
     resetUsage: resetUserUsage,
+    setUsageMultiplier: setUserUsageMultiplier,
   },
 }

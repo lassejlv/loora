@@ -1,0 +1,1 @@
+ALTER TABLE "user" ADD COLUMN "usage_multiplier" integer DEFAULT 1 NOT NULL;
