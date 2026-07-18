@@ -1,0 +1,41 @@
+import '@tanstack/react-start'
+import { createFileRoute } from '@tanstack/react-router'
+import { and, eq } from 'drizzle-orm'
+import { db } from '#/db'
+import { asset } from '#/db/schema'
+import { requireSession } from '#/lib/auth'
+import { s3 } from '#/lib/storage'
+
+export const Route = createFileRoute('/api/asset/$id')({
+  server: {
+    handlers: {
+      GET: async ({ request, params }) => {
+        const session = await requireSession(request)
+        if (!session) return new Response('Unauthorized', { status: 401 })
+
+        const [found] = await db
+          .select({ data: asset.data, storageKey: asset.storageKey, mediaType: asset.mediaType })
+          .from(asset)
+          .where(and(eq(asset.id, params.id), eq(asset.userId, session.user.id)))
+          .limit(1)
+
+        if (!found) return new Response('Not found', { status: 404 })
+
+        let bytes: Uint8Array
+        if (found.storageKey && s3) {
+          bytes = new Uint8Array(await s3.file(found.storageKey).arrayBuffer())
+        } else if (found.data) {
+          bytes = Uint8Array.from(atob(found.data), (c) => c.charCodeAt(0))
+        } else {
+          return new Response('Asset payload unavailable', { status: 500 })
+        }
+        return new Response(new Blob([bytes as Uint8Array<ArrayBuffer>]), {
+          headers: {
+            'Content-Type': found.mediaType,
+            'Cache-Control': 'private, max-age=31536000, immutable',
+          },
+        })
+      },
+    },
+  },
+})

@@ -1,7 +1,9 @@
 import { useState } from 'react'
 import {
   CircleIcon,
+  CodeIcon,
   FrameIcon,
+  ImageIcon,
   SquareIcon,
   TypeIcon,
   XIcon,
@@ -17,11 +19,15 @@ const TYPE_ICONS = {
   rect: SquareIcon,
   ellipse: CircleIcon,
   text: TypeIcon,
+  image: ImageIcon,
+  component: CodeIcon,
 } as const
 
 function layerLabel(s: Shape) {
   if (s.type === 'frame') return s.text ?? 'Frame'
   if (s.type === 'text') return s.text || 'Text'
+  if (s.type === 'image') return s.text || 'Image'
+  if (s.type === 'component') return s.text || 'Component'
   return s.type === 'rect' ? 'Rectangle' : 'Ellipse'
 }
 

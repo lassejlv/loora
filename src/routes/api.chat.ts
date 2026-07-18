@@ -7,6 +7,9 @@ import type { Shape } from '#/lib/canvas'
 import { GEMINI_MODEL } from '#/lib/models'
 import { requireSession } from '#/lib/auth'
 import { DESIGN_SKILL_PROMPT } from '#/skills/design-skills'
+import { desc, eq } from 'drizzle-orm'
+import { db } from '#/db'
+import { asset } from '#/db/schema'
 
 const shapePatch = {
   x: z.number().describe('left edge in canvas units'),
@@ -27,7 +30,7 @@ const shapePatch = {
 }
 
 const newShapeSchema = z.object({
-  type: z.enum(['rect', 'ellipse', 'text', 'frame']),
+  type: z.enum(['rect', 'ellipse', 'text', 'frame', 'image']),
   x: shapePatch.x,
   y: shapePatch.y,
   w: shapePatch.w,
@@ -41,7 +44,18 @@ const newShapeSchema = z.object({
   fontSize: shapePatch.fontSize.optional(),
   fontWeight: shapePatch.fontWeight.optional(),
   align: shapePatch.align.optional(),
+  src: z
+    .string()
+    .optional()
+    .describe('image shapes only: the asset URL, e.g. /api/asset/{id} from the Assets list'),
 })
+
+const componentCodeSchema = z
+  .string()
+  .max(100_000)
+  .describe(
+    'Self-contained JSX defining `function App()`. React hooks (useState etc.) are in scope; Tailwind classes work. No imports, no exports, no other libraries.',
+  )
 
 function messagesForModel(messages: UIMessage[]): UIMessage[] {
   return messages.flatMap((message) => {
@@ -54,7 +68,8 @@ export const Route = createFileRoute('/api/chat')({
   server: {
     handlers: {
       POST: async ({ request }) => {
-        if (!(await requireSession(request))) {
+        const session = await requireSession(request)
+        if (!session) {
           return Response.json({ error: 'Unauthorized' }, { status: 401 })
         }
 
@@ -69,6 +84,13 @@ export const Route = createFileRoute('/api/chat')({
         }
         const google = createGoogleGenerativeAI({ apiKey })
         const model = google(GEMINI_MODEL)
+
+        const assets = await db
+          .select({ id: asset.id, name: asset.name, mediaType: asset.mediaType })
+          .from(asset)
+          .where(eq(asset.userId, session.user.id))
+          .orderBy(desc(asset.createdAt))
+          .limit(100)
 
         const tools = {
             // All tools execute on the client against canvas state.
@@ -128,6 +150,31 @@ export const Route = createFileRoute('/api/chat')({
                 }
               },
             },
+            createComponent: {
+              description:
+                'Add a live interactive React component to the canvas (forms, toggles, charts, mini apps, real UI). Renders in a sandboxed frame. Use this instead of static shapes whenever the user asks for something interactive or a real working UI. Returns the created shape id.',
+              inputSchema: z.object({
+                name: z.string().describe('short human label, e.g. "Signup form"'),
+                code: componentCodeSchema,
+                x: shapePatch.x,
+                y: shapePatch.y,
+                w: shapePatch.w,
+                h: shapePatch.h,
+              }),
+            },
+            updateComponent: {
+              description:
+                'Replace the code (and optionally name or bounds) of an existing component shape by id. Send the complete new code, not a diff.',
+              inputSchema: z.object({
+                id: z.string(),
+                code: componentCodeSchema.optional(),
+                name: z.string().optional(),
+                x: shapePatch.x.optional(),
+                y: shapePatch.y.optional(),
+                w: shapePatch.w.optional(),
+                h: shapePatch.h.optional(),
+              }),
+            },
             askQuestion: {
               description:
                 'Ask the user a question when a request is ambiguous or a design decision is theirs to make. Provide 2-4 short options. When a sensible default exists, include "Decide for me" as the last option and pick the default yourself if chosen.',
@@ -154,6 +201,11 @@ export const Route = createFileRoute('/api/chat')({
             'Palette to prefer: #1a1917 ink, #ffffff white, #2440e6 ultramarine, #e8442e vermilion, #f5c518 yellow, #23a25d green. Other CSS colors are allowed when asked.',
             'Text shapes render at fontSize (default 20) with fontWeight (400-700) and align (left/center/right), in the fill color. Text wraps at the box width w and supports newlines - size the box for the content. Use weight and size for hierarchy: e.g. 32/700 titles, 14/400 body.',
             'When laying out multiple shapes, space them deliberately - aligned edges, consistent gaps. Use createShapes (batch) to add them all in one call.',
+            'Interactive components: createComponent adds a live React component rendered in a sandboxed iframe. The code must be self-contained JSX that defines `function App()` - hooks (useState, useEffect, useRef, useMemo, useCallback, useReducer) are already in scope, Tailwind utility classes work, no imports/exports/external libraries. Write real, polished, working UI. Size w/h to fit the content. In canvas snapshots components appear as dashed placeholders - their live rendering is only visible to the user, so do not try to visually verify component internals.',
+            'Image shapes place uploaded assets: type "image" with src set to an asset URL from the Assets list below. Never invent asset URLs; if no fitting asset exists, say so or use styled shapes instead.',
+            '',
+            'Assets available (JSON):',
+            JSON.stringify(assets.map((a) => ({ name: a.name, mediaType: a.mediaType, src: `/api/asset/${a.id}` }))),
             'Verify loop: after finishing the edits for a design task, call viewCanvas to see the actual result. If you spot problems (overlap, misalignment, cramped spacing, poor contrast), fix them and check again. Skip verification for trivial single-shape edits.',
             'Keep replies to one or two short sentences; the user sees the canvas change live.',
             '',

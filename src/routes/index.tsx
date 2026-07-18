@@ -15,6 +15,7 @@ import {
   HandIcon,
   LogOutIcon,
   MousePointer2Icon,
+  ImageIcon,
   LayersIcon,
   SparklesIcon,
   Redo2Icon,
@@ -43,6 +44,7 @@ import {
   DropdownMenuTrigger,
 } from '#/components/ui/dropdown-menu'
 import { LayersPanel } from '#/components/layers-panel'
+import { AssetsPanel, type AssetMeta } from '#/components/assets-panel'
 import { HistoryPopover } from '#/components/history-panel'
 import { deleteHistory } from '#/lib/history'
 import { snapshotCanvas } from '#/lib/snapshot'
@@ -189,6 +191,7 @@ function Editor({ preview = false, userId }: { preview?: boolean; userId?: strin
     setAgentOpen(open)
     localStorage.setItem('loora:agent', open ? '1' : '0')
   }
+  const [assetsOpen, setAssetsOpen] = useState(false)
 
   const shapesRef = useRef(shapes)
   shapesRef.current = shapes
@@ -298,6 +301,30 @@ function Editor({ preview = false, userId }: { preview?: boolean; userId?: strin
     setShapes([])
     setSelectedIds([])
     resetHistory()
+  }
+
+  const insertAsset = (a: AssetMeta) => {
+    const img = new Image()
+    const place = (w: number, h: number) => {
+      const k = Math.min(1, 480 / Math.max(w, h))
+      const shape: Shape = {
+        id: shapeId(),
+        type: 'image',
+        x: 40,
+        y: 40,
+        w: Math.max(1, Math.round(w * k)),
+        h: Math.max(1, Math.round(h * k)),
+        fill: '#ffffff',
+        src: `/api/asset/${a.id}`,
+        text: a.name,
+      }
+      mutate((prev) => [...prev, shape])
+      setSelectedIds([shape.id])
+    }
+    img.onload = () => place(img.naturalWidth || 320, img.naturalHeight || 240)
+    img.onerror = () => place(320, 240)
+    img.src = `/api/asset/${a.id}`
+    setAssetsOpen(false)
   }
 
   const renameDoc = (name: string) => {
@@ -594,6 +621,11 @@ function Editor({ preview = false, userId }: { preview?: boolean; userId?: strin
               />
             </DrawerPopup>
           </Drawer>
+          <Drawer open={assetsOpen} onOpenChange={setAssetsOpen} position="bottom">
+            <DrawerPopup position="bottom" variant="inset" className="h-[min(60svh,32rem)]">
+              <AssetsPanel onInsert={insertAsset} />
+            </DrawerPopup>
+          </Drawer>
           <HistoryPopover
             docId={activeId}
             shapesRef={shapesRef}
@@ -616,6 +648,10 @@ function Editor({ preview = false, userId }: { preview?: boolean; userId?: strin
               <DropdownMenuCheckboxItem checked={layersOpen} onCheckedChange={toggleLayers}>
                 <LayersIcon data-slot="icon" />
                 Layers
+              </DropdownMenuCheckboxItem>
+              <DropdownMenuCheckboxItem checked={assetsOpen} onCheckedChange={setAssetsOpen}>
+                <ImageIcon data-slot="icon" />
+                Assets
               </DropdownMenuCheckboxItem>
               <DropdownMenuSeparator />
               <DropdownMenuItem onClick={exportPng} disabled={shapes.length === 0}>

@@ -5,8 +5,43 @@ function esc(s: string) {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
 }
 
-function shapeSvg(s: Shape): string {
+// Image shapes reference same-origin URLs; SVG rasterization loads the markup
+// in an isolated document, so hrefs must be inlined as data URLs first.
+const imageDataCache = new Map<string, string | null>()
+
+async function toDataUrl(src: string): Promise<string | null> {
+  const cached = imageDataCache.get(src)
+  if (cached !== undefined) return cached
+  try {
+    const blob = await (await fetch(src)).blob()
+    const url = await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader()
+      reader.onload = () => resolve(reader.result as string)
+      reader.onerror = reject
+      reader.readAsDataURL(blob)
+    })
+    imageDataCache.set(src, url)
+    return url
+  } catch {
+    imageDataCache.set(src, null)
+    return null
+  }
+}
+
+function shapeSvg(s: Shape, imageData?: Map<string, string | null>): string {
   const opacity = s.opacity != null ? ` opacity="${s.opacity}"` : ''
+  if (s.type === 'image') {
+    const href = s.src ? imageData?.get(s.src) : null
+    if (!href) {
+      return `<rect x="${s.x}" y="${s.y}" width="${s.w}" height="${s.h}" fill="#e5e3dc"${opacity}/>`
+    }
+    return `<image x="${s.x}" y="${s.y}" width="${s.w}" height="${s.h}" preserveAspectRatio="none" href="${esc(href)}"${opacity}/>`
+  }
+  if (s.type === 'component') {
+    // iframes can't be rasterized; show a labeled placeholder so the agent
+    // knows a live component occupies this region.
+    return `<rect x="${s.x}" y="${s.y}" width="${s.w}" height="${s.h}" rx="6" fill="#ffffff" stroke="#2440e6" stroke-dasharray="6 4"${opacity}/><text x="${s.x + 10}" y="${s.y + 22}" font-size="13" font-family="monospace" fill="#2440e6">⚛ ${esc(s.text ?? 'Component')} (interactive, not rendered here)</text>`
+  }
   const stroke = s.stroke
     ? ` stroke="${esc(s.stroke)}" stroke-width="${s.strokeWidth ?? 1}"`
     : s.type === 'frame'
@@ -50,10 +85,15 @@ export async function snapshotCanvas(
   const h = maxY - minY
   const scale = Math.min(1, 1600 / Math.max(w, h)) * pixelRatio
 
+  const srcs = [...new Set(shapes.filter((s) => s.type === 'image' && s.src).map((s) => s.src!))]
+  const imageData = new Map(
+    await Promise.all(srcs.map(async (src) => [src, await toDataUrl(src)] as const)),
+  )
+
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${minX} ${minY} ${w} ${h}" width="${Math.round(w * scale)}" height="${Math.round(h * scale)}"><rect x="${minX}" y="${minY}" width="${w}" height="${h}" fill="#f1f0ec"/>${renderOrder(
     shapes,
   )
-    .map(shapeSvg)
+    .map((s) => shapeSvg(s, imageData))
     .join('')}</svg>`
 
   try {

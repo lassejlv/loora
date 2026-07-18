@@ -2,10 +2,11 @@ import { and, asc, desc, eq } from 'drizzle-orm'
 import { ORPCError, os } from '@orpc/server'
 import { z } from 'zod'
 import { db } from '#/db'
-import { design, designChat, designVersion } from '#/db/schema'
+import { asset, design, designChat, designVersion } from '#/db/schema'
 import type { getSession } from '#/lib/auth'
 import type { Shape } from '#/lib/canvas'
 import type { UIMessage } from 'ai'
+import { assetKey, s3 } from '#/lib/storage'
 
 type Session = Awaited<ReturnType<typeof getSession>>
 
@@ -15,7 +16,7 @@ export interface ORPCContext {
 
 const shapeSchema = z.object({
   id: z.string(),
-  type: z.enum(['rect', 'ellipse', 'text', 'frame']),
+  type: z.enum(['rect', 'ellipse', 'text', 'frame', 'image', 'component']),
   x: z.number(),
   y: z.number(),
   w: z.number(),
@@ -29,6 +30,8 @@ const shapeSchema = z.object({
   fontSize: z.number().optional(),
   fontWeight: z.number().optional(),
   align: z.enum(['left', 'center', 'right']).optional(),
+  src: z.string().max(2048).optional(),
+  code: z.string().max(100_000).optional(),
 })
 
 const requireUser = os.$context<ORPCContext>().middleware(async ({ context, next }) => {
@@ -268,6 +271,76 @@ const deleteChat = protectedProcedure
     return { deleted: deleted.length > 0 }
   })
 
+const MAX_ASSET_BYTES = 5 * 1024 * 1024
+
+const listAssets = protectedProcedure.handler(async ({ context }) => {
+  const assets = await db
+    .select({
+      id: asset.id,
+      name: asset.name,
+      mediaType: asset.mediaType,
+      size: asset.size,
+      createdAt: asset.createdAt,
+    })
+    .from(asset)
+    .where(eq(asset.userId, context.user.id))
+    .orderBy(desc(asset.createdAt))
+
+  return assets.map(({ createdAt, ...a }) => ({ ...a, at: createdAt.getTime() }))
+})
+
+const uploadAsset = protectedProcedure
+  .input(
+    z.object({
+      name: z.string().trim().min(1).max(200),
+      mediaType: z.string().regex(/^image\/[\w.+-]+$/),
+      data: z.string().min(1), // base64, no data: prefix
+    }),
+  )
+  .handler(async ({ context, input }) => {
+    const bytes = Buffer.from(input.data, 'base64')
+    if (bytes.length > MAX_ASSET_BYTES) {
+      throw new ORPCError('PAYLOAD_TOO_LARGE', { message: 'Assets are capped at 5MB.' })
+    }
+    const id = `a${crypto.randomUUID().replaceAll('-', '')}`
+
+    let storageKey: string | null = null
+    if (s3) {
+      storageKey = assetKey(context.user.id, id)
+      await s3.write(storageKey, bytes, { type: input.mediaType })
+    }
+
+    const [saved] = await db
+      .insert(asset)
+      .values({
+        id,
+        userId: context.user.id,
+        name: input.name,
+        mediaType: input.mediaType,
+        size: bytes.length,
+        storageKey,
+        data: storageKey ? null : input.data,
+      })
+      .returning({ id: asset.id, name: asset.name, mediaType: asset.mediaType, size: asset.size })
+
+    return saved
+  })
+
+const deleteAsset = protectedProcedure
+  .input(z.object({ id: z.string().min(1).max(128) }))
+  .handler(async ({ context, input }) => {
+    const deleted = await db
+      .delete(asset)
+      .where(and(eq(asset.id, input.id), eq(asset.userId, context.user.id)))
+      .returning({ id: asset.id, storageKey: asset.storageKey })
+
+    const key = deleted[0]?.storageKey
+    if (key && s3) {
+      await s3.delete(key).catch((error) => console.error('[assets] S3 delete failed:', error))
+    }
+    return { deleted: deleted.length > 0 }
+  })
+
 export const appRouter = {
   design: {
     list: listDesigns,
@@ -284,5 +357,10 @@ export const appRouter = {
     get: getChat,
     save: saveChat,
     delete: deleteChat,
+  },
+  asset: {
+    list: listAssets,
+    upload: uploadAsset,
+    delete: deleteAsset,
   },
 }

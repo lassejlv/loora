@@ -1,4 +1,4 @@
-export type ShapeType = 'rect' | 'ellipse' | 'text' | 'frame'
+export type ShapeType = 'rect' | 'ellipse' | 'text' | 'frame' | 'image' | 'component'
 
 export interface Shape {
   id: string
@@ -16,6 +16,8 @@ export interface Shape {
   fontSize?: number
   fontWeight?: number
   align?: 'left' | 'center' | 'right'
+  src?: string // image shapes: URL, usually /api/asset/{id}
+  code?: string // component shapes: JSX source defining function App()
 }
 
 let measureCtx: CanvasRenderingContext2D | null = null

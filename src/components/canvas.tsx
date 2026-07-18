@@ -1,6 +1,7 @@
 import { useRef, useState } from 'react'
 import type { Shape, ShapeType } from '#/lib/canvas'
 import { LINE_HEIGHT, layoutText, renderOrder, shapeId } from '#/lib/canvas'
+import { ComponentFrame } from '#/components/component-frame'
 
 export type Tool = 'select' | 'hand' | ShapeType
 
@@ -53,6 +54,9 @@ export function Canvas({
   const [drag, setDrag] = useState<Drag | null>(null)
   const [guides, setGuides] = useState<{ v: number[]; h: number[] }>({ v: [], h: [] })
   const [editingId, setEditingId] = useState<string | null>(null)
+  // Component shape currently in "interact" mode: its iframe receives pointer
+  // events instead of the canvas. Entered by double-click, left by clicking out.
+  const [interactiveId, setInteractiveId] = useState<string | null>(null)
   const dragRef = useRef<Drag | null>(null)
   dragRef.current = drag
 
@@ -71,6 +75,9 @@ export function Canvas({
 
   const onPointerDown = (e: React.PointerEvent) => {
     if (e.button !== 0 && e.button !== 1) return
+    // Clicks inside an interactive iframe never reach the svg, so any pointer
+    // down that lands here means the user clicked outside it.
+    if (interactiveId) setInteractiveId(null)
     ;(e.currentTarget as Element).setPointerCapture(e.pointerId)
     const pt = toScene(e.clientX, e.clientY)
 
@@ -203,6 +210,8 @@ export function Canvas({
         ellipse: { w: 160, h: 100 },
         text: { w: 120, h: 28 },
         frame: { w: 375, h: 812 },
+        image: { w: 320, h: 240 },
+        component: { w: 360, h: 280 },
       }
       const def = defaults[d.type]
       const shape: Shape = {
@@ -286,6 +295,10 @@ export function Canvas({
         const id = target?.getAttribute('data-shape-id')
         const s = shapes.find((sh) => sh.id === id)
         if (s?.type === 'text') setEditingId(s.id)
+        if (s?.type === 'component') {
+          setInteractiveId(s.id)
+          onSelect([])
+        }
       }}
     >
       <defs>
@@ -304,7 +317,12 @@ export function Canvas({
 
       <g transform={`translate(${view.x} ${view.y}) scale(${view.scale})`}>
         {renderOrder(shapes).map((s) => (
-          <ShapeView key={s.id} shape={s} hideText={s.id === editingId} />
+          <ShapeView
+            key={s.id}
+            shape={s}
+            hideText={s.id === editingId}
+            interactive={s.id === interactiveId}
+          />
         ))}
 
         {(drag?.mode === 'draw' || drag?.mode === 'marquee') && (drag.w > 4 || drag.h > 4) && (
@@ -433,7 +451,61 @@ export function Canvas({
   )
 }
 
-function ShapeView({ shape: s, hideText }: { shape: Shape; hideText?: boolean }) {
+function ShapeView({
+  shape: s,
+  hideText,
+  interactive,
+}: {
+  shape: Shape
+  hideText?: boolean
+  interactive?: boolean
+}) {
+  if (s.type === 'image') {
+    return (
+      <image
+        data-shape-id={s.id}
+        href={s.src}
+        x={s.x}
+        y={s.y}
+        width={s.w}
+        height={s.h}
+        opacity={s.opacity}
+        preserveAspectRatio="none"
+      />
+    )
+  }
+  if (s.type === 'component') {
+    return (
+      <g opacity={s.opacity}>
+        <text
+          x={s.x}
+          y={s.y - 8}
+          fontSize={12}
+          fontFamily="var(--font-mono)"
+          fill={interactive ? 'var(--cx-accent)' : 'var(--color-muted-foreground)'}
+          pointerEvents="none"
+        >
+          {`⚛ ${s.text ?? 'Component'}${interactive ? ' · interacting (click outside to exit)' : ''}`}
+        </text>
+        <foreignObject x={s.x} y={s.y} width={s.w} height={s.h}>
+          <div className="h-full w-full overflow-hidden rounded-md shadow-sm ring-1 ring-black/10">
+            <ComponentFrame code={s.code ?? ''} interactive={!!interactive} />
+          </div>
+        </foreignObject>
+        {/* transparent hit layer so select/move/resize work; removed in interact mode */}
+        {!interactive && (
+          <rect
+            data-shape-id={s.id}
+            x={s.x}
+            y={s.y}
+            width={s.w}
+            height={s.h}
+            fill="transparent"
+          />
+        )}
+      </g>
+    )
+  }
   const common = {
     'data-shape-id': s.id,
     opacity: s.opacity,

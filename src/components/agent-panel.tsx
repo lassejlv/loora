@@ -5,6 +5,7 @@ import { nanoid } from 'nanoid'
 import {
   BookOpenIcon,
   CheckIcon,
+  CodeIcon,
   ChevronDownIcon,
   EyeIcon,
   ChevronRightIcon,
@@ -180,6 +181,42 @@ export function AgentPanel({
             const { id, ...patch } = input as { id: string } & Partial<Shape>
             const updated = actions.updateShape(id, patch)
             respond(updated ?? { error: `No shape with id ${id}` })
+            break
+          }
+          case 'createComponent': {
+            const { name, code, x, y, w, h } = input as {
+              name: string
+              code: string
+              x: number
+              y: number
+              w: number
+              h: number
+            }
+            const created = actions.createShape({
+              type: 'component',
+              x,
+              y,
+              w,
+              h,
+              fill: '#ffffff',
+              text: name,
+              code,
+            })
+            respond({ id: created.id, name })
+            break
+          }
+          case 'updateComponent': {
+            const { id, name, code, ...bounds } = input as {
+              id: string
+              name?: string
+              code?: string
+            } & Partial<Shape>
+            const updated = actions.updateShape(id, {
+              ...bounds,
+              ...(name != null ? { text: name } : {}),
+              ...(code != null ? { code } : {}),
+            })
+            respond(updated ? { id, updated: true } : { error: `No component with id ${id}` })
             break
           }
           case 'viewCanvas':
@@ -514,6 +551,8 @@ const TOOL_META = {
   deleteShape: { icon: Trash2Icon, label: 'Delete' },
   loadSkill: { icon: BookOpenIcon, label: 'Skill' },
   viewCanvas: { icon: EyeIcon, label: 'Verify' },
+  createComponent: { icon: CodeIcon, label: 'Component' },
+  updateComponent: { icon: CodeIcon, label: 'Component' },
 } as const
 
 function describeShape(s: Partial<Shape> | undefined) {
@@ -545,6 +584,11 @@ function toolSummary(name: string, part: ToolPart, shapes: Shape[]) {
   }
   if (name === 'loadSkill') {
     return String(input.name ?? '')
+  }
+  if (name === 'createComponent' || name === 'updateComponent') {
+    const label = String(input.name ?? (target?.text || input.id) ?? '')
+    const kb = typeof input.code === 'string' ? ` · ${Math.max(1, Math.round(input.code.length / 1024))}KB jsx` : ''
+    return `${label}${kb}`
   }
   if (name === 'viewCanvas') {
     return 'looking at the canvas'
@@ -625,6 +669,8 @@ const PAST_TENSE = {
   deleteShape: 'Deleted',
   loadSkill: 'Loaded skill',
   viewCanvas: 'Verified',
+  createComponent: 'Built component',
+  updateComponent: 'Updated component',
 } as const
 
 function ToolGroup({

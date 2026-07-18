@@ -157,6 +157,25 @@ export const designChat = pgTable(
   ],
 )
 
+export const asset = pgTable(
+  'asset',
+  {
+    id: text('id').primaryKey(),
+    userId: text('user_id')
+      .notNull()
+      .references(() => user.id, { onDelete: 'cascade' }),
+    name: text('name').notNull(),
+    mediaType: text('media_type').notNull(),
+    size: integer('size').notNull(),
+    // S3 object key when a bucket is configured…
+    storageKey: text('storage_key'),
+    // …else base64 payload directly in Postgres
+    data: text('data'),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+  },
+  (table) => [index('asset_user_id_idx').on(table.userId, table.createdAt)],
+)
+
 export const userRelations = relations(user, ({ many }) => ({
   sessions: many(session),
   accounts: many(account),
