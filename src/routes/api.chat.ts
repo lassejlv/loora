@@ -6,6 +6,7 @@ import { z } from 'zod'
 import type { Shape } from '#/lib/canvas'
 import { GEMINI_MODEL } from '#/lib/models'
 import { requireSession } from '#/lib/auth'
+import { DESIGN_SKILL_PROMPT } from '#/skills/design-skills'
 
 const shapePatch = {
   x: z.number().describe('left edge in canvas units'),
@@ -144,9 +145,7 @@ export const Route = createFileRoute('/api/chat')({
             'Only touch the canvas when the user explicitly asks for a change. Greetings, questions, or chit-chat get a plain text reply with zero tool calls.',
             'Never delete or overwrite existing shapes unless the user asked for exactly that. When a request is ambiguous, use the askQuestion tool instead of guessing.',
             'Make the minimal set of changes that fulfills the request - no extra decoration, no unrequested layouts.',
-            'For substantial designs, first form a compact internal plan for palette, type hierarchy, layout, and one memorable signature element. Do not expose the plan unless the user asks.',
-            'Ground every design in the subject and audience. Avoid generic AI defaults: decorative gradients, arbitrary numbered sections, excessive cards, random motion, and filler copy.',
-            'Use deliberate alignment, spacing, hierarchy, contrast, and plain useful copy. Spend visual boldness in one place and keep the rest disciplined.',
+            DESIGN_SKILL_PROMPT,
             'You manipulate the canvas only through tools. Shapes are rect, ellipse, text, or frame.',
             'Frames are artboards: white containers that render behind other shapes. Design inside a frame when one exists (or create one for a screen/page design, e.g. 375x812 mobile or 1440x900 desktop). The frame name lives in its "text" field.',
             'Shapes support stroke (border color + strokeWidth), radius (rounded corners on rect/frame), and opacity (0-1). Use them: a rect with radius 8 and a subtle stroke reads as a button or card.',
