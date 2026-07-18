@@ -55,6 +55,15 @@ function shapeDiff(previous: Shape[], next: Shape[]) {
   }
 }
 
+// Chats and versions can arrive before the debounced design save; make sure
+// the parent row exists so their FKs hold. The real save upserts over this.
+async function ensureDesign(designId: string, userId: string) {
+  await db
+    .insert(design)
+    .values({ id: designId, userId, name: 'Untitled', shapes: [] })
+    .onConflictDoNothing({ target: [design.id, design.userId] })
+}
+
 const listDesigns = protectedProcedure.handler(async ({ context }) => {
   return db
     .select({ id: design.id, name: design.name, shapes: design.shapes })
@@ -146,6 +155,7 @@ const commitVersion = protectedProcedure
     }
 
     const changes = shapeDiff(latest?.shapes ?? [], input.shapes)
+    await ensureDesign(input.designId, context.user.id)
     const [version] = await db
       .insert(designVersion)
       .values({
@@ -192,6 +202,7 @@ const createChat = protectedProcedure
     }),
   )
   .handler(async ({ context, input }) => {
+    await ensureDesign(input.designId, context.user.id)
     const [chat] = await db
       .insert(designChat)
       .values({ ...input, userId: context.user.id, messages: [] })

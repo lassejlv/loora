@@ -23,7 +23,14 @@ import {
   ConversationScrollButton,
 } from '#/components/ai-elements/conversation'
 import { Message, MessageContent } from '#/components/ai-elements/message'
-import { Textarea } from '#/components/ui/textarea'
+import {
+  PromptInput,
+  PromptInputBody,
+  PromptInputFooter,
+  PromptInputSubmit,
+  PromptInputTextarea,
+} from '#/components/ai-elements/prompt-input'
+import { Kbd } from '#/components/ui/kbd'
 import type { CanvasActions } from '#/lib/canvas'
 import type { Shape } from '#/lib/canvas'
 import { snapshotCanvas } from '#/lib/snapshot'
@@ -72,6 +79,14 @@ function titleFromPrompt(prompt: string) {
   return title.length > 48 ? `${title.slice(0, 47)}…` : title
 }
 
+function hasAssistantOutput(message: UIMessage) {
+  return message.parts.some((part) => {
+    if (part.type === 'step-start') return false
+    if (part.type === 'text' || part.type === 'reasoning') return part.text.trim().length > 0
+    return true
+  })
+}
+
 function AgentThinking({ label = 'Thinking' }: { label?: string }) {
   return (
     <p className="cx-agent-thinking w-fit text-sm" role="status" aria-label={`${label}…`}>
@@ -95,18 +110,23 @@ export function AgentPanel({
   actions,
   shapesRef,
   docId,
+  ready = true,
 }: {
   actions: CanvasActions
   shapesRef: React.RefObject<Shape[]>
   docId: string
+  ready?: boolean
 }) {
   const [input, setInput] = useState('')
   const [chatReady, setChatReady] = useState(false)
   const [stallError, setStallError] = useState<string | null>(null)
   const [chats, setChats] = useState<ChatSummary[]>([])
   const [activeChatId, setActiveChatId] = useState<string | null>(null)
+  const emptyResponseRetries = useRef(0)
+  const retryEmptyResponse = useRef<() => void>(() => {})
   const chatsRef = useRef(chats)
   chatsRef.current = chats
+  const composerRef = useRef<HTMLTextAreaElement>(null)
   const activeChat = chats.find((chat) => chat.id === activeChatId)
 
   const { messages, setMessages, sendMessage, addToolOutput, status, stop, error } = useChat({
@@ -117,6 +137,21 @@ export function AgentPanel({
       }),
     }),
     sendAutomaticallyWhen: lastAssistantMessageIsCompleteWithToolCalls,
+    onFinish({ message, isAbort, isError }) {
+      if (isAbort || isError || hasAssistantOutput(message)) {
+        emptyResponseRetries.current = 0
+        return
+      }
+
+      if (emptyResponseRetries.current === 0) {
+        emptyResponseRetries.current = 1
+        setStallError('The agent returned an empty response. Retrying…')
+        queueMicrotask(() => retryEmptyResponse.current())
+        return
+      }
+
+      setStallError('The agent returned two empty responses. Try again.')
+    },
     onToolCall({ toolCall }) {
       if (toolCall.dynamic) return
       const input = toolCall.input as Record<string, unknown>
@@ -166,8 +201,17 @@ export function AgentPanel({
     },
   })
 
+  retryEmptyResponse.current = () => {
+    setStallError(null)
+    void sendMessage()
+  }
+
   const messagesRef = useRef(messages)
   messagesRef.current = messages
+
+  useEffect(() => {
+    if (chatReady) composerRef.current?.focus()
+  }, [chatReady])
 
   useEffect(() => {
     if (status !== 'submitted' && status !== 'streaming') return
@@ -184,6 +228,7 @@ export function AgentPanel({
     setChats([])
     setActiveChatId(null)
     setMessages([])
+    if (!ready) return
 
     void (async () => {
       try {
@@ -208,7 +253,7 @@ export function AgentPanel({
     return () => {
       cancelled = true
     }
-  }, [docId, setMessages])
+  }, [docId, ready, setMessages])
 
   useEffect(() => {
     if (!activeChatId) return
@@ -380,66 +425,69 @@ export function AgentPanel({
       </Conversation>
 
       <div className="border-t p-3">
-        <form
-          onSubmit={async (e) => {
-            e.preventDefault()
-            if (!input.trim()) return
-            const text = input
+        <PromptInput
+          accept="image/*"
+          onSubmit={async ({ text, files }) => {
+            const trimmed = text.trim()
+            if (!trimmed || !chatReady || status === 'streaming' || status === 'submitted') return
             setInput('')
             setStallError(null)
+            emptyResponseRetries.current = 0
             if (activeChat?.title === 'New chat') {
-              const title = titleFromPrompt(text)
+              const title = titleFromPrompt(trimmed)
               setChats((current) =>
                 current.map((chat) => (chat.id === activeChatId ? { ...chat, title } : chat)),
               )
             }
             // safety checkpoint: restorable from History if the agent goes wrong
-            commitIfChanged(docId, `Before: ${text.slice(0, 60)}`, shapesRef.current)
+            commitIfChanged(docId, `Before: ${trimmed.slice(0, 60)}`, shapesRef.current)
             void orpc.history
               .commit({
                 id: `c${nanoid()}`,
                 designId: docId,
-                message: `Before: ${text.slice(0, 60)}`,
+                message: `Before: ${trimmed.slice(0, 60)}`,
                 shapes: shapesRef.current,
                 skipIfUnchanged: true,
               })
               .catch((error) => console.error('[history] Failed to save checkpoint:', error))
             const snapshot = await snapshotCanvas(shapesRef.current)
             sendMessage({
-              text,
-              files: snapshot
-                ? [{ type: 'file', mediaType: 'image/png', url: snapshot }]
-                : undefined,
+              text: trimmed,
+              files: [
+                ...files,
+                ...(snapshot
+                  ? [{ type: 'file' as const, mediaType: 'image/png', url: snapshot }]
+                  : []),
+              ],
             })
           }}
-          className="flex flex-col gap-2"
         >
-          <Textarea
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
-                e.preventDefault()
-                e.currentTarget.form?.requestSubmit()
+          <PromptInputBody>
+            <PromptInputTextarea
+              ref={composerRef}
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              placeholder={chatReady ? 'Describe a change…' : 'Loading chat…'}
+              disabled={!chatReady}
+            />
+          </PromptInputBody>
+          <PromptInputFooter>
+            <span className="flex items-center gap-1 text-xs text-muted-foreground">
+              <Kbd>⏎</Kbd> send
+              <span className="text-muted-foreground/60">·</span>
+              <Kbd>⇧⏎</Kbd> newline
+            </span>
+            <PromptInputSubmit
+              status={status}
+              onStop={() => stop()}
+              disabled={
+                status !== 'streaming' &&
+                status !== 'submitted' &&
+                (!chatReady || !input.trim())
               }
-            }}
-            rows={3}
-            placeholder="Describe a change…"
-            disabled={!chatReady}
-            className="resize-none"
-          />
-          <div className="flex justify-end">
-            {status === 'streaming' || status === 'submitted' ? (
-              <Button type="button" variant="outline" size="sm" onClick={() => stop()}>
-                Stop
-              </Button>
-            ) : (
-              <Button type="submit" size="sm" disabled={!chatReady || !input.trim()}>
-                Send
-              </Button>
-            )}
-          </div>
-        </form>
+            />
+          </PromptInputFooter>
+        </PromptInput>
       </div>
     </Sidebar>
   )

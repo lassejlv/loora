@@ -544,7 +544,13 @@ function Editor({ preview = false, userId }: { preview?: boolean; userId?: strin
       className="h-full min-h-0 bg-cx-canvas"
       style={{ '--sidebar-width': '21.25rem' } as React.CSSProperties}
     >
-      <AgentPanel key={activeId} actions={actions} shapesRef={shapesRef} docId={activeId} />
+      <AgentPanel
+        key={activeId}
+        actions={actions}
+        shapesRef={shapesRef}
+        docId={activeId}
+        ready={databaseReady}
+      />
 
       <main className="relative min-w-0 flex-1">
         <Canvas
