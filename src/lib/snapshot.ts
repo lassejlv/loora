@@ -1,5 +1,8 @@
 import type { Shape } from './canvas'
-import { LINE_HEIGHT, layoutText, renderOrder } from './canvas'
+import { LINE_HEIGHT, renderOrder } from './canvas'
+import { sanitizeHtml, toXhtml } from './sanitize'
+import { frameCss } from './frame-tailwind'
+import { captureComponent } from '#/components/component-frame'
 
 function esc(s: string) {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
@@ -28,7 +31,11 @@ async function toDataUrl(src: string): Promise<string | null> {
   }
 }
 
-function shapeSvg(s: Shape, imageData?: Map<string, string | null>): string {
+function shapeSvg(
+  s: Shape,
+  imageData?: Map<string, string | null>,
+  componentShots?: Map<string, string | null>,
+): string {
   const opacity = s.opacity != null ? ` opacity="${s.opacity}"` : ''
   if (s.type === 'image') {
     const href = s.src ? imageData?.get(s.src) : null
@@ -38,9 +45,12 @@ function shapeSvg(s: Shape, imageData?: Map<string, string | null>): string {
     return `<image x="${s.x}" y="${s.y}" width="${s.w}" height="${s.h}" preserveAspectRatio="none" href="${esc(href)}"${opacity}/>`
   }
   if (s.type === 'component') {
-    // iframes can't be rasterized; show a labeled placeholder so the agent
-    // knows a live component occupies this region.
-    return `<rect x="${s.x}" y="${s.y}" width="${s.w}" height="${s.h}" rx="6" fill="#ffffff" stroke="#2440e6" stroke-dasharray="6 4"${opacity}/><text x="${s.x + 10}" y="${s.y + 22}" font-size="13" font-family="monospace" fill="#2440e6">⚛ ${esc(s.text ?? 'Component')} (interactive, not rendered here)</text>`
+    const shot = componentShots?.get(s.id)
+    if (shot) {
+      return `<image x="${s.x}" y="${s.y}" width="${s.w}" height="${s.h}" preserveAspectRatio="none" href="${esc(shot)}"${opacity}/>`
+    }
+    // Frame not mounted or capture failed: labeled placeholder.
+    return `<rect x="${s.x}" y="${s.y}" width="${s.w}" height="${s.h}" rx="6" fill="#ffffff" stroke="#2440e6" stroke-dasharray="6 4"${opacity}/><text x="${s.x + 10}" y="${s.y + 22}" font-size="13" font-family="monospace" fill="#2440e6">⚛ ${esc(s.text ?? 'Component')} (not rendered)</text>`
   }
   const stroke = s.stroke
     ? ` stroke="${esc(s.stroke)}" stroke-width="${s.strokeWidth ?? 1}"`
@@ -51,22 +61,21 @@ function shapeSvg(s: Shape, imageData?: Map<string, string | null>): string {
     return `<ellipse cx="${s.x + s.w / 2}" cy="${s.y + s.h / 2}" rx="${s.w / 2}" ry="${s.h / 2}" fill="${esc(s.fill)}"${stroke}${opacity}/>`
   }
   if (s.type === 'text') {
-    const size = s.fontSize ?? 20
-    const anchorX = s.align === 'center' ? s.x + s.w / 2 : s.align === 'right' ? s.x + s.w : s.x
-    const anchor = s.align === 'center' ? 'middle' : s.align === 'right' ? 'end' : 'start'
-    const spans = layoutText(s)
-      .map(
-        (line, i) =>
-          `<tspan x="${anchorX}" y="${s.y + size + i * size * LINE_HEIGHT}">${esc(line)}</tspan>`,
-      )
-      .join('')
-    return `<text font-size="${size}" font-weight="${s.fontWeight ?? 400}" text-anchor="${anchor}" font-family="sans-serif" fill="${esc(s.fill)}"${opacity}>${spans}</text>`
+    // Match the live DOM renderer: a wrapping div, not manual tspans.
+    const style = `font:${s.fontWeight ?? 400} ${s.fontSize ?? 20}px sans-serif;line-height:${LINE_HEIGHT};color:${s.fill};text-align:${s.align ?? 'left'};white-space:pre-wrap;overflow-wrap:break-word;width:${s.w}px;height:${s.h}px`
+    return `<foreignObject x="${s.x}" y="${s.y}" width="${s.w}" height="${s.h}" style="overflow:visible"${opacity}><div xmlns="http://www.w3.org/1999/xhtml" style="${esc(style)}">${esc(s.text ?? '')}</div></foreignObject>`
   }
-  const label =
-    s.type === 'frame'
-      ? `<text x="${s.x}" y="${s.y - 8}" font-size="12" font-family="monospace" fill="#75726b">${esc(s.text ?? 'Frame')}</text>`
-      : ''
-  return `${label}<rect x="${s.x}" y="${s.y}" width="${s.w}" height="${s.h}" rx="${s.radius ?? 0}" fill="${esc(s.fill)}"${stroke}${opacity}/>`
+  if (s.type === 'frame') {
+    const label = `<text x="${s.x}" y="${s.y - 8}" font-size="12" font-family="monospace" fill="#75726b">${esc(s.text ?? 'Frame')}</text>`
+    const box = `<rect x="${s.x}" y="${s.y}" width="${s.w}" height="${s.h}" rx="${s.radius ?? 0}" fill="${esc(s.fill)}"${stroke}${opacity}/>`
+    if (!s.html) return `${label}${box}`
+    const safe = sanitizeHtml(s.html)
+    const body = toXhtml(safe)
+    // XML-escape only & and < : full esc() would mangle quotes in CSS strings.
+    const tailwind = `<style>${frameCss(safe).replace(/&/g, '&amp;').replace(/</g, '&lt;')}</style>`
+    return `${label}${box}<foreignObject x="${s.x}" y="${s.y}" width="${s.w}" height="${s.h}"${opacity}><div xmlns="http://www.w3.org/1999/xhtml" style="width:${s.w}px;height:${s.h}px;overflow:hidden;font-family:sans-serif">${tailwind}${body}</div></foreignObject>`
+  }
+  return `<rect x="${s.x}" y="${s.y}" width="${s.w}" height="${s.h}" rx="${s.radius ?? 0}" fill="${esc(s.fill)}"${stroke}${opacity}/>`
 }
 
 // Rasterize shapes to a PNG data URL (agent snapshots and file export).
@@ -90,21 +99,29 @@ export async function snapshotCanvas(
     await Promise.all(srcs.map(async (src) => [src, await toDataUrl(src)] as const)),
   )
 
+  // Live component iframes capture themselves and hand back PNGs.
+  const componentIds = shapes.filter((s) => s.type === 'component').map((s) => s.id)
+  const componentShots = new Map(
+    await Promise.all(
+      componentIds.map(async (id) => [id, await captureComponent(id)] as const),
+    ),
+  )
+
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${minX} ${minY} ${w} ${h}" width="${Math.round(w * scale)}" height="${Math.round(h * scale)}"><rect x="${minX}" y="${minY}" width="${w}" height="${h}" fill="#f1f0ec"/>${renderOrder(
     shapes,
   )
-    .map((s) => shapeSvg(s, imageData))
+    .map((s) => shapeSvg(s, imageData, componentShots))
     .join('')}</svg>`
 
   try {
     const img = new Image()
-    const url = URL.createObjectURL(new Blob([svg], { type: 'image/svg+xml' }))
+    // data: URL, not blob: — Chrome taints the canvas when a blob-loaded SVG
+    // contains <foreignObject>, which breaks toDataURL.
     await new Promise((resolve, reject) => {
       img.onload = resolve
       img.onerror = reject
-      img.src = url
+      img.src = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`
     })
-    URL.revokeObjectURL(url)
     const canvas = document.createElement('canvas')
     canvas.width = Math.round(w * scale)
     canvas.height = Math.round(h * scale)

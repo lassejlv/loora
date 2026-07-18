@@ -1,7 +1,8 @@
 import { memo, useEffect, useRef, useState } from 'react'
 import type { Shape, ShapeType } from '#/lib/canvas'
-import { LINE_HEIGHT, layoutText, renderOrder, shapeId } from '#/lib/canvas'
+import { LINE_HEIGHT, renderOrder, shapeId } from '#/lib/canvas'
 import { ComponentFrame } from '#/components/component-frame'
+import { FrameBody } from '#/components/frame-body'
 
 export type Tool = 'select' | 'hand' | ShapeType
 
@@ -80,7 +81,7 @@ export function Canvas({
   onCreate,
   onUpdate,
 }: CanvasProps) {
-  const svgRef = useRef<SVGSVGElement>(null)
+  const rootRef = useRef<HTMLDivElement>(null)
   const [view, setView] = useState<View>(() => loadView(docId))
   const [drag, setDrag] = useState<Drag | null>(null)
   const [guides, setGuides] = useState<{ v: number[]; h: number[] }>({ v: [], h: [] })
@@ -92,7 +93,7 @@ export function Canvas({
   dragRef.current = drag
 
   const toScene = (clientX: number, clientY: number) => {
-    const rect = svgRef.current!.getBoundingClientRect()
+    const rect = rootRef.current!.getBoundingClientRect()
     return {
       x: (clientX - rect.left - view.x) / view.scale,
       y: (clientY - rect.top - view.y) / view.scale,
@@ -106,8 +107,8 @@ export function Canvas({
 
   const onPointerDown = (e: React.PointerEvent) => {
     if (e.button !== 0 && e.button !== 1) return
-    // Clicks inside an interactive iframe never reach the svg, so any pointer
-    // down that lands here means the user clicked outside it.
+    // Clicks inside an interactive iframe never reach the canvas, so any
+    // pointer down that lands here means the user clicked outside it.
     if (interactiveId) setInteractiveId(null)
     ;(e.currentTarget as Element).setPointerCapture(e.pointerId)
     const pt = toScene(e.clientX, e.clientY)
@@ -161,7 +162,7 @@ export function Canvas({
     e.stopPropagation()
     const s = selectedIds.length === 1 ? shapes.find((sh) => sh.id === selectedIds[0]) : undefined
     if (!s) return
-    svgRef.current!.setPointerCapture(e.pointerId)
+    rootRef.current!.setPointerCapture(e.pointerId)
     setDragBoth({ mode: 'resize', id: s.id, corner, start: s })
   }
 
@@ -299,7 +300,7 @@ export function Canvas({
   // no-op — the browser still page-zooms on trackpad pinch (ctrl+wheel).
   // Block it (and Safari's gesture events) with native non-passive listeners.
   useEffect(() => {
-    const el = svgRef.current
+    const el = rootRef.current
     if (!el) return
     const blockWheel = (e: WheelEvent) => e.preventDefault()
     const blockGesture = (e: Event) => e.preventDefault()
@@ -340,7 +341,7 @@ export function Canvas({
   }
 
   const viewportSize = () => {
-    const rect = svgRef.current?.getBoundingClientRect()
+    const rect = rootRef.current?.getBoundingClientRect()
     return { w: rect?.width ?? 1200, h: rect?.height ?? 800 }
   }
 
@@ -387,19 +388,19 @@ export function Canvas({
 
   const onWheel = (e: React.WheelEvent) => {
     if (e.ctrlKey || e.metaKey) {
-      const rect = svgRef.current!.getBoundingClientRect()
+      const rect = rootRef.current!.getBoundingClientRect()
       zoomAt(e.clientX - rect.left, e.clientY - rect.top, Math.exp(-e.deltaY * 0.01))
     } else {
       setView((v) => ({ ...v, x: v.x - e.deltaX, y: v.y - e.deltaY }))
     }
   }
 
-  const svgRect = svgRef.current?.getBoundingClientRect()
+  const rootRect = rootRef.current?.getBoundingClientRect()
   const scene = {
     left: -view.x / view.scale,
     top: -view.y / view.scale,
-    right: ((svgRect?.width ?? 2000) - view.x) / view.scale,
-    bottom: ((svgRect?.height ?? 2000) - view.y) / view.scale,
+    right: ((rootRect?.width ?? 2000) - view.x) / view.scale,
+    bottom: ((rootRect?.height ?? 2000) - view.y) / view.scale,
   }
   const selectedShapes = shapes.filter((s) => selectedIds.includes(s.id))
   const single = selectedShapes.length === 1 ? selectedShapes[0] : undefined
@@ -415,10 +416,15 @@ export function Canvas({
         : 'crosshair'
 
   return (
-    <svg
-      ref={svgRef}
-      className="h-full w-full touch-none select-none bg-cx-canvas"
-      style={{ cursor }}
+    <div
+      ref={rootRef}
+      className="relative h-full w-full touch-none select-none overflow-hidden bg-cx-canvas"
+      style={{
+        cursor,
+        backgroundImage: 'radial-gradient(var(--cx-dot) 1px, transparent 1px)',
+        backgroundSize: `${dot}px ${dot}px`,
+        backgroundPosition: `${view.x % dot}px ${view.y % dot}px`,
+      }}
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}
       onPointerUp={onPointerUp}
@@ -434,21 +440,14 @@ export function Canvas({
         }
       }}
     >
-      <defs>
-        <pattern
-          id="cx-dots"
-          width={dot}
-          height={dot}
-          patternUnits="userSpaceOnUse"
-          x={view.x % dot}
-          y={view.y % dot}
-        >
-          <circle cx={1} cy={1} r={1} fill="var(--cx-dot)" />
-        </pattern>
-      </defs>
-      <rect width="100%" height="100%" fill="url(#cx-dots)" />
-
-      <g transform={`translate(${view.x} ${view.y}) scale(${view.scale})`}>
+      {/* Scene: real DOM, scaled with the view. */}
+      <div
+        className="absolute top-0 left-0"
+        style={{
+          transform: `translate(${view.x}px, ${view.y}px) scale(${view.scale})`,
+          transformOrigin: '0 0',
+        }}
+      >
         {renderOrder(shapes).map((s) => (
           <ShapeView
             key={s.id}
@@ -458,120 +457,120 @@ export function Canvas({
           />
         ))}
 
-        {(drag?.mode === 'draw' || drag?.mode === 'marquee') && (drag.w > 4 || drag.h > 4) && (
-          <rect
-            x={drag.x}
-            y={drag.y}
-            width={drag.w}
-            height={drag.h}
-            fill={drag.mode === 'marquee' ? 'rgba(36, 64, 230, 0.06)' : 'none'}
-            stroke="var(--cx-accent)"
-            strokeWidth={1 / view.scale}
-            strokeDasharray={`${4 / view.scale} ${3 / view.scale}`}
+        {editing && (
+          <textarea
+            autoFocus
+            defaultValue={editing.text}
+            className="absolute resize-none bg-transparent outline-none"
+            style={{
+              left: editing.x,
+              top: editing.y,
+              width: Math.max(editing.w, 40),
+              height: Math.max(editing.h, 32),
+              font: `${editing.fontWeight ?? 400} ${editing.fontSize ?? 20}px var(--font-sans)`,
+              lineHeight: LINE_HEIGHT,
+              color: editing.fill,
+              textAlign: editing.align ?? 'left',
+            }}
+            onBlur={(e) => {
+              onUpdate(editing.id, { text: e.target.value })
+              setEditingId(null)
+            }}
+            onKeyDown={(e) => {
+              e.stopPropagation()
+              if (e.key === 'Escape') e.currentTarget.blur()
+            }}
+            onPointerDown={(e) => e.stopPropagation()}
           />
         )}
+      </div>
 
-        {!editingId &&
-          selectedShapes.map((s) => (
+      {/* Overlay chrome: selection, guides, marquee, handles. */}
+      <svg className="pointer-events-none absolute inset-0 h-full w-full">
+        <g transform={`translate(${view.x} ${view.y}) scale(${view.scale})`}>
+          {(drag?.mode === 'draw' || drag?.mode === 'marquee') && (drag.w > 4 || drag.h > 4) && (
             <rect
-              key={s.id}
-              x={s.x}
-              y={s.y}
-              width={s.w}
-              height={s.h}
-              fill="none"
+              x={drag.x}
+              y={drag.y}
+              width={drag.w}
+              height={drag.h}
+              fill={drag.mode === 'marquee' ? 'rgba(36, 64, 230, 0.06)' : 'none'}
               stroke="var(--cx-accent)"
-              strokeWidth={1.5 / view.scale}
-              pointerEvents="none"
+              strokeWidth={1 / view.scale}
+              strokeDasharray={`${4 / view.scale} ${3 / view.scale}`}
+            />
+          )}
+
+          {!editingId &&
+            selectedShapes.map((s) => (
+              <rect
+                key={s.id}
+                x={s.x}
+                y={s.y}
+                width={s.w}
+                height={s.h}
+                fill="none"
+                stroke="var(--cx-accent)"
+                strokeWidth={1.5 / view.scale}
+              />
+            ))}
+
+          {guides.v.map((x) => (
+            <line
+              key={`v${x}`}
+              x1={x}
+              y1={scene.top}
+              x2={x}
+              y2={scene.bottom}
+              stroke="#e8442e"
+              strokeWidth={1 / view.scale}
+            />
+          ))}
+          {guides.h.map((y) => (
+            <line
+              key={`h${y}`}
+              x1={scene.left}
+              y1={y}
+              x2={scene.right}
+              y2={y}
+              stroke="#e8442e"
+              strokeWidth={1 / view.scale}
             />
           ))}
 
-        {guides.v.map((x) => (
-          <line
-            key={`v${x}`}
-            x1={x}
-            y1={scene.top}
-            x2={x}
-            y2={scene.bottom}
-            stroke="#e8442e"
-            strokeWidth={1 / view.scale}
-            pointerEvents="none"
-          />
-        ))}
-        {guides.h.map((y) => (
-          <line
-            key={`h${y}`}
-            x1={scene.left}
-            y1={y}
-            x2={scene.right}
-            y2={y}
-            stroke="#e8442e"
-            strokeWidth={1 / view.scale}
-            pointerEvents="none"
-          />
-        ))}
-
-        {single && !editingId && (
-          <g>
-            {HANDLE_CORNERS.map(([cx, cy], i) => (
-              <rect
-                key={i}
-                x={single.x + cx * single.w - 4 / view.scale}
-                y={single.y + cy * single.h - 4 / view.scale}
-                width={8 / view.scale}
-                height={8 / view.scale}
-                fill="#ffffff"
-                stroke="var(--cx-accent)"
-                strokeWidth={1.5 / view.scale}
-                style={{ cursor: i % 2 === 0 ? 'nwse-resize' : 'nesw-resize' }}
-                onPointerDown={(e) => startResize(e, i)}
-              />
-            ))}
-            <text
-              x={single.x}
-              y={single.y + single.h + 16 / view.scale}
-              fontSize={11 / view.scale}
-              fontFamily="var(--font-mono)"
-              fill="var(--cx-accent)"
-              pointerEvents="none"
-            >
-              {`${single.x}, ${single.y} · ${single.w} × ${single.h}`}
-            </text>
-          </g>
-        )}
-
-        {editing && (
-          <foreignObject
-            x={editing.x}
-            y={editing.y}
-            width={Math.max(editing.w, 40)}
-            height={Math.max(editing.h, 32)}
-          >
-            <textarea
-              autoFocus
-              defaultValue={editing.text}
-              className="h-full w-full resize-none bg-transparent outline-none"
-              style={{
-                font: `${editing.fontWeight ?? 400} ${editing.fontSize ?? 20}px var(--font-sans)`,
-                lineHeight: LINE_HEIGHT,
-                color: editing.fill,
-                textAlign: editing.align ?? 'left',
-              }}
-              onBlur={(e) => {
-                onUpdate(editing.id, { text: e.target.value })
-                setEditingId(null)
-              }}
-              onKeyDown={(e) => {
-                e.stopPropagation()
-                if (e.key === 'Escape') e.currentTarget.blur()
-              }}
-              onPointerDown={(e) => e.stopPropagation()}
-            />
-          </foreignObject>
-        )}
-      </g>
-
-    </svg>
+          {single && !editingId && (
+            <g>
+              {HANDLE_CORNERS.map(([cx, cy], i) => (
+                <rect
+                  key={i}
+                  x={single.x + cx * single.w - 4 / view.scale}
+                  y={single.y + cy * single.h - 4 / view.scale}
+                  width={8 / view.scale}
+                  height={8 / view.scale}
+                  fill="#ffffff"
+                  stroke="var(--cx-accent)"
+                  strokeWidth={1.5 / view.scale}
+                  style={{
+                    cursor: i % 2 === 0 ? 'nwse-resize' : 'nesw-resize',
+                    pointerEvents: 'auto',
+                  }}
+                  onPointerDown={(e) => startResize(e, i)}
+                />
+              ))}
+              <text
+                x={single.x}
+                y={single.y + single.h + 16 / view.scale}
+                fontSize={11 / view.scale}
+                fontFamily="var(--font-mono)"
+                fill="var(--cx-accent)"
+              >
+                {`${single.x}, ${single.y} · ${single.w} × ${single.h}`}
+              </text>
+            </g>
+          )}
+        </g>
+      </svg>
+    </div>
   )
 }
 
@@ -584,127 +583,112 @@ const ShapeView = memo(function ShapeView({
   hideText?: boolean
   interactive?: boolean
 }) {
+  const box: React.CSSProperties = {
+    position: 'absolute',
+    left: s.x,
+    top: s.y,
+    width: s.w,
+    height: s.h,
+    opacity: s.opacity,
+  }
+
   if (s.type === 'image') {
     return (
-      <image
+      <img
         data-shape-id={s.id}
-        href={s.src}
-        x={s.x}
-        y={s.y}
-        width={s.w}
-        height={s.h}
-        opacity={s.opacity}
-        preserveAspectRatio="none"
+        src={s.src}
+        alt={s.text ?? ''}
+        draggable={false}
+        style={{ ...box, objectFit: 'fill' }}
       />
     )
   }
+
   if (s.type === 'component') {
     return (
-      <g opacity={s.opacity}>
-        <text
-          x={s.x}
-          y={s.y - 8}
-          fontSize={12}
-          fontFamily="var(--font-mono)"
-          fill={interactive ? 'var(--cx-accent)' : 'var(--color-muted-foreground)'}
-          pointerEvents="none"
+      <div style={box}>
+        <div
+          className="pointer-events-none absolute font-mono"
+          style={{
+            top: -20,
+            left: 0,
+            fontSize: 12,
+            whiteSpace: 'nowrap',
+            color: interactive ? 'var(--cx-accent)' : 'var(--color-muted-foreground)',
+          }}
         >
           {`⚛ ${s.text ?? 'Component'}${interactive ? ' · interacting (click outside to exit)' : ' · double-click to interact'}`}
-        </text>
-        <foreignObject x={s.x} y={s.y} width={s.w} height={s.h}>
-          <div className="h-full w-full overflow-hidden rounded-md shadow-sm ring-1 ring-black/10">
-            <ComponentFrame code={s.code ?? ''} interactive={!!interactive} />
-          </div>
-        </foreignObject>
+        </div>
+        <div className="h-full w-full overflow-hidden rounded-md shadow-sm ring-1 ring-black/10">
+          <ComponentFrame shapeId={s.id} code={s.code ?? ''} interactive={!!interactive} />
+        </div>
         {/* transparent hit layer so select/move/resize work; removed in interact mode */}
-        {!interactive && (
-          <rect
-            data-shape-id={s.id}
-            x={s.x}
-            y={s.y}
-            width={s.w}
-            height={s.h}
-            fill="transparent"
-          />
-        )}
-      </g>
+        {!interactive && <div data-shape-id={s.id} className="absolute inset-0" />}
+      </div>
     )
   }
-  const common = {
-    'data-shape-id': s.id,
-    opacity: s.opacity,
-    stroke: s.stroke ?? 'rgba(0,0,0,0.12)',
-    strokeWidth: s.stroke ? (s.strokeWidth ?? 1) : 1,
-  }
-  if (s.type === 'ellipse') {
-    return (
-      <ellipse
-        {...common}
-        cx={s.x + s.w / 2}
-        cy={s.y + s.h / 2}
-        rx={s.w / 2}
-        ry={s.h / 2}
-        fill={s.fill}
-      />
-    )
-  }
+
   if (s.type === 'text') {
-    const fontSize = s.fontSize ?? 20
-    const anchorX = s.align === 'center' ? s.x + s.w / 2 : s.align === 'right' ? s.x + s.w : s.x
     return (
-      <g data-shape-id={s.id} opacity={s.opacity}>
-        {/* invisible hit area so empty space in the box is clickable */}
-        <rect x={s.x} y={s.y} width={s.w} height={s.h} fill="transparent" />
-        <text
-          fontSize={fontSize}
-          fontWeight={s.fontWeight ?? 400}
-          fontFamily="var(--font-sans)"
-          fill={hideText ? 'transparent' : s.fill}
-          textAnchor={s.align === 'center' ? 'middle' : s.align === 'right' ? 'end' : 'start'}
-        >
-          {layoutText(s).map((line, i) => (
-            <tspan key={i} x={anchorX} y={s.y + fontSize + i * fontSize * LINE_HEIGHT}>
-              {line}
-            </tspan>
-          ))}
-        </text>
-      </g>
+      <div
+        data-shape-id={s.id}
+        style={{
+          ...box,
+          font: `${s.fontWeight ?? 400} ${s.fontSize ?? 20}px var(--font-sans)`,
+          lineHeight: LINE_HEIGHT,
+          color: hideText ? 'transparent' : s.fill,
+          textAlign: s.align ?? 'left',
+          whiteSpace: 'pre-wrap',
+          overflowWrap: 'break-word',
+        }}
+      >
+        {s.text}
+      </div>
     )
   }
+
   if (s.type === 'frame') {
     return (
-      <g data-shape-id={s.id} opacity={s.opacity}>
-        <text
-          x={s.x}
-          y={s.y - 8}
-          fontSize={12}
-          fontFamily="var(--font-mono)"
-          fill="var(--color-muted-foreground)"
+      <div data-shape-id={s.id} style={box}>
+        <div
+          className="pointer-events-none absolute font-mono"
+          style={{
+            top: -20,
+            left: 0,
+            fontSize: 12,
+            whiteSpace: 'nowrap',
+            color: 'var(--color-muted-foreground)',
+          }}
         >
           {s.text ?? 'Frame'}
-        </text>
-        <rect
-          x={s.x}
-          y={s.y}
-          width={s.w}
-          height={s.h}
-          rx={s.radius ?? 0}
-          fill={s.fill}
-          stroke={s.stroke ?? 'var(--cx-dot)'}
-          strokeWidth={s.strokeWidth ?? 1}
-        />
-      </g>
+        </div>
+        <div
+          className="h-full w-full"
+          style={{
+            backgroundColor: s.fill,
+            border: `${s.strokeWidth ?? 1}px solid ${s.stroke ?? 'var(--cx-dot)'}`,
+            borderRadius: s.radius ?? 0,
+            overflow: s.html ? 'hidden' : undefined,
+          }}
+        >
+          {s.html && <FrameBody html={s.html} />}
+        </div>
+      </div>
     )
   }
+
+  // rect / ellipse
   return (
-    <rect
-      {...common}
-      x={s.x}
-      y={s.y}
-      width={s.w}
-      height={s.h}
-      rx={s.radius ?? 0}
-      fill={s.fill}
+    <div
+      data-shape-id={s.id}
+      style={{
+        ...box,
+        backgroundColor: s.fill,
+        border: s.stroke
+          ? `${s.strokeWidth ?? 1}px solid ${s.stroke}`
+          : '1px solid rgba(0,0,0,0.12)',
+        borderRadius: s.type === 'ellipse' ? '50%' : (s.radius ?? 0),
+      }}
     />
   )
 })

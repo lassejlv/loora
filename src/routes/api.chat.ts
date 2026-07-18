@@ -28,6 +28,12 @@ const shapePatch = {
     .number()
     .describe('font weight for text shapes: 400, 500, 600, or 700 (default 400)'),
   align: z.enum(['left', 'center', 'right']).describe('text alignment within the box (text shapes only)'),
+  html: z
+    .string()
+    .max(200_000)
+    .describe(
+      'frame shapes only: full HTML body rendered inside the frame. Tailwind v3 classes work; a <style> block and inline styles also work. Scripts are stripped.',
+    ),
 }
 
 const newShapeSchema = z.object({
@@ -45,6 +51,7 @@ const newShapeSchema = z.object({
   fontSize: shapePatch.fontSize.optional(),
   fontWeight: shapePatch.fontWeight.optional(),
   align: shapePatch.align.optional(),
+  html: shapePatch.html.optional(),
   src: z
     .string()
     .optional()
@@ -164,6 +171,7 @@ export const Route = createFileRoute('/api/chat')({
                 fontSize: shapePatch.fontSize.optional(),
                 fontWeight: shapePatch.fontWeight.optional(),
                 align: shapePatch.align.optional(),
+                html: shapePatch.html.optional(),
               }),
             },
             deleteShape: {
@@ -239,14 +247,15 @@ export const Route = createFileRoute('/api/chat')({
             DESIGN_SKILL_PROMPT,
             'You manipulate the canvas only through tools. Shapes are rect, ellipse, text, or frame.',
             'Frames are artboards: white containers that render behind other shapes. Design inside a frame when one exists (or create one for a screen/page design, e.g. 375x812 mobile or 1440x900 desktop). The frame name lives in its "text" field.',
+            'Frames can carry a full HTML body via the "html" field: real HTML rendered live inside the frame. THIS IS THE PREFERRED WAY to build websites, landing pages, app screens, and rich mockups — one frame with html beats dozens of positioned shapes. Tailwind v3 utility classes work; add a <style> block or inline styles for anything beyond utilities. Scripts are stripped. The body renders in an isolated scope sized to the frame, so design mobile frames at mobile widths and desktop frames at desktop widths. Images: only asset URLs from the Assets list, as <img src="/api/asset/...">. Update a design by sending the complete new html via updateShape.',
             'Shapes support stroke (border color + strokeWidth), radius (rounded corners on rect/frame), and opacity (0-1). Use them: a rect with radius 8 and a subtle stroke reads as a button or card.',
             'The user message may include a PNG snapshot of the current canvas. Use it to judge layout, overlap, and balance before and after your edits.',
             'Coordinates: x/y is the top-left corner, y grows downward. The visible canvas is roughly 1200x800 around the origin.',
             'Palette to prefer: #1a1917 ink, #ffffff white, #2440e6 ultramarine, #e8442e vermilion, #f5c518 yellow, #23a25d green. Other CSS colors are allowed when asked.',
             'Text shapes render at fontSize (default 20) with fontWeight (400-700) and align (left/center/right), in the fill color. Text wraps at the box width w and supports newlines - size the box for the content. Use weight and size for hierarchy: e.g. 32/700 titles, 14/400 body.',
             'When laying out multiple shapes, space them deliberately - aligned edges, consistent gaps. Use createShapes (batch) to add them all in one call.',
-            'For websites, landing pages, and visual mockups: build with frames + shapes + text via createShapes. Do not use createComponent unless the user explicitly asks for a working interactive widget.',
-            'Interactive components: createComponent adds a live React component in a sandboxed iframe. Self-contained JSX defining App (function App or export default function App). Normal React idioms work: import { useState } from "react" and export default are stripped at runtime; hooks and onClick/onChange work; prefer those over <form> submit. Tailwind utilities work; no external npm libraries. Keep code under ~200 lines. Users double-click the component on the canvas to try interactions. Snapshots show components as dashed placeholders, so do not visually verify component internals.',
+            'For websites, landing pages, and visual mockups: create a frame with an "html" body. Use loose shapes (rect/ellipse/text) only for freeform diagrams, wireframe scribbles, or annotations around frames. Do not use createComponent unless the user explicitly asks for a working interactive widget.',
+            'Interactive components: createComponent adds a live React component in a sandboxed iframe. Self-contained JSX defining App (function App or export default function App). Normal React idioms work: import { useState } from "react" and export default are stripped at runtime; hooks and onClick/onChange work; prefer those over <form> submit. Tailwind utilities work inside components; no external npm libraries. Keep code under ~200 lines. Users double-click the component on the canvas to try interactions. Components render live in canvas snapshots, so viewCanvas verifies them too.',
             'Image shapes place uploaded assets: type "image" with src set to an asset URL from the Assets list below. Never invent asset URLs; if no fitting asset exists, say so or use styled shapes instead.',
             '',
             'Assets available (JSON):',

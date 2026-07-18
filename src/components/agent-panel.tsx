@@ -40,6 +40,7 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '#/component
 import { interruptIn, interruptTransition } from '#/lib/motion'
 import { orpc } from '#/lib/orpc-client'
 import { DEFAULT_MODEL, MODELS } from '#/lib/models'
+import { sanitizeHtml } from '#/lib/sanitize'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -192,16 +193,24 @@ export function AgentPanel({
             errorText: message,
           } as Parameters<typeof addToolOutput>[0])
 
+        // Agent-authored frame HTML is sanitized before it ever reaches state.
+        const clean = <T extends { html?: string }>(shape: T): T =>
+          typeof shape.html === 'string' ? { ...shape, html: sanitizeHtml(shape.html) } : shape
+
         try {
           switch (toolCall.toolName) {
             case 'createShape':
-              respond(actions.createShape(input as never))
+              respond(actions.createShape(clean(input as never)))
               break
             case 'createShapes':
-              respond(actions.createShapes((input as { shapes: Omit<Shape, 'id'>[] }).shapes))
+              respond(
+                actions.createShapes(
+                  (input as { shapes: Omit<Shape, 'id'>[] }).shapes.map(clean),
+                ),
+              )
               break
             case 'updateShape': {
-              const { id, ...patch } = input as { id: string } & Partial<Shape>
+              const { id, ...patch } = clean(input as { id: string } & Partial<Shape>)
               const updated = actions.updateShape(id, patch)
               respond(updated ?? { error: `No shape with id ${id}` })
               break

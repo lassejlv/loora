@@ -19,6 +19,7 @@ export interface Shape {
   groupId?: string // shapes sharing a groupId select and move as one
   src?: string // image shapes: URL, usually /api/asset/{id}
   code?: string // component shapes: JSX defining App (imports/exports stripped at runtime)
+  html?: string // frame shapes: sanitized HTML body (inline styles / <style>, no scripts)
 }
 
 let measureCtx: CanvasRenderingContext2D | null = null

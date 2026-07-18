@@ -312,6 +312,16 @@ function Editor({ preview = false, userId }: { preview?: boolean; userId?: strin
     return () => window.clearTimeout(timeout)
   }, [activeId, databaseReady, docs, preview, shapes])
 
+  // Dev-only hook for end-to-end tests to seed and inspect canvas state.
+  useEffect(() => {
+    if (!import.meta.env.DEV || preview) return
+    ;(window as unknown as Record<string, unknown>).__loora = {
+      setShapes: (next: Shape[]) => mutate(() => next),
+      getShapes: () => shapesRef.current,
+      snapshot: () => snapshotCanvas(shapesRef.current),
+    }
+  })
+
   const resetHistory = () => {
     past.current = []
     future.current = []
