@@ -599,7 +599,9 @@ const ShapeView = memo(function ShapeView({
         src={s.src}
         alt={s.text ?? ''}
         draggable={false}
-        style={{ ...box, objectFit: 'fill' }}
+        // maxWidth: Tailwind preflight sets img{max-width:100%}, and the scene
+        // container has zero intrinsic width — without this the image collapses to 0.
+        style={{ ...box, objectFit: 'fill', maxWidth: 'none' }}
       />
     )
   }
