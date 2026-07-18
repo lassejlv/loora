@@ -13,7 +13,7 @@ import {
   EllipsisIcon,
   FrameIcon,
   HandIcon,
-  LogOutIcon,
+  SettingsIcon,
   MousePointer2Icon,
   ImageIcon,
   LayersIcon,
@@ -45,6 +45,7 @@ import {
 } from '#/components/ui/dropdown-menu'
 import { LayersPanel } from '#/components/layers-panel'
 import { AssetsPanel, type AssetMeta } from '#/components/assets-panel'
+import { SettingsPanel, type SettingsTab } from '#/components/settings-panel'
 import { HistoryPopover } from '#/components/history-panel'
 import { deleteHistory } from '#/lib/history'
 import { snapshotCanvas } from '#/lib/snapshot'
@@ -192,6 +193,12 @@ function Editor({ preview = false, userId }: { preview?: boolean; userId?: strin
     localStorage.setItem('loora:agent', open ? '1' : '0')
   }
   const [assetsOpen, setAssetsOpen] = useState(false)
+  const [settingsOpen, setSettingsOpen] = useState(false)
+  const [settingsTab, setSettingsTab] = useState<SettingsTab>('account')
+  const openSettings = (tab: SettingsTab) => {
+    setSettingsTab(tab)
+    setSettingsOpen(true)
+  }
 
   const shapesRef = useRef(shapes)
   shapesRef.current = shapes
@@ -588,6 +595,7 @@ function Editor({ preview = false, userId }: { preview?: boolean; userId?: strin
         shapesRef={shapesRef}
         docId={activeId}
         ready={databaseReady}
+        onOpenSettings={() => openSettings('ai')}
       />
 
       <main className="relative min-w-0 flex-1">
@@ -626,6 +634,11 @@ function Editor({ preview = false, userId }: { preview?: boolean; userId?: strin
               <AssetsPanel onInsert={insertAsset} />
             </DrawerPopup>
           </Drawer>
+          <Drawer open={settingsOpen} onOpenChange={setSettingsOpen} position="bottom">
+            <DrawerPopup position="bottom" variant="inset" className="h-[min(60svh,30rem)]">
+              <SettingsPanel key={settingsTab} initialTab={settingsTab} />
+            </DrawerPopup>
+          </Drawer>
           <HistoryPopover
             docId={activeId}
             shapesRef={shapesRef}
@@ -659,9 +672,9 @@ function Editor({ preview = false, userId }: { preview?: boolean; userId?: strin
                 {selectedIds.length > 0 ? 'Export selection' : 'Export canvas'}
               </DropdownMenuItem>
               <DropdownMenuSeparator />
-              <DropdownMenuItem variant="destructive" onClick={() => authClient.signOut()}>
-                <LogOutIcon data-slot="icon" />
-                Sign out
+              <DropdownMenuItem onClick={() => openSettings('account')}>
+                <SettingsIcon data-slot="icon" />
+                Settings
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>

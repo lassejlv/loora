@@ -30,7 +30,6 @@ import {
   PromptInputSubmit,
   PromptInputTextarea,
 } from '#/components/ai-elements/prompt-input'
-import { Kbd } from '#/components/ui/kbd'
 import type { CanvasActions } from '#/lib/canvas'
 import type { Shape } from '#/lib/canvas'
 import { snapshotCanvas } from '#/lib/snapshot'
@@ -45,15 +44,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '#/components/ui/dropdown-menu'
-import {
-  Dialog,
-  DialogDescription,
-  DialogHeader,
-  DialogPanel,
-  DialogPopup,
-  DialogTitle,
-} from '#/components/ui/dialog'
-import { LoginWithChatGPT, useLoginWithChatGPT } from '@opencoredev/loginwithchatgpt-react'
+import { useLoginWithChatGPT } from '@opencoredev/loginwithchatgpt-react'
 import { createChatGPTProxyProvider } from '@opencoredev/loginwithchatgpt-ai'
 
 type ChatState = ReturnType<typeof useChat>
@@ -121,19 +112,24 @@ export function AgentPanel({
   shapesRef,
   docId,
   ready = true,
+  onOpenSettings,
 }: {
   actions: CanvasActions
   shapesRef: React.RefObject<Shape[]>
   docId: string
   ready?: boolean
+  onOpenSettings?: () => void
 }) {
   const [input, setInput] = useState('')
-  const [model, setModel] = useState(() => localStorage.getItem('loora:model') ?? 'gemini')
+  const [model, setModel] = useState(
+    // localStorage is absent in the node test environment
+    () => (typeof localStorage === 'undefined' ? null : localStorage.getItem('loora:model')) ?? 'gemini',
+  )
   const modelRef = useRef(model)
   modelRef.current = model
   const changeModel = (next: string) => {
     setModel(next)
-    localStorage.setItem('loora:model', next)
+    if (typeof localStorage !== 'undefined') localStorage.setItem('loora:model', next)
   }
   const [chatReady, setChatReady] = useState(false)
   const [stallError, setStallError] = useState<string | null>(null)
@@ -532,7 +528,11 @@ export function AgentPanel({
             className="w-full"
           />
           <PromptInputFooter>
-            <ModelPicker model={model} onModelChange={changeModel} />
+            <ModelPicker
+              model={model}
+              onModelChange={changeModel}
+              onOpenSettings={() => onOpenSettings?.()}
+            />
             <PromptInputSubmit
               status={status}
               onStop={() => stop()}
@@ -558,13 +558,14 @@ function modelLabel(model: string) {
 function ModelPicker({
   model,
   onModelChange,
+  onOpenSettings,
 }: {
   model: string
   onModelChange: (model: string) => void
+  onOpenSettings: () => void
 }) {
   const { status, user, isAuthenticated, logout } = useLoginWithChatGPT()
   const [models, setModels] = useState<string[]>([])
-  const [connectOpen, setConnectOpen] = useState(false)
 
   useEffect(() => {
     if (!isAuthenticated) {
@@ -624,30 +625,12 @@ function ModelPicker({
               </DropdownMenuItem>
             </>
           ) : (
-            <DropdownMenuItem onSelect={() => setConnectOpen(true)} disabled={status === 'loading'}>
+            <DropdownMenuItem onSelect={onOpenSettings} disabled={status === 'loading'}>
               Connect ChatGPT account…
             </DropdownMenuItem>
           )}
         </DropdownMenuContent>
       </DropdownMenu>
-
-      <Dialog open={connectOpen} onOpenChange={setConnectOpen}>
-        <DialogPopup className="max-w-sm">
-          <DialogHeader>
-            <DialogTitle>Connect ChatGPT</DialogTitle>
-            <DialogDescription>
-              Sign in with your ChatGPT account to run the agent on your own subscription's
-              models.
-            </DialogDescription>
-          </DialogHeader>
-          <DialogPanel className="flex justify-center pb-6">
-            <LoginWithChatGPT
-              consent={{ appName: 'loora' }}
-              onAuthenticated={() => setConnectOpen(false)}
-            />
-          </DialogPanel>
-        </DialogPopup>
-      </Dialog>
     </>
   )
 }
