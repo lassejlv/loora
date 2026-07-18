@@ -95,18 +95,7 @@ function hasAssistantOutput(message: UIMessage) {
 function AgentThinking({ label = 'Thinking' }: { label?: string }) {
   return (
     <p className="cx-agent-thinking w-fit text-sm" role="status" aria-label={`${label}…`}>
-      <span aria-hidden="true">
-        {[...label].map((character, index) => (
-          <span
-            key={`${character}-${index}`}
-            data-char
-            style={{ '--cx-char-index': index } as React.CSSProperties}
-          >
-            {character}
-          </span>
-        ))}
-        <span className="cx-agent-thinking-dots">…</span>
-      </span>
+      <span aria-hidden="true">{label}…</span>
     </p>
   )
 }
