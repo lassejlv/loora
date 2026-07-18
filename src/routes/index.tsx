@@ -15,7 +15,8 @@ import {
   HandIcon,
   LogOutIcon,
   MousePointer2Icon,
-  PanelRightIcon,
+  LayersIcon,
+  SparklesIcon,
   Redo2Icon,
   SendToBackIcon,
   SquareIcon,
@@ -35,6 +36,7 @@ import {
 } from '#/lib/docs'
 import {
   DropdownMenu,
+  DropdownMenuCheckboxItem,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuSeparator,
@@ -50,9 +52,9 @@ import { Button } from '#/components/ui/button'
 import { cn } from '#/lib/utils'
 import { AuthScreen } from '#/components/auth-screen'
 import { authClient } from '#/lib/auth-client'
-import { SidebarProvider, SidebarTrigger } from '#/components/ui/sidebar'
+import { SidebarProvider } from '#/components/ui/sidebar'
 import { orpc } from '#/lib/orpc-client'
-import { Drawer, DrawerPopup, DrawerTrigger } from '#/components/ui/drawer'
+import { Drawer, DrawerPopup } from '#/components/ui/drawer'
 
 export const Route = createFileRoute('/')({ component: App, ssr: false })
 
@@ -179,6 +181,13 @@ function Editor({ preview = false, userId }: { preview?: boolean; userId?: strin
   const toggleLayers = (open: boolean) => {
     setLayersOpen(open)
     localStorage.setItem('loora:layers', open ? '1' : '0')
+  }
+  const [agentOpen, setAgentOpen] = useState(() =>
+    preview ? true : localStorage.getItem('loora:agent') !== '0',
+  )
+  const toggleAgent = (open: boolean) => {
+    setAgentOpen(open)
+    localStorage.setItem('loora:agent', open ? '1' : '0')
   }
 
   const shapesRef = useRef(shapes)
@@ -541,6 +550,8 @@ function Editor({ preview = false, userId }: { preview?: boolean; userId?: strin
 
   return (
     <SidebarProvider
+      open={agentOpen}
+      onOpenChange={toggleAgent}
       className="h-full min-h-0 bg-cx-canvas"
       style={{ '--sidebar-width': '21.25rem' } as React.CSSProperties}
     >
@@ -564,15 +575,7 @@ function Editor({ preview = false, userId }: { preview?: boolean; userId?: strin
         />
 
         <div className="absolute top-4 right-4 flex items-center gap-1">
-          <SidebarTrigger aria-label="Toggle agent" title="Toggle agent" />
           <Drawer open={layersOpen} onOpenChange={toggleLayers} position="bottom">
-            <DrawerTrigger
-              render={
-                <Button variant="ghost" size="icon" aria-label="Show layers" title="Layers" />
-              }
-            >
-              <PanelRightIcon data-slot="icon" />
-            </DrawerTrigger>
             <DrawerPopup
               position="bottom"
               variant="inset"
@@ -606,6 +609,15 @@ function Editor({ preview = false, userId }: { preview?: boolean; userId?: strin
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="w-48">
+              <DropdownMenuCheckboxItem checked={agentOpen} onCheckedChange={toggleAgent}>
+                <SparklesIcon data-slot="icon" />
+                Agent panel
+              </DropdownMenuCheckboxItem>
+              <DropdownMenuCheckboxItem checked={layersOpen} onCheckedChange={toggleLayers}>
+                <LayersIcon data-slot="icon" />
+                Layers
+              </DropdownMenuCheckboxItem>
+              <DropdownMenuSeparator />
               <DropdownMenuItem onClick={exportPng} disabled={shapes.length === 0}>
                 <DownloadIcon data-slot="icon" />
                 {selectedIds.length > 0 ? 'Export selection' : 'Export canvas'}

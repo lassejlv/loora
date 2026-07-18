@@ -25,7 +25,6 @@ import {
 import { Message, MessageContent } from '#/components/ai-elements/message'
 import {
   PromptInput,
-  PromptInputBody,
   PromptInputFooter,
   PromptInputSubmit,
   PromptInputTextarea,
@@ -462,15 +461,14 @@ export function AgentPanel({
             })
           }}
         >
-          <PromptInputBody>
-            <PromptInputTextarea
-              ref={composerRef}
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              placeholder={chatReady ? 'Describe a change…' : 'Loading chat…'}
-              disabled={!chatReady}
-            />
-          </PromptInputBody>
+          <PromptInputTextarea
+            ref={composerRef}
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            placeholder={chatReady ? 'Describe a change…' : 'Loading chat…'}
+            disabled={!chatReady}
+            className="w-full"
+          />
           <PromptInputFooter>
             <span className="flex items-center gap-1 text-xs text-muted-foreground">
               <Kbd>⏎</Kbd> send
