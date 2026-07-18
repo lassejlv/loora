@@ -176,6 +176,23 @@ export const asset = pgTable(
   (table) => [index('asset_user_id_idx').on(table.userId, table.createdAt)],
 )
 
+// One row per completed AI request; cost stored in micro-USD so limit sums stay integer.
+export const aiUsage = pgTable(
+  'ai_usage',
+  {
+    id: text('id').primaryKey(),
+    userId: text('user_id')
+      .notNull()
+      .references(() => user.id, { onDelete: 'cascade' }),
+    model: text('model').notNull(),
+    inputTokens: integer('input_tokens').notNull(),
+    outputTokens: integer('output_tokens').notNull(),
+    costMicroUsd: integer('cost_micro_usd').notNull(),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+  },
+  (table) => [index('ai_usage_user_created_idx').on(table.userId, table.createdAt)],
+)
+
 // Login-with-ChatGPT sessions (tokens encrypted at rest by the handler).
 // Keyed by the handler's opaque session id, not by app user.
 export const chatgptSession = pgTable('chatgpt_session', {

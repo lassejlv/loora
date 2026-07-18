@@ -5,6 +5,7 @@ import { convertToModelMessages, stepCountIs, streamText, type UIMessage } from 
 import { z } from 'zod'
 import type { Shape } from '#/lib/canvas'
 import { DEFAULT_MODEL, type ModelKey } from '#/lib/models'
+import { checkLimits, recordUsage } from '#/lib/ai-limits'
 import { requireSession } from '#/lib/auth'
 import { DESIGN_SKILL_PROMPT } from '#/skills/design-skills'
 import { desc, eq } from 'drizzle-orm'
@@ -114,9 +115,14 @@ export const Route = createFileRoute('/api/chat')({
           baseURL: 'https://pass.wafer.ai/v1',
           apiKey,
         })
-        const modelId =
-          WAFER_MODEL_IDS[(modelKey as ModelKey) ?? DEFAULT_MODEL] ?? WAFER_MODEL_IDS[DEFAULT_MODEL]
-        const model = wafer(modelId)
+        const key: ModelKey =
+          modelKey && modelKey in WAFER_MODEL_IDS ? (modelKey as ModelKey) : DEFAULT_MODEL
+        const model = wafer(WAFER_MODEL_IDS[key])
+
+        const limitError = await checkLimits(session.user.id)
+        if (limitError) {
+          return Response.json({ error: limitError }, { status: 429 })
+        }
 
         let assets: { id: string; name: string; mediaType: string }[] = []
         try {
@@ -261,6 +267,18 @@ export const Route = createFileRoute('/api/chat')({
           // surfaces to the client as an empty successful stream and trips empty-response retries.
           abortSignal: AbortSignal.timeout(180_000),
           onError: ({ error }) => console.error('[chat] stream error:', error),
+          onFinish: async ({ totalUsage }) => {
+            try {
+              await recordUsage(
+                session.user.id,
+                key,
+                totalUsage.inputTokens ?? 0,
+                totalUsage.outputTokens ?? 0,
+              )
+            } catch (error) {
+              console.error('[chat] Failed to record usage:', error)
+            }
+          },
         })
 
         return result.toUIMessageStreamResponse({

@@ -478,7 +478,7 @@ export function AgentPanel({
           )}
           {(stallError || error) && (
             <p className="text-xs text-destructive-foreground">
-              {stallError || error?.message || 'Request failed.'}
+              {stallError || readableError(error?.message) || 'Request failed.'}
             </p>
           )}
         </ConversationContent>
@@ -549,6 +549,18 @@ export function AgentPanel({
   )
 }
 
+
+// Non-OK API responses reach useChat as their raw JSON body, e.g. '{"error":"…"}'.
+function readableError(message?: string) {
+  if (!message) return null
+  try {
+    const parsed = JSON.parse(message)
+    if (typeof parsed?.error === 'string') return parsed.error
+  } catch {
+    // not JSON — show as-is
+  }
+  return message
+}
 
 function modelLabel(model: string) {
   return MODELS.find((m) => m.id === model)?.label ?? model
