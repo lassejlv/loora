@@ -39,6 +39,7 @@ import { Sidebar } from '#/components/ui/sidebar'
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '#/components/ui/collapsible'
 import { interruptIn, interruptTransition } from '#/lib/motion'
 import { orpc } from '#/lib/orpc-client'
+import { DEFAULT_MODEL, MODELS } from '#/lib/models'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -122,10 +123,11 @@ export function AgentPanel({
   ready?: boolean
 }) {
   const [input, setInput] = useState('')
-  const [model, setModel] = useState(
+  const [model, setModel] = useState(() => {
     // localStorage is absent in the node test environment
-    () => (typeof localStorage === 'undefined' ? null : localStorage.getItem('loora:model')) ?? 'gemini',
-  )
+    const stored = typeof localStorage === 'undefined' ? null : localStorage.getItem('loora:model')
+    return stored && MODELS.some((m) => m.id === stored) ? stored : DEFAULT_MODEL
+  })
   const modelRef = useRef(model)
   modelRef.current = model
   const changeModel = (next: string) => {
@@ -547,7 +549,6 @@ export function AgentPanel({
   )
 }
 
-const MODELS = [{ id: 'gemini', label: 'Gemini Flash' }] as const
 
 function modelLabel(model: string) {
   return MODELS.find((m) => m.id === model)?.label ?? model

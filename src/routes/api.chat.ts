@@ -1,10 +1,10 @@
 import '@tanstack/react-start'
 import { createFileRoute } from '@tanstack/react-router'
-import { createGoogleGenerativeAI } from '@ai-sdk/google'
+import { createOpenAICompatible } from '@ai-sdk/openai-compatible'
 import { convertToModelMessages, stepCountIs, streamText, type UIMessage } from 'ai'
 import { z } from 'zod'
 import type { Shape } from '#/lib/canvas'
-import { GEMINI_MODEL } from '#/lib/models'
+import { DEFAULT_MODEL, type ModelKey } from '#/lib/models'
 import { requireSession } from '#/lib/auth'
 import { DESIGN_SKILL_PROMPT } from '#/skills/design-skills'
 import { desc, eq } from 'drizzle-orm'
@@ -57,6 +57,22 @@ const componentCodeSchema = z
     'Self-contained JSX defining App (function App or export default function App). Normal React idioms are fine: import { useState } from "react" and export default are stripped at runtime. Hooks and onClick/onChange work; prefer those over <form> submit. Tailwind utilities work. No external npm libraries.',
   )
 
+// Server-only mapping; never send these ids to the client.
+const WAFER_MODEL_IDS: Record<ModelKey, string> = {
+  mini: 'Kimi-K2.6',
+  max: 'GLM-5.2',
+  'max-fast': 'glm5.2-fast',
+}
+
+// Errors from the provider can echo the real model id; scrub before it reaches the client.
+function sanitizeModelNames(text: string): string {
+  let out = text
+  for (const [key, id] of Object.entries(WAFER_MODEL_IDS)) {
+    out = out.split(id).join(key)
+  }
+  return out
+}
+
 function messagesForModel(messages: UIMessage[]): UIMessage[] {
   return messages.flatMap((message) => {
     const parts = message.parts.filter((part) => {
@@ -79,22 +95,28 @@ export const Route = createFileRoute('/api/chat')({
           return Response.json({ error: 'Unauthorized' }, { status: 401 })
         }
 
-        const { messages, shapes, selectedIds } = (await request.json()) as {
+        const { messages, shapes, selectedIds, model: modelKey } = (await request.json()) as {
           messages: UIMessage[]
           shapes: Shape[]
           selectedIds?: string[]
           model?: string
         }
 
-        const apiKey = process.env.GEMINI_API_KEY
+        const apiKey = process.env.WAFER_API_KEY
         if (!apiKey) {
           return Response.json(
-            { error: 'Gemini is not configured on the server.' },
+            { error: 'Wafer is not configured on the server.' },
             { status: 503 },
           )
         }
-        const google = createGoogleGenerativeAI({ apiKey })
-        const model = google(GEMINI_MODEL)
+        const wafer = createOpenAICompatible({
+          name: 'wafer',
+          baseURL: 'https://pass.wafer.ai/v1',
+          apiKey,
+        })
+        const modelId =
+          WAFER_MODEL_IDS[(modelKey as ModelKey) ?? DEFAULT_MODEL] ?? WAFER_MODEL_IDS[DEFAULT_MODEL]
+        const model = wafer(modelId)
 
         let assets: { id: string; name: string; mediaType: string }[] = []
         try {
@@ -146,7 +168,7 @@ export const Route = createFileRoute('/api/chat')({
             viewCanvas: {
               description:
                 'Render the current canvas to an image and look at it. Call this after finishing edits for a design task to verify the result, then fix any problems you see.',
-              // Non-empty schema: Gemini rejects function declarations with zero properties.
+              // Non-empty schema: some providers reject function declarations with zero properties.
               inputSchema: z.object({
                 focus: z.string().optional().describe('what you are checking, e.g. "spacing of the header"'),
               }),
@@ -235,12 +257,6 @@ export const Route = createFileRoute('/api/chat')({
           messages: await convertToModelMessages(messagesForModel(messages), { tools }),
           stopWhen: stepCountIs(10),
           tools,
-          // Gemini 3 defaults to medium thinking; low starts tool calls sooner for canvas work.
-          providerOptions: {
-            google: {
-              thinkingConfig: { thinkingLevel: 'low' },
-            },
-          },
           // Design tasks (multi-shape layouts, components) routinely need >60s; a short abort
           // surfaces to the client as an empty successful stream and trips empty-response retries.
           abortSignal: AbortSignal.timeout(180_000),
@@ -249,7 +265,9 @@ export const Route = createFileRoute('/api/chat')({
 
         return result.toUIMessageStreamResponse({
           onError: (error) =>
-            error instanceof Error ? error.message : 'The model request failed.',
+            error instanceof Error
+              ? sanitizeModelNames(error.message)
+              : 'The model request failed.',
         })
       },
     },
