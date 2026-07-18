@@ -609,7 +609,7 @@ const ShapeView = memo(function ShapeView({
           fill={interactive ? 'var(--cx-accent)' : 'var(--color-muted-foreground)'}
           pointerEvents="none"
         >
-          {`⚛ ${s.text ?? 'Component'}${interactive ? ' · interacting (click outside to exit)' : ''}`}
+          {`⚛ ${s.text ?? 'Component'}${interactive ? ' · interacting (click outside to exit)' : ' · double-click to interact'}`}
         </text>
         <foreignObject x={s.x} y={s.y} width={s.w} height={s.h}>
           <div className="h-full w-full overflow-hidden rounded-md shadow-sm ring-1 ring-black/10">

@@ -47,8 +47,6 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '#/components/ui/dropdown-menu'
-import { useLoginWithChatGPT } from '@opencoredev/loginwithchatgpt-react'
-import { createChatGPTProxyProvider } from '@opencoredev/loginwithchatgpt-ai'
 
 type ChatState = ReturnType<typeof useChat>
 type ChatSummary = { id: string; title: string; updatedAt: number }
@@ -116,14 +114,12 @@ export function AgentPanel({
   selectedIdsRef,
   docId,
   ready = true,
-  onOpenSettings,
 }: {
   actions: CanvasActions
   shapesRef: React.RefObject<Shape[]>
   selectedIdsRef?: React.RefObject<string[]>
   docId: string
   ready?: boolean
-  onOpenSettings?: () => void
 }) {
   const [input, setInput] = useState('')
   const [model, setModel] = useState(
@@ -534,11 +530,7 @@ export function AgentPanel({
             className="w-full"
           />
           <PromptInputFooter>
-            <ModelPicker
-              model={model}
-              onModelChange={changeModel}
-              onOpenSettings={() => onOpenSettings?.()}
-            />
+            <ModelPicker model={model} onModelChange={changeModel} />
             <PromptInputSubmit
               status={status}
               onStop={() => stop()}
@@ -555,89 +547,40 @@ export function AgentPanel({
   )
 }
 
+const MODELS = [{ id: 'gemini', label: 'Gemini Flash' }] as const
+
 function modelLabel(model: string) {
-  return model === 'gemini' ? 'Gemini Flash' : model
+  return MODELS.find((m) => m.id === model)?.label ?? model
 }
 
-// Composer footer model switcher. Gemini runs on the server key; ChatGPT
-// models run through the user's own connected ChatGPT subscription.
 function ModelPicker({
   model,
   onModelChange,
-  onOpenSettings,
 }: {
   model: string
   onModelChange: (model: string) => void
-  onOpenSettings: () => void
 }) {
-  const { status, user, isAuthenticated, logout } = useLoginWithChatGPT()
-  const [models, setModels] = useState<string[]>([])
-
-  useEffect(() => {
-    if (!isAuthenticated) {
-      setModels([])
-      if (model !== 'gemini') onModelChange('gemini')
-      return
-    }
-    createChatGPTProxyProvider()
-      .listModels()
-      .then(setModels)
-      .catch((error) => console.error('[chatgpt] Failed to list models:', error))
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isAuthenticated])
-
   return (
-    <>
-      <DropdownMenu>
-        <DropdownMenuTrigger asChild>
-          <button
-            type="button"
-            className="flex items-center gap-1 rounded-md px-1.5 py-1 text-xs text-muted-foreground outline-none hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
-          >
-            {modelLabel(model)}
-            <ChevronDownIcon className="size-3" />
-          </button>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="start" className="w-60">
-          <DropdownMenuLabel className="text-xs text-muted-foreground">Model</DropdownMenuLabel>
-          <DropdownMenuItem onSelect={() => onModelChange('gemini')}>
-            <span className="min-w-0 flex-1 truncate">Gemini Flash</span>
-            {model === 'gemini' && <CheckIcon className="text-foreground" />}
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <button
+          type="button"
+          className="flex items-center gap-1 rounded-md px-1.5 py-1 text-xs text-muted-foreground outline-none hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+        >
+          {modelLabel(model)}
+          <ChevronDownIcon className="size-3" />
+        </button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="start" className="w-48">
+        <DropdownMenuLabel className="text-xs text-muted-foreground">Model</DropdownMenuLabel>
+        {MODELS.map(({ id, label }) => (
+          <DropdownMenuItem key={id} onSelect={() => onModelChange(id)}>
+            <span className="min-w-0 flex-1 truncate">{label}</span>
+            {model === id && <CheckIcon className="text-foreground" />}
           </DropdownMenuItem>
-          <DropdownMenuSeparator />
-          <DropdownMenuLabel className="text-xs text-muted-foreground">
-            {isAuthenticated ? `ChatGPT · ${user?.email ?? 'connected'}` : 'ChatGPT'}
-          </DropdownMenuLabel>
-          {isAuthenticated ? (
-            <>
-              {models.map((slug) => (
-                <DropdownMenuItem key={slug} onSelect={() => onModelChange(slug)}>
-                  <span className="min-w-0 flex-1 truncate">{slug}</span>
-                  {model === slug && <CheckIcon className="text-foreground" />}
-                </DropdownMenuItem>
-              ))}
-              {models.length === 0 && (
-                <DropdownMenuItem disabled>Loading models…</DropdownMenuItem>
-              )}
-              <DropdownMenuSeparator />
-              <DropdownMenuItem
-                variant="destructive"
-                onSelect={() => {
-                  onModelChange('gemini')
-                  void logout()
-                }}
-              >
-                Disconnect ChatGPT
-              </DropdownMenuItem>
-            </>
-          ) : (
-            <DropdownMenuItem onSelect={onOpenSettings} disabled={status === 'loading'}>
-              Connect ChatGPT account…
-            </DropdownMenuItem>
-          )}
-        </DropdownMenuContent>
-      </DropdownMenu>
-    </>
+        ))}
+      </DropdownMenuContent>
+    </DropdownMenu>
   )
 }
 

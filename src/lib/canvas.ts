@@ -18,7 +18,7 @@ export interface Shape {
   align?: 'left' | 'center' | 'right'
   groupId?: string // shapes sharing a groupId select and move as one
   src?: string // image shapes: URL, usually /api/asset/{id}
-  code?: string // component shapes: JSX source defining function App()
+  code?: string // component shapes: JSX defining App (imports/exports stripped at runtime)
 }
 
 let measureCtx: CanvasRenderingContext2D | null = null

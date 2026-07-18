@@ -6,8 +6,6 @@ import { z } from 'zod'
 import type { Shape } from '#/lib/canvas'
 import { GEMINI_MODEL } from '#/lib/models'
 import { requireSession } from '#/lib/auth'
-import { chatgptAuth } from '#/lib/chatgpt-auth'
-import { createChatGPTProxyProvider } from '@opencoredev/loginwithchatgpt-ai'
 import { DESIGN_SKILL_PROMPT } from '#/skills/design-skills'
 import { desc, eq } from 'drizzle-orm'
 import { db } from '#/db'
@@ -56,7 +54,7 @@ const componentCodeSchema = z
   .string()
   .max(100_000)
   .describe(
-    'Self-contained JSX defining `function App()`. React hooks (useState etc.) are in scope; Tailwind classes work. No imports, no exports, no other libraries.',
+    'Self-contained JSX defining App (function App or export default function App). Normal React idioms are fine: import { useState } from "react" and export default are stripped at runtime. Hooks and onClick/onChange work; prefer those over <form> submit. Tailwind utilities work. No external npm libraries.',
   )
 
 function messagesForModel(messages: UIMessage[]): UIMessage[] {
@@ -81,37 +79,22 @@ export const Route = createFileRoute('/api/chat')({
           return Response.json({ error: 'Unauthorized' }, { status: 401 })
         }
 
-        const { messages, shapes, selectedIds, model: requestedModel } = (await request.json()) as {
+        const { messages, shapes, selectedIds } = (await request.json()) as {
           messages: UIMessage[]
           shapes: Shape[]
           selectedIds?: string[]
           model?: string
         }
 
-        // "gemini" (default) runs on the server key; anything else is a
-        // ChatGPT model slug proxied through the user's own ChatGPT session.
-        let model
-        if (requestedModel && requestedModel !== 'gemini') {
-          const chatgptSession = await chatgptAuth.getSession(request)
-          if (chatgptSession.status !== 'authenticated') {
-            return Response.json(
-              { error: 'Connect your ChatGPT account to use ChatGPT models.' },
-              { status: 403 },
-            )
-          }
-          const chatgpt = createChatGPTProxyProvider({ fetch: chatgptAuth.proxyFetch(request) })
-          model = chatgpt(requestedModel)
-        } else {
-          const apiKey = process.env.GEMINI_API_KEY
-          if (!apiKey) {
-            return Response.json(
-              { error: 'Gemini is not configured on the server.' },
-              { status: 503 },
-            )
-          }
-          const google = createGoogleGenerativeAI({ apiKey })
-          model = google(GEMINI_MODEL)
+        const apiKey = process.env.GEMINI_API_KEY
+        if (!apiKey) {
+          return Response.json(
+            { error: 'Gemini is not configured on the server.' },
+            { status: 503 },
+          )
         }
+        const google = createGoogleGenerativeAI({ apiKey })
+        const model = google(GEMINI_MODEL)
 
         let assets: { id: string; name: string; mediaType: string }[] = []
         try {
@@ -185,7 +168,7 @@ export const Route = createFileRoute('/api/chat')({
             },
             createComponent: {
               description:
-                'Add a live interactive React component (forms, toggles, charts, mini apps). Only when the user explicitly wants working interactivity — not for ordinary websites, landing pages, or mockups (use createShapes for those). Code must define function App() with no imports/exports. Returns the created shape id.',
+                'Add a live interactive React component (forms, toggles, charts, mini apps). Only when the user explicitly wants working interactivity — not for ordinary websites, landing pages, or mockups (use createShapes for those). Code must define App; imports/exports are OK (stripped at runtime). Returns the created shape id.',
               inputSchema: z.object({
                 name: z.string().describe('short human label, e.g. "Signup form"'),
                 code: componentCodeSchema,
@@ -235,7 +218,7 @@ export const Route = createFileRoute('/api/chat')({
             'Text shapes render at fontSize (default 20) with fontWeight (400-700) and align (left/center/right), in the fill color. Text wraps at the box width w and supports newlines - size the box for the content. Use weight and size for hierarchy: e.g. 32/700 titles, 14/400 body.',
             'When laying out multiple shapes, space them deliberately - aligned edges, consistent gaps. Use createShapes (batch) to add them all in one call.',
             'For websites, landing pages, and visual mockups: build with frames + shapes + text via createShapes. Do not use createComponent unless the user explicitly asks for a working interactive widget.',
-            'Interactive components: createComponent adds a live React component in a sandboxed iframe. Self-contained JSX defining `function App()` only - hooks (useState, useEffect, useRef, useMemo, useCallback, useReducer) are in scope, Tailwind works, no imports/exports/external libraries. Keep code focused and under ~200 lines. Snapshots show components as dashed placeholders, so do not visually verify component internals.',
+            'Interactive components: createComponent adds a live React component in a sandboxed iframe. Self-contained JSX defining App (function App or export default function App). Normal React idioms work: import { useState } from "react" and export default are stripped at runtime; hooks and onClick/onChange work; prefer those over <form> submit. Tailwind utilities work; no external npm libraries. Keep code under ~200 lines. Users double-click the component on the canvas to try interactions. Snapshots show components as dashed placeholders, so do not visually verify component internals.',
             'Image shapes place uploaded assets: type "image" with src set to an asset URL from the Assets list below. Never invent asset URLs; if no fitting asset exists, say so or use styled shapes instead.',
             '',
             'Assets available (JSON):',

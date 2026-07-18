@@ -18,17 +18,6 @@ const orpc = vi.hoisted(() => ({
 vi.mock('#/lib/orpc-client', () => ({ orpc }))
 vi.mock('#/lib/history', () => ({ commitIfChanged: vi.fn() }))
 vi.mock('#/lib/snapshot', () => ({ snapshotCanvas: vi.fn().mockResolvedValue(null) }))
-// The ChatGPT login hook polls /api/chatgpt at mount, which would consume the
-// mocked fetch responses meant for /api/chat.
-vi.mock('@opencoredev/loginwithchatgpt-react', () => ({
-  LoginWithChatGPT: () => null,
-  useLoginWithChatGPT: () => ({
-    status: 'unauthenticated',
-    user: undefined,
-    isAuthenticated: false,
-    logout: vi.fn(),
-  }),
-}))
 
 import { AgentPanel } from './agent-panel'
 
