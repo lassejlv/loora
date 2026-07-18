@@ -25,8 +25,13 @@ import {
   Undo2Icon,
   Trash2Icon,
   TypeIcon,
+  GroupIcon,
+  UngroupIcon,
+  ZoomInIcon,
+  ZoomOutIcon,
+  MaximizeIcon,
 } from 'lucide-react'
-import { Canvas, type Tool } from '#/components/canvas'
+import { Canvas, type CanvasControls, type Tool } from '#/components/canvas'
 import {
   deleteDocStorage,
   docId,
@@ -240,6 +245,10 @@ function Editor({ preview = false, userId }: { preview?: boolean; userId?: strin
 
   const shapesRef = useRef(shapes)
   shapesRef.current = shapes
+  const selectedIdsRef = useRef(selectedIds)
+  selectedIdsRef.current = selectedIds
+  const canvasControls = useRef<CanvasControls | null>(null)
+  const [zoomPct, setZoomPct] = useState(100)
 
   useEffect(() => {
     if (preview) return
@@ -490,10 +499,21 @@ function Editor({ preview = false, userId }: { preview?: boolean; userId?: strin
     [mutate],
   )
 
+  // Copies must not stay grouped with their originals: give each source
+  // group a fresh id, preserving grouping within the copied set.
+  const remapGroups = (targets: Shape[]) => {
+    const map = new Map<string, string>()
+    return targets.map((s) => {
+      if (!s.groupId) return s
+      if (!map.has(s.groupId)) map.set(s.groupId, `g${shapeId()}`)
+      return { ...s, groupId: map.get(s.groupId) }
+    })
+  }
+
   const duplicateSelected = useCallback(() => {
     const targets = shapesRef.current.filter((s) => selectedIds.includes(s.id))
     if (targets.length === 0) return
-    const copies = targets.map((s) => ({ ...s, id: shapeId(), x: s.x + 16, y: s.y + 16 }))
+    const copies = remapGroups(targets).map((s) => ({ ...s, id: shapeId(), x: s.x + 16, y: s.y + 16 }))
     mutate((prev) => [...prev, ...copies])
     setSelectedIds(copies.map((c) => c.id))
   }, [mutate, selectedIds])
@@ -511,10 +531,22 @@ function Editor({ preview = false, userId }: { preview?: boolean; userId?: strin
     if (clip.length === 0) return
     clipboard.current.pastes += 1
     const offset = 16 * clipboard.current.pastes
-    const copies = clip.map((s) => ({ ...s, id: shapeId(), x: s.x + offset, y: s.y + offset }))
+    const copies = remapGroups(clip).map((s) => ({ ...s, id: shapeId(), x: s.x + offset, y: s.y + offset }))
     mutate((prev) => [...prev, ...copies])
     setSelectedIds(copies.map((c) => c.id))
     setTool('select')
+  }, [mutate])
+
+  const groupSelected = useCallback(() => {
+    const sel = selectedIdsRef.current
+    if (sel.length < 2) return
+    const gid = `g${shapeId()}`
+    mutate((prev) => prev.map((s) => (sel.includes(s.id) ? { ...s, groupId: gid } : s)))
+  }, [mutate])
+
+  const ungroupSelected = useCallback(() => {
+    const sel = selectedIdsRef.current
+    mutate((prev) => prev.map((s) => (sel.includes(s.id) ? { ...s, groupId: undefined } : s)))
   }, [mutate])
 
   const actions: CanvasActions = { createShape, createShapes, updateShape, deleteShape }
@@ -571,6 +603,36 @@ function Editor({ preview = false, userId }: { preview?: boolean; userId?: strin
         else undo()
         return
       }
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'g') {
+        e.preventDefault()
+        if (e.shiftKey) ungroupSelected()
+        else groupSelected()
+        return
+      }
+      if ((e.metaKey || e.ctrlKey) && (e.key === '=' || e.key === '+')) {
+        e.preventDefault()
+        canvasControls.current?.zoomIn()
+        return
+      }
+      if ((e.metaKey || e.ctrlKey) && e.key === '-') {
+        e.preventDefault()
+        canvasControls.current?.zoomOut()
+        return
+      }
+      if ((e.metaKey || e.ctrlKey) && e.key === '0') {
+        e.preventDefault()
+        canvasControls.current?.zoomReset()
+        return
+      }
+      // e.code: layout-independent (⇧1 types "!" on US but '"' etc. elsewhere)
+      if (e.shiftKey && !e.metaKey && !e.ctrlKey && e.code === 'Digit1') {
+        canvasControls.current?.zoomToFit()
+        return
+      }
+      if (e.shiftKey && !e.metaKey && !e.ctrlKey && e.code === 'Digit2') {
+        canvasControls.current?.zoomToSelection()
+        return
+      }
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'd') {
         e.preventDefault()
         duplicateSelected()
@@ -615,7 +677,7 @@ function Editor({ preview = false, userId }: { preview?: boolean; userId?: strin
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [deleteSelected, duplicateSelected, undo, redo, reorder, copySelected, paste, selectedIds, mutate, preview])
+  }, [deleteSelected, duplicateSelected, undo, redo, reorder, copySelected, paste, selectedIds, mutate, preview, groupSelected, ungroupSelected])
 
   const selectedShapes = shapes.filter((s) => selectedIds.includes(s.id))
   const selected = selectedShapes[0]
@@ -634,6 +696,7 @@ function Editor({ preview = false, userId }: { preview?: boolean; userId?: strin
         key={activeId}
         actions={actions}
         shapesRef={shapesRef}
+        selectedIdsRef={selectedIdsRef}
         docId={activeId}
         ready={databaseReady}
         onOpenSettings={() => openSettings('ai')}
@@ -644,6 +707,9 @@ function Editor({ preview = false, userId }: { preview?: boolean; userId?: strin
           shapes={shapes}
           selectedIds={selectedIds}
           tool={tool}
+          docId={preview ? undefined : activeId}
+          controlsRef={canvasControls}
+          onScaleChange={setZoomPct}
           onSelect={setSelectedIds}
           onToolChange={setTool}
           onCreate={(s) => mutate((prev) => [...prev, s])}
@@ -770,6 +836,50 @@ function Editor({ preview = false, userId }: { preview?: boolean; userId?: strin
             onClick={redo}
           >
             <Redo2Icon data-slot="icon" />
+          </Button>
+        </div>
+
+        <div className="absolute bottom-4 left-4 flex items-center gap-0.5 rounded-xl border bg-card p-1 shadow-sm">
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            aria-label="Zoom out (⌘-)"
+            title="Zoom out (⌘-)"
+            onClick={() => canvasControls.current?.zoomOut()}
+          >
+            <ZoomOutIcon data-slot="icon" />
+          </Button>
+          <button
+            type="button"
+            aria-label="Reset zoom (⌘0)"
+            title="Reset zoom (⌘0)"
+            className="w-11 rounded-md px-1 py-0.5 text-center font-mono text-[11px] text-muted-foreground hover:bg-secondary hover:text-foreground"
+            onClick={() => canvasControls.current?.zoomReset()}
+          >
+            {zoomPct}%
+          </button>
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            aria-label="Zoom in (⌘+)"
+            title="Zoom in (⌘+)"
+            onClick={() => canvasControls.current?.zoomIn()}
+          >
+            <ZoomInIcon data-slot="icon" />
+          </Button>
+          <div className="mx-0.5 h-4 w-px bg-border" />
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            aria-label="Zoom to fit (⇧1), selection (⇧2)"
+            title="Zoom to fit (⇧1 · ⇧2 selection)"
+            onClick={() =>
+              selectedIds.length > 0
+                ? canvasControls.current?.zoomToSelection()
+                : canvasControls.current?.zoomToFit()
+            }
+          >
+            <MaximizeIcon data-slot="icon" />
           </Button>
         </div>
 
@@ -926,6 +1036,28 @@ function Editor({ preview = false, userId }: { preview?: boolean; userId?: strin
             >
               <SendToBackIcon data-slot="icon" />
             </Button>
+            {selectedShapes.length > 1 && (
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                aria-label="Group selection (⌘G)"
+                title="Group (⌘G)"
+                onClick={groupSelected}
+              >
+                <GroupIcon data-slot="icon" />
+              </Button>
+            )}
+            {selectedShapes.some((s) => s.groupId) && (
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                aria-label="Ungroup selection (⇧⌘G)"
+                title="Ungroup (⇧⌘G)"
+                onClick={ungroupSelected}
+              >
+                <UngroupIcon data-slot="icon" />
+              </Button>
+            )}
             <Button
               variant="ghost"
               size="icon-sm"

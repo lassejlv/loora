@@ -16,6 +16,7 @@ export interface Shape {
   fontSize?: number
   fontWeight?: number
   align?: 'left' | 'center' | 'right'
+  groupId?: string // shapes sharing a groupId select and move as one
   src?: string // image shapes: URL, usually /api/asset/{id}
   code?: string // component shapes: JSX source defining function App()
 }

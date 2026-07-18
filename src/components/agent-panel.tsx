@@ -113,12 +113,14 @@ function AgentThinking({ label = 'Thinking' }: { label?: string }) {
 export function AgentPanel({
   actions,
   shapesRef,
+  selectedIdsRef,
   docId,
   ready = true,
   onOpenSettings,
 }: {
   actions: CanvasActions
   shapesRef: React.RefObject<Shape[]>
+  selectedIdsRef?: React.RefObject<string[]>
   docId: string
   ready?: boolean
   onOpenSettings?: () => void
@@ -151,6 +153,7 @@ export function AgentPanel({
         api: '/api/chat',
         body: () => ({
           shapes: shapesRef.current,
+          selectedIds: selectedIdsRef?.current ?? [],
           model: modelRef.current,
         }),
       }),

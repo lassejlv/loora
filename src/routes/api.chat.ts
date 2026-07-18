@@ -81,9 +81,10 @@ export const Route = createFileRoute('/api/chat')({
           return Response.json({ error: 'Unauthorized' }, { status: 401 })
         }
 
-        const { messages, shapes, model: requestedModel } = (await request.json()) as {
+        const { messages, shapes, selectedIds, model: requestedModel } = (await request.json()) as {
           messages: UIMessage[]
           shapes: Shape[]
+          selectedIds?: string[]
           model?: string
         }
 
@@ -244,6 +245,9 @@ export const Route = createFileRoute('/api/chat')({
             '',
             'Current canvas shapes (JSON):',
             JSON.stringify(shapes ?? []),
+            selectedIds?.length
+              ? `The user currently has these shape ids selected: ${JSON.stringify(selectedIds)}. When the request says "this", "these", or "the selected", it refers to those shapes.`
+              : '',
           ].join('\n'),
           messages: await convertToModelMessages(messagesForModel(messages), { tools }),
           stopWhen: stepCountIs(10),

@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react'
+import { memo, useEffect, useRef, useState } from 'react'
 import type { Shape, ShapeType } from '#/lib/canvas'
 import { LINE_HEIGHT, layoutText, renderOrder, shapeId } from '#/lib/canvas'
 import { ComponentFrame } from '#/components/component-frame'
@@ -11,10 +11,21 @@ interface View {
   scale: number
 }
 
+export interface CanvasControls {
+  zoomIn: () => void
+  zoomOut: () => void
+  zoomReset: () => void
+  zoomToFit: () => void
+  zoomToSelection: () => void
+}
+
 interface CanvasProps {
   shapes: Shape[]
   selectedIds: string[]
   tool: Tool
+  docId?: string
+  controlsRef?: React.RefObject<CanvasControls | null>
+  onScaleChange?: (pct: number) => void
   onSelect: (ids: string[]) => void
   onToolChange: (tool: Tool) => void
   onCreate: (shape: Shape) => void
@@ -40,17 +51,37 @@ const HANDLE_CORNERS = [
   [0, 1],
 ] as const
 
+const MIN_SCALE = 0.1
+const MAX_SCALE = 16
+
+function loadView(docId?: string): View {
+  if (!docId || typeof localStorage === 'undefined') return { x: 0, y: 0, scale: 1 }
+  try {
+    const raw = localStorage.getItem(`loora:view:${docId}`)
+    if (raw) {
+      const v = JSON.parse(raw) as View
+      if (Number.isFinite(v.x) && Number.isFinite(v.y) && Number.isFinite(v.scale)) return v
+    }
+  } catch {
+    // corrupt entry: fall through to default
+  }
+  return { x: 0, y: 0, scale: 1 }
+}
+
 export function Canvas({
   shapes,
   selectedIds,
   tool,
+  docId,
+  controlsRef,
+  onScaleChange,
   onSelect,
   onToolChange,
   onCreate,
   onUpdate,
 }: CanvasProps) {
   const svgRef = useRef<SVGSVGElement>(null)
-  const [view, setView] = useState<View>({ x: 0, y: 0, scale: 1 })
+  const [view, setView] = useState<View>(() => loadView(docId))
   const [drag, setDrag] = useState<Drag | null>(null)
   const [guides, setGuides] = useState<{ v: number[]; h: number[] }>({ v: [], h: [] })
   const [editingId, setEditingId] = useState<string | null>(null)
@@ -90,13 +121,18 @@ export function Canvas({
       const target = (e.target as Element).closest('[data-shape-id]')
       const id = target?.getAttribute('data-shape-id') ?? null
       if (id) {
+        // Clicking a grouped shape acts on the whole group.
+        const gid = shapes.find((s) => s.id === id)?.groupId
+        const member = gid ? shapes.filter((s) => s.groupId === gid).map((s) => s.id) : [id]
         if (e.shiftKey) {
           onSelect(
-            selectedIds.includes(id) ? selectedIds.filter((i) => i !== id) : [...selectedIds, id],
+            selectedIds.includes(id)
+              ? selectedIds.filter((i) => !member.includes(i))
+              : [...new Set([...selectedIds, ...member])],
           )
           return
         }
-        const ids = selectedIds.includes(id) ? selectedIds : [id]
+        const ids = selectedIds.includes(id) ? selectedIds : member
         if (ids !== selectedIds) onSelect(ids)
         const origins = shapes
           .filter((s) => ids.includes(s.id))
@@ -189,15 +225,22 @@ export function Canvas({
     } else if (d.mode === 'resize') {
       const [cx, cy] = HANDLE_CORNERS[d.corner]
       const { start } = d
-      // anchor is the corner opposite the one being dragged
-      const ax = start.x + (1 - cx) * start.w
-      const ay = start.y + (1 - cy) * start.h
-      onUpdate(d.id, {
-        x: Math.round(Math.min(ax, pt.x)),
-        y: Math.round(Math.min(ay, pt.y)),
-        w: Math.max(1, Math.round(Math.abs(pt.x - ax))),
-        h: Math.max(1, Math.round(Math.abs(pt.y - ay))),
-      })
+      // Anchor: opposite corner, or the shape center when alt is held.
+      const ax = e.altKey ? start.x + start.w / 2 : start.x + (1 - cx) * start.w
+      const ay = e.altKey ? start.y + start.h / 2 : start.y + (1 - cy) * start.h
+      const grow = e.altKey ? 2 : 1
+      let w = Math.abs(pt.x - ax) * grow
+      let h = Math.abs(pt.y - ay) * grow
+      if (e.shiftKey && start.w > 0 && start.h > 0) {
+        const ratio = start.w / start.h
+        if (w / Math.max(h, 1e-6) > ratio) h = w / ratio
+        else w = h * ratio
+      }
+      w = Math.max(1, Math.round(w))
+      h = Math.max(1, Math.round(h))
+      const x = e.altKey ? ax - w / 2 : pt.x < ax ? ax - w : ax
+      const y = e.altKey ? ay - h / 2 : pt.y < ay ? ay - h : ay
+      onUpdate(d.id, { x: Math.round(x), y: Math.round(y), w, h })
     }
   }
 
@@ -239,23 +282,113 @@ export function Canvas({
             : s.x < d.x + d.w && s.x + s.w > d.x && s.y < d.y + d.h && s.y + s.h > d.y,
         )
         .map((s) => s.id)
-      onSelect(d.additive ? [...new Set([...selectedIds, ...hits])] : hits)
+      // A marquee touching any group member catches the whole group.
+      const groups = new Set(
+        shapes.filter((s) => hits.includes(s.id) && s.groupId).map((s) => s.groupId),
+      )
+      const expanded = [
+        ...new Set([...hits, ...shapes.filter((s) => s.groupId && groups.has(s.groupId)).map((s) => s.id)]),
+      ]
+      onSelect(d.additive ? [...new Set([...selectedIds, ...expanded])] : expanded)
     }
     setDragBoth(null)
     setGuides({ v: [], h: [] })
   }
 
+  // React attaches wheel listeners passively, so preventDefault there is a
+  // no-op — the browser still page-zooms on trackpad pinch (ctrl+wheel).
+  // Block it (and Safari's gesture events) with native non-passive listeners.
+  useEffect(() => {
+    const el = svgRef.current
+    if (!el) return
+    const blockWheel = (e: WheelEvent) => e.preventDefault()
+    const blockGesture = (e: Event) => e.preventDefault()
+    el.addEventListener('wheel', blockWheel, { passive: false })
+    el.addEventListener('gesturestart', blockGesture)
+    el.addEventListener('gesturechange', blockGesture)
+    return () => {
+      el.removeEventListener('wheel', blockWheel)
+      el.removeEventListener('gesturestart', blockGesture)
+      el.removeEventListener('gesturechange', blockGesture)
+    }
+  }, [])
+
+  // Per-doc pan/zoom: reload on doc switch, persist (debounced) on change.
+  useEffect(() => {
+    setView(loadView(docId))
+  }, [docId])
+  useEffect(() => {
+    if (!docId) return
+    const t = window.setTimeout(
+      () => localStorage.setItem(`loora:view:${docId}`, JSON.stringify(view)),
+      300,
+    )
+    return () => window.clearTimeout(t)
+  }, [view, docId])
+
+  useEffect(() => {
+    onScaleChange?.(Math.round(view.scale * 100))
+  }, [view.scale, onScaleChange])
+
+  // Zoom keeping the given viewport point fixed.
+  const zoomAt = (px: number, py: number, factor: number) => {
+    setView((v) => {
+      const scale = Math.min(MAX_SCALE, Math.max(MIN_SCALE, v.scale * factor))
+      const k = scale / v.scale
+      return { scale, x: px - (px - v.x) * k, y: py - (py - v.y) * k }
+    })
+  }
+
+  const viewportSize = () => {
+    const rect = svgRef.current?.getBoundingClientRect()
+    return { w: rect?.width ?? 1200, h: rect?.height ?? 800 }
+  }
+
+  const zoomToBounds = (targets: Shape[]) => {
+    if (targets.length === 0) return
+    const left = Math.min(...targets.map((s) => s.x))
+    const top = Math.min(...targets.map((s) => s.y))
+    const right = Math.max(...targets.map((s) => s.x + s.w))
+    const bottom = Math.max(...targets.map((s) => s.y + s.h))
+    const { w, h } = viewportSize()
+    const pad = 64
+    const scale = Math.min(
+      MAX_SCALE,
+      Math.max(MIN_SCALE, Math.min((w - pad * 2) / (right - left || 1), (h - pad * 2) / (bottom - top || 1))),
+    )
+    setView({
+      scale,
+      x: w / 2 - ((left + right) / 2) * scale,
+      y: h / 2 - ((top + bottom) / 2) * scale,
+    })
+  }
+
+  if (controlsRef) {
+    controlsRef.current = {
+      zoomIn: () => {
+        const { w, h } = viewportSize()
+        zoomAt(w / 2, h / 2, 1.25)
+      },
+      zoomOut: () => {
+        const { w, h } = viewportSize()
+        zoomAt(w / 2, h / 2, 1 / 1.25)
+      },
+      zoomReset: () => {
+        const { w, h } = viewportSize()
+        setView((v) => {
+          const k = 1 / v.scale
+          return { scale: 1, x: w / 2 - (w / 2 - v.x) * k, y: h / 2 - (h / 2 - v.y) * k }
+        })
+      },
+      zoomToFit: () => zoomToBounds(shapes),
+      zoomToSelection: () => zoomToBounds(shapes.filter((s) => selectedIds.includes(s.id))),
+    }
+  }
+
   const onWheel = (e: React.WheelEvent) => {
     if (e.ctrlKey || e.metaKey) {
       const rect = svgRef.current!.getBoundingClientRect()
-      const px = e.clientX - rect.left
-      const py = e.clientY - rect.top
-      const factor = Math.exp(-e.deltaY * 0.01)
-      setView((v) => {
-        const scale = Math.min(4, Math.max(0.2, v.scale * factor))
-        const k = scale / v.scale
-        return { scale, x: px - (px - v.x) * k, y: py - (py - v.y) * k }
-      })
+      zoomAt(e.clientX - rect.left, e.clientY - rect.top, Math.exp(-e.deltaY * 0.01))
     } else {
       setView((v) => ({ ...v, x: v.x - e.deltaX, y: v.y - e.deltaY }))
     }
@@ -438,20 +571,11 @@ export function Canvas({
         )}
       </g>
 
-      <text
-        x={16}
-        y="99%"
-        fontSize={11}
-        fontFamily="var(--font-mono)"
-        fill="var(--color-muted-foreground)"
-      >
-        {`${Math.round(view.scale * 100)}%`}
-      </text>
     </svg>
   )
 }
 
-function ShapeView({
+const ShapeView = memo(function ShapeView({
   shape: s,
   hideText,
   interactive,
@@ -583,4 +707,4 @@ function ShapeView({
       fill={s.fill}
     />
   )
-}
+})
