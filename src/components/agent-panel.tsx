@@ -93,9 +93,12 @@ function hasAssistantOutput(message: UIMessage) {
 }
 
 function AgentThinking({ label = 'Thinking' }: { label?: string }) {
+  const text = `${label}…`
   return (
-    <p className="cx-agent-thinking w-fit text-sm" role="status" aria-label={`${label}…`}>
-      <span aria-hidden="true">{label}…</span>
+    <p className="w-fit text-sm" role="status" aria-label={text}>
+      <span className="cx-agent-thinking" aria-hidden="true">
+        {text}
+      </span>
     </p>
   )
 }
