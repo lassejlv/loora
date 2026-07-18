@@ -107,11 +107,12 @@ export const Route = createFileRoute('/api/chat')({
           return Response.json({ error: 'Unauthorized' }, { status: 401 })
         }
 
-        const { messages, shapes, selectedIds, model: modelKey } = (await request.json()) as {
+        const { messages, shapes, selectedIds, model: modelKey, forceCanvasAction } = (await request.json()) as {
           messages: UIMessage[]
           shapes: Shape[]
           selectedIds?: string[]
           model?: string
+          forceCanvasAction?: boolean
         }
 
         const apiKey = process.env.WAFER_API_KEY
@@ -254,6 +255,10 @@ export const Route = createFileRoute('/api/chat')({
           system: [
             'You are the design agent inside loora, a minimal canvas tool.',
             'Only touch the canvas when the user explicitly asks for a change. Greetings, questions, or chit-chat get a plain text reply with zero tool calls.',
+            'When the user has asked for a canvas change and the requirements are known, make the change with a canvas tool in the same turn. Never say you will build, create, or update something without actually calling the tool first.',
+            forceCanvasAction
+              ? 'Your previous response promised a canvas change but stopped without making one. Call the appropriate canvas mutation tool now; do not reply with another promise.'
+              : '',
             'Never delete or overwrite existing shapes unless the user asked for exactly that. When a request is ambiguous, use the askQuestion tool instead of guessing.',
             'Make the minimal set of changes that fulfills the request - no extra decoration, no unrequested layouts.',
             DESIGN_SKILL_PROMPT,

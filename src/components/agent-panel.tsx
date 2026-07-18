@@ -92,6 +92,31 @@ function hasAssistantOutput(message: UIMessage) {
   })
 }
 
+function hasCanvasMutation(message: UIMessage) {
+  return message.parts.some((part) =>
+    [
+      'tool-createShape',
+      'tool-createShapes',
+      'tool-updateShape',
+      'tool-deleteShape',
+      'tool-createComponent',
+      'tool-updateComponent',
+    ].includes(part.type),
+  )
+}
+
+function promisesCanvasWork(message: UIMessage) {
+  const text = message.parts
+    .filter((part) => part.type === 'text')
+    .map((part) => part.text)
+    .join(' ')
+
+  return (
+    /\b(?:let me|i(?:['’]ll| will)|i(?:['’]m| am) going to)\s+(?:now\s+)?(?:build|create|design|make|add|update|edit|change|remove|delete|fix|rework|revise|implement|start|get started)\b/i.test(text) ||
+    /\b(?:starting|building|creating|designing|updating)\s+(?:it|that|this|now)\b/i.test(text)
+  )
+}
+
 function AgentThinking({ label = 'Thinking' }: { label?: string }) {
   return (
     <p className="cx-agent-thinking w-fit text-sm" role="status" aria-label={`${label}…`}>
@@ -127,11 +152,16 @@ export function AgentPanel({
     if (typeof localStorage !== 'undefined') localStorage.setItem('loora:model', next)
   }
   const [chatReady, setChatReady] = useState(false)
+  // Frames created from a still-streaming createShape call: toolCallId → shape id,
+  // so later chunks (and the final tool call) update instead of duplicating.
+  const streamedCreates = useRef(new Map<string, string>())
+  const streamedAppliedAt = useRef(new Map<string, number>())
   const [stallError, setStallError] = useState<string | null>(null)
   const [chats, setChats] = useState<ChatSummary[]>([])
   const [activeChatId, setActiveChatId] = useState<string | null>(null)
-  const emptyResponseRetries = useRef(0)
-  const retryEmptyResponse = useRef<() => void>(() => {})
+  const recoveryRetries = useRef(0)
+  const retryResponse = useRef<() => void>(() => {})
+  const forceCanvasAction = useRef(false)
   const chatsRef = useRef(chats)
   chatsRef.current = chats
   const composerRef = useRef<HTMLTextAreaElement>(null)
@@ -145,26 +175,35 @@ export function AgentPanel({
           shapes: shapesRef.current,
           selectedIds: selectedIdsRef?.current ?? [],
           model: modelRef.current,
+          forceCanvasAction: forceCanvasAction.current,
         }),
       }),
       sendAutomaticallyWhen: lastAssistantMessageIsCompleteWithToolCalls,
       onFinish({ message, isAbort, isError }) {
-        if (isAbort || isError || hasAssistantOutput(message)) {
-          emptyResponseRetries.current = 0
+        const stoppedBeforeAction =
+          !hasCanvasMutation(message) &&
+          (forceCanvasAction.current || promisesCanvasWork(message))
+        if (isAbort || isError || (hasAssistantOutput(message) && !stoppedBeforeAction)) {
+          recoveryRetries.current = 0
+          forceCanvasAction.current = false
           return
         }
 
-        // Server-side aborts arrive as a successful empty stream (isAbort stays false).
-        // Regenerate drops the empty assistant turn; sendMessage() would resubmit it.
-        if (emptyResponseRetries.current === 0) {
-          emptyResponseRetries.current = 1
-          setStallError('The agent returned an empty response. Retrying…')
-          queueMicrotask(() => retryEmptyResponse.current())
+        // Regenerate drops the incomplete assistant turn; sendMessage() would resubmit it.
+        if (recoveryRetries.current === 0) {
+          recoveryRetries.current = 1
+          forceCanvasAction.current = stoppedBeforeAction
+          setStallError(
+            stoppedBeforeAction
+              ? 'The agent stopped before changing the canvas. Retrying…'
+              : 'The agent returned an empty response. Retrying…',
+          )
+          queueMicrotask(() => retryResponse.current())
           return
         }
 
         setStallError(
-          'The agent timed out or returned empty twice. Try a smaller request, or try again.',
+          'The agent stopped twice without completing the request. Try again.',
         )
       },
       onToolCall({ toolCall }) {
@@ -190,9 +229,18 @@ export function AgentPanel({
 
         try {
           switch (toolCall.toolName) {
-            case 'createShape':
-              respond(actions.createShape(clean(input as never)))
+            case 'createShape': {
+              // If a live preview already created this shape, finalize it in place.
+              const streamedId = streamedCreates.current.get(toolCall.toolCallId)
+              if (streamedId) {
+                streamedCreates.current.delete(toolCall.toolCallId)
+                const updated = actions.updateShape(streamedId, clean(input as never))
+                respond(updated ?? actions.createShape(clean(input as never)))
+              } else {
+                respond(actions.createShape(clean(input as never)))
+              }
               break
+            }
             case 'createShapes':
               respond(
                 actions.createShapes(
@@ -264,13 +312,52 @@ export function AgentPanel({
       },
     })
 
-  retryEmptyResponse.current = () => {
+  retryResponse.current = () => {
     setStallError(null)
     void regenerate()
   }
 
   const messagesRef = useRef(messages)
   messagesRef.current = messages
+
+  // Live preview: while a createShape/updateShape call is still streaming its
+  // input, push the partial frame HTML into the canvas so the design appears
+  // as it is generated instead of only after the full tool call parses.
+  // Components are excluded — partial JSX rarely compiles.
+  useEffect(() => {
+    if (status !== 'streaming') return
+    const last = messages[messages.length - 1]
+    if (!last || last.role !== 'assistant') return
+    for (const part of last.parts) {
+      const p = part as unknown as ToolPart
+      if (typeof p.type !== 'string' || !p.type.startsWith('tool-')) continue
+      if (p.state !== 'input-streaming' || !p.input) continue
+      const input = p.input as Partial<Shape> & { id?: string }
+      if (typeof input.html !== 'string' || input.html.length === 0) continue
+      const now = performance.now()
+      if (now - (streamedAppliedAt.current.get(p.toolCallId) ?? 0) < 150) continue
+      const name = p.type.slice(5)
+      if (name === 'updateShape' && typeof input.id === 'string') {
+        streamedAppliedAt.current.set(p.toolCallId, now)
+        actions.updateShape(input.id, { html: sanitizeHtml(input.html) })
+      } else if (name === 'createShape' && input.type === 'frame') {
+        // Wait until the bounds have fully streamed (html comes last in the JSON).
+        if ([input.x, input.y, input.w, input.h].some((n) => typeof n !== 'number')) continue
+        streamedAppliedAt.current.set(p.toolCallId, now)
+        const existing = streamedCreates.current.get(p.toolCallId)
+        if (existing) {
+          actions.updateShape(existing, { html: sanitizeHtml(input.html) })
+        } else {
+          const created = actions.createShape({
+            ...(input as Omit<Shape, 'id'> & { id?: string }),
+            id: undefined,
+            html: sanitizeHtml(input.html),
+          })
+          streamedCreates.current.set(p.toolCallId, created.id)
+        }
+      }
+    }
+  }, [messages, status, actions])
 
   useEffect(() => {
     if (chatReady) composerRef.current?.focus()
@@ -497,7 +584,8 @@ export function AgentPanel({
             if (!trimmed || !chatReady || status === 'streaming' || status === 'submitted') return
             setInput('')
             setStallError(null)
-            emptyResponseRetries.current = 0
+            recoveryRetries.current = 0
+            forceCanvasAction.current = false
             if (activeChat?.title === 'New chat') {
               const title = titleFromPrompt(trimmed)
               setChats((current) =>

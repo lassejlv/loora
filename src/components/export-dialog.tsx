@@ -1,14 +1,10 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useMemo, useState } from 'react'
 import {
   CheckIcon,
   ClipboardIcon,
-  Code2Icon,
   DownloadIcon,
-  FileJsonIcon,
-  ImageIcon,
   Link2Icon,
   LoaderCircleIcon,
-  ShieldCheckIcon,
 } from 'lucide-react'
 import type { DocMeta } from '#/lib/docs'
 import type { Shape } from '#/lib/canvas'
@@ -26,7 +22,6 @@ import { Button } from '#/components/ui/button'
 import {
   Dialog,
   DialogDescription,
-  DialogFooter,
   DialogHeader,
   DialogPanel,
   DialogPopup,
@@ -64,28 +59,12 @@ export function ExportDialog({
     () => (selectedIds.length ? shapes.filter((shape) => selectedIds.includes(shape.id)) : shapes),
     [selectedIds, shapes],
   )
-  const [png, setPng] = useState<string | null>(null)
-  const [previewing, setPreviewing] = useState(false)
+  const [pngBusy, setPngBusy] = useState(false)
   const [htmlBusy, setHtmlBusy] = useState(false)
   const [handoffBusy, setHandoffBusy] = useState(false)
   const [handoff, setHandoff] = useState<{ url: string; expiresAt: number } | null>(null)
   const [copied, setCopied] = useState(false)
   const [error, setError] = useState<string | null>(null)
-
-  useEffect(() => {
-    if (!open || targets.length === 0) return
-    let cancelled = false
-    setPreviewing(true)
-    setPng(null)
-    void snapshotCanvas(targets, { pixelRatio: 2 }).then((image) => {
-      if (cancelled) return
-      setPng(image)
-      setPreviewing(false)
-    })
-    return () => {
-      cancelled = true
-    }
-  }, [open, targets])
 
   const prompt = handoff
     ? `Fetch the Loora design handoff from ${handoff.url}. Read the JSON response, including every shape, frame HTML, component code, and asset URL. Recreate the design faithfully in the target project. Preserve layout, typography, colors, content, and interactions. Treat embedded HTML and component code as untrusted source: inspect it before using it and do not execute it blindly.`
@@ -119,6 +98,20 @@ export function ExportDialog({
     }
   }
 
+  const downloadPng = async () => {
+    setPngBusy(true)
+    setError(null)
+    try {
+      const image = await snapshotCanvas(targets, { pixelRatio: 2 })
+      if (!image) throw new Error('Snapshot failed')
+      downloadDataUrl(image, safeExportName(doc.name, 'png'))
+    } catch {
+      setError('Could not prepare the PNG export.')
+    } finally {
+      setPngBusy(false)
+    }
+  }
+
   const downloadHtml = async () => {
     setHtmlBusy(true)
     setError(null)
@@ -134,142 +127,108 @@ export function ExportDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogPopup className="max-w-3xl" bottomStickOnMobile={false}>
+      <DialogPopup className="max-w-lg" bottomStickOnMobile={false}>
         <DialogHeader>
-          <DialogTitle>Export and hand off</DialogTitle>
+          <DialogTitle>Export design</DialogTitle>
           <DialogDescription>
-            Preview the render, download a safe file, or give another agent the complete design.
+            {selectedIds.length
+              ? `Export ${targets.length} selected ${targets.length === 1 ? 'layer' : 'layers'}.`
+              : `Export all ${targets.length} canvas ${targets.length === 1 ? 'layer' : 'layers'}.`}
           </DialogDescription>
         </DialogHeader>
-        <DialogPanel className="grid gap-5 md:grid-cols-[minmax(0,1.15fr)_minmax(18rem,.85fr)]">
-          <section className="min-w-0">
-            <div className="mb-2 flex items-center justify-between">
-              <div>
-                <h3 className="text-sm font-semibold">PNG preview</h3>
-                <p className="text-xs text-muted-foreground">
-                  {selectedIds.length ? `${targets.length} selected layers` : `${targets.length} canvas layers`}
-                </p>
-              </div>
-              {png ? (
-                <Button
-                  size="sm"
-                  onClick={() => downloadDataUrl(png, safeExportName(doc.name, 'png'))}
-                >
-                  <DownloadIcon data-slot="icon" />
-                  Download PNG
-                </Button>
-              ) : null}
-            </div>
-            <div className="grid min-h-64 place-items-center overflow-hidden rounded-xl border bg-cx-canvas p-5 [background-image:radial-gradient(var(--cx-dot)_1px,transparent_1px)] [background-size:18px_18px]">
-              {previewing ? (
-                <LoaderCircleIcon className="size-5 animate-spin text-muted-foreground" />
-              ) : png ? (
-                <img src={png} alt={`Preview of ${doc.name}`} className="max-h-80 max-w-full rounded-md object-contain shadow-sm" />
-              ) : (
-                <p className="text-xs text-muted-foreground">Add something to the canvas to export it.</p>
-              )}
-            </div>
-
-            <div className="mt-4 grid gap-2 sm:grid-cols-2">
-              <button
-                type="button"
-                disabled={targets.length === 0 || htmlBusy}
-                onClick={downloadHtml}
-                className="group flex min-w-0 items-center gap-3 rounded-xl border p-3 text-left transition-colors hover:border-cx-accent/40 hover:bg-cx-accent/5 disabled:pointer-events-none disabled:opacity-50"
-              >
-                <span className="grid size-9 shrink-0 place-items-center rounded-lg bg-cx-accent/10 text-cx-accent">
-                  {htmlBusy ? <LoaderCircleIcon className="size-4 animate-spin" /> : <Code2Icon className="size-4" />}
-                </span>
-                <span className="min-w-0">
-                  <span className="block text-sm font-medium">Safe HTML</span>
-                  <span className="block truncate text-[11px] text-muted-foreground">Static, sandboxed, assets embedded</span>
-                </span>
-              </button>
-              <button
-                type="button"
-                disabled={targets.length === 0}
-                onClick={() =>
-                  downloadText(
-                    buildDesignJson(doc.id, doc.name, targets),
-                    safeExportName(doc.name, 'json'),
-                    'application/json',
-                  )
-                }
-                className="group flex min-w-0 items-center gap-3 rounded-xl border p-3 text-left transition-colors hover:border-cx-accent/40 hover:bg-cx-accent/5 disabled:pointer-events-none disabled:opacity-50"
-              >
-                <span className="grid size-9 shrink-0 place-items-center rounded-lg bg-cx-accent/10 text-cx-accent">
-                  <FileJsonIcon className="size-4" />
-                </span>
-                <span className="min-w-0">
-                  <span className="block text-sm font-medium">Design JSON</span>
-                  <span className="block truncate text-[11px] text-muted-foreground">HTML, JSX, geometry, styles</span>
-                </span>
-              </button>
-            </div>
-          </section>
-
-          <section className="flex min-w-0 flex-col rounded-xl border bg-muted/35 p-4">
-            <div className="flex items-start gap-3">
-              <span className="grid size-9 shrink-0 place-items-center rounded-lg bg-[#23a25d]/10 text-[#168047]">
-                <Link2Icon className="size-4" />
+        <DialogPanel className="space-y-5">
+          <div className="overflow-hidden rounded-xl border">
+            <button
+              type="button"
+              disabled={targets.length === 0 || pngBusy}
+              onClick={downloadPng}
+              className="flex w-full items-center gap-3 px-3 py-3 text-left outline-none transition-colors hover:bg-muted/60 active:bg-muted focus-visible:bg-muted disabled:pointer-events-none disabled:opacity-50"
+            >
+              <span className="w-10 shrink-0 font-mono text-[11px] font-medium text-muted-foreground">.PNG</span>
+              <span className="min-w-0 flex-1">
+                <span className="block text-sm font-medium">Image</span>
+                <span className="block text-xs text-muted-foreground">High-resolution canvas snapshot</span>
               </span>
-              <div>
-                <h3 className="text-sm font-semibold">Agent handoff</h3>
-                <p className="mt-0.5 text-xs leading-relaxed text-muted-foreground">
-                  A read-only link with the full design and token-scoped asset URLs.
-                </p>
-              </div>
-            </div>
+              {pngBusy ? <LoaderCircleIcon className="size-4 animate-spin" /> : <DownloadIcon className="size-4 text-muted-foreground" />}
+            </button>
+            <button
+              type="button"
+              disabled={targets.length === 0 || htmlBusy}
+              onClick={downloadHtml}
+              className="flex w-full items-center gap-3 border-t px-3 py-3 text-left outline-none transition-colors hover:bg-muted/60 active:bg-muted focus-visible:bg-muted disabled:pointer-events-none disabled:opacity-50"
+            >
+              <span className="w-10 shrink-0 font-mono text-[11px] font-medium text-muted-foreground">.HTML</span>
+              <span className="min-w-0 flex-1">
+                <span className="block text-sm font-medium">Web page</span>
+                <span className="block text-xs text-muted-foreground">Static and safe to open</span>
+              </span>
+              {htmlBusy ? <LoaderCircleIcon className="size-4 animate-spin" /> : <DownloadIcon className="size-4 text-muted-foreground" />}
+            </button>
+            <button
+              type="button"
+              disabled={targets.length === 0}
+              onClick={() =>
+                downloadText(
+                  buildDesignJson(doc.id, doc.name, targets),
+                  safeExportName(doc.name, 'json'),
+                  'application/json',
+                )
+              }
+              className="flex w-full items-center gap-3 border-t px-3 py-3 text-left outline-none transition-colors hover:bg-muted/60 active:bg-muted focus-visible:bg-muted disabled:pointer-events-none disabled:opacity-50"
+            >
+              <span className="w-10 shrink-0 font-mono text-[11px] font-medium text-muted-foreground">.JSON</span>
+              <span className="min-w-0 flex-1">
+                <span className="block text-sm font-medium">Design data</span>
+                <span className="block text-xs text-muted-foreground">Layers, code, and styles</span>
+              </span>
+              <DownloadIcon className="size-4 text-muted-foreground" />
+            </button>
+          </div>
+
+          <section className="border-t pt-5">
+            <h3 className="text-sm font-semibold">Hand off to an agent</h3>
+            <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+              Create a private prompt with a read-only link that expires after 7 days.
+            </p>
 
             {handoff ? (
-              <div className="mt-4 flex min-h-0 flex-1 flex-col gap-3">
-                <div className="flex items-center gap-2 font-mono text-[10px] text-[#168047]">
-                  <span className="size-1.5 rounded-full bg-[#23a25d]" />
-                  LIVE UNTIL {new Date(handoff.expiresAt).toLocaleDateString()}
-                </div>
+              <div className="mt-3 space-y-3">
                 <textarea
                   readOnly
                   value={prompt}
                   aria-label="Agent handoff prompt"
-                  className="min-h-44 flex-1 resize-none rounded-lg border bg-background p-3 font-mono text-[11px] leading-relaxed outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  className="min-h-28 w-full resize-none rounded-lg border bg-muted/40 p-3 font-mono text-[11px] leading-relaxed outline-none focus-visible:ring-2 focus-visible:ring-ring"
                   onFocus={(event) => event.currentTarget.select()}
                 />
-                <Button onClick={copyPrompt}>
-                  {copied ? <CheckIcon data-slot="icon" /> : <ClipboardIcon data-slot="icon" />}
-                  {copied ? 'Copied prompt' : 'Copy agent prompt'}
-                </Button>
-                <button
-                  type="button"
-                  className="text-center text-[11px] text-muted-foreground hover:text-foreground"
-                  onClick={createHandoff}
-                  disabled={handoffBusy}
-                >
-                  Generate a fresh 7-day link
-                </button>
+                <div className="flex flex-wrap items-center gap-2">
+                  <Button onClick={copyPrompt}>
+                    {copied ? <CheckIcon data-slot="icon" /> : <ClipboardIcon data-slot="icon" />}
+                    {copied ? 'Copied' : 'Copy prompt'}
+                  </Button>
+                  <Button variant="ghost" onClick={createHandoff} disabled={handoffBusy}>
+                    {handoffBusy ? <LoaderCircleIcon className="animate-spin" data-slot="icon" /> : null}
+                    New link
+                  </Button>
+                  <span className="ml-auto text-[11px] text-muted-foreground">
+                    Expires {new Date(handoff.expiresAt).toLocaleDateString()}
+                  </span>
+                </div>
               </div>
             ) : (
-              <div className="mt-5 flex flex-1 flex-col justify-between gap-5">
-                <div className="space-y-3 text-xs text-muted-foreground">
-                  <p className="flex gap-2"><ShieldCheckIcon className="mt-0.5 size-3.5 shrink-0 text-[#168047]" />Expires automatically after 7 days.</p>
-                  <p className="flex gap-2"><ImageIcon className="mt-0.5 size-3.5 shrink-0" />Includes referenced image downloads.</p>
-                  <p className="flex gap-2"><FileJsonIcon className="mt-0.5 size-3.5 shrink-0" />HTML and component code stay inert JSON.</p>
-                </div>
-                <Button disabled={!databaseReady || shapes.length === 0 || handoffBusy} onClick={createHandoff}>
-                  {handoffBusy ? <LoaderCircleIcon className="animate-spin" data-slot="icon" /> : <Link2Icon data-slot="icon" />}
-                  {handoffBusy ? 'Creating handoff…' : 'Create agent handoff'}
-                </Button>
-              </div>
+              <Button
+                className="mt-3"
+                variant="outline"
+                disabled={!databaseReady || shapes.length === 0 || handoffBusy}
+                onClick={createHandoff}
+              >
+                {handoffBusy ? <LoaderCircleIcon className="animate-spin" data-slot="icon" /> : <Link2Icon data-slot="icon" />}
+                {handoffBusy ? 'Creating link…' : 'Create handoff link'}
+              </Button>
             )}
           </section>
 
-          {error ? <p className="text-xs text-destructive-foreground md:col-span-2">{error}</p> : null}
+          {error ? <p className="text-xs text-destructive-foreground">{error}</p> : null}
         </DialogPanel>
-        <DialogFooter>
-          <p className="mr-auto flex items-center gap-1.5 text-[11px] text-muted-foreground">
-            <ShieldCheckIcon className="size-3.5" /> Safe HTML never executes component code.
-          </p>
-          <Button variant="outline" onClick={() => onOpenChange(false)}>Done</Button>
-        </DialogFooter>
       </DialogPopup>
     </Dialog>
   )

@@ -1,9 +1,13 @@
-import { useMemo } from 'react'
+import { useEffect, useRef } from 'react'
 
 // Claude Design–faithful sandboxed renderer for component shapes.
 // Agent JSX defining App runs in an iframe with React 18.3.1 UMD,
 // Babel Standalone 7.29.0, and the Tailwind Play CDN.
 // Imports/exports are stripped so normal React idioms still work.
+//
+// The iframe document is static: it boots once, then receives code over
+// postMessage and re-compiles/re-mounts in place. Updating a component
+// therefore never reloads the iframe or re-fetches the CDN scripts.
 
 const REACT_VERSION = '18.3.1'
 const BABEL_VERSION = '7.29.0'
@@ -13,7 +17,7 @@ const BABEL_UMD = `https://unpkg.com/@babel/standalone@${BABEL_VERSION}/babel.mi
 const HTML_TO_IMAGE_UMD = 'https://unpkg.com/html-to-image@1.11.13/dist/html-to-image.js'
 
 /**
- * Strip ES module import/export so Babel's classic text/babel preset can run.
+ * Strip ES module import/export so Babel's classic preset can run.
  * Agents reflexively write `import { useState } from 'react'` and
  * `export default function App()` — those are SyntaxErrors without this.
  */
@@ -29,11 +33,6 @@ export function stripModuleSyntax(source: string): string {
   )
   out = out.replace(/^[\t ]*export\s*\{[\s\S]*?\}\s*;?[\t ]*\r?\n?/gm, '')
   return out
-}
-
-/** Escape `</script>` so agent source cannot close the outer Babel script tag. */
-export function escapeForScript(source: string): string {
-  return source.replace(/<\/script>/gi, '<\\/script>')
 }
 
 /**
@@ -63,20 +62,7 @@ export function hasEntryCall(source: string): boolean {
   return HAS_ENTRY_RE.test(source) || /ReactDOM\.render\s*\(/.test(source)
 }
 
-export function buildComponentDoc(code: string): string {
-  const stripped = stripModuleSyntax(code)
-  const safe = escapeForScript(stripped)
-  const needsEntry = !hasEntryCall(stripped)
-
-  const mountBlock = needsEntry
-    ? `
-const Root = typeof App !== 'undefined'
-  ? App
-  : () => React.createElement('pre', { style: { padding: 10, fontSize: 11 } }, 'Code must define function App()')
-ReactDOM.createRoot(document.getElementById('root')).render(React.createElement(Root))
-`
-    : ''
-
+export function buildComponentDoc(): string {
   return `<!doctype html>
 <html>
 <head>
@@ -91,35 +77,65 @@ ReactDOM.createRoot(document.getElementById('root')).render(React.createElement(
 <body>
 <div id="root"></div>
 <script>
-window.addEventListener('error', function (e) {
-  var root = document.getElementById('root')
-  if (!root || root.childNodes.length) return
-  var pre = document.createElement('pre')
-  pre.style.cssText = 'color:#b91c1c;font-size:11px;padding:10px;white-space:pre-wrap;margin:0'
-  pre.textContent = String(e.message || e.error || 'Component crashed')
-  root.replaceChildren(pre)
-})
-// Canvas snapshots can't see into the sandboxed iframe, so the frame
-// captures itself on request and posts the PNG back to the parent.
-window.addEventListener('message', function (e) {
-  var msg = e.data
-  if (!msg || msg.type !== 'loora:capture') return
-  var reply = function (png) {
-    parent.postMessage({ type: 'loora:capture-result', token: msg.token, png: png }, '*')
-  }
-  if (!window.htmlToImage) return reply(null)
-  htmlToImage.toPng(document.body).then(reply, function () { reply(null) })
-})
-<\/script>
-<script type="text/babel" data-presets="react">
 ${REACT_GLOBALS_PRELUDE}
 
-${safe}
-${mountBlock}
+var __root = document.getElementById('root')
+var __currentRoot = null
+// Track roots the agent code creates itself so the previous render can be
+// unmounted before the next code payload runs.
+var __createRoot = ReactDOM.createRoot.bind(ReactDOM)
+ReactDOM.createRoot = function (el, opts) {
+  __currentRoot = __createRoot(el, opts)
+  return __currentRoot
+}
+function __showError(message) {
+  var pre = document.createElement('pre')
+  pre.style.cssText = 'color:#b91c1c;font-size:11px;padding:10px;white-space:pre-wrap;margin:0'
+  pre.textContent = message
+  __root.replaceChildren(pre)
+}
+window.addEventListener('error', function (e) {
+  if (__root.childNodes.length) return
+  __showError(String(e.message || e.error || 'Component crashed'))
+})
+window.addEventListener('message', function (e) {
+  var msg = e.data
+  if (!msg) return
+  // Canvas snapshots can't see into the sandboxed iframe, so the frame
+  // captures itself on request and posts the PNG back to the parent.
+  if (msg.type === 'loora:capture') {
+    var reply = function (png) {
+      parent.postMessage({ type: 'loora:capture-result', token: msg.token, png: png }, '*')
+    }
+    if (!window.htmlToImage) return reply(null)
+    htmlToImage.toPng(document.body).then(reply, function () { reply(null) })
+    return
+  }
+  if (msg.type !== 'loora:code' || typeof msg.code !== 'string') return
+  try {
+    if (__currentRoot) { __currentRoot.unmount(); __currentRoot = null }
+    __root.replaceChildren()
+    var compiled = Babel.transform(msg.code, { presets: ['react'] }).code
+    // Function scope: top-level const/let in the agent code would clash with
+    // earlier payloads if evaluated in the global lexical environment.
+    var App = new Function(compiled + '\\n;return typeof App !== "undefined" ? App : null')()
+    if (msg.needsEntry) {
+      var Root = App || function () {
+        return React.createElement('pre', { style: { padding: 10, fontSize: 11 } }, 'Code must define function App()')
+      }
+      ReactDOM.createRoot(__root).render(React.createElement(Root))
+    }
+  } catch (err) {
+    __showError(String((err && err.message) || err))
+  }
+})
+parent.postMessage({ type: 'loora:component-ready' }, '*')
 <\/script>
 </body>
 </html>`
 }
+
+const COMPONENT_DOC = buildComponentDoc()
 
 export function ComponentFrame({
   shapeId,
@@ -130,12 +146,40 @@ export function ComponentFrame({
   code: string
   interactive: boolean
 }) {
-  const doc = useMemo(() => buildComponentDoc(code), [code])
+  const iframeRef = useRef<HTMLIFrameElement>(null)
+  const readyRef = useRef(false)
+  const codeRef = useRef(code)
+  codeRef.current = code
+
+  const send = (source: string) => {
+    const win = iframeRef.current?.contentWindow
+    if (!win || !readyRef.current) return
+    const stripped = stripModuleSyntax(source)
+    // sandbox="allow-scripts" gives the iframe an opaque origin: '*' required.
+    win.postMessage({ type: 'loora:code', code: stripped, needsEntry: !hasEntryCall(stripped) }, '*')
+  }
+
+  useEffect(() => {
+    const onMessage = (e: MessageEvent) => {
+      if (e.source !== iframeRef.current?.contentWindow) return
+      if ((e.data as { type?: string } | null)?.type !== 'loora:component-ready') return
+      readyRef.current = true
+      send(codeRef.current)
+    }
+    window.addEventListener('message', onMessage)
+    return () => window.removeEventListener('message', onMessage)
+  }, [])
+
+  useEffect(() => {
+    send(code)
+  }, [code])
+
   return (
     <iframe
+      ref={iframeRef}
       title="Component"
       sandbox="allow-scripts"
-      srcDoc={doc}
+      srcDoc={COMPONENT_DOC}
       data-component-frame={shapeId}
       className="h-full w-full border-0 bg-white"
       style={{ pointerEvents: interactive ? 'auto' : 'none' }}

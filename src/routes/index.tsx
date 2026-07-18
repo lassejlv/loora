@@ -16,6 +16,7 @@ import {
   HandIcon,
   SettingsIcon,
   MousePointer2Icon,
+  MousePointerClickIcon,
   ImageIcon,
   LayersIcon,
   SparklesIcon,
@@ -198,6 +199,7 @@ function DocSwitcher({
 
 const TOOLS: { tool: Tool; icon: typeof SquareIcon; key: string; label: string }[] = [
   { tool: 'select', icon: MousePointer2Icon, key: 'v', label: 'Select' },
+  { tool: 'interact', icon: MousePointerClickIcon, key: 'i', label: 'Interact' },
   { tool: 'frame', icon: FrameIcon, key: 'f', label: 'Frame' },
   { tool: 'rect', icon: SquareIcon, key: 'r', label: 'Rectangle' },
   { tool: 'ellipse', icon: CircleIcon, key: 'o', label: 'Ellipse' },
@@ -660,7 +662,10 @@ function Editor({ preview = false, userId }: { preview?: boolean; userId?: strin
       const t = TOOLS.find((x) => x.key === e.key.toLowerCase())
       if (t && !e.metaKey && !e.ctrlKey) setTool(t.tool)
       if (e.key === 'Delete' || e.key === 'Backspace') deleteSelected()
-      if (e.key === 'Escape') setSelectedIds([])
+      if (e.key === 'Escape') {
+        setSelectedIds([])
+        setTool('select')
+      }
       if (e.key.startsWith('Arrow') && selectedIds.length > 0) {
         e.preventDefault()
         const step = e.shiftKey ? 10 : 1

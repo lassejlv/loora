@@ -4,7 +4,7 @@ import { LINE_HEIGHT, renderOrder, shapeId } from '#/lib/canvas'
 import { ComponentFrame } from '#/components/component-frame'
 import { FrameBody } from '#/components/frame-body'
 
-export type Tool = 'select' | 'hand' | ShapeType
+export type Tool = 'select' | 'hand' | 'interact' | ShapeType
 
 interface View {
   x: number
@@ -112,6 +112,15 @@ export function Canvas({
     // pointer down that lands here means the user clicked outside it.
     if (interactiveId) setInteractiveId(null)
     if (editingFrameId) setEditingFrameId(null)
+
+    // Interact tool: clicks on shapes belong to their content (hover, buttons,
+    // details, …) — never select or move. Empty canvas pans instead.
+    if (tool === 'interact') {
+      if (e.button === 0 && (e.target as Element).closest('[data-shape-id]')) return
+      ;(e.currentTarget as Element).setPointerCapture(e.pointerId)
+      setDragBoth({ mode: 'pan', startX: e.clientX, startY: e.clientY, view })
+      return
+    }
     ;(e.currentTarget as Element).setPointerCapture(e.pointerId)
     const pt = toScene(e.clientX, e.clientY)
 
@@ -413,7 +422,7 @@ export function Canvas({
       ? drag?.mode === 'pan'
         ? 'grabbing'
         : 'grab'
-      : tool === 'select'
+      : tool === 'select' || tool === 'interact'
         ? 'default'
         : 'crosshair'
 
@@ -432,6 +441,7 @@ export function Canvas({
       onPointerUp={onPointerUp}
       onWheel={onWheel}
       onDoubleClick={(e) => {
+        if (tool !== 'select') return
         const target = (e.target as Element).closest('[data-shape-id]')
         const id = target?.getAttribute('data-shape-id')
         const s = shapes.find((sh) => sh.id === id)
@@ -461,7 +471,7 @@ export function Canvas({
             key={s.id}
             shape={s}
             hideText={s.id === editingId}
-            interactive={s.id === interactiveId}
+            interactive={s.id === interactiveId || tool === 'interact'}
             editable={s.id === editingFrameId}
             onHtmlChange={(html) => onUpdate(s.id, { html })}
           />
@@ -633,7 +643,7 @@ const ShapeView = memo(function ShapeView({
             color: interactive ? 'var(--cx-accent)' : 'var(--color-muted-foreground)',
           }}
         >
-          {`⚛ ${s.text ?? 'Component'}${interactive ? ' · interacting (click outside to exit)' : ' · double-click to interact'}`}
+          {`⚛ ${s.text ?? 'Component'}${interactive ? ' · interacting' : ' · double-click to interact'}`}
         </div>
         <div className="h-full w-full overflow-hidden rounded-md shadow-sm ring-1 ring-black/10">
           <ComponentFrame shapeId={s.id} code={s.code ?? ''} interactive={!!interactive} />

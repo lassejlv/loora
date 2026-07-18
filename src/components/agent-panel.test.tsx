@@ -150,6 +150,88 @@ describe('AgentPanel empty response recovery', () => {
     expect(await screen.findByText('Built.')).toBeTruthy()
   })
 
+  it('retries with a canvas-action reminder when the agent promises work without a tool call', async () => {
+    const chatFetch = mock()
+      .mockResolvedValueOnce(
+        stream(
+          { type: 'start' },
+          { type: 'text-start', id: 'answer' },
+          { type: 'text-delta', id: 'answer', delta: 'Got it — let me build it.' },
+          { type: 'text-end', id: 'answer' },
+          { type: 'finish' },
+        ),
+      )
+      .mockResolvedValueOnce(
+        stream(
+          { type: 'start' },
+          {
+            type: 'tool-input-start',
+            toolCallId: 'create-portfolio',
+            toolName: 'createShapes',
+          },
+          {
+            type: 'tool-input-available',
+            toolCallId: 'create-portfolio',
+            toolName: 'createShapes',
+            input: {
+              shapes: [
+                {
+                  type: 'frame',
+                  x: 0,
+                  y: 0,
+                  w: 1440,
+                  h: 900,
+                  fill: '#ffffff',
+                  text: 'Portfolio',
+                  html: '<main>Portfolio</main>',
+                },
+              ],
+            },
+          },
+          { type: 'finish' },
+        ),
+      )
+      .mockResolvedValueOnce(
+        stream(
+          { type: 'start' },
+          { type: 'text-start', id: 'answer' },
+          { type: 'text-delta', id: 'answer', delta: 'Built.' },
+          { type: 'text-end', id: 'answer' },
+          { type: 'finish' },
+        ),
+      )
+    globalThis.fetch = chatFetch as unknown as typeof fetch
+
+    const shapesRef = { current: [] as Shape[] }
+    const actions: CanvasActions = {
+      createShape: mock(),
+      createShapes: mock().mockReturnValue([
+        { id: 'portfolio', type: 'frame', x: 0, y: 0, w: 1440, h: 900, fill: '#ffffff' },
+      ]),
+      updateShape: mock(),
+      deleteShape: mock(),
+    }
+
+    render(
+      <SidebarProvider>
+        <AgentPanel actions={actions} shapesRef={shapesRef} docId="test" />
+      </SidebarProvider>,
+    )
+
+    const input = await screen.findByPlaceholderText('Describe a change…')
+    await waitFor(() => expect((input as HTMLTextAreaElement).disabled).toBe(false))
+    fireEvent.change(input, { target: { value: 'Make a portfolio website' } })
+    fireEvent.submit(input.closest('form')!)
+
+    await waitFor(() => expect(chatFetch).toHaveBeenCalledTimes(3))
+    expect(await screen.findByText('Built.')).toBeTruthy()
+    expect(actions.createShapes).toHaveBeenCalledTimes(1)
+
+    const secondBody = JSON.parse((chatFetch.mock.calls[1]?.[1] as RequestInit)?.body as string)
+    expect(secondBody.trigger).toBe('regenerate-message')
+    expect(secondBody.forceCanvasAction).toBe(true)
+  })
+
   it('captures and sends canvas images with Mini', async () => {
     const chatFetch = mock().mockResolvedValue(
       stream(

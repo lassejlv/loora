@@ -103,14 +103,40 @@ export function FrameBody({
   const onChangeRef = useRef(onChange)
   onChangeRef.current = onChange
 
+  // Mount-once: shadow root, twind engine, and navigation blocking survive
+  // html updates so re-renders only swap innerHTML (no stylesheet teardown).
+  useEffect(() => {
+    const host = hostRef.current
+    if (!host) return
+    const root = host.shadowRoot ?? host.attachShadow({ mode: 'open' })
+    // Frames should feel like a webpage (hover, cursors) but never navigate
+    // the app: block link clicks and form submits inside the shadow tree.
+    const blockNav = (event: Event) => {
+      const path = typeof event.composedPath === 'function' ? event.composedPath() : []
+      if (path.some((node) => node instanceof HTMLAnchorElement && node.href)) {
+        event.preventDefault()
+      }
+    }
+    const blockSubmit = (event: Event) => event.preventDefault()
+    root.addEventListener('click', blockNav, true)
+    root.addEventListener('submit', blockSubmit, true)
+    // Constructable stylesheets are missing in test DOMs; render unstyled there.
+    const unmountTailwind =
+      typeof CSSStyleSheet !== 'undefined' && 'adoptedStyleSheets' in root
+        ? mountFrameTailwind(root)
+        : undefined
+    return () => {
+      root.removeEventListener('click', blockNav, true)
+      root.removeEventListener('submit', blockSubmit, true)
+      unmountTailwind?.()
+    }
+  }, [])
+
   useEffect(() => {
     const host = hostRef.current
     if (!host) return
     const root = host.shadowRoot ?? host.attachShadow({ mode: 'open' })
     root.innerHTML = `<style data-loora-frame-base>:host{display:block;height:100%;overflow:hidden}</style>${sanitizeHtml(html)}`
-    // Constructable stylesheets are missing in test DOMs; render unstyled there.
-    if (typeof CSSStyleSheet === 'undefined' || !('adoptedStyleSheets' in root)) return
-    return mountFrameTailwind(root)
   }, [html])
 
   useEffect(() => {
@@ -262,11 +288,15 @@ export function FrameBody({
   }, [editable, html])
 
   return (
+    // Always pointer-events-auto: hover/cursor styles run in every mode, and
+    // outside edit mode events bubble to the canvas so select/drag still work.
     <div
       ref={hostRef}
-      className={`relative h-full w-full ${editable ? 'pointer-events-auto' : 'pointer-events-none'}`}
+      className="relative h-full w-full pointer-events-auto"
       onPointerDown={editable ? (event) => event.stopPropagation() : undefined}
       onDoubleClick={editable ? (event) => event.stopPropagation() : undefined}
+      // Native image/link drags would hijack the canvas move gesture.
+      onDragStart={(event) => event.preventDefault()}
     />
   )
 }
