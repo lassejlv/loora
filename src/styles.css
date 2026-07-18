@@ -204,29 +204,30 @@ body {
   animation: cx-shimmer 1.4s ease-in-out infinite;
 }
 
-.cx-agent-thinking [data-char] {
-  display: inline-block;
-  color: var(--color-muted-foreground);
-  opacity: 0.42;
-  animation: cx-agent-thinking 1.25s ease-in-out infinite;
-  animation-delay: calc(var(--cx-char-index) * 55ms);
-}
-
-.cx-agent-thinking-dots {
-  color: var(--color-muted-foreground);
-  opacity: 0.55;
+.cx-agent-thinking {
+  background-image: linear-gradient(
+    105deg,
+    #6a6761 0%,
+    #6a6761 38%,
+    #9e9b94 45%,
+    #e8e6e1 50%,
+    #9e9b94 55%,
+    #6a6761 62%,
+    #6a6761 100%
+  );
+  background-size: 220% 100%;
+  background-clip: text;
+  -webkit-background-clip: text;
+  color: transparent;
+  animation: cx-agent-thinking 1.8s linear infinite;
 }
 
 @keyframes cx-agent-thinking {
-  0%,
-  55%,
-  100% {
-    color: var(--color-muted-foreground);
-    opacity: 0.42;
+  0% {
+    background-position: 100% 0;
   }
-  24% {
-    color: var(--foreground);
-    opacity: 1;
+  100% {
+    background-position: -100% 0;
   }
 }
 
@@ -247,9 +248,12 @@ body {
     color: var(--color-muted-foreground);
   }
 
-  .cx-agent-thinking [data-char] {
+  .cx-agent-thinking {
     animation: none;
-    opacity: 1;
+    background-image: none;
+    background-clip: unset;
+    -webkit-background-clip: unset;
+    color: var(--color-muted-foreground);
   }
 }
 
