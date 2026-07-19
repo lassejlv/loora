@@ -1,10 +1,10 @@
-import type { Shape } from './canvas'
+import type { CanvasElement } from './canvas'
 
 export interface Commit {
   id: string
   message: string
   at: number
-  shapes: Shape[]
+  shapes: CanvasElement[]
   // diff vs the previous commit, computed at commit time
   added: number
   removed: number
@@ -22,7 +22,7 @@ export function loadHistory(docId: string): Commit[] {
   }
 }
 
-function diff(prev: Shape[], next: Shape[]) {
+function diff(prev: CanvasElement[], next: CanvasElement[]) {
   const prevById = new Map(prev.map((s) => [s.id, s]))
   const nextIds = new Set(next.map((s) => s.id))
   let added = 0
@@ -36,7 +36,7 @@ function diff(prev: Shape[], next: Shape[]) {
   return { added, removed, changed }
 }
 
-export function commitDoc(docId: string, message: string, shapes: Shape[]): Commit[] {
+export function commitDoc(docId: string, message: string, shapes: CanvasElement[]): Commit[] {
   const history = loadHistory(docId)
   const parent = history[0]?.shapes ?? []
   const commit: Commit = {
@@ -52,7 +52,7 @@ export function commitDoc(docId: string, message: string, shapes: Shape[]): Comm
 }
 
 // Auto-checkpoint: skip when the canvas is empty or identical to the latest commit.
-export function commitIfChanged(docId: string, message: string, shapes: Shape[]) {
+export function commitIfChanged(docId: string, message: string, shapes: CanvasElement[]) {
   if (shapes.length === 0) return
   const latest = loadHistory(docId)[0]
   if (latest && JSON.stringify(latest.shapes) === JSON.stringify(shapes)) return

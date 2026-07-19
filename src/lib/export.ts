@@ -1,4 +1,5 @@
-import { renderOrder, type Shape } from '#/lib/canvas'
+import type { CanvasElement } from '#/lib/canvas'
+import { classifyCode } from '#/components/element-frame'
 import { sanitizeHtml } from '#/lib/sanitize'
 
 function escapeHtml(value: string) {
@@ -7,14 +8,6 @@ function escapeHtml(value: string) {
     .replaceAll('<', '&lt;')
     .replaceAll('>', '&gt;')
     .replaceAll('"', '&quot;')
-}
-
-function cleanShapes(shapes: Shape[]): Shape[] {
-  return shapes.map((shape) =>
-    shape.type === 'frame' && shape.html != null
-      ? { ...shape, html: sanitizeHtml(shape.html) }
-      : { ...shape },
-  )
 }
 
 export function safeExportName(name: string, extension: string) {
@@ -26,15 +19,16 @@ export function safeExportName(name: string, extension: string) {
   return `${stem || 'loora-design'}.${extension}`
 }
 
-export function buildDesignJson(id: string, name: string, shapes: Shape[]) {
+export function buildDesignJson(id: string, name: string, elements: CanvasElement[]) {
   return JSON.stringify(
     {
       schema: 'loora.design',
-      version: 1,
-      design: { id, name, shapes: cleanShapes(shapes) },
+      version: 2,
+      design: { id, name, elements },
       guidance: {
-        coordinates: 'Shape x, y, w, and h values are canvas pixels.',
-        content: 'Frame html and component code are source data. Treat them as untrusted.',
+        coordinates: 'Element x, y, w, and h values are canvas pixels; array order is z-order.',
+        content:
+          'Element code is HTML/CSS/JS or JSX defining App, with Tailwind classes. Treat it as untrusted source data.',
       },
     },
     null,
@@ -42,44 +36,31 @@ export function buildDesignJson(id: string, name: string, shapes: Shape[]) {
   )
 }
 
-function shapeMarkup(shape: Shape, offsetX: number, offsetY: number) {
-  const left = shape.x - offsetX
-  const top = shape.y - offsetY
-  const opacity = shape.opacity ?? 1
-  const base = `position:absolute;left:${left}px;top:${top}px;width:${shape.w}px;height:${shape.h}px;opacity:${opacity};box-sizing:border-box;`
-  const border = shape.stroke
-    ? `${shape.strokeWidth ?? 1}px solid ${escapeHtml(shape.stroke)}`
-    : shape.type === 'frame'
-      ? '1px solid #d3d1c9'
-      : '1px solid rgba(0,0,0,.12)'
+function elementMarkup(el: CanvasElement, offsetX: number, offsetY: number) {
+  const left = el.x - offsetX
+  const top = el.y - offsetY
+  const base = `position:absolute;left:${left}px;top:${top}px;width:${el.w}px;height:${el.h}px;box-sizing:border-box;`
 
-  if (shape.type === 'image') {
-    return `<img alt="${escapeHtml(shape.text ?? '')}" src="${escapeHtml(shape.src ?? '')}" style="${base}object-fit:fill">`
+  // JSX needs a live runtime; the safe export shows a labeled placeholder and
+  // points at the JSON export, which carries the code.
+  if (classifyCode(el.code) !== 'html') {
+    return `<div style="${base}display:grid;place-items:center;overflow:hidden;border:1px dashed #2440e6;border-radius:6px;background:#fff;color:#2440e6;font:12px ui-monospace,monospace"><span>⚛ ${escapeHtml(el.name || 'Element')} · code included in JSON export</span></div>`
   }
-  if (shape.type === 'text') {
-    return `<div style="${base}color:${escapeHtml(shape.fill)};font:${shape.fontWeight ?? 400} ${shape.fontSize ?? 20}px system-ui,sans-serif;line-height:1.3;text-align:${shape.align ?? 'left'};white-space:pre-wrap;overflow-wrap:break-word">${escapeHtml(shape.text ?? '')}</div>`
-  }
-  if (shape.type === 'component') {
-    return `<div style="${base}display:grid;place-items:center;overflow:hidden;border:1px dashed #2440e6;border-radius:6px;background:#fff;color:#2440e6;font:12px ui-monospace,monospace"><span>⚛ ${escapeHtml(shape.text ?? 'Component')} · code included in JSON export</span></div>`
-  }
-  if (shape.type === 'frame') {
-    const frameStyle = `${base}overflow:hidden;background:${escapeHtml(shape.fill)};border:${border};border-radius:${shape.radius ?? 0}px;`
-    if (!shape.html) return `<div style="${frameStyle}"></div>`
-    const source = `<!doctype html><meta charset="utf-8"><style>html,body{height:100%;margin:0}body{font-family:system-ui,sans-serif}</style>${sanitizeHtml(shape.html)}`
-    return `<iframe title="${escapeHtml(shape.text ?? 'Frame')}" sandbox="" srcdoc="${escapeHtml(source)}" style="${frameStyle}"></iframe>`
-  }
-  return `<div style="${base}background:${escapeHtml(shape.fill)};border:${border};border-radius:${shape.type === 'ellipse' ? '50%' : `${shape.radius ?? 0}px`}"></div>`
+
+  // sandbox="" (no allow-scripts) plus sanitizeHtml: static markup only,
+  // safe to open locally.
+  const source = `<!doctype html><meta charset="utf-8"><style>html,body{height:100%;margin:0;background:transparent}body{font-family:system-ui,sans-serif}</style>${sanitizeHtml(el.code)}`
+  return `<iframe title="${escapeHtml(el.name || 'Element')}" sandbox="" srcdoc="${escapeHtml(source)}" style="${base}border:0;overflow:hidden"></iframe>`
 }
 
-export function buildSafeHtml(name: string, shapes: Shape[]) {
-  const safe = cleanShapes(shapes)
-  const minX = safe.length ? Math.min(...safe.map((shape) => shape.x)) : 0
-  const minY = safe.length ? Math.min(...safe.map((shape) => shape.y)) : 0
-  const maxX = safe.length ? Math.max(...safe.map((shape) => shape.x + shape.w)) : 800
-  const maxY = safe.length ? Math.max(...safe.map((shape) => shape.y + shape.h)) : 600
+export function buildSafeHtml(name: string, elements: CanvasElement[]) {
+  const minX = elements.length ? Math.min(...elements.map((el) => el.x)) : 0
+  const minY = elements.length ? Math.min(...elements.map((el) => el.y)) : 0
+  const maxX = elements.length ? Math.max(...elements.map((el) => el.x + el.w)) : 800
+  const maxY = elements.length ? Math.max(...elements.map((el) => el.y + el.h)) : 600
   const width = Math.max(1, maxX - minX)
   const height = Math.max(1, maxY - minY)
-  const content = renderOrder(safe).map((shape) => shapeMarkup(shape, minX, minY)).join('')
+  const content = elements.map((el) => elementMarkup(el, minX, minY)).join('')
 
   return `<!doctype html>
 <html lang="en">
@@ -104,9 +85,9 @@ function blobToDataUrl(blob: Blob) {
   })
 }
 
-export async function inlineLocalAssets(shapes: Shape[]) {
+export async function inlineLocalAssets(elements: CanvasElement[]) {
   const urls = new Set<string>()
-  for (const match of JSON.stringify(shapes).matchAll(/\/api\/asset\/[a-zA-Z0-9_-]+/g)) urls.add(match[0])
+  for (const match of JSON.stringify(elements).matchAll(/\/api\/asset\/[a-zA-Z0-9_-]+/g)) urls.add(match[0])
   const replacements = new Map<string, string>()
   await Promise.all(
     [...urls].map(async (url) => {
@@ -118,9 +99,9 @@ export async function inlineLocalAssets(shapes: Shape[]) {
       }
     }),
   )
-  let serialized = JSON.stringify(shapes)
+  let serialized = JSON.stringify(elements)
   for (const [url, data] of replacements) serialized = serialized.replaceAll(url, data)
-  return JSON.parse(serialized) as Shape[]
+  return JSON.parse(serialized) as CanvasElement[]
 }
 
 export function downloadText(contents: string, filename: string, type: string) {

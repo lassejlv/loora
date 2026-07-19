@@ -2,21 +2,17 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { AnimatePresence, motion, useReducedMotion } from 'motion/react'
 import { createFileRoute } from '@tanstack/react-router'
 import {
-  AlignCenterIcon,
-  AlignLeftIcon,
-  AlignRightIcon,
   BringToFrontIcon,
   CheckIcon,
   ChevronDownIcon,
-  CircleIcon,
   CopyIcon,
   DownloadIcon,
   EllipsisIcon,
-  FrameIcon,
   HandIcon,
   SettingsIcon,
   MousePointer2Icon,
   MousePointerClickIcon,
+  MessageSquarePlusIcon,
   ImageIcon,
   LayersIcon,
   SparklesIcon,
@@ -37,9 +33,9 @@ import {
   deleteDocStorage,
   docId,
   loadDocs,
-  loadShapes,
+  loadElements,
   saveDocs,
-  saveShapes,
+  saveElements,
   type DocMeta,
 } from '#/lib/docs'
 import {
@@ -58,7 +54,8 @@ import { deleteHistory } from '#/lib/history'
 import { snapshotCanvas } from '#/lib/snapshot'
 import { AgentPanel } from '#/components/agent-panel'
 import { ExportDialog } from '#/components/export-dialog'
-import { PALETTE, shapeId, type CanvasActions, type Shape } from '#/lib/canvas'
+import { elementId, type CanvasElement, type ElementActions } from '#/lib/canvas'
+import { imageTemplate } from '#/lib/element-templates'
 import { Button } from '#/components/ui/button'
 import { cn } from '#/lib/utils'
 import { AuthScreen } from '#/components/auth-screen'
@@ -200,10 +197,10 @@ function DocSwitcher({
 const TOOLS: { tool: Tool; icon: typeof SquareIcon; key: string; label: string }[] = [
   { tool: 'select', icon: MousePointer2Icon, key: 'v', label: 'Select' },
   { tool: 'interact', icon: MousePointerClickIcon, key: 'i', label: 'Interact' },
-  { tool: 'frame', icon: FrameIcon, key: 'f', label: 'Frame' },
-  { tool: 'rect', icon: SquareIcon, key: 'r', label: 'Rectangle' },
-  { tool: 'ellipse', icon: CircleIcon, key: 'o', label: 'Ellipse' },
+  { tool: 'comment', icon: MessageSquarePlusIcon, key: 'c', label: 'Comment' },
   { tool: 'text', icon: TypeIcon, key: 't', label: 'Text' },
+  { tool: 'box', icon: SquareIcon, key: 'r', label: 'Box' },
+  { tool: 'image', icon: ImageIcon, key: 'm', label: 'Image' },
   { tool: 'hand', icon: HandIcon, key: 'h', label: 'Hand' },
 ]
 
@@ -218,8 +215,8 @@ function Editor({ preview = false, userId }: { preview?: boolean; userId?: strin
     }
     return loadDocs()
   })
-  const [shapes, setShapes] = useState<Shape[]>(() =>
-    preview || cacheOwnedByAnotherUser ? [] : loadShapes(activeId),
+  const [shapes, setShapes] = useState<CanvasElement[]>(() =>
+    preview || cacheOwnedByAnotherUser ? [] : loadElements(activeId),
   )
   const [selectedIds, setSelectedIds] = useState<string[]>([])
   const [tool, setTool] = useState<Tool>('select')
@@ -248,6 +245,8 @@ function Editor({ preview = false, userId }: { preview?: boolean; userId?: strin
   selectedIdsRef.current = selectedIds
   const canvasControls = useRef<CanvasControls | null>(null)
   const [zoomPct, setZoomPct] = useState(100)
+  // Bridge: canvas comment pins push messages straight into the agent chat.
+  const agentSend = useRef<((text: string) => boolean) | null>(null)
 
   useEffect(() => {
     if (preview) return
@@ -261,14 +260,14 @@ function Editor({ preview = false, userId }: { preview?: boolean; userId?: strin
         if (remote.length === 0) {
           await Promise.all(
             docs.map((doc) =>
-              orpc.design.save({ id: doc.id, name: doc.name, shapes: loadShapes(doc.id) }),
+              orpc.design.save({ id: doc.id, name: doc.name, shapes: loadElements(doc.id) }),
             ),
           )
           saveDocs(docs, activeId)
         } else {
           const remoteDocs = remote.map(({ id, name }) => ({ id, name }))
           const nextActive = remote.some((doc) => doc.id === activeId) ? activeId : remote[0].id
-          for (const doc of remote) saveShapes(doc.id, doc.shapes)
+          for (const doc of remote) saveElements(doc.id, doc.shapes)
           saveDocs(remoteDocs, nextActive)
           setDocState({ docs: remoteDocs, activeId: nextActive })
           setShapes(remote.find((doc) => doc.id === nextActive)?.shapes ?? [])
@@ -292,14 +291,14 @@ function Editor({ preview = false, userId }: { preview?: boolean; userId?: strin
 
   // Undo history: mutations within 800ms coalesce into one step
   // (a drag, a typed number, an agent burst each become a single undo).
-  const past = useRef<Shape[][]>([])
-  const future = useRef<Shape[][]>([])
+  const past = useRef<CanvasElement[][]>([])
+  const future = useRef<CanvasElement[][]>([])
   const lastMutation = useRef(0)
   const [, bumpHistory] = useState(0)
 
   useEffect(() => {
     if (preview) return
-    saveShapes(activeId, shapes)
+    saveElements(activeId, shapes)
   }, [shapes, activeId, preview])
 
   useEffect(() => {
@@ -320,8 +319,8 @@ function Editor({ preview = false, userId }: { preview?: boolean; userId?: strin
   useEffect(() => {
     if (!import.meta.env.DEV || preview) return
     ;(window as unknown as Record<string, unknown>).__loora = {
-      setShapes: (next: Shape[]) => mutate(() => next),
-      getShapes: () => shapesRef.current,
+      setElements: (next: CanvasElement[]) => mutate(() => next),
+      getElements: () => shapesRef.current,
       snapshot: () => snapshotCanvas(shapesRef.current),
     }
   })
@@ -344,7 +343,7 @@ function Editor({ preview = false, userId }: { preview?: boolean; userId?: strin
       saveDocs(s.docs, id)
       return { ...s, activeId: id }
     })
-    setShapes(loadShapes(id))
+    setShapes(loadElements(id))
     setSelectedIds([])
     resetHistory()
   }
@@ -358,7 +357,7 @@ function Editor({ preview = false, userId }: { preview?: boolean; userId?: strin
     }
     const doc = { id: docId(), name: `Untitled ${docs.length + 1}` }
     const next = [...docs, doc]
-    saveShapes(doc.id, [])
+    saveElements(doc.id, [])
     saveDocs(next, doc.id)
     setDocState({ docs: next, activeId: doc.id })
     setShapes([])
@@ -370,19 +369,17 @@ function Editor({ preview = false, userId }: { preview?: boolean; userId?: strin
     const img = new Image()
     const place = (w: number, h: number) => {
       const k = Math.min(1, 480 / Math.max(w, h))
-      const shape: Shape = {
-        id: shapeId(),
-        type: 'image',
+      const element: CanvasElement = {
+        id: elementId(),
+        name: a.name || 'Image',
         x: 40,
         y: 40,
         w: Math.max(1, Math.round(w * k)),
         h: Math.max(1, Math.round(h * k)),
-        fill: '#ffffff',
-        src: `/api/asset/${a.id}`,
-        text: a.name,
+        code: imageTemplate(`/api/asset/${a.id}`, a.name),
       }
-      mutate((prev) => [...prev, shape])
-      setSelectedIds([shape.id])
+      mutate((prev) => [...prev, element])
+      setSelectedIds([element.id])
     }
     img.onload = () => place(img.naturalWidth || 320, img.naturalHeight || 240)
     img.onerror = () => place(320, 240)
@@ -407,16 +404,16 @@ function Editor({ preview = false, userId }: { preview?: boolean; userId?: strin
     let next = docs.filter((d) => d.id !== activeId)
     if (next.length === 0) {
       next = [{ id: docId(), name: 'Untitled' }]
-      saveShapes(next[0].id, [])
+      saveElements(next[0].id, [])
     }
     saveDocs(next, next[0].id)
     setDocState({ docs: next, activeId: next[0].id })
-    setShapes(loadShapes(next[0].id))
+    setShapes(loadElements(next[0].id))
     setSelectedIds([])
     resetHistory()
   }
 
-  const mutate = useCallback((fn: (prev: Shape[]) => Shape[]) => {
+  const mutate = useCallback((fn: (prev: CanvasElement[]) => CanvasElement[]) => {
     setShapes((prev) => {
       const now = Date.now()
       if (now - lastMutation.current > 800) {
@@ -447,31 +444,27 @@ function Editor({ preview = false, userId }: { preview?: boolean; userId?: strin
     bumpHistory((n) => n + 1)
   }, [])
 
-  const createShape = useCallback(
-    (shape: Omit<Shape, 'id'> & { id?: string }) => {
-      const full: Shape = { fontSize: shape.type === 'text' ? 20 : undefined, ...shape, id: shape.id ?? shapeId() }
+  const createElement = useCallback(
+    (element: Omit<CanvasElement, 'id'> & { id?: string }) => {
+      const full: CanvasElement = { ...element, id: element.id ?? elementId() }
       mutate((prev) => [...prev, full])
       return full
     },
     [mutate],
   )
 
-  const createShapes = useCallback(
-    (batch: Omit<Shape, 'id'>[]) => {
-      const full = batch.map((shape) => ({
-        fontSize: shape.type === 'text' ? 20 : undefined,
-        ...shape,
-        id: shapeId(),
-      }))
+  const createElements = useCallback(
+    (batch: Omit<CanvasElement, 'id'>[]) => {
+      const full = batch.map((element) => ({ ...element, id: elementId() }))
       mutate((prev) => [...prev, ...full])
       return full
     },
     [mutate],
   )
 
-  const updateShape = useCallback(
-    (id: string, patch: Partial<Omit<Shape, 'id'>>) => {
-      let updated: Shape | null = null
+  const updateElement = useCallback(
+    (id: string, patch: Partial<Omit<CanvasElement, 'id'>>) => {
+      let updated: CanvasElement | null = null
       mutate((prev) =>
         prev.map((s) => {
           if (s.id !== id) return s
@@ -484,7 +477,7 @@ function Editor({ preview = false, userId }: { preview?: boolean; userId?: strin
     [mutate],
   )
 
-  const deleteShape = useCallback(
+  const deleteElement = useCallback(
     (id: string) => {
       const exists = shapesRef.current.some((s) => s.id === id)
       mutate((prev) => prev.filter((s) => s.id !== id))
@@ -501,20 +494,13 @@ function Editor({ preview = false, userId }: { preview?: boolean; userId?: strin
     })
   }, [mutate])
 
-  const updateSelected = useCallback(
-    (ids: string[], patch: Partial<Omit<Shape, 'id'>>) => {
-      mutate((prev) => prev.map((s) => (ids.includes(s.id) ? { ...s, ...patch } : s)))
-    },
-    [mutate],
-  )
-
   // Copies must not stay grouped with their originals: give each source
   // group a fresh id, preserving grouping within the copied set.
-  const remapGroups = (targets: Shape[]) => {
+  const remapGroups = (targets: CanvasElement[]) => {
     const map = new Map<string, string>()
     return targets.map((s) => {
       if (!s.groupId) return s
-      if (!map.has(s.groupId)) map.set(s.groupId, `g${shapeId()}`)
+      if (!map.has(s.groupId)) map.set(s.groupId, `g${elementId()}`)
       return { ...s, groupId: map.get(s.groupId) }
     })
   }
@@ -522,25 +508,25 @@ function Editor({ preview = false, userId }: { preview?: boolean; userId?: strin
   const duplicateSelected = useCallback(() => {
     const targets = shapesRef.current.filter((s) => selectedIds.includes(s.id))
     if (targets.length === 0) return
-    const copies = remapGroups(targets).map((s) => ({ ...s, id: shapeId(), x: s.x + 16, y: s.y + 16 }))
+    const copies = remapGroups(targets).map((s) => ({ ...s, id: elementId(), x: s.x + 16, y: s.y + 16 }))
     mutate((prev) => [...prev, ...copies])
     setSelectedIds(copies.map((c) => c.id))
   }, [mutate, selectedIds])
 
   // In-memory clipboard; repeated pastes cascade by +16 each.
-  const clipboard = useRef<{ shapes: Shape[]; pastes: number }>({ shapes: [], pastes: 0 })
+  const clipboard = useRef<{ elements: CanvasElement[]; pastes: number }>({ elements: [], pastes: 0 })
 
   const copySelected = useCallback(() => {
     const targets = shapesRef.current.filter((s) => selectedIds.includes(s.id))
-    if (targets.length > 0) clipboard.current = { shapes: targets, pastes: 0 }
+    if (targets.length > 0) clipboard.current = { elements: targets, pastes: 0 }
   }, [selectedIds])
 
   const paste = useCallback(() => {
-    const { shapes: clip } = clipboard.current
+    const { elements: clip } = clipboard.current
     if (clip.length === 0) return
     clipboard.current.pastes += 1
     const offset = 16 * clipboard.current.pastes
-    const copies = remapGroups(clip).map((s) => ({ ...s, id: shapeId(), x: s.x + offset, y: s.y + offset }))
+    const copies = remapGroups(clip).map((s) => ({ ...s, id: elementId(), x: s.x + offset, y: s.y + offset }))
     mutate((prev) => [...prev, ...copies])
     setSelectedIds(copies.map((c) => c.id))
     setTool('select')
@@ -549,7 +535,7 @@ function Editor({ preview = false, userId }: { preview?: boolean; userId?: strin
   const groupSelected = useCallback(() => {
     const sel = selectedIdsRef.current
     if (sel.length < 2) return
-    const gid = `g${shapeId()}`
+    const gid = `g${elementId()}`
     mutate((prev) => prev.map((s) => (sel.includes(s.id) ? { ...s, groupId: gid } : s)))
   }, [mutate])
 
@@ -558,7 +544,7 @@ function Editor({ preview = false, userId }: { preview?: boolean; userId?: strin
     mutate((prev) => prev.map((s) => (sel.includes(s.id) ? { ...s, groupId: undefined } : s)))
   }, [mutate])
 
-  const actions: CanvasActions = { createShape, createShapes, updateShape, deleteShape }
+  const actions: ElementActions = { createElement, createElements, updateElement, deleteElement }
 
   const reorder = useCallback(
     (dir: 'forward' | 'backward' | 'front' | 'back') => {
@@ -700,11 +686,12 @@ function Editor({ preview = false, userId }: { preview?: boolean; userId?: strin
         selectedIdsRef={selectedIdsRef}
         docId={activeId}
         ready={databaseReady}
+        sendRef={agentSend}
       />
 
       <main className="relative min-w-0 flex-1">
         <Canvas
-          shapes={shapes}
+          elements={shapes}
           selectedIds={selectedIds}
           tool={tool}
           docId={preview ? undefined : activeId}
@@ -713,7 +700,11 @@ function Editor({ preview = false, userId }: { preview?: boolean; userId?: strin
           onSelect={setSelectedIds}
           onToolChange={setTool}
           onCreate={(s) => mutate((prev) => [...prev, s])}
-          onUpdate={updateShape}
+          onUpdate={updateElement}
+          onComment={(text) => {
+            toggleAgent(true)
+            return agentSend.current?.(text) ?? false
+          }}
         />
 
         <div className="absolute top-4 right-4 flex items-center gap-1">
@@ -724,7 +715,7 @@ function Editor({ preview = false, userId }: { preview?: boolean; userId?: strin
               className="h-[min(60svh,32rem)]"
             >
               <LayersPanel
-                shapes={shapes}
+                elements={shapes}
                 selectedIds={selectedIds}
                 onSelect={setSelectedIds}
                 onReorderList={(orderedIds) =>
@@ -732,7 +723,7 @@ function Editor({ preview = false, userId }: { preview?: boolean; userId?: strin
                     [...prev].sort((a, b) => orderedIds.indexOf(a.id) - orderedIds.indexOf(b.id)),
                   )
                 }
-                onRenameFrame={(id, name) => updateShape(id, { text: name })}
+                onRename={(id, name) => updateElement(id, { name })}
               />
             </DrawerPopup>
           </Drawer>
@@ -894,130 +885,6 @@ function Editor({ preview = false, userId }: { preview?: boolean; userId?: strin
                 exit={barMotion.exit}
                 transition={barTransition}
               >
-            {PALETTE.map((color) => (
-              <button
-                key={color}
-                type="button"
-                aria-label={`Fill ${color}`}
-                className={cn(
-                  'size-5 rounded-full border border-black/15 transition-transform hover:scale-110',
-                  selected.fill === color && 'ring-2 ring-cx-accent ring-offset-1',
-                )}
-                style={{ backgroundColor: color }}
-                onClick={() => updateSelected(selectedIds, { fill: color })}
-              />
-            ))}
-            {selectedShapes.some((s) => s.type !== 'text') && (
-              <>
-                <div className="mx-1 h-4 w-px bg-border" />
-                <button
-                  type="button"
-                  aria-label="No stroke"
-                  title="No stroke"
-                  className={cn(
-                    'relative size-5 rounded-full border border-black/15 bg-white transition-transform hover:scale-110',
-                    !selected.stroke && 'ring-2 ring-cx-accent ring-offset-1',
-                  )}
-                  onClick={() => updateSelected(selectedIds, { stroke: undefined, strokeWidth: undefined })}
-                >
-                  <span className="absolute inset-0.5 rotate-45 border-t border-red-400" />
-                </button>
-                {PALETTE.map((color) => (
-                  <button
-                    key={color}
-                    type="button"
-                    aria-label={`Stroke ${color}`}
-                    title="Stroke"
-                    className={cn(
-                      'size-5 rounded-full bg-transparent transition-transform hover:scale-110',
-                      selected.stroke === color && 'ring-2 ring-cx-accent ring-offset-1',
-                    )}
-                    style={{ border: `2.5px solid ${color}` }}
-                    onClick={() => updateSelected(selectedIds, { stroke: color, strokeWidth: selected.strokeWidth ?? 2 })}
-                  />
-                ))}
-              </>
-            )}
-            {selected.type === 'text' && (
-              <>
-                <div className="mx-1 h-4 w-px bg-border" />
-                <label className="flex items-center gap-1 font-mono text-[11px] text-muted-foreground">
-                  S
-                  <input
-                    type="number"
-                    min={6}
-                    value={selected.fontSize ?? 20}
-                    onChange={(e) =>
-                      updateSelected(selectedIds, { fontSize: Math.max(6, Number(e.target.value)) })
-                    }
-                    className="w-11 rounded border bg-background px-1 py-0.5 text-foreground"
-                  />
-                </label>
-                <select
-                  aria-label="Font weight"
-                  value={selected.fontWeight ?? 400}
-                  onChange={(e) => updateSelected(selectedIds, { fontWeight: Number(e.target.value) })}
-                  className="rounded border bg-background px-1 py-0.5 font-mono text-[11px] text-foreground"
-                >
-                  <option value={400}>Regular</option>
-                  <option value={500}>Medium</option>
-                  <option value={600}>Semibold</option>
-                  <option value={700}>Bold</option>
-                </select>
-                {(
-                  [
-                    ['left', AlignLeftIcon],
-                    ['center', AlignCenterIcon],
-                    ['right', AlignRightIcon],
-                  ] as const
-                ).map(([align, Icon]) => (
-                  <Button
-                    key={align}
-                    variant="ghost"
-                    size="icon-sm"
-                    aria-label={`Align ${align}`}
-                    className={cn(
-                      (selected.align ?? 'left') === align && 'bg-cx-accent/10 text-cx-accent',
-                    )}
-                    onClick={() => updateSelected(selectedIds, { align })}
-                  >
-                    <Icon data-slot="icon" />
-                  </Button>
-                ))}
-              </>
-            )}
-            {selectedShapes.some((s) => s.type === 'rect' || s.type === 'frame') && (
-              <>
-                <div className="mx-1 h-4 w-px bg-border" />
-                <label className="flex items-center gap-1 font-mono text-[11px] text-muted-foreground">
-                  R
-                  <input
-                    type="number"
-                    min={0}
-                    value={selected.radius ?? 0}
-                    onChange={(e) => updateSelected(selectedIds, { radius: Math.max(0, Number(e.target.value)) })}
-                    className="w-11 rounded border bg-background px-1 py-0.5 text-foreground"
-                  />
-                </label>
-              </>
-            )}
-            <div className="mx-1 h-4 w-px bg-border" />
-            <label className="flex items-center gap-1 font-mono text-[11px] text-muted-foreground">
-              O
-              <input
-                type="number"
-                min={0}
-                max={100}
-                value={Math.round((selected.opacity ?? 1) * 100)}
-                onChange={(e) =>
-                  updateSelected(selectedIds, {
-                    opacity: Math.min(100, Math.max(0, Number(e.target.value))) / 100,
-                  })
-                }
-                className="w-11 rounded border bg-background px-1 py-0.5 text-foreground"
-              />
-            </label>
-            <div className="mx-1 h-4 w-px bg-border" />
             <Button
               variant="ghost"
               size="icon-sm"

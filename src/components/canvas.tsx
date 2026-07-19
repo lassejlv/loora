@@ -1,10 +1,30 @@
 import { memo, useEffect, useRef, useState } from 'react'
-import type { Shape, ShapeType } from '#/lib/canvas'
-import { LINE_HEIGHT, renderOrder, shapeId } from '#/lib/canvas'
-import { ComponentFrame } from '#/components/component-frame'
-import { FrameBody } from '#/components/frame-body'
+import type { CanvasElement } from '#/lib/canvas'
+import { elementId } from '#/lib/canvas'
+import { TEMPLATE_DEFAULTS, type InsertTool } from '#/lib/element-templates'
+import { ElementFrame } from '#/components/element-frame'
 
-export type Tool = 'select' | 'hand' | 'interact' | ShapeType
+export type Tool = 'select' | 'hand' | 'interact' | 'comment' | InsertTool
+
+// A comment pin: the element it targets and the pin position inside it,
+// as percentages of the element box.
+export interface CommentTarget {
+  element: CanvasElement
+  px: number
+  py: number
+}
+
+export function composeComment(text: string, target: CommentTarget): string {
+  const { element, px, py } = target
+  return [
+    text,
+    '',
+    '---',
+    'Canvas comment pinned to:',
+    `- Element "${element.name}" (id: ${element.id}) at (${element.x}, ${element.y}), ${element.w}×${element.h}`,
+    `- Pin location inside the element: ${px}% from the left, ${py}% from the top`,
+  ].join('\n')
+}
 
 interface View {
   x: number
@@ -21,7 +41,7 @@ export interface CanvasControls {
 }
 
 interface CanvasProps {
-  shapes: Shape[]
+  elements: CanvasElement[]
   selectedIds: string[]
   tool: Tool
   docId?: string
@@ -29,8 +49,11 @@ interface CanvasProps {
   onScaleChange?: (pct: number) => void
   onSelect: (ids: string[]) => void
   onToolChange: (tool: Tool) => void
-  onCreate: (shape: Shape) => void
-  onUpdate: (id: string, patch: Partial<Shape>) => void
+  onCreate: (element: CanvasElement) => void
+  onUpdate: (id: string, patch: Partial<CanvasElement>) => void
+  // Returns false when the message could not be sent (agent busy) so the
+  // comment popover stays open instead of losing the user's text.
+  onComment?: (text: string) => boolean | void
 }
 
 type Drag =
@@ -41,9 +64,9 @@ type Drag =
       startY: number
       origins: { id: string; ox: number; oy: number; w: number; h: number }[]
     }
-  | { mode: 'draw'; type: ShapeType; startX: number; startY: number; x: number; y: number; w: number; h: number }
+  | { mode: 'draw'; type: InsertTool; startX: number; startY: number; x: number; y: number; w: number; h: number }
   | { mode: 'marquee'; additive: boolean; startX: number; startY: number; x: number; y: number; w: number; h: number }
-  | { mode: 'resize'; id: string; corner: number; start: Shape }
+  | { mode: 'resize'; id: string; corner: number; start: CanvasElement }
 
 const HANDLE_CORNERS = [
   [0, 0],
@@ -70,7 +93,7 @@ function loadView(docId?: string): View {
 }
 
 export function Canvas({
-  shapes,
+  elements,
   selectedIds,
   tool,
   docId,
@@ -80,16 +103,19 @@ export function Canvas({
   onToolChange,
   onCreate,
   onUpdate,
+  onComment,
 }: CanvasProps) {
   const rootRef = useRef<HTMLDivElement>(null)
   const [view, setView] = useState<View>(() => loadView(docId))
   const [drag, setDrag] = useState<Drag | null>(null)
   const [guides, setGuides] = useState<{ v: number[]; h: number[] }>({ v: [], h: [] })
-  const [editingId, setEditingId] = useState<string | null>(null)
-  // Component shape currently in "interact" mode: its iframe receives pointer
-  // events instead of the canvas. Entered by double-click, left by clicking out.
+  // Element currently in "interact" mode: its iframe receives pointer events
+  // instead of the canvas. Entered by double-click, left by clicking out.
   const [interactiveId, setInteractiveId] = useState<string | null>(null)
-  const [editingFrameId, setEditingFrameId] = useState<string | null>(null)
+  // Comment tool: hovered element outline + open comment draft, in viewport coords.
+  const [commentHover, setCommentHover] = useState<{ x: number; y: number; w: number; h: number } | null>(null)
+  const [commentDraft, setCommentDraft] = useState<{ x: number; y: number; target: CommentTarget } | null>(null)
+  const commentInputRef = useRef<HTMLTextAreaElement>(null)
   const dragRef = useRef<Drag | null>(null)
   dragRef.current = drag
 
@@ -106,17 +132,65 @@ export function Canvas({
     setDrag(d)
   }
 
+  // Comment tool hit-test: the element under the pointer.
+  const commentHit = (e: React.PointerEvent) => {
+    const hitEl = (e.target as Element).closest('[data-element-id]')
+    const id = hitEl?.getAttribute('data-element-id')
+    const element = elements.find((el) => el.id === id)
+    if (!hitEl || !element) return null
+    return { element, hitEl }
+  }
+
+  const buildCommentTarget = (
+    hit: { element: CanvasElement; hitEl: Element },
+    e: React.PointerEvent,
+  ): CommentTarget => {
+    const rect = hit.hitEl.getBoundingClientRect()
+    const px = Math.round(Math.min(100, Math.max(0, ((e.clientX - rect.left) / Math.max(rect.width, 1)) * 100)))
+    const py = Math.round(Math.min(100, Math.max(0, ((e.clientY - rect.top) / Math.max(rect.height, 1)) * 100)))
+    return { element: hit.element, px, py }
+  }
+
+  const submitComment = () => {
+    const text = commentInputRef.current?.value.trim()
+    if (!text || !commentDraft) return
+    if (onComment?.(composeComment(text, commentDraft.target)) === false) return
+    setCommentDraft(null)
+    onToolChange('select')
+  }
+
   const onPointerDown = (e: React.PointerEvent) => {
     if (e.button !== 0 && e.button !== 1) return
     // Clicks inside an interactive iframe never reach the canvas, so any
     // pointer down that lands here means the user clicked outside it.
     if (interactiveId) setInteractiveId(null)
-    if (editingFrameId) setEditingFrameId(null)
 
-    // Interact tool: clicks on shapes belong to their content (hover, buttons,
+    // Comment tool: click an element to pin a comment for the agent.
+    // Empty canvas pans.
+    if (tool === 'comment') {
+      if (e.button === 0) {
+        const hit = commentHit(e)
+        if (hit) {
+          const rect = rootRef.current!.getBoundingClientRect()
+          setCommentDraft({
+            x: e.clientX - rect.left,
+            y: e.clientY - rect.top,
+            target: buildCommentTarget(hit, e),
+          })
+          setCommentHover(null)
+          return
+        }
+      }
+      setCommentDraft(null)
+      ;(e.currentTarget as Element).setPointerCapture(e.pointerId)
+      setDragBoth({ mode: 'pan', startX: e.clientX, startY: e.clientY, view })
+      return
+    }
+
+    // Interact tool: clicks on elements belong to their content (hover, buttons,
     // details, …) — never select or move. Empty canvas pans instead.
     if (tool === 'interact') {
-      if (e.button === 0 && (e.target as Element).closest('[data-shape-id]')) return
+      if (e.button === 0 && (e.target as Element).closest('[data-element-id]')) return
       ;(e.currentTarget as Element).setPointerCapture(e.pointerId)
       setDragBoth({ mode: 'pan', startX: e.clientX, startY: e.clientY, view })
       return
@@ -130,12 +204,12 @@ export function Canvas({
     }
 
     if (tool === 'select') {
-      const target = (e.target as Element).closest('[data-shape-id]')
-      const id = target?.getAttribute('data-shape-id') ?? null
+      const target = (e.target as Element).closest('[data-element-id]')
+      const id = target?.getAttribute('data-element-id') ?? null
       if (id) {
-        // Clicking a grouped shape acts on the whole group.
-        const gid = shapes.find((s) => s.id === id)?.groupId
-        const member = gid ? shapes.filter((s) => s.groupId === gid).map((s) => s.id) : [id]
+        // Clicking a grouped element acts on the whole group.
+        const gid = elements.find((el) => el.id === id)?.groupId
+        const member = gid ? elements.filter((el) => el.groupId === gid).map((el) => el.id) : [id]
         if (e.shiftKey) {
           onSelect(
             selectedIds.includes(id)
@@ -146,9 +220,9 @@ export function Canvas({
         }
         const ids = selectedIds.includes(id) ? selectedIds : member
         if (ids !== selectedIds) onSelect(ids)
-        const origins = shapes
-          .filter((s) => ids.includes(s.id))
-          .map((s) => ({ id: s.id, ox: s.x, oy: s.y, w: s.w, h: s.h }))
+        const origins = elements
+          .filter((el) => ids.includes(el.id))
+          .map((el) => ({ id: el.id, ox: el.x, oy: el.y, w: el.w, h: el.h }))
         setDragBoth({ mode: 'move', startX: pt.x, startY: pt.y, origins })
       } else {
         setDragBoth({
@@ -165,19 +239,35 @@ export function Canvas({
       return
     }
 
-    // shape tools: drag out a new shape
+    // insert tools: drag out a new element
     setDragBoth({ mode: 'draw', type: tool, startX: pt.x, startY: pt.y, x: pt.x, y: pt.y, w: 0, h: 0 })
   }
 
   const startResize = (e: React.PointerEvent, corner: number) => {
     e.stopPropagation()
-    const s = selectedIds.length === 1 ? shapes.find((sh) => sh.id === selectedIds[0]) : undefined
-    if (!s) return
+    const el = selectedIds.length === 1 ? elements.find((c) => c.id === selectedIds[0]) : undefined
+    if (!el) return
     rootRef.current!.setPointerCapture(e.pointerId)
-    setDragBoth({ mode: 'resize', id: s.id, corner, start: s })
+    setDragBoth({ mode: 'resize', id: el.id, corner, start: el })
   }
 
   const onPointerMove = (e: React.PointerEvent) => {
+    // Comment tool: outline the element under the pointer.
+    if (tool === 'comment' && !dragRef.current && !commentDraft) {
+      const hit = commentHit(e)
+      if (hit) {
+        const rootRect = rootRef.current!.getBoundingClientRect()
+        const r = hit.hitEl.getBoundingClientRect()
+        const next = { x: r.left - rootRect.left, y: r.top - rootRect.top, w: r.width, h: r.height }
+        setCommentHover((prev) =>
+          prev && prev.x === next.x && prev.y === next.y && prev.w === next.w && prev.h === next.h
+            ? prev
+            : next,
+        )
+      } else {
+        setCommentHover(null)
+      }
+    }
     const d = dragRef.current
     if (!d) return
     if (d.mode === 'pan') {
@@ -189,19 +279,19 @@ export function Canvas({
       let dx = pt.x - d.startX
       let dy = pt.y - d.startY
 
-      // Snap the selection bounding box to edges/centers of other shapes.
+      // Snap the selection bounding box to edges/centers of other elements.
       const movingIds = new Set(d.origins.map((o) => o.id))
       const left = Math.min(...d.origins.map((o) => o.ox)) + dx
       const top = Math.min(...d.origins.map((o) => o.oy)) + dy
       const right = Math.max(...d.origins.map((o) => o.ox + o.w)) + dx
       const bottom = Math.max(...d.origins.map((o) => o.oy + o.h)) + dy
       const threshold = 6 / view.scale
-      const others = shapes.filter((s) => !movingIds.has(s.id))
+      const others = elements.filter((el) => !movingIds.has(el.id))
 
       let bestX: { corr: number; line: number } | null = null
       let bestY: { corr: number; line: number } | null = null
-      for (const s of others) {
-        for (const c of [s.x, s.x + s.w / 2, s.x + s.w]) {
+      for (const el of others) {
+        for (const c of [el.x, el.x + el.w / 2, el.x + el.w]) {
           for (const t of [left, (left + right) / 2, right]) {
             const corr = c - t
             if (Math.abs(corr) <= threshold && (!bestX || Math.abs(corr) < Math.abs(bestX.corr))) {
@@ -209,7 +299,7 @@ export function Canvas({
             }
           }
         }
-        for (const c of [s.y, s.y + s.h / 2, s.y + s.h]) {
+        for (const c of [el.y, el.y + el.h / 2, el.y + el.h]) {
           for (const t of [top, (top + bottom) / 2, bottom]) {
             const corr = c - t
             if (Math.abs(corr) <= threshold && (!bestY || Math.abs(corr) < Math.abs(bestY.corr))) {
@@ -237,7 +327,7 @@ export function Canvas({
     } else if (d.mode === 'resize') {
       const [cx, cy] = HANDLE_CORNERS[d.corner]
       const { start } = d
-      // Anchor: opposite corner, or the shape center when alt is held.
+      // Anchor: opposite corner, or the element center when alt is held.
       const ax = e.altKey ? start.x + start.w / 2 : start.x + (1 - cx) * start.w
       const ay = e.altKey ? start.y + start.h / 2 : start.y + (1 - cy) * start.h
       const grow = e.altKey ? 2 : 1
@@ -260,46 +350,33 @@ export function Canvas({
     const d = dragRef.current
     if (d?.mode === 'draw') {
       const dragged = d.w > 4 || d.h > 4
-      const defaults: Record<ShapeType, { w: number; h: number }> = {
-        rect: { w: 160, h: 100 },
-        ellipse: { w: 160, h: 100 },
-        text: { w: 120, h: 28 },
-        frame: { w: 375, h: 812 },
-        image: { w: 320, h: 240 },
-        component: { w: 360, h: 280 },
-      }
-      const def = defaults[d.type]
-      const shape: Shape = {
-        id: shapeId(),
-        type: d.type,
+      const def = TEMPLATE_DEFAULTS[d.type]
+      const element: CanvasElement = {
+        id: elementId(),
+        name: def.name,
         x: Math.round(dragged ? d.x : d.startX - def.w / 2),
         y: Math.round(dragged ? d.y : d.startY - def.h / 2),
         w: Math.round(dragged ? d.w : def.w),
         h: Math.round(dragged ? d.h : def.h),
-        fill: d.type === 'text' ? '#1a1917' : '#ffffff',
-        ...(d.type === 'text' ? { text: 'Text', fontSize: 20 } : {}),
-        ...(d.type === 'frame' ? { text: 'Frame' } : {}),
+        code: def.code,
       }
-      onCreate(shape)
-      onSelect([shape.id])
+      onCreate(element)
+      onSelect([element.id])
       onToolChange('select')
-      if (d.type === 'text') setEditingId(shape.id)
     }
     if (d?.mode === 'marquee') {
-      // Frames must be fully enclosed to be caught; other shapes just intersect.
-      const hits = shapes
-        .filter((s) =>
-          s.type === 'frame'
-            ? s.x >= d.x && s.y >= d.y && s.x + s.w <= d.x + d.w && s.y + s.h <= d.y + d.h
-            : s.x < d.x + d.w && s.x + s.w > d.x && s.y < d.y + d.h && s.y + s.h > d.y,
-        )
-        .map((s) => s.id)
+      const hits = elements
+        .filter((el) => el.x < d.x + d.w && el.x + el.w > d.x && el.y < d.y + d.h && el.y + el.h > d.y)
+        .map((el) => el.id)
       // A marquee touching any group member catches the whole group.
       const groups = new Set(
-        shapes.filter((s) => hits.includes(s.id) && s.groupId).map((s) => s.groupId),
+        elements.filter((el) => hits.includes(el.id) && el.groupId).map((el) => el.groupId),
       )
       const expanded = [
-        ...new Set([...hits, ...shapes.filter((s) => s.groupId && groups.has(s.groupId)).map((s) => s.id)]),
+        ...new Set([
+          ...hits,
+          ...elements.filter((el) => el.groupId && groups.has(el.groupId)).map((el) => el.id),
+        ]),
       ]
       onSelect(d.additive ? [...new Set([...selectedIds, ...expanded])] : expanded)
     }
@@ -324,6 +401,14 @@ export function Canvas({
       el.removeEventListener('gesturechange', blockGesture)
     }
   }, [])
+
+  // Leaving the comment tool drops any hover outline and open draft.
+  useEffect(() => {
+    if (tool !== 'comment') {
+      setCommentHover(null)
+      setCommentDraft(null)
+    }
+  }, [tool])
 
   // Per-doc pan/zoom: reload on doc switch, persist (debounced) on change.
   useEffect(() => {
@@ -356,12 +441,12 @@ export function Canvas({
     return { w: rect?.width ?? 1200, h: rect?.height ?? 800 }
   }
 
-  const zoomToBounds = (targets: Shape[]) => {
+  const zoomToBounds = (targets: CanvasElement[]) => {
     if (targets.length === 0) return
-    const left = Math.min(...targets.map((s) => s.x))
-    const top = Math.min(...targets.map((s) => s.y))
-    const right = Math.max(...targets.map((s) => s.x + s.w))
-    const bottom = Math.max(...targets.map((s) => s.y + s.h))
+    const left = Math.min(...targets.map((el) => el.x))
+    const top = Math.min(...targets.map((el) => el.y))
+    const right = Math.max(...targets.map((el) => el.x + el.w))
+    const bottom = Math.max(...targets.map((el) => el.y + el.h))
     const { w, h } = viewportSize()
     const pad = 64
     const scale = Math.min(
@@ -392,8 +477,8 @@ export function Canvas({
           return { scale: 1, x: w / 2 - (w / 2 - v.x) * k, y: h / 2 - (h / 2 - v.y) * k }
         })
       },
-      zoomToFit: () => zoomToBounds(shapes),
-      zoomToSelection: () => zoomToBounds(shapes.filter((s) => selectedIds.includes(s.id))),
+      zoomToFit: () => zoomToBounds(elements),
+      zoomToSelection: () => zoomToBounds(elements.filter((el) => selectedIds.includes(el.id))),
     }
   }
 
@@ -413,9 +498,8 @@ export function Canvas({
     right: ((rootRect?.width ?? 2000) - view.x) / view.scale,
     bottom: ((rootRect?.height ?? 2000) - view.y) / view.scale,
   }
-  const selectedShapes = shapes.filter((s) => selectedIds.includes(s.id))
-  const single = selectedShapes.length === 1 ? selectedShapes[0] : undefined
-  const editing = shapes.find((s) => s.id === editingId)
+  const selectedElements = elements.filter((el) => selectedIds.includes(el.id))
+  const single = selectedElements.length === 1 ? selectedElements[0] : undefined
   const dot = 24 * view.scale
   const cursor =
     tool === 'hand'
@@ -442,23 +526,16 @@ export function Canvas({
       onWheel={onWheel}
       onDoubleClick={(e) => {
         if (tool !== 'select') return
-        const target = (e.target as Element).closest('[data-shape-id]')
-        const id = target?.getAttribute('data-shape-id')
-        const s = shapes.find((sh) => sh.id === id)
-        if (s?.type === 'text') setEditingId(s.id)
-        if (s?.type === 'component') {
-          setInteractiveId(s.id)
-          setEditingFrameId(null)
-          onSelect([])
-        }
-        if (s?.type === 'frame' && s.html) {
-          setEditingFrameId(s.id)
-          setInteractiveId(null)
+        const target = (e.target as Element).closest('[data-element-id]')
+        const id = target?.getAttribute('data-element-id')
+        const el = elements.find((c) => c.id === id)
+        if (el) {
+          setInteractiveId(el.id)
           onSelect([])
         }
       }}
     >
-      {/* Scene: real DOM, scaled with the view. */}
+      {/* Scene: element iframes, scaled with the view. */}
       <div
         className="absolute top-0 left-0"
         style={{
@@ -466,43 +543,13 @@ export function Canvas({
           transformOrigin: '0 0',
         }}
       >
-        {renderOrder(shapes).map((s) => (
-          <ShapeView
-            key={s.id}
-            shape={s}
-            hideText={s.id === editingId}
-            interactive={s.id === interactiveId || tool === 'interact'}
-            editable={s.id === editingFrameId}
-            onHtmlChange={(html) => onUpdate(s.id, { html })}
+        {elements.map((el) => (
+          <ElementView
+            key={el.id}
+            element={el}
+            interactive={el.id === interactiveId || tool === 'interact'}
           />
         ))}
-
-        {editing && (
-          <textarea
-            autoFocus
-            defaultValue={editing.text}
-            className="absolute resize-none bg-transparent outline-none"
-            style={{
-              left: editing.x,
-              top: editing.y,
-              width: Math.max(editing.w, 40),
-              height: Math.max(editing.h, 32),
-              font: `${editing.fontWeight ?? 400} ${editing.fontSize ?? 20}px var(--font-sans)`,
-              lineHeight: LINE_HEIGHT,
-              color: editing.fill,
-              textAlign: editing.align ?? 'left',
-            }}
-            onBlur={(e) => {
-              onUpdate(editing.id, { text: e.target.value })
-              setEditingId(null)
-            }}
-            onKeyDown={(e) => {
-              e.stopPropagation()
-              if (e.key === 'Escape') e.currentTarget.blur()
-            }}
-            onPointerDown={(e) => e.stopPropagation()}
-          />
-        )}
       </div>
 
       {/* Overlay chrome: selection, guides, marquee, handles. */}
@@ -521,19 +568,18 @@ export function Canvas({
             />
           )}
 
-          {!editingId &&
-            selectedShapes.map((s) => (
-              <rect
-                key={s.id}
-                x={s.x}
-                y={s.y}
-                width={s.w}
-                height={s.h}
-                fill="none"
-                stroke="var(--cx-accent)"
-                strokeWidth={1.5 / view.scale}
-              />
-            ))}
+          {selectedElements.map((el) => (
+            <rect
+              key={el.id}
+              x={el.x}
+              y={el.y}
+              width={el.w}
+              height={el.h}
+              fill="none"
+              stroke="var(--cx-accent)"
+              strokeWidth={1.5 / view.scale}
+            />
+          ))}
 
           {guides.v.map((x) => (
             <line
@@ -558,7 +604,7 @@ export function Canvas({
             />
           ))}
 
-          {single && !editingId && (
+          {single && (
             <g>
               {HANDLE_CORNERS.map(([cx, cy], i) => (
                 <rect
@@ -590,131 +636,131 @@ export function Canvas({
           )}
         </g>
       </svg>
+
+      {/* Comment tool: hovered element outline (viewport space). */}
+      {tool === 'comment' && commentHover && !commentDraft && (
+        <div
+          className="pointer-events-none absolute border border-cx-accent bg-cx-accent/5"
+          style={{
+            left: commentHover.x,
+            top: commentHover.y,
+            width: commentHover.w,
+            height: commentHover.h,
+            borderRadius: 2,
+          }}
+        />
+      )}
+
+      {/* Comment draft popover, anchored at the click point. */}
+      {commentDraft && (
+        <div
+          className="absolute z-10 w-72 rounded-xl border bg-card p-2 shadow-md"
+          style={{
+            left: Math.min(commentDraft.x, (rootRect?.width ?? 800) - 300),
+            top: Math.min(commentDraft.y, (rootRect?.height ?? 600) - 160),
+          }}
+          onPointerDown={(e) => e.stopPropagation()}
+          onDoubleClick={(e) => e.stopPropagation()}
+          onWheel={(e) => e.stopPropagation()}
+        >
+          <div className="mb-1.5 truncate px-1 font-mono text-[11px] text-muted-foreground">
+            {`${commentDraft.target.element.name} · ${commentDraft.target.px}%, ${commentDraft.target.py}%`}
+          </div>
+          <textarea
+            ref={commentInputRef}
+            autoFocus
+            rows={3}
+            placeholder="Tell the agent what to change here…"
+            className="w-full resize-none rounded-md border bg-background p-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            onKeyDown={(e) => {
+              e.stopPropagation()
+              if (e.key === 'Escape') setCommentDraft(null)
+              if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault()
+                submitComment()
+              }
+            }}
+          />
+          <div className="mt-1.5 flex justify-end gap-1.5">
+            <button
+              type="button"
+              className="rounded-md px-2.5 py-1 text-xs text-muted-foreground hover:bg-secondary hover:text-foreground"
+              onClick={() => setCommentDraft(null)}
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              className="rounded-md bg-cx-accent px-2.5 py-1 text-xs font-medium text-white hover:opacity-90"
+              onClick={submitComment}
+            >
+              Send to agent
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
 
-const ShapeView = memo(function ShapeView({
-  shape: s,
-  hideText,
+const ElementView = memo(function ElementView({
+  element: el,
   interactive,
-  editable,
-  onHtmlChange,
 }: {
-  shape: Shape
-  hideText?: boolean
+  element: CanvasElement
   interactive?: boolean
-  editable?: boolean
-  onHtmlChange?: (html: string) => void
 }) {
-  const box: React.CSSProperties = {
-    position: 'absolute',
-    left: s.x,
-    top: s.y,
-    width: s.w,
-    height: s.h,
-    opacity: s.opacity,
+  const [error, setError] = useState<string | null>(null)
+  const errorTimer = useRef<number | null>(null)
+
+  // Compile failures mid-stream are expected (partial code); only surface an
+  // error that survives for a moment. Success clears it immediately.
+  const onFrameError = (message: string | null) => {
+    if (errorTimer.current) {
+      window.clearTimeout(errorTimer.current)
+      errorTimer.current = null
+    }
+    if (message === null) setError(null)
+    else errorTimer.current = window.setTimeout(() => setError(message), 600)
   }
 
-  if (s.type === 'image') {
-    return (
-      <img
-        data-shape-id={s.id}
-        src={s.src}
-        alt={s.text ?? ''}
-        draggable={false}
-        // maxWidth: Tailwind preflight sets img{max-width:100%}, and the scene
-        // container has zero intrinsic width — without this the image collapses to 0.
-        style={{ ...box, objectFit: 'fill', maxWidth: 'none' }}
-      />
-    )
-  }
+  useEffect(
+    () => () => {
+      if (errorTimer.current) window.clearTimeout(errorTimer.current)
+    },
+    [],
+  )
 
-  if (s.type === 'component') {
-    return (
-      <div style={box}>
-        <div
-          className="pointer-events-none absolute font-mono"
-          style={{
-            top: -20,
-            left: 0,
-            fontSize: 12,
-            whiteSpace: 'nowrap',
-            color: interactive ? 'var(--cx-accent)' : 'var(--color-muted-foreground)',
-          }}
-        >
-          {`⚛ ${s.text ?? 'Component'}${interactive ? ' · interacting' : ' · double-click to interact'}`}
-        </div>
-        <div className="h-full w-full overflow-hidden rounded-md shadow-sm ring-1 ring-black/10">
-          <ComponentFrame shapeId={s.id} code={s.code ?? ''} interactive={!!interactive} />
-        </div>
-        {/* transparent hit layer so select/move/resize work; removed in interact mode */}
-        {!interactive && <div data-shape-id={s.id} className="absolute inset-0" />}
-      </div>
-    )
-  }
-
-  if (s.type === 'text') {
-    return (
+  return (
+    <div style={{ position: 'absolute', left: el.x, top: el.y, width: el.w, height: el.h }}>
       <div
-        data-shape-id={s.id}
+        className="pointer-events-none absolute flex items-center gap-1.5 font-mono"
         style={{
-          ...box,
-          font: `${s.fontWeight ?? 400} ${s.fontSize ?? 20}px var(--font-sans)`,
-          lineHeight: LINE_HEIGHT,
-          color: hideText ? 'transparent' : s.fill,
-          textAlign: s.align ?? 'left',
-          whiteSpace: 'pre-wrap',
-          overflowWrap: 'break-word',
+          top: -20,
+          left: 0,
+          fontSize: 12,
+          whiteSpace: 'nowrap',
+          color: interactive ? 'var(--cx-accent)' : 'var(--color-muted-foreground)',
         }}
       >
-        {s.text}
+        {el.name}
+        {interactive ? ' · interacting' : ''}
+        {error && (
+          <span title={error} className="text-[#e8442e]">
+            ● error
+          </span>
+        )}
       </div>
-    )
-  }
-
-  if (s.type === 'frame') {
-    return (
-      <div data-shape-id={s.id} style={box}>
-        <div
-          className="pointer-events-none absolute font-mono"
-          style={{
-            top: -20,
-            left: 0,
-            fontSize: 12,
-            whiteSpace: 'nowrap',
-            color: 'var(--color-muted-foreground)',
-          }}
-        >
-          {`${s.text ?? 'Frame'}${s.html ? editable ? ' · editing (click outside to exit)' : ' · double-click to edit HTML' : ''}`}
-        </div>
-        <div
-          className="h-full w-full"
-          style={{
-            backgroundColor: s.fill,
-            border: `${s.strokeWidth ?? 1}px solid ${s.stroke ?? 'var(--cx-dot)'}`,
-            borderRadius: s.radius ?? 0,
-            overflow: s.html ? 'hidden' : undefined,
-          }}
-        >
-          {s.html && <FrameBody html={s.html} editable={editable} onChange={onHtmlChange} />}
-        </div>
+      <div className="h-full w-full overflow-hidden">
+        <ElementFrame
+          elementId={el.id}
+          code={el.code}
+          interactive={!!interactive}
+          onError={onFrameError}
+        />
       </div>
-    )
-  }
-
-  // rect / ellipse
-  return (
-    <div
-      data-shape-id={s.id}
-      style={{
-        ...box,
-        backgroundColor: s.fill,
-        border: s.stroke
-          ? `${s.strokeWidth ?? 1}px solid ${s.stroke}`
-          : '1px solid rgba(0,0,0,0.12)',
-        borderRadius: s.type === 'ellipse' ? '50%' : (s.radius ?? 0),
-      }}
-    />
+      {/* transparent hit layer so select/move/resize work; removed in interact mode */}
+      {!interactive && <div data-element-id={el.id} className="absolute inset-0" />}
+    </div>
   )
 })

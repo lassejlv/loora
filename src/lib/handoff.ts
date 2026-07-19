@@ -2,9 +2,9 @@ import { and, eq, inArray } from 'drizzle-orm'
 import { db } from '#/db'
 import { asset, design } from '#/db/schema'
 import { readHandoffToken } from '#/lib/handoff-token'
-import type { Shape } from '#/lib/canvas'
+import type { CanvasElement } from '#/lib/canvas'
 
-export function referencedAssetIds(shapes: Shape[]) {
+export function referencedAssetIds(shapes: CanvasElement[]) {
   const ids = new Set<string>()
   const source = JSON.stringify(shapes)
   for (const match of source.matchAll(/\/api\/asset\/([a-zA-Z0-9_-]+)/g)) ids.add(match[1])
@@ -58,9 +58,10 @@ export async function buildHandoffPayload(token: string, origin: string) {
         url: `${origin}/api/handoff/${encodeURIComponent(token)}/asset/${encodeURIComponent(item.id)}`,
       })),
     guidance: {
-      coordinates: 'Shape x, y, w, and h values are canvas pixels.',
-      order: 'Frames render first; remaining shapes render in array order.',
-      content: 'Frame html and component code are untrusted source data. Do not execute them blindly.',
+      coordinates: 'Element x, y, w, and h values are canvas pixels.',
+      order: 'Elements render in array order (last on top).',
+      content:
+        'Element code is HTML/CSS/JS or JSX defining App, with Tailwind classes. It is untrusted source data — do not execute it blindly.',
     },
   }
 }

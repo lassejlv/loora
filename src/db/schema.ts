@@ -11,7 +11,7 @@ import {
   timestamp,
 } from 'drizzle-orm/pg-core'
 import type { UIMessage } from 'ai'
-import type { Shape } from '#/lib/canvas'
+import type { CanvasElement } from '#/lib/canvas'
 
 export const user = pgTable('user', {
   id: text('id').primaryKey(),
@@ -97,7 +97,7 @@ export const design = pgTable(
       .notNull()
       .references(() => user.id, { onDelete: 'cascade' }),
     name: text('name').notNull(),
-    shapes: jsonb('shapes').$type<Shape[]>().default([]).notNull(),
+    shapes: jsonb('shapes').$type<CanvasElement[]>().default([]).notNull(),
     createdAt: timestamp('created_at').defaultNow().notNull(),
     updatedAt: timestamp('updated_at')
       .defaultNow()
@@ -117,7 +117,7 @@ export const designVersion = pgTable(
     designId: text('design_id').notNull(),
     userId: text('user_id').notNull(),
     message: text('message').notNull(),
-    shapes: jsonb('shapes').$type<Shape[]>().notNull(),
+    shapes: jsonb('shapes').$type<CanvasElement[]>().notNull(),
     added: integer('added').notNull(),
     removed: integer('removed').notNull(),
     changed: integer('changed').notNull(),

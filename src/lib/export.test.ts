@@ -1,45 +1,46 @@
 import { describe, expect, it } from 'bun:test'
 import { buildDesignJson, buildSafeHtml, safeExportName } from './export'
-import type { Shape } from './canvas'
+import type { CanvasElement } from './canvas'
 
-const shapes: Shape[] = [
+const elements: CanvasElement[] = [
   {
-    id: 'frame-1',
-    type: 'frame',
+    id: 'section-1',
+    name: 'Hero',
     x: 10,
     y: 20,
     w: 320,
     h: 200,
-    fill: '#ffffff',
-    html: '<h1 onclick="alert(1)">Hello</h1><script>alert(1)</script>',
+    code: '<h1 onclick="alert(1)">Hello</h1><script>alert(1)</script>',
   },
   {
-    id: 'component-1',
-    type: 'component',
+    id: 'widget-1',
+    name: 'Counter',
     x: 350,
     y: 20,
     w: 200,
     h: 100,
-    fill: '#ffffff',
-    text: 'Counter',
     code: 'function App() { return <button>Count</button> }',
   },
 ]
 
 describe('safe design exports', () => {
-  it('keeps complete source in inert JSON while sanitizing frame HTML', () => {
-    const exported = JSON.parse(buildDesignJson('design-1', 'Landing', shapes))
+  it('keeps complete element source in the JSON export', () => {
+    const exported = JSON.parse(buildDesignJson('design-1', 'Landing', elements))
     expect(exported.schema).toBe('loora.design')
-    expect(exported.design.shapes[0].html).toBe('<h1>Hello</h1>')
-    expect(exported.design.shapes[1].code).toContain('function App()')
+    expect(exported.version).toBe(2)
+    expect(exported.design.elements[0].code).toContain('<h1')
+    expect(exported.design.elements[1].code).toContain('function App()')
   })
 
   it('builds a sandboxed static HTML document without executable source', () => {
-    const exported = buildSafeHtml('Landing', shapes)
+    const exported = buildSafeHtml('Landing', elements)
     expect(exported).toContain('Content-Security-Policy')
+    // HTML elements render as sandboxed, sanitized iframes
     expect(exported).toContain('sandbox=""')
-    expect(exported).not.toContain('<script>')
     expect(exported).not.toContain('onclick=')
+    expect(exported).not.toContain('alert(1)')
+    // JSX elements need a runtime; the static export shows a placeholder
+    expect(exported).toContain('code included in JSON export')
     expect(exported).not.toContain('function App()')
   })
 

@@ -1,51 +1,25 @@
 import { useState } from 'react'
-import {
-  CircleIcon,
-  CodeIcon,
-  FrameIcon,
-  ImageIcon,
-  SquareIcon,
-  TypeIcon,
-  XIcon,
-} from 'lucide-react'
-import type { Shape } from '#/lib/canvas'
-import { renderOrder } from '#/lib/canvas'
+import { CodeIcon, XIcon } from 'lucide-react'
+import type { CanvasElement } from '#/lib/canvas'
 import { Button } from '#/components/ui/button'
 import { DrawerClose } from '#/components/ui/drawer'
 import { cn } from '#/lib/utils'
 
-const TYPE_ICONS = {
-  frame: FrameIcon,
-  rect: SquareIcon,
-  ellipse: CircleIcon,
-  text: TypeIcon,
-  image: ImageIcon,
-  component: CodeIcon,
-} as const
-
-function layerLabel(s: Shape) {
-  if (s.type === 'frame') return s.text ?? 'Frame'
-  if (s.type === 'text') return s.text || 'Text'
-  if (s.type === 'image') return s.text || 'Image'
-  if (s.type === 'component') return s.text || 'Component'
-  return s.type === 'rect' ? 'Rectangle' : 'Ellipse'
-}
-
 export function LayersPanel({
-  shapes,
+  elements,
   selectedIds,
   onSelect,
   onReorderList,
-  onRenameFrame,
+  onRename,
 }: {
-  shapes: Shape[]
+  elements: CanvasElement[]
   selectedIds: string[]
   onSelect: (ids: string[]) => void
   onReorderList: (orderedIds: string[]) => void
-  onRenameFrame: (id: string, name: string) => void
+  onRename: (id: string, name: string) => void
 }) {
   // top-most layer first
-  const display = [...renderOrder(shapes)].reverse()
+  const display = [...elements].reverse()
   const [dragId, setDragId] = useState<string | null>(null)
   const [overId, setOverId] = useState<string | null>(null)
   const [renamingId, setRenamingId] = useState<string | null>(null)
@@ -75,7 +49,6 @@ export function LayersPanel({
           <p className="px-2 py-3 text-xs text-muted-foreground">Nothing on the canvas yet.</p>
         )}
         {display.map((s) => {
-          const Icon = TYPE_ICONS[s.type]
           const isSelected = selectedIds.includes(s.id)
           return (
             <div
@@ -100,24 +73,21 @@ export function LayersPanel({
                   onSelect([s.id])
                 }
               }}
-              onDoubleClick={() => {
-                if (s.type === 'frame') setRenamingId(s.id)
-              }}
+              onDoubleClick={() => setRenamingId(s.id)}
               className={cn(
                 'flex cursor-default items-center gap-2 rounded-md px-2 py-1.5 text-xs',
                 isSelected ? 'bg-cx-accent/10 text-cx-accent' : 'hover:bg-secondary',
                 overId === s.id && dragId !== s.id && 'border-t border-cx-accent',
-                s.type === 'frame' && 'font-medium',
               )}
             >
-              <Icon className="size-3.5 shrink-0 opacity-70" />
+              <CodeIcon className="size-3.5 shrink-0 opacity-70" />
               {renamingId === s.id ? (
                 <input
                   autoFocus
-                  defaultValue={s.text ?? 'Frame'}
+                  defaultValue={s.name}
                   className="w-full bg-transparent text-xs outline-none"
                   onBlur={(e) => {
-                    onRenameFrame(s.id, e.target.value.trim() || 'Frame')
+                    onRename(s.id, e.target.value.trim() || 'Element')
                     setRenamingId(null)
                   }}
                   onKeyDown={(e) => {
@@ -127,7 +97,7 @@ export function LayersPanel({
                   onClick={(e) => e.stopPropagation()}
                 />
               ) : (
-                <span className="truncate">{layerLabel(s)}</span>
+                <span className="truncate">{s.name || 'Element'}</span>
               )}
             </div>
           )

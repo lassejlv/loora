@@ -1,4 +1,5 @@
-import type { Shape } from './canvas'
+import type { CanvasElement } from './canvas'
+import { onlyCodeElements } from './canvas'
 
 export interface DocMeta {
   id: string
@@ -22,15 +23,12 @@ function readJson<T>(key: string, fallback: T): T {
   }
 }
 
-// First run migrates the single-canvas storage into document #1.
 export function loadDocs(): { docs: DocMeta[]; activeId: string } {
   let docs = readJson<DocMeta[]>(INDEX_KEY, [])
   if (docs.length === 0) {
-    const legacy =
-      localStorage.getItem('loora:shapes') ?? localStorage.getItem('canvasx:shapes') ?? '[]'
     const first: DocMeta = { id: docId(), name: 'Untitled' }
     docs = [first]
-    localStorage.setItem(docKey(first.id), legacy)
+    localStorage.setItem(docKey(first.id), '[]')
     localStorage.setItem(INDEX_KEY, JSON.stringify(docs))
     localStorage.setItem(ACTIVE_KEY, first.id)
   }
@@ -39,12 +37,13 @@ export function loadDocs(): { docs: DocMeta[]; activeId: string } {
   return { docs, activeId }
 }
 
-export function loadShapes(id: string): Shape[] {
-  return readJson<Shape[]>(docKey(id), [])
+export function loadElements(id: string): CanvasElement[] {
+  // Pre-code-element records (the old typed-shape format) are dropped on load.
+  return onlyCodeElements(readJson<unknown>(docKey(id), []))
 }
 
-export function saveShapes(id: string, shapes: Shape[]) {
-  localStorage.setItem(docKey(id), JSON.stringify(shapes))
+export function saveElements(id: string, elements: CanvasElement[]) {
+  localStorage.setItem(docKey(id), JSON.stringify(elements))
 }
 
 export function saveDocs(docs: DocMeta[], activeId: string) {

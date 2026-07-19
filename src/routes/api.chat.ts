@@ -3,8 +3,8 @@ import { createFileRoute } from '@tanstack/react-router'
 import { createOpenAICompatible } from '@ai-sdk/openai-compatible'
 import { convertToModelMessages, stepCountIs, streamText, type UIMessage } from 'ai'
 import { z } from 'zod'
-import type { Shape } from '#/lib/canvas'
-import { DEFAULT_MODEL, type ModelKey } from '#/lib/models'
+import type { CanvasElement } from '#/lib/canvas'
+import { getModel, getProvider, MODELS } from '#/lib/models'
 import {
   modelSupportsImageInput,
   withoutImageParts,
@@ -16,71 +16,36 @@ import { desc, eq } from 'drizzle-orm'
 import { db } from '#/db'
 import { asset } from '#/db/schema'
 
-const shapePatch = {
+const elementFields = {
+  name: z.string().max(200).describe('short layer label shown to the user, e.g. "Hero section"'),
   x: z.number().describe('left edge in canvas units'),
   y: z.number().describe('top edge in canvas units'),
   w: z.number().min(1).describe('width'),
   h: z.number().min(1).describe('height'),
-  fill: z.string().describe('CSS color, e.g. #2440e6'),
-  stroke: z.string().describe('border color; omit for no border'),
-  strokeWidth: z.number().min(0).describe('border width in px, default 1'),
-  radius: z.number().min(0).describe('corner radius in px (rect and frame only)'),
-  opacity: z.number().min(0).max(1).describe('0-1, default 1'),
-  text: z.string().describe('text content, or the frame name for frames'),
-  fontSize: z.number().describe('font size in px (text shapes only)'),
-  fontWeight: z
-    .number()
-    .describe('font weight for text shapes: 400, 500, 600, or 700 (default 400)'),
-  align: z.enum(['left', 'center', 'right']).describe('text alignment within the box (text shapes only)'),
-  html: z
+  // Keep code as the LAST field so it streams last and the client can place
+  // the element (from the already-parsed geometry) while code is generating.
+  code: z
     .string()
     .max(200_000)
     .describe(
-      'frame shapes only: full HTML body rendered inside the frame. Tailwind v3 classes work; a <style> block and inline styles also work. Scripts are stripped.',
+      'The element content: either plain HTML (Tailwind classes, <style> blocks, inline <script> all work), or JSX defining function App (React hooks like useState work; imports/exports are stripped at runtime). Renders in a sandboxed document sized exactly w×h.',
     ),
 }
 
-const newShapeSchema = z.object({
-  type: z.enum(['rect', 'ellipse', 'text', 'frame', 'image']),
-  x: shapePatch.x,
-  y: shapePatch.y,
-  w: shapePatch.w,
-  h: shapePatch.h,
-  fill: shapePatch.fill,
-  stroke: shapePatch.stroke.optional(),
-  strokeWidth: shapePatch.strokeWidth.optional(),
-  radius: shapePatch.radius.optional(),
-  opacity: shapePatch.opacity.optional(),
-  text: shapePatch.text.optional(),
-  fontSize: shapePatch.fontSize.optional(),
-  fontWeight: shapePatch.fontWeight.optional(),
-  align: shapePatch.align.optional(),
-  html: shapePatch.html.optional(),
-  src: z
-    .string()
-    .optional()
-    .describe('image shapes only: the asset URL, e.g. /api/asset/{id} from the Assets list'),
+const newElementSchema = z.object({
+  name: elementFields.name,
+  x: elementFields.x,
+  y: elementFields.y,
+  w: elementFields.w,
+  h: elementFields.h,
+  code: elementFields.code,
 })
-
-const componentCodeSchema = z
-  .string()
-  .max(100_000)
-  .describe(
-    'Self-contained JSX defining App (function App or export default function App). Normal React idioms are fine: import { useState } from "react" and export default are stripped at runtime. Hooks and onClick/onChange work; prefer those over <form> submit. Tailwind utilities work. No external npm libraries.',
-  )
-
-// Server-only mapping; never send these ids to the client.
-const WAFER_MODEL_IDS: Record<ModelKey, string> = {
-  mini: 'MiniMax-M3',
-  max: 'GLM-5.2',
-  'max-fast': 'glm5.2-fast',
-}
 
 // Errors from the provider can echo the real model id; scrub before it reaches the client.
 function sanitizeModelNames(text: string): string {
   let out = text
-  for (const [key, id] of Object.entries(WAFER_MODEL_IDS)) {
-    out = out.split(id).join(key)
+  for (const model of MODELS) {
+    out = out.split(model.modelId).join(model.label)
   }
   return out
 }
@@ -109,27 +74,32 @@ export const Route = createFileRoute('/api/chat')({
 
         const { messages, shapes, selectedIds, model: modelKey, forceCanvasAction } = (await request.json()) as {
           messages: UIMessage[]
-          shapes: Shape[]
+          shapes: CanvasElement[]
           selectedIds?: string[]
           model?: string
           forceCanvasAction?: boolean
         }
 
-        const apiKey = process.env.WAFER_API_KEY
+        const modelConfig = getModel(modelKey ?? '')
+        const providerConfig = getProvider(modelConfig.provider)
+        const apiKey = process.env[providerConfig.apiKeyEnv]
         if (!apiKey) {
           return Response.json(
-            { error: 'Wafer is not configured on the server.' },
+            {
+              error: `${providerConfig.label} is not configured. Set ${providerConfig.apiKeyEnv} on the server.`,
+            },
             { status: 503 },
           )
         }
-        const wafer = createOpenAICompatible({
-          name: 'wafer',
-          baseURL: 'https://pass.wafer.ai/v1',
+        const provider = createOpenAICompatible({
+          name: modelConfig.provider,
+          baseURL: providerConfig.baseURL,
           apiKey,
+          headers: providerConfig.headers,
+          includeUsage: providerConfig.includeUsage,
         })
-        const key: ModelKey =
-          modelKey && modelKey in WAFER_MODEL_IDS ? (modelKey as ModelKey) : DEFAULT_MODEL
-        const model = wafer(WAFER_MODEL_IDS[key])
+        const key = modelConfig.id
+        const model = provider(modelConfig.modelId)
         const imageInputsEnabled = modelSupportsImageInput(key)
 
         const limitError = await checkLimits(session.user.id)
@@ -151,44 +121,38 @@ export const Route = createFileRoute('/api/chat')({
 
         const tools = {
             // All tools execute on the client against canvas state.
-            createShape: {
-              description: 'Add a single shape to the canvas. Returns the created shape with its id.',
-              inputSchema: newShapeSchema,
-            },
-            createShapes: {
+            createElement: {
               description:
-                'Add many shapes to the canvas in one call. Always prefer this over repeated createShape when adding more than one shape. Prefer this for marketing sites, landing pages, and wireframes (frames + rects + text). Returns the created shapes with their ids.',
-              inputSchema: z.object({ shapes: z.array(newShapeSchema).min(1).max(100) }),
+                'Add one element to the canvas. An element is a positioned box of code — a heading, an image, a card, a full page section, or an interactive React widget. Returns the created element with its id.',
+              inputSchema: newElementSchema,
             },
-            updateShape: {
-              description: 'Update properties of an existing shape by id.',
+            createElements: {
+              description:
+                'Add several elements in one call. Prefer this over repeated createElement when adding more than one element. Returns the created elements with their ids.',
+              inputSchema: z.object({ elements: z.array(newElementSchema).min(1).max(40) }),
+            },
+            updateElement: {
+              description:
+                'Update an existing element by id. When changing code, send the complete new code, not a diff.',
               inputSchema: z.object({
                 id: z.string(),
-                x: shapePatch.x.optional(),
-                y: shapePatch.y.optional(),
-                w: shapePatch.w.optional(),
-                h: shapePatch.h.optional(),
-                fill: shapePatch.fill.optional(),
-                stroke: shapePatch.stroke.optional(),
-                strokeWidth: shapePatch.strokeWidth.optional(),
-                radius: shapePatch.radius.optional(),
-                opacity: shapePatch.opacity.optional(),
-                text: shapePatch.text.optional(),
-                fontSize: shapePatch.fontSize.optional(),
-                fontWeight: shapePatch.fontWeight.optional(),
-                align: shapePatch.align.optional(),
-                html: shapePatch.html.optional(),
+                name: elementFields.name.optional(),
+                x: elementFields.x.optional(),
+                y: elementFields.y.optional(),
+                w: elementFields.w.optional(),
+                h: elementFields.h.optional(),
+                code: elementFields.code.optional(),
               }),
             },
-            deleteShape: {
+            deleteElement: {
               description:
-                'Remove a shape from the canvas by id. The user is asked to confirm each deletion and may decline.',
+                'Remove an element from the canvas by id. The user is asked to confirm each deletion and may decline.',
               inputSchema: z.object({ id: z.string() }),
             },
             viewCanvas: {
               description: imageInputsEnabled
                 ? 'Render the current canvas to an image and look at it. Call this after finishing edits for a design task to verify the result, then fix any problems you see.'
-                : 'Canvas image viewing is temporarily unavailable. Use the current canvas shapes JSON instead.',
+                : 'Canvas image viewing is temporarily unavailable. Use the current canvas elements JSON instead.',
               // Non-empty schema: some providers reject function declarations with zero properties.
               inputSchema: z.object({
                 focus: z.string().optional().describe('what you are checking, e.g. "spacing of the header"'),
@@ -197,7 +161,7 @@ export const Route = createFileRoute('/api/chat')({
                 if (!imageInputsEnabled) {
                   return {
                     type: 'text' as const,
-                    value: 'Canvas image viewing is temporarily disabled. Use the current canvas shapes JSON.',
+                    value: 'Canvas image viewing is temporarily disabled. Use the current canvas elements JSON.',
                   }
                 }
                 if (!output?.image) {
@@ -214,31 +178,6 @@ export const Route = createFileRoute('/api/chat')({
                   ],
                 }
               },
-            },
-            createComponent: {
-              description:
-                'Add a live interactive React component (forms, toggles, charts, mini apps). Only when the user explicitly wants working interactivity — not for ordinary websites, landing pages, or mockups (use createShapes for those). Code must define App; imports/exports are OK (stripped at runtime). Returns the created shape id.',
-              inputSchema: z.object({
-                name: z.string().describe('short human label, e.g. "Signup form"'),
-                code: componentCodeSchema,
-                x: shapePatch.x,
-                y: shapePatch.y,
-                w: shapePatch.w,
-                h: shapePatch.h,
-              }),
-            },
-            updateComponent: {
-              description:
-                'Replace the code (and optionally name or bounds) of an existing component shape by id. Send the complete new code, not a diff.',
-              inputSchema: z.object({
-                id: z.string(),
-                code: componentCodeSchema.optional(),
-                name: z.string().optional(),
-                x: shapePatch.x.optional(),
-                y: shapePatch.y.optional(),
-                w: shapePatch.w.optional(),
-                h: shapePatch.h.optional(),
-              }),
             },
             askQuestion: {
               description:
@@ -259,23 +198,21 @@ export const Route = createFileRoute('/api/chat')({
             forceCanvasAction
               ? 'Your previous response promised a canvas change but stopped without making one. Call the appropriate canvas mutation tool now; do not reply with another promise.'
               : '',
-            'Never delete or overwrite existing shapes unless the user asked for exactly that. When a request is ambiguous, use the askQuestion tool instead of guessing.',
+            'Never delete or overwrite existing elements unless the user asked for exactly that. When a request is ambiguous, use the askQuestion tool instead of guessing.',
             'Make the minimal set of changes that fulfills the request - no extra decoration, no unrequested layouts.',
             DESIGN_SKILL_PROMPT,
-            'You manipulate the canvas only through tools. Shapes are rect, ellipse, text, or frame.',
-            'Frames are artboards: white containers that render behind other shapes. Design inside a frame when one exists (or create one for a screen/page design, e.g. 375x812 mobile or 1440x900 desktop). The frame name lives in its "text" field.',
-            'Frames can carry a full HTML body via the "html" field: real HTML rendered live inside the frame. THIS IS THE PREFERRED WAY to build websites, landing pages, app screens, and rich mockups — one frame with html beats dozens of positioned shapes. Tailwind v3 utility classes work; add a <style> block or inline styles for anything beyond utilities. Scripts are stripped. The body renders in an isolated scope sized to the frame, so design mobile frames at mobile widths and desktop frames at desktop widths. Images: only asset URLs from the Assets list, as <img src="/api/asset/...">. Update a design by sending the complete new html via updateShape.',
-            'Shapes support stroke (border color + strokeWidth), radius (rounded corners on rect/frame), and opacity (0-1). Use them: a rect with radius 8 and a subtle stroke reads as a button or card.',
+            'You manipulate the canvas only through tools. Every canvas element is a positioned box of code: { name, x, y, w, h, code }.',
+            'Element code is either plain HTML or JSX. Plain HTML is the default for anything static: headings, paragraphs, images, cards, full page sections. Tailwind v3 utility classes work everywhere; add a <style> block or inline styles for anything beyond utilities; inline <script> tags run too. Write JSX defining function App only when the user wants working interactivity (forms, toggles, counters, mini apps): hooks like useState/useEffect work, imports/exports are stripped at runtime, prefer onClick/onChange over <form> submit, no external npm libraries.',
+            'Each element renders in its own isolated sandboxed document sized exactly w×h with a transparent background — give sections an explicit background class (e.g. bg-white) and design at real widths (375 wide for mobile screens, 1280-1440 for desktop pages).',
+            'Granularity: one cohesive thing per element. A landing page is usually ONE element (a full-page section stack) — or a few section elements stacked vertically when the user wants to rearrange sections. A logo, a headline, or a screenshot placed beside it are their own elements. Do not shred a design into dozens of absolutely positioned fragments.',
+            'Always emit name, x, y, w, h before code (the canvas shows a live preview while code streams). Update an element by sending its complete new code via updateElement — never a diff or fragment.',
             imageInputsEnabled
               ? 'The user message may include a PNG snapshot of the current canvas. Use it to judge layout, overlap, and balance before and after your edits.'
-              : 'Image input is temporarily disabled. Rely on the current canvas shapes JSON and do not call viewCanvas.',
-            'Coordinates: x/y is the top-left corner, y grows downward. The visible canvas is roughly 1200x800 around the origin.',
+              : 'Image input is temporarily disabled. Rely on the current canvas elements JSON and do not call viewCanvas.',
+            'Coordinates: x/y is the top-left corner, y grows downward. The visible canvas is roughly 1200x800 around the origin. Leave 40-80px gaps between separate elements; align edges deliberately.',
             'Palette to prefer: #1a1917 ink, #ffffff white, #2440e6 ultramarine, #e8442e vermilion, #f5c518 yellow, #23a25d green. Other CSS colors are allowed when asked.',
-            'Text shapes render at fontSize (default 20) with fontWeight (400-700) and align (left/center/right), in the fill color. Text wraps at the box width w and supports newlines - size the box for the content. Use weight and size for hierarchy: e.g. 32/700 titles, 14/400 body.',
-            'When laying out multiple shapes, space them deliberately - aligned edges, consistent gaps. Use createShapes (batch) to add them all in one call.',
-            'For websites, landing pages, and visual mockups: create a frame with an "html" body. Use loose shapes (rect/ellipse/text) only for freeform diagrams, wireframe scribbles, or annotations around frames. Do not use createComponent unless the user explicitly asks for a working interactive widget.',
-            'Interactive components: createComponent adds a live React component in a sandboxed iframe. Self-contained JSX defining App (function App or export default function App). Normal React idioms work: import { useState } from "react" and export default are stripped at runtime; hooks and onClick/onChange work; prefer those over <form> submit. Tailwind utilities work inside components; no external npm libraries. Keep code under ~200 lines. Users double-click the component on the canvas to try interactions. Components render live in canvas snapshots, so viewCanvas verifies them too.',
-            'Image shapes place uploaded assets: type "image" with src set to an asset URL from the Assets list below. Never invent asset URLs; if no fitting asset exists, say so or use styled shapes instead.',
+            'Images: use only asset URLs from the Assets list below, as <img src="/api/asset/...">. Never invent asset URLs; if no fitting asset exists, say so or design with styled markup instead.',
+            'Interactive elements render live: users press I or double-click an element to interact with it. Elements render live in canvas snapshots, so viewCanvas verifies them too.',
             '',
             'Assets available (JSON):',
             JSON.stringify(assets.map((a) => ({ name: a.name, mediaType: a.mediaType, src: `/api/asset/${a.id}` }))),
@@ -284,11 +221,12 @@ export const Route = createFileRoute('/api/chat')({
               : 'Canvas image verification is temporarily disabled. Do not call viewCanvas.',
             'Keep replies to one or two short sentences; the user sees the canvas change live.',
             '',
-            'Current canvas shapes (JSON):',
+            'Current canvas elements (JSON):',
             JSON.stringify(shapes ?? []),
             selectedIds?.length
-              ? `The user currently has these shape ids selected: ${JSON.stringify(selectedIds)}. When the request says "this", "these", or "the selected", it refers to those shapes.`
+              ? `The user currently has these element ids selected: ${JSON.stringify(selectedIds)}. When the request says "this", "these", or "the selected", it refers to those elements.`
               : '',
+            'Comment pins: a user message may end with a "Canvas comment pinned to:" block. It names the target element id plus a pin position as percentages inside that element\'s box. Locate what sits at that spot in the element\'s code (and in the canvas snapshot), change only what the comment asks, and send the complete updated code via updateElement. Do not touch other elements.',
           ].join('\n'),
           messages: await convertToModelMessages(
             messagesForModel(messages, imageInputsEnabled),

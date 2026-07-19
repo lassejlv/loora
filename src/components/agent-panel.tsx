@@ -6,7 +6,6 @@ import { nanoid } from 'nanoid'
 import {
   BookOpenIcon,
   CheckIcon,
-  CodeIcon,
   ChevronDownIcon,
   EyeIcon,
   ChevronRightIcon,
@@ -31,17 +30,15 @@ import {
   PromptInputSubmit,
   PromptInputTextarea,
 } from '#/components/ai-elements/prompt-input'
-import type { CanvasActions } from '#/lib/canvas'
-import type { Shape } from '#/lib/canvas'
+import type { CanvasElement, ElementActions } from '#/lib/canvas'
 import { snapshotCanvas } from '#/lib/snapshot'
 import { commitIfChanged } from '#/lib/history'
 import { Sidebar } from '#/components/ui/sidebar'
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '#/components/ui/collapsible'
 import { interruptIn, interruptTransition } from '#/lib/motion'
 import { orpc } from '#/lib/orpc-client'
-import { DEFAULT_MODEL, MODELS } from '#/lib/models'
+import { DEFAULT_MODEL, MODELS, PROVIDERS } from '#/lib/models'
 import { modelSupportsImageInput } from '#/lib/ai-image-inputs'
-import { sanitizeHtml } from '#/lib/sanitize'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -95,12 +92,10 @@ function hasAssistantOutput(message: UIMessage) {
 function hasCanvasMutation(message: UIMessage) {
   return message.parts.some((part) =>
     [
-      'tool-createShape',
-      'tool-createShapes',
-      'tool-updateShape',
-      'tool-deleteShape',
-      'tool-createComponent',
-      'tool-updateComponent',
+      'tool-createElement',
+      'tool-createElements',
+      'tool-updateElement',
+      'tool-deleteElement',
     ].includes(part.type),
   )
 }
@@ -134,12 +129,15 @@ export function AgentPanel({
   selectedIdsRef,
   docId,
   ready = true,
+  sendRef,
 }: {
-  actions: CanvasActions
-  shapesRef: React.RefObject<Shape[]>
+  actions: ElementActions
+  shapesRef: React.RefObject<CanvasElement[]>
   selectedIdsRef?: React.RefObject<string[]>
   docId: string
   ready?: boolean
+  // Exposes a send-message entry point for canvas comment pins.
+  sendRef?: React.RefObject<((text: string) => boolean) | null>
 }) {
   const [input, setInput] = useState('')
   const [model, setModel] = useState(() => {
@@ -155,8 +153,9 @@ export function AgentPanel({
     if (typeof localStorage !== 'undefined') localStorage.setItem('loora:model', next)
   }
   const [chatReady, setChatReady] = useState(false)
-  // Frames created from a still-streaming createShape call: toolCallId → shape id,
-  // so later chunks (and the final tool call) update instead of duplicating.
+  // Elements created from a still-streaming createElement call: toolCallId →
+  // element id, so later chunks (and the final tool call) update instead of
+  // duplicating.
   const streamedCreates = useRef(new Map<string, string>())
   const streamedAppliedAt = useRef(new Map<string, number>())
   const [stallError, setStallError] = useState<string | null>(null)
@@ -226,71 +225,29 @@ export function AgentPanel({
             errorText: message,
           } as Parameters<typeof addToolOutput>[0])
 
-        // Agent-authored frame HTML is sanitized before it ever reaches state.
-        const clean = <T extends { html?: string }>(shape: T): T =>
-          typeof shape.html === 'string' ? { ...shape, html: sanitizeHtml(shape.html) } : shape
-
         try {
           switch (toolCall.toolName) {
-            case 'createShape': {
-              // If a live preview already created this shape, finalize it in place.
+            case 'createElement': {
+              // If a live preview already created this element, finalize it in place.
               const streamedId = streamedCreates.current.get(toolCall.toolCallId)
               if (streamedId) {
                 streamedCreates.current.delete(toolCall.toolCallId)
-                const updated = actions.updateShape(streamedId, clean(input as never))
-                respond(updated ?? actions.createShape(clean(input as never)))
+                const updated = actions.updateElement(streamedId, input as never)
+                respond(updated ?? actions.createElement(input as never))
               } else {
-                respond(actions.createShape(clean(input as never)))
+                respond(actions.createElement(input as never))
               }
               break
             }
-            case 'createShapes':
+            case 'createElements':
               respond(
-                actions.createShapes(
-                  (input as { shapes: Omit<Shape, 'id'>[] }).shapes.map(clean),
-                ),
+                actions.createElements((input as { elements: Omit<CanvasElement, 'id'>[] }).elements),
               )
               break
-            case 'updateShape': {
-              const { id, ...patch } = clean(input as { id: string } & Partial<Shape>)
-              const updated = actions.updateShape(id, patch)
-              respond(updated ?? { error: `No shape with id ${id}` })
-              break
-            }
-            case 'createComponent': {
-              const { name, code, x, y, w, h } = input as {
-                name: string
-                code: string
-                x: number
-                y: number
-                w: number
-                h: number
-              }
-              const created = actions.createShape({
-                type: 'component',
-                x,
-                y,
-                w,
-                h,
-                fill: '#ffffff',
-                text: name,
-                code,
-              })
-              respond({ id: created.id, name })
-              break
-            }
-            case 'updateComponent': {
-              const { id, name, code, ...bounds } = input as {
-                id: string
-                name?: string
-                code?: string
-              } & Partial<Shape>
-              const updated = actions.updateShape(id, {
-                ...bounds,
-                ...(name != null ? { text: name } : {}),
-                ...(code != null ? { code } : {}),
-              })
-              respond(updated ? { id, updated: true } : { error: `No component with id ${id}` })
+            case 'updateElement': {
+              const { id, ...patch } = input as { id: string } & Partial<CanvasElement>
+              const updated = actions.updateElement(id, patch)
+              respond(updated ?? { error: `No element with id ${id}` })
               break
             }
             case 'viewCanvas':
@@ -302,7 +259,7 @@ export function AgentPanel({
                 .then((image) => respond(image ? { image } : { empty: true }))
                 .catch(() => fail('Could not capture the canvas.'))
               break
-            case 'deleteShape':
+            case 'deleteElement':
             case 'askQuestion':
               // These tools wait for the user in their inline controls.
               break
@@ -320,13 +277,51 @@ export function AgentPanel({
     void regenerate()
   }
 
+  // Canvas comment pins send through here. Returns false while the chat is
+  // busy or still loading so the caller can keep the comment draft open.
+  if (sendRef) {
+    sendRef.current = (text: string): boolean => {
+      if (!chatReady || status === 'streaming' || status === 'submitted') return false
+      setStallError(null)
+      recoveryRetries.current = 0
+      if (activeChat?.title === 'New chat') {
+        const title = titleFromPrompt(text)
+        setChats((current) =>
+          current.map((chat) => (chat.id === activeChatId ? { ...chat, title } : chat)),
+        )
+      }
+      // safety checkpoint: restorable from History if the agent goes wrong
+      commitIfChanged(docId, `Before: ${text.slice(0, 60)}`, shapesRef.current)
+      void orpc.history
+        .commit({
+          id: `c${nanoid()}`,
+          designId: docId,
+          message: `Before: ${text.slice(0, 60)}`,
+          shapes: shapesRef.current,
+          skipIfUnchanged: true,
+        })
+        .catch((error) => console.error('[history] Failed to save checkpoint:', error))
+      void (async () => {
+        const snapshot = imageInputsEnabled ? await snapshotCanvas(shapesRef.current) : null
+        void sendMessage({
+          text,
+          files: snapshot
+            ? [{ type: 'file' as const, mediaType: 'image/png', url: snapshot }]
+            : [],
+        })
+      })()
+      return true
+    }
+  }
+
   const messagesRef = useRef(messages)
   messagesRef.current = messages
 
-  // Live preview: while a createShape/updateShape call is still streaming its
-  // input, push the partial frame HTML into the canvas so the design appears
-  // as it is generated instead of only after the full tool call parses.
-  // Components are excluded — partial JSX rarely compiles.
+  // Live preview: while a createElement/updateElement call is still streaming
+  // its input, push the partial code into the canvas so the design appears as
+  // it is generated instead of only after the full tool call parses. The
+  // element runtime keeps the last successfully compiled payload, so partial
+  // JSX/HTML chunks are safe to apply.
   useEffect(() => {
     if (status !== 'streaming') return
     const last = messages[messages.length - 1]
@@ -335,26 +330,29 @@ export function AgentPanel({
       const p = part as unknown as ToolPart
       if (typeof p.type !== 'string' || !p.type.startsWith('tool-')) continue
       if (p.state !== 'input-streaming' || !p.input) continue
-      const input = p.input as Partial<Shape> & { id?: string }
-      if (typeof input.html !== 'string' || input.html.length === 0) continue
+      const input = p.input as Partial<CanvasElement> & { id?: string }
+      if (typeof input.code !== 'string' || input.code.length === 0) continue
       const now = performance.now()
       if (now - (streamedAppliedAt.current.get(p.toolCallId) ?? 0) < 150) continue
       const name = p.type.slice(5)
-      if (name === 'updateShape' && typeof input.id === 'string') {
+      if (name === 'updateElement' && typeof input.id === 'string') {
         streamedAppliedAt.current.set(p.toolCallId, now)
-        actions.updateShape(input.id, { html: sanitizeHtml(input.html) })
-      } else if (name === 'createShape' && input.type === 'frame') {
-        // Wait until the bounds have fully streamed (html comes last in the JSON).
+        actions.updateElement(input.id, { code: input.code })
+      } else if (name === 'createElement') {
+        // Wait until the bounds have fully streamed (code comes last in the JSON).
         if ([input.x, input.y, input.w, input.h].some((n) => typeof n !== 'number')) continue
         streamedAppliedAt.current.set(p.toolCallId, now)
         const existing = streamedCreates.current.get(p.toolCallId)
         if (existing) {
-          actions.updateShape(existing, { html: sanitizeHtml(input.html) })
+          actions.updateElement(existing, { code: input.code })
         } else {
-          const created = actions.createShape({
-            ...(input as Omit<Shape, 'id'> & { id?: string }),
-            id: undefined,
-            html: sanitizeHtml(input.html),
+          const created = actions.createElement({
+            name: input.name ?? 'Element',
+            x: input.x!,
+            y: input.y!,
+            w: input.w!,
+            h: input.h!,
+            code: input.code,
           })
           streamedCreates.current.set(p.toolCallId, created.id)
         }
@@ -480,11 +478,11 @@ export function AgentPanel({
     if (!allow) {
       output = { deleted: false, reason: 'User declined the deletion' }
     } else {
-      const ok = actions.deleteShape(id)
-      output = ok ? { deleted: true, ...target } : { error: 'No such shape' }
+      const ok = actions.deleteElement(id)
+      output = ok ? { deleted: true, ...target } : { error: 'No such element' }
     }
     addToolOutput({
-      tool: 'deleteShape',
+      tool: 'deleteElement',
       toolCallId,
       output,
     } as Parameters<typeof addToolOutput>[0])
@@ -683,9 +681,10 @@ function ModelPicker({
       </DropdownMenuTrigger>
       <DropdownMenuContent align="start" className="w-48">
         <DropdownMenuLabel className="text-xs text-muted-foreground">Model</DropdownMenuLabel>
-        {MODELS.map(({ id, label }) => (
+        {MODELS.map(({ id, label, provider }) => (
           <DropdownMenuItem key={id} onSelect={() => onModelChange(id)}>
             <span className="min-w-0 flex-1 truncate">{label}</span>
+            <span className="text-xs text-muted-foreground">{PROVIDERS[provider].label}</span>
             {model === id && <CheckIcon className="text-foreground" />}
           </DropdownMenuItem>
         ))}
@@ -711,50 +710,48 @@ interface ToolPart {
 }
 
 const TOOL_META = {
-  createShape: { icon: PlusIcon, label: 'Create' },
-  createShapes: { icon: PlusIcon, label: 'Create' },
-  updateShape: { icon: PenLineIcon, label: 'Update' },
-  deleteShape: { icon: Trash2Icon, label: 'Delete' },
+  createElement: { icon: PlusIcon, label: 'Create' },
+  createElements: { icon: PlusIcon, label: 'Create' },
+  updateElement: { icon: PenLineIcon, label: 'Update' },
+  deleteElement: { icon: Trash2Icon, label: 'Delete' },
   loadSkill: { icon: BookOpenIcon, label: 'Skill' },
   viewCanvas: { icon: EyeIcon, label: 'Verify' },
-  createComponent: { icon: CodeIcon, label: 'Component' },
-  updateComponent: { icon: CodeIcon, label: 'Component' },
 } as const
 
-function describeShape(s: Partial<Shape> | undefined) {
+function describeElement(s: Partial<CanvasElement> | undefined) {
   if (!s) return ''
-  if (s.type === 'text' && s.text) return `text "${s.text}"`
-  const size = s.w != null && s.h != null ? ` ${s.w}×${s.h}` : ''
-  return `${s.type ?? 'shape'}${size}`
+  const size = s.w != null && s.h != null ? ` · ${s.w}×${s.h}` : ''
+  return `${s.name ?? 'element'}${size}`
 }
 
-function toolSummary(name: string, part: ToolPart, shapes: Shape[]) {
+function codeSize(input: Record<string, unknown>) {
+  return typeof input.code === 'string'
+    ? ` · ${Math.max(1, Math.round((input.code as string).length / 1024))}KB`
+    : ''
+}
+
+function toolSummary(name: string, part: ToolPart, elements: CanvasElement[]) {
   const input = part.input ?? {}
-  if (name === 'createShape') {
-    return `${describeShape(input as Partial<Shape>)} at (${input.x}, ${input.y})`
+  if (name === 'createElement') {
+    return `${describeElement(input as Partial<CanvasElement>)}${codeSize(input)}`
   }
-  if (name === 'createShapes') {
-    const batch = (input.shapes as Partial<Shape>[] | undefined) ?? []
-    return `${batch.length} shapes`
+  if (name === 'createElements') {
+    const batch = (input.elements as Partial<CanvasElement>[] | undefined) ?? []
+    return `${batch.length} elements`
   }
-  const target = shapes.find((s) => s.id === input.id)
-  if (name === 'updateShape') {
+  const target = elements.find((s) => s.id === input.id)
+  if (name === 'updateElement') {
     const changed = Object.keys(input)
       .filter((k) => k !== 'id')
       .join(', ')
-    return `${describeShape(target) || String(input.id ?? '')} · ${changed}`
+    return `${describeElement(target) || String(input.id ?? '')} · ${changed}`
   }
-  if (name === 'deleteShape') {
-    // after deletion the shape is gone from state; fall back to the tool output
-    return describeShape(target ?? (part.output as Partial<Shape>)) || String(input.id ?? '')
+  if (name === 'deleteElement') {
+    // after deletion the element is gone from state; fall back to the tool output
+    return describeElement(target ?? (part.output as Partial<CanvasElement>)) || String(input.id ?? '')
   }
   if (name === 'loadSkill') {
     return String(input.name ?? '')
-  }
-  if (name === 'createComponent' || name === 'updateComponent') {
-    const label = String(input.name ?? (target?.text || input.id) ?? '')
-    const kb = typeof input.code === 'string' ? ` · ${Math.max(1, Math.round(input.code.length / 1024))}KB jsx` : ''
-    return `${label}${kb}`
   }
   if (name === 'viewCanvas') {
     return 'looking at the canvas'
@@ -837,14 +834,12 @@ function QuestionCard({
 }
 
 const PAST_TENSE = {
-  createShape: 'Created',
-  createShapes: 'Created',
-  updateShape: 'Updated',
-  deleteShape: 'Deleted',
+  createElement: 'Created',
+  createElements: 'Created',
+  updateElement: 'Updated',
+  deleteElement: 'Deleted',
   loadSkill: 'Loaded skill',
   viewCanvas: 'Verified',
-  createComponent: 'Built component',
-  updateComponent: 'Updated component',
 } as const
 
 function ToolGroup({
@@ -853,7 +848,7 @@ function ToolGroup({
   onResolveDelete,
 }: {
   parts: ToolPart[]
-  shapesRef: React.RefObject<Shape[]>
+  shapesRef: React.RefObject<CanvasElement[]>
   onResolveDelete: (toolCallId: string, allow: boolean, id: string) => void
 }) {
   const [open, setOpen] = useState(false)
@@ -871,16 +866,16 @@ function ToolGroup({
     const verb = PAST_TENSE[name as keyof typeof PAST_TENSE]
     // a batch call counts as its number of shapes, not 1
     const weight =
-      name === 'createShapes' ? ((p.input?.shapes as unknown[] | undefined)?.length ?? 1) : 1
+      name === 'createElements' ? ((p.input?.elements as unknown[] | undefined)?.length ?? 1) : 1
     if (verb) counts.set(verb, (counts.get(verb) ?? 0) + weight)
   }
   const summary = [...counts.entries()].map(([verb, n]) => `${verb} ${n}`).join(' · ')
   const busy = parts.some(
-    (p) => p.state === 'input-streaming' || (p.state === 'input-available' && p.type !== 'tool-deleteShape'),
+    (p) => p.state === 'input-streaming' || (p.state === 'input-available' && p.type !== 'tool-deleteElement'),
   )
   const failed = parts.some((p) => p.state === 'output-error' || (p.output as { error?: string })?.error)
   const pendingDeletes = parts.filter(
-    (p) => p.type === 'tool-deleteShape' && p.state === 'input-available',
+    (p) => p.type === 'tool-deleteElement' && p.state === 'input-available',
   )
 
   return (
@@ -945,14 +940,14 @@ function BatchDeleteConfirm({
   onResolveDelete,
 }: {
   parts: ToolPart[]
-  shapesRef: React.RefObject<Shape[]>
+  shapesRef: React.RefObject<CanvasElement[]>
   onResolveDelete: (toolCallId: string, allow: boolean, id: string) => void
 }) {
   const [showAll, setShowAll] = useState(false)
   const targets = parts.map((p) => ({
     part: p,
     label:
-      describeShape(shapesRef.current.find((s) => s.id === p.input?.id)) ||
+      describeElement(shapesRef.current.find((s) => s.id === p.input?.id)) ||
       String(p.input?.id ?? ''),
   }))
   const visible = showAll ? targets : targets.slice(0, 3)
@@ -962,7 +957,7 @@ function BatchDeleteConfirm({
 
   return (
     <div className="flex flex-col gap-2 rounded-lg border bg-background px-3 py-2.5">
-      <p className="text-xs font-medium">Delete {parts.length} shapes?</p>
+      <p className="text-xs font-medium">Delete {parts.length} elements?</p>
       <ul className="flex flex-col gap-0.5 font-mono text-[11px] text-muted-foreground">
         {visible.map(({ part, label }) => (
           <li key={part.toolCallId} className="truncate">
@@ -997,14 +992,14 @@ function DeleteConfirm({
   onResolveDelete,
 }: {
   part: ToolPart
-  shapesRef: React.RefObject<Shape[]>
+  shapesRef: React.RefObject<CanvasElement[]>
   onResolveDelete: (toolCallId: string, allow: boolean, id: string) => void
 }) {
   const target = shapesRef.current.find((s) => s.id === part.input?.id)
   return (
     <div className="flex items-center gap-2 rounded-lg border bg-background px-3 py-2">
       <p className="min-w-0 flex-1 truncate text-xs text-muted-foreground">
-        Delete {describeShape(target) || 'this shape'}?
+        Delete {describeElement(target) || 'this element'}?
       </p>
       <Button
         size="sm"
@@ -1031,7 +1026,7 @@ function ToolRow({
   hideConfirm = false,
 }: {
   part: ToolPart
-  shapesRef: React.RefObject<Shape[]>
+  shapesRef: React.RefObject<CanvasElement[]>
   onResolveDelete: (toolCallId: string, allow: boolean, id: string) => void
   hideConfirm?: boolean
 }) {
@@ -1041,7 +1036,7 @@ function ToolRow({
 
   const denied = (part.output as { deleted?: boolean; reason?: string } | undefined)?.reason
   const failed = part.state === 'output-error' || Boolean((part.output as { error?: string })?.error)
-  const awaitingConfirm = name === 'deleteShape' && part.state === 'input-available'
+  const awaitingConfirm = name === 'deleteElement' && part.state === 'input-available'
   const done = part.state === 'output-available'
   const reduceMotion = useReducedMotion()
   const enter = interruptIn(reduceMotion)
@@ -1052,7 +1047,7 @@ function ToolRow({
         <meta.icon
           className={cn(
             'size-3.5 shrink-0',
-            name === 'deleteShape' ? 'text-destructive-foreground/70' : 'text-muted-foreground',
+            name === 'deleteElement' ? 'text-destructive-foreground/70' : 'text-muted-foreground',
           )}
         />
         <span className="font-medium">{meta.label}</span>

@@ -1,5 +1,5 @@
 import { MultiFileDiff } from '@pierre/diffs/react'
-import type { Shape } from '#/lib/canvas'
+import type { CanvasElement } from '#/lib/canvas'
 
 export function DesignDiff({
   oldShapes,
@@ -7,8 +7,8 @@ export function DesignDiff({
   oldKey,
   newKey,
 }: {
-  oldShapes: Shape[]
-  newShapes: Shape[]
+  oldShapes: CanvasElement[]
+  newShapes: CanvasElement[]
   oldKey: string
   newKey: string
 }) {

@@ -1,7 +1,7 @@
 import { lazy, Suspense, useState } from 'react'
 import { HistoryIcon } from 'lucide-react'
 import { nanoid } from 'nanoid'
-import type { Shape } from '#/lib/canvas'
+import type { CanvasElement } from '#/lib/canvas'
 import { loadHistory, relativeTime, type Commit } from '#/lib/history'
 import { Button } from '#/components/ui/button'
 import { Input } from '#/components/ui/input'
@@ -27,8 +27,8 @@ export function HistoryPopover({
   onRestore,
 }: {
   docId: string
-  shapesRef: React.RefObject<Shape[]>
-  onRestore: (shapes: Shape[]) => void
+  shapesRef: React.RefObject<CanvasElement[]>
+  onRestore: (elements: CanvasElement[]) => void
 }) {
   const [open, setOpen] = useState(false)
   const [history, setHistory] = useState<Commit[]>([])

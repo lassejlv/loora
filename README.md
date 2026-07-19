@@ -16,7 +16,7 @@ Set these values in `.env`:
 - `DATABASE_URL`: a Neon PostgreSQL connection string
 - `BETTER_AUTH_SECRET`: at least 32 random characters
 - `BETTER_AUTH_URL`: the public app origin, usually `http://localhost:3000` locally
-- `GEMINI_API_KEY`: the server-managed Gemini key used by the design agent
+- `WAFER_API_KEY`: the server-managed Wafer key used by the default models
 
 Google login is enabled only when both of these optional values are set:
 
@@ -46,4 +46,41 @@ bun run db:migrate   # apply pending migrations
 bun run db:studio    # open Drizzle Studio
 ```
 
-Canvas documents, shapes, version history, and multiple agent chats per design are stored per user in Postgres through the authenticated oRPC API at `/api/rpc`. The agent uses the server-managed `gemini-3.5-flash` model; model credentials are never sent to or stored in the browser.
+Canvas documents, shapes, version history, and multiple agent chats per design are stored per user in Postgres through the authenticated oRPC API at `/api/rpc`. Model credentials are never sent to or stored in the browser.
+
+## AI providers and models
+
+Providers and models live in one typed catalog: [`src/lib/models.ts`](src/lib/models.ts).
+Providers must expose an OpenAI-compatible API.
+
+To add a provider, add its label, base URL, and API-key environment variable:
+
+```ts
+export const PROVIDERS = {
+  wafer: {
+    label: 'Wafer',
+    baseURL: 'https://pass.wafer.ai/v1',
+    apiKeyEnv: 'WAFER_API_KEY',
+  },
+  openrouter: {
+    label: 'OpenRouter',
+    baseURL: 'https://openrouter.ai/api/v1',
+    apiKeyEnv: 'OPENROUTER_API_KEY',
+  },
+} as const satisfies Record<string, ProviderDefinition>
+```
+
+Then add models with any Loora label and upstream model ID:
+
+```ts
+{
+  id: 'sonnet',
+  label: 'Claude Sonnet',
+  provider: 'openrouter',
+  modelId: 'anthropic/claude-sonnet-4',
+  supportsImageInput: true,
+  price: { input: 3, output: 15 },
+}
+```
+
+Finally, set the provider's API-key environment variable. The provider name is shown beside each model in the picker.

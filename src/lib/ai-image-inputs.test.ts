@@ -3,10 +3,11 @@ import type { UIMessage } from 'ai'
 import { modelSupportsImageInput, withoutImageParts } from './ai-image-inputs'
 
 describe('AI image input capabilities', () => {
-  it('enables images only for Mini', () => {
+  it('reads image support from the model catalog', () => {
     expect(modelSupportsImageInput('mini')).toBe(true)
     expect(modelSupportsImageInput('max')).toBe(false)
     expect(modelSupportsImageInput('max-fast')).toBe(false)
+    expect(modelSupportsImageInput('unknown')).toBe(true)
   })
 
   it('removes image parts before messages reach the provider', () => {

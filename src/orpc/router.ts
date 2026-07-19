@@ -4,7 +4,7 @@ import { z } from 'zod'
 import { db } from '#/db'
 import { asset, design, designChat, designVersion, user } from '#/db/schema'
 import { googleOAuthEnabled, type getSession } from '#/lib/auth'
-import type { Shape } from '#/lib/canvas'
+import type { CanvasElement } from '#/lib/canvas'
 import type { UIMessage } from 'ai'
 import { assetKey, s3 } from '#/lib/storage'
 import { createHandoffToken } from '#/lib/handoff-token'
@@ -24,23 +24,12 @@ export interface ORPCContext {
 
 const shapeSchema = z.object({
   id: z.string(),
-  type: z.enum(['rect', 'ellipse', 'text', 'frame', 'image', 'component']),
+  name: z.string().max(200),
   x: z.number(),
   y: z.number(),
   w: z.number(),
   h: z.number(),
-  fill: z.string(),
-  stroke: z.string().optional(),
-  strokeWidth: z.number().optional(),
-  radius: z.number().optional(),
-  opacity: z.number().min(0).max(1).optional(),
-  text: z.string().optional(),
-  fontSize: z.number().optional(),
-  fontWeight: z.number().optional(),
-  align: z.enum(['left', 'center', 'right']).optional(),
-  src: z.string().max(2048).optional(),
-  code: z.string().max(100_000).optional(),
-  html: z.string().max(200_000).optional(),
+  code: z.string().max(200_000),
   groupId: z.string().max(128).optional(),
 })
 
@@ -59,7 +48,7 @@ const requireAdmin = os.$context<ORPCContext>().middleware(async ({ context, nex
 
 const adminProcedure = os.$context<ORPCContext>().use(requireAdmin)
 
-function shapeDiff(previous: Shape[], next: Shape[]) {
+function shapeDiff(previous: CanvasElement[], next: CanvasElement[]) {
   const previousById = new Map(previous.map((shape) => [shape.id, shape]))
   const nextIds = new Set(next.map((shape) => shape.id))
   let added = 0

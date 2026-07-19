@@ -1,11 +1,8 @@
 import type { UIMessage } from 'ai'
-import type { ModelKey } from '#/lib/models'
-
-// Add a model key here when its provider model supports image input.
-const IMAGE_INPUT_MODELS = new Set<ModelKey>(['mini'])
+import { getModel } from '#/lib/models'
 
 export function modelSupportsImageInput(model: string): boolean {
-  return IMAGE_INPUT_MODELS.has(model as ModelKey)
+  return getModel(model).supportsImageInput
 }
 
 export function withoutImageParts(

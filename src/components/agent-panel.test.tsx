@@ -1,7 +1,7 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, mock } from 'bun:test'
 import { SidebarProvider } from '#/components/ui/sidebar'
-import type { CanvasActions, Shape } from '#/lib/canvas'
+import type { CanvasElement, ElementActions } from '#/lib/canvas'
 
 const orpc = {
   chat: {
@@ -84,12 +84,12 @@ describe('AgentPanel empty response recovery', () => {
       )
     globalThis.fetch = chatFetch as unknown as typeof fetch
 
-    const shapesRef = { current: [] as Shape[] }
-    const actions: CanvasActions = {
-      createShape: mock(),
-      createShapes: mock(),
-      updateShape: mock(),
-      deleteShape: mock(),
+    const shapesRef = { current: [] as CanvasElement[] }
+    const actions: ElementActions = {
+      createElement: mock(),
+      createElements: mock(),
+      updateElement: mock(),
+      deleteElement: mock(),
     }
 
     render(
@@ -127,12 +127,12 @@ describe('AgentPanel empty response recovery', () => {
       )
     globalThis.fetch = chatFetch as unknown as typeof fetch
 
-    const shapesRef = { current: [] as Shape[] }
-    const actions: CanvasActions = {
-      createShape: mock(),
-      createShapes: mock(),
-      updateShape: mock(),
-      deleteShape: mock(),
+    const shapesRef = { current: [] as CanvasElement[] }
+    const actions: ElementActions = {
+      createElement: mock(),
+      createElements: mock(),
+      updateElement: mock(),
+      deleteElement: mock(),
     }
 
     render(
@@ -167,23 +167,21 @@ describe('AgentPanel empty response recovery', () => {
           {
             type: 'tool-input-start',
             toolCallId: 'create-portfolio',
-            toolName: 'createShapes',
+            toolName: 'createElements',
           },
           {
             type: 'tool-input-available',
             toolCallId: 'create-portfolio',
-            toolName: 'createShapes',
+            toolName: 'createElements',
             input: {
-              shapes: [
+              elements: [
                 {
-                  type: 'frame',
+                  name: 'Portfolio',
                   x: 0,
                   y: 0,
                   w: 1440,
                   h: 900,
-                  fill: '#ffffff',
-                  text: 'Portfolio',
-                  html: '<main>Portfolio</main>',
+                  code: '<main>Portfolio</main>',
                 },
               ],
             },
@@ -202,14 +200,14 @@ describe('AgentPanel empty response recovery', () => {
       )
     globalThis.fetch = chatFetch as unknown as typeof fetch
 
-    const shapesRef = { current: [] as Shape[] }
-    const actions: CanvasActions = {
-      createShape: mock(),
-      createShapes: mock().mockReturnValue([
-        { id: 'portfolio', type: 'frame', x: 0, y: 0, w: 1440, h: 900, fill: '#ffffff' },
+    const shapesRef = { current: [] as CanvasElement[] }
+    const actions: ElementActions = {
+      createElement: mock(),
+      createElements: mock().mockReturnValue([
+        { id: 'portfolio', name: 'Portfolio', x: 0, y: 0, w: 1440, h: 900, code: '<main>Portfolio</main>' },
       ]),
-      updateShape: mock(),
-      deleteShape: mock(),
+      updateElement: mock(),
+      deleteElement: mock(),
     }
 
     render(
@@ -225,7 +223,7 @@ describe('AgentPanel empty response recovery', () => {
 
     await waitFor(() => expect(chatFetch).toHaveBeenCalledTimes(3))
     expect(await screen.findByText('Built.')).toBeTruthy()
-    expect(actions.createShapes).toHaveBeenCalledTimes(1)
+    expect(actions.createElements).toHaveBeenCalledTimes(1)
 
     const secondBody = JSON.parse((chatFetch.mock.calls[1]?.[1] as RequestInit)?.body as string)
     expect(secondBody.trigger).toBe('regenerate-message')
@@ -246,14 +244,14 @@ describe('AgentPanel empty response recovery', () => {
 
     const shapesRef = {
       current: [
-        { id: 'shape-1', type: 'rect', x: 0, y: 0, w: 100, h: 100, fill: '#fff' },
-      ] as Shape[],
+        { id: 'el-1', name: 'Box', x: 0, y: 0, w: 100, h: 100, code: '<div></div>' },
+      ] as CanvasElement[],
     }
-    const actions: CanvasActions = {
-      createShape: mock(),
-      createShapes: mock(),
-      updateShape: mock(),
-      deleteShape: mock(),
+    const actions: ElementActions = {
+      createElement: mock(),
+      createElements: mock(),
+      updateElement: mock(),
+      deleteElement: mock(),
     }
 
     render(
@@ -289,14 +287,14 @@ describe('AgentPanel empty response recovery', () => {
 
     const shapesRef = {
       current: [
-        { id: 'shape-1', type: 'rect', x: 0, y: 0, w: 100, h: 100, fill: '#fff' },
-      ] as Shape[],
+        { id: 'el-1', name: 'Box', x: 0, y: 0, w: 100, h: 100, code: '<div></div>' },
+      ] as CanvasElement[],
     }
-    const actions: CanvasActions = {
-      createShape: mock(),
-      createShapes: mock(),
-      updateShape: mock(),
-      deleteShape: mock(),
+    const actions: ElementActions = {
+      createElement: mock(),
+      createElements: mock(),
+      updateElement: mock(),
+      deleteElement: mock(),
     }
 
     render(

@@ -1,15 +1,7 @@
 import { and, asc, eq, gte, sql } from 'drizzle-orm'
 import { db } from '#/db'
 import { aiUsage, user } from '#/db/schema'
-import type { ModelKey } from '#/lib/models'
-
-// USD per 1M tokens. Server-only — never ship to the client.
-// A price of $X per 1M tokens equals X micro-USD per token, so cost math stays integer.
-const PRICES: Record<ModelKey, { input: number; output: number }> = {
-  mini: { input: 1.2, output: 4.9 },
-  max: { input: 1.5, output: 4.2 },
-  'max-fast': { input: 4, output: 12 },
-}
+import { getModel, type ModelKey } from '#/lib/models'
 
 export const DAILY_LIMIT_USD = 0.5
 export const WEEKLY_LIMIT_USD = 2
@@ -17,7 +9,8 @@ export const WEEKLY_LIMIT_USD = 2
 const MICRO = 1_000_000
 
 export function costMicroUsd(model: ModelKey, inputTokens: number, outputTokens: number) {
-  const price = PRICES[model]
+  // A price of $X per 1M tokens equals X micro-USD per token.
+  const price = getModel(model).price
   return Math.round(inputTokens * price.input + outputTokens * price.output)
 }
 
