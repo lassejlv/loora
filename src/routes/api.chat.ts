@@ -28,7 +28,7 @@ const elementFields = {
     .string()
     .max(200_000)
     .describe(
-      'The element content: either plain HTML (Tailwind classes, <style> blocks, inline <script> all work), or JSX defining function App (React hooks like useState work; imports/exports are stripped at runtime). Renders in a sandboxed document sized exactly w×h.',
+      'The element content: either plain HTML (Tailwind classes, <style> blocks, inline <script> all work), or JSX/TSX defining function App (React hooks like useState work; TypeScript is stripped at compile; imports/exports are stripped at runtime). Renders in a sandboxed document sized exactly w×h.',
     ),
 }
 
@@ -50,17 +50,86 @@ function sanitizeModelNames(text: string): string {
   return out
 }
 
+// How many trailing messages keep their full payloads. Everything older is
+// compacted: reasoning dropped, canvas snapshots dropped, tool-call code
+// truncated. Without this, a few build iterations push hundreds of KB of
+// stale code and PNGs into every request until the provider rejects it.
+const HISTORY_TAIL_INTACT = 3
+const CODE_PREVIEW_CHARS = 200
+
+function truncatedCode(code: string): string {
+  if (code.length <= CODE_PREVIEW_CHARS + 80) return code
+  return `${code.slice(0, CODE_PREVIEW_CHARS)}…[truncated, ${code.length} chars — call readElement for the current code]`
+}
+
+function compactRecord(value: Record<string, unknown>): Record<string, unknown> {
+  const out = { ...value }
+  if (typeof out.code === 'string') out.code = truncatedCode(out.code)
+  if (typeof out.image === 'string') delete out.image
+  if (Array.isArray(out.elements)) {
+    out.elements = out.elements.map((el) =>
+      el && typeof el === 'object' ? compactRecord(el as Record<string, unknown>) : el,
+    )
+  }
+  return out
+}
+
+function compactOldToolPart(part: UIMessage['parts'][number]): UIMessage['parts'][number] {
+  const p = part as unknown as {
+    input?: unknown
+    output?: unknown
+    state?: string
+  }
+  const next = { ...(part as Record<string, unknown>) }
+  if (p.input && typeof p.input === 'object') {
+    next.input = compactRecord(p.input as Record<string, unknown>)
+  }
+  if (p.state === 'output-available' && p.output && typeof p.output === 'object') {
+    next.output =
+      part.type === 'tool-viewCanvas'
+        ? { viewed: true }
+        : compactRecord(p.output as Record<string, unknown>)
+  }
+  return next as unknown as UIMessage['parts'][number]
+}
+
 function messagesForModel(messages: UIMessage[], imageInputsEnabled: boolean): UIMessage[] {
-  return withoutImageParts(messages, imageInputsEnabled).flatMap((message) => {
-    const parts = message.parts.filter((part) => {
-      if (part.type === 'tool-loadSkill' || part.type === 'step-start') return false
+  const kept = withoutImageParts(messages, imageInputsEnabled)
+  return kept.flatMap((message, index) => {
+    const old = index < kept.length - HISTORY_TAIL_INTACT
+    const parts = message.parts.flatMap((part) => {
+      if (part.type === 'tool-loadSkill' || part.type === 'step-start') return []
+      if (old && part.type === 'file' && part.mediaType?.startsWith('image/')) return []
       if (part.type === 'text' || part.type === 'reasoning') {
-        return 'text' in part && typeof part.text === 'string' && part.text.trim().length > 0
+        if (!('text' in part) || typeof part.text !== 'string' || part.text.trim().length === 0) {
+          return []
+        }
+        if (old && part.type === 'reasoning') return []
+        return [part]
       }
-      return true
+      if (old && part.type.startsWith('tool-')) return [compactOldToolPart(part)]
+      return [part]
     })
     return parts.length > 0 ? [{ ...message, parts }] : []
   })
+}
+
+// The system prompt lists every element, but big code bodies are previewed —
+// the agent pulls full code on demand with readElement. Keeps the request
+// small no matter how large the designs grow.
+function canvasForPrompt(shapes: CanvasElement[]) {
+  return shapes.map((el) => ({
+    id: el.id,
+    name: el.name,
+    x: el.x,
+    y: el.y,
+    w: el.w,
+    h: el.h,
+    code:
+      el.code.length <= 1200
+        ? el.code
+        : `${el.code.slice(0, 400)}…[truncated — ${el.code.length} chars total; call readElement("${el.id}") before editing]`,
+  }))
 }
 
 export const Route = createFileRoute('/api/chat')({
@@ -72,15 +141,13 @@ export const Route = createFileRoute('/api/chat')({
           return Response.json({ error: 'Unauthorized' }, { status: 401 })
         }
 
-        const { messages, shapes, selectedIds, model: modelKey, mode, forceCanvasAction } = (await request.json()) as {
+        const { messages, shapes, selectedIds, model: modelKey, forceCanvasAction } = (await request.json()) as {
           messages: UIMessage[]
           shapes: CanvasElement[]
           selectedIds?: string[]
           model?: string
-          mode?: 'canvas' | 'page'
           forceCanvasAction?: boolean
         }
-        const pageMode = mode === 'page'
 
         const modelConfig = getModel(modelKey ?? '')
         const providerConfig = getProvider(modelConfig.provider)
@@ -125,17 +192,17 @@ export const Route = createFileRoute('/api/chat')({
             // All tools execute on the client against canvas state.
             createElement: {
               description:
-                'Add one element to the canvas. An element is a positioned box of code — a heading, an image, a card, a full page section, or an interactive React widget. Returns the created element with its id.',
+                'Add one element to the canvas. An element is a positioned box of code — a heading, an image, a card, a full page section, or an interactive React widget. Returns the created element id plus a render result: "ok", or "error: …" when the code failed to compile or crashed — fix the code with updateElement when that happens.',
               inputSchema: newElementSchema,
             },
             createElements: {
               description:
-                'Add several elements in one call. Prefer this over repeated createElement when adding more than one element. Returns the created elements with their ids.',
+                'Add several elements in one call. Prefer this over repeated createElement when adding more than one element. Returns the created ids with per-element render results ("ok" or "error: …" — fix errors with updateElement).',
               inputSchema: z.object({ elements: z.array(newElementSchema).min(1).max(40) }),
             },
             updateElement: {
               description:
-                'Update an existing element by id. When changing code, send the complete new code, not a diff.',
+                'Update an existing element by id. When changing code, send the complete new code, not a diff — and only when you have the element\'s full current code (from this conversation or readElement). Returns a render result: "ok", or "error: …" you must fix.',
               inputSchema: z.object({
                 id: z.string(),
                 name: elementFields.name.optional(),
@@ -145,6 +212,11 @@ export const Route = createFileRoute('/api/chat')({
                 h: elementFields.h.optional(),
                 code: elementFields.code.optional(),
               }),
+            },
+            readElement: {
+              description:
+                'Read the full current code of one element. Call this before updateElement whenever you do not already have that element\'s complete code in this conversation — canvas listings truncate long code.',
+              inputSchema: z.object({ id: z.string() }),
             },
             deleteElement: {
               description:
@@ -204,27 +276,18 @@ export const Route = createFileRoute('/api/chat')({
             'Make the minimal set of changes that fulfills the request - no extra decoration, no unrequested layouts.',
             DESIGN_SKILL_PROMPT,
             'You manipulate the canvas only through tools. Every canvas element is a positioned box of code: { name, x, y, w, h, code }.',
-            'Element code is either plain HTML or JSX. Plain HTML is the default for anything static: headings, paragraphs, images, cards, full page sections. Tailwind v3 utility classes work everywhere; add a <style> block or inline styles for anything beyond utilities; inline <script> tags run too. Write JSX defining function App only when the user wants working interactivity (forms, toggles, counters, mini apps): hooks like useState/useEffect work, imports/exports are stripped at runtime, prefer onClick/onChange over <form> submit, no external npm libraries.',
-            pageMode
-              ? 'THIS DOCUMENT IS IN WEB PAGE MODE: it is a website, and each top-level element is ONE full page (like one HTML file). Create a new page with createElement at x 0, y 0, w 1440 (the design width; use 375 only if the user asks for mobile). Content flows naturally and may be much taller than h — h is just the initial frame, the page scrolls. Everything belongs inside a page\'s code; never place loose fragments next to a page. Edit a page by sending its complete new code via updateElement.'
-              : 'Each element renders in its own isolated sandboxed document sized exactly w×h with a transparent background — give sections an explicit background class (e.g. bg-white) and design at real widths (375 wide for mobile screens, 1280-1440 for desktop pages).',
-            pageMode
-              ? ''
-              : 'Granularity: one cohesive thing per element. A landing page is usually ONE element (a full-page section stack) — or a few section elements stacked vertically when the user wants to rearrange sections. A logo, a headline, or a screenshot placed beside it are their own elements. Do not shred a design into dozens of absolutely positioned fragments.',
-            'Always emit name, x, y, w, h before code (the canvas shows a live preview while code streams). Update an element by sending its complete new code via updateElement — never a diff or fragment.',
+            'Element code is either plain HTML or JSX/TSX. Plain HTML is the default for anything static: headings, paragraphs, images, cards, full page sections. Tailwind v3 utility classes work everywhere; add a <style> block or inline styles for anything beyond utilities; inline <script> tags run too. Write JSX defining function App only when the user wants working interactivity (forms, toggles, counters, mini apps): hooks like useState/useEffect work, TypeScript annotations are fine (stripped at compile), imports/exports are stripped at runtime, no external npm libraries. Forms never navigate (submit is always prevented — handle it in onSubmit/onClick state) and links are inert except #hash jumps, so interactive demos are safe.',
+            'Every createElement/createElements/updateElement result reports render: "ok" or "error: <message>". On an error, fix the code and update the element again — never leave an element in an error state and never claim success while a render error is unresolved.',
+            'Each element renders in its own isolated sandboxed document sized exactly w×h with a transparent background — give sections an explicit background class (e.g. bg-white) and design at real widths (375 wide for mobile screens, 1280-1440 for desktop pages).',
+            'Granularity: one cohesive thing per element. A landing page is usually ONE element (a full-page section stack) — or a few section elements stacked vertically when the user wants to rearrange sections. A logo, a headline, or a screenshot placed beside it are their own elements. Do not shred a design into dozens of absolutely positioned fragments.',
+            'Always emit name, x, y, w, h before code (the canvas shows a live preview while code streams). Update an element by sending its complete new code via updateElement — never a diff or fragment. If you do not have an element\'s complete current code in this conversation (the canvas listing below truncates long code with […]), call readElement first; updating from a truncated preview destroys the element.',
             imageInputsEnabled
-              ? pageMode
-                ? 'The user message may include a PNG snapshot of the page they are currently viewing. Use it to judge layout and balance before and after your edits; viewCanvas also shows the viewed page.'
-                : 'The user message may include a PNG snapshot of the current canvas. Use it to judge layout, overlap, and balance before and after your edits.'
+              ? 'The user message may include a PNG snapshot of the current canvas. Use it to judge layout, overlap, and balance before and after your edits.'
               : 'Image input is temporarily disabled. Rely on the current canvas elements JSON and do not call viewCanvas.',
-            pageMode
-              ? 'The user is currently viewing the selected page (see selected ids below); apply page edits there unless they name another page.'
-              : 'Coordinates: x/y is the top-left corner, y grows downward. The visible canvas is roughly 1200x800 around the origin. Leave 40-80px gaps between separate elements; align edges deliberately.',
+            'Coordinates: x/y is the top-left corner, y grows downward. The visible canvas is roughly 1200x800 around the origin. Leave 40-80px gaps between separate elements; align edges deliberately.',
             'Palette to prefer: #1a1917 ink, #ffffff white, #2440e6 ultramarine, #e8442e vermilion, #f5c518 yellow, #23a25d green. Other CSS colors are allowed when asked.',
             'Images: use only asset URLs from the Assets list below, as <img src="/api/asset/...">. Never invent asset URLs; if no fitting asset exists, say so or design with styled markup instead.',
-            pageMode
-              ? 'Pages are always live: buttons, hovers, links, and React state work immediately, and render live in snapshots, so viewCanvas verifies them too.'
-              : 'Interactive elements render live: users press I or double-click an element to interact with it. Elements render live in canvas snapshots, so viewCanvas verifies them too.',
+            'Interactive elements render live: users press I or double-click an element to interact with it. Elements render live in canvas snapshots, so viewCanvas verifies them too.',
             '',
             'Assets available (JSON):',
             JSON.stringify(assets.map((a) => ({ name: a.name, mediaType: a.mediaType, src: `/api/asset/${a.id}` }))),
@@ -233,8 +296,8 @@ export const Route = createFileRoute('/api/chat')({
               : 'Canvas image verification is temporarily disabled. Do not call viewCanvas.',
             'Keep replies to one or two short sentences; the user sees the canvas change live.',
             '',
-            'Current canvas elements (JSON):',
-            JSON.stringify(shapes ?? []),
+            'Current canvas elements (JSON; long code is previewed — readElement returns the full code):',
+            JSON.stringify(canvasForPrompt(shapes ?? [])),
             selectedIds?.length
               ? `The user currently has these element ids selected: ${JSON.stringify(selectedIds)}. When the request says "this", "these", or "the selected", it refers to those elements.`
               : '',
@@ -244,11 +307,11 @@ export const Route = createFileRoute('/api/chat')({
             messagesForModel(messages, imageInputsEnabled),
             { tools },
           ),
-          stopWhen: stepCountIs(10),
+          stopWhen: stepCountIs(40),
           tools,
           // Design tasks (multi-shape layouts, components) routinely need >60s; a short abort
           // surfaces to the client as an empty successful stream and trips empty-response retries.
-          abortSignal: AbortSignal.timeout(180_000),
+          abortSignal: AbortSignal.timeout(300_000),
           onError: ({ error }) => console.error('[chat] stream error:', error),
           onFinish: async ({ totalUsage }) => {
             try {

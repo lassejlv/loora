@@ -1,0 +1,1 @@
+ALTER TABLE "design" DROP COLUMN "mode";

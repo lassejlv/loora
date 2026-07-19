@@ -2,10 +2,12 @@ import { describe, expect, it, mock } from 'bun:test'
 import {
   buildElementDoc,
   classifyCode,
+  compileForFrame,
   hasEntryCall,
   inlineAssetUrls,
   REACT_GLOBALS_PRELUDE,
   stripModuleSyntax,
+  type BabelLike,
 } from './element-frame'
 
 describe('stripModuleSyntax', () => {
@@ -101,15 +103,101 @@ describe('classifyCode', () => {
   })
 })
 
+describe('compileForFrame', () => {
+  const fakeBabel: BabelLike = {
+    transform: (code) => ({ code: `/*compiled*/\n${code}` }),
+  }
+  const failingBabel: BabelLike = {
+    transform: () => {
+      throw new Error('unknown: Unexpected token (2:14)')
+    },
+  }
+
+  it('passes html through without a compiler', () => {
+    const result = compileForFrame('<p class="text-xl">Hello</p>', null)
+    expect(result).toEqual({
+      ok: true,
+      payload: { mode: 'html', code: '<p class="text-xl">Hello</p>', needsEntry: false },
+    })
+  })
+
+  it('compiles App definitions to executable js', () => {
+    const result = compileForFrame('function App() { return <div /> }', fakeBabel)
+    if (!result.ok) throw new Error('expected ok')
+    expect(result.payload.mode).toBe('js')
+    expect(result.payload.needsEntry).toBe(true)
+    expect(result.payload.code).toContain('/*compiled*/')
+  })
+
+  it('respects an explicit entry call', () => {
+    const source = `function App() { return <div /> }\nReactDOM.createRoot(document.getElementById('root')).render(<App />)`
+    const result = compileForFrame(source, fakeBabel)
+    if (!result.ok) throw new Error('expected ok')
+    expect(result.payload.needsEntry).toBe(false)
+  })
+
+  it('wraps jsx snippets in an App function', () => {
+    const calls: string[] = []
+    const spyBabel: BabelLike = {
+      transform: (code) => {
+        calls.push(code)
+        return { code }
+      },
+    }
+    const result = compileForFrame('<p className="text-xl">Hi</p>', spyBabel)
+    if (!result.ok) throw new Error('expected ok')
+    expect(calls[0]).toContain('function App() { return <>')
+  })
+
+  it('strips module syntax before compiling', () => {
+    const calls: string[] = []
+    const spyBabel: BabelLike = {
+      transform: (code) => {
+        calls.push(code)
+        return { code }
+      },
+    }
+    compileForFrame(`import { useState } from 'react'\nexport default function App() { return null }`, spyBabel)
+    expect(calls[0]).not.toContain('import')
+    expect(calls[0]).not.toContain('export')
+  })
+
+  it('tries the typescript preset for TSX support', () => {
+    const presetsUsed: unknown[] = []
+    const spyBabel: BabelLike = {
+      transform: (code, options) => {
+        presetsUsed.push(options.presets)
+        return { code }
+      },
+    }
+    compileForFrame('function App() { const [n] = useState<number>(0); return <div>{n}</div> }', spyBabel)
+    expect(JSON.stringify(presetsUsed[0])).toContain('typescript')
+  })
+
+  it('falls back to html when a markup snippet fails to compile', () => {
+    const result = compileForFrame('<div style={{}}><style>.a{color:red}</style></div>', failingBabel)
+    if (!result.ok) throw new Error('expected html fallback')
+    expect(result.payload.mode).toBe('html')
+  })
+
+  it('reports a readable compile error for broken App code', () => {
+    const result = compileForFrame('function App() { return <div } ', failingBabel)
+    if (result.ok) throw new Error('expected error')
+    expect(result.error).toContain('Unexpected token (2:14)')
+    expect(result.error).not.toContain('unknown:')
+  })
+})
+
 describe('buildElementDoc', () => {
   const doc = buildElementDoc()
 
-  it('loads only vendored same-origin runtime scripts', () => {
+  it('loads only vendored same-origin runtime scripts, without Babel', () => {
     expect(doc).toContain('src="/vendor/tailwind.js"')
     expect(doc).toContain('src="/vendor/react.js"')
     expect(doc).toContain('src="/vendor/react-dom.js"')
-    expect(doc).toContain('src="/vendor/babel.js"')
     expect(doc).toContain('src="/vendor/html-to-image.js"')
+    // JSX compiles in the parent — the 3MB compiler must not boot per frame.
+    expect(doc).not.toContain('babel')
     expect(doc).not.toContain('unpkg.com')
     expect(doc).not.toContain('cdn.tailwindcss.com')
   })
@@ -127,8 +215,24 @@ describe('buildElementDoc', () => {
     expect(doc).toContain("'loora:ok'")
     expect(doc).toContain("'loora:error'")
     expect(doc).toContain('seq')
-    // compile happens before the previous render is torn down
-    expect(doc.indexOf('Babel.transform')).toBeLessThan(doc.indexOf('__teardown()', doc.indexOf('Babel.transform')))
+  })
+
+  it('reports unhandled promise rejections', () => {
+    expect(doc).toContain('unhandledrejection')
+  })
+
+  it('clears timers, animation frames, and listeners between payloads', () => {
+    expect(doc).toContain('__clearPayloadGlobals')
+    expect(doc).toContain('clearInterval')
+    expect(doc).toContain('cancelAnimationFrame')
+    expect(doc).toContain('removeEventListener')
+    // teardown runs the cleanup before each mount
+    expect(doc.indexOf('__clearPayloadGlobals()')).toBeGreaterThan(-1)
+  })
+
+  it('keeps payload code from navigating the frame', () => {
+    expect(doc).toContain("document.addEventListener('submit'")
+    expect(doc).toContain("document.addEventListener('click'")
   })
 
   it('mounts raw HTML and re-executes inline scripts', () => {

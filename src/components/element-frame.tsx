@@ -1,11 +1,16 @@
 import { useEffect, useRef } from 'react'
 
 // Sandboxed renderer for canvas elements. Every element is code — plain
-// HTML/CSS/JS or JSX defining App — running in an iframe with React 18,
-// Babel Standalone, and Tailwind (all vendored, same-origin).
+// HTML/CSS/JS or JSX/TSX defining App — running in an iframe with React and
+// Tailwind (vendored, same-origin).
 //
-// The iframe document is static: it boots once, then receives code over
-// postMessage and re-renders in place. Updating an element never reloads
+// JSX compiles in the PARENT document with a single shared Babel instance
+// (lazy-loaded once), so each iframe only boots React + Tailwind instead of
+// re-parsing a 3MB compiler. Compile errors are known before anything is sent
+// and are reported both to the UI and to the agent via the render registry.
+//
+// The iframe document is static: it boots once, then receives compiled code
+// over postMessage and re-renders in place. Updating an element never reloads
 // the iframe or re-fetches the runtime scripts.
 //
 // Rendering is last-good: a payload that fails to compile leaves the
@@ -16,9 +21,11 @@ const VENDOR_SCRIPTS = [
   '/vendor/tailwind.js',
   '/vendor/react.js',
   '/vendor/react-dom.js',
-  '/vendor/babel.js',
   '/vendor/html-to-image.js',
 ] as const
+
+const FONTS_URL =
+  'https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&family=Spline+Sans+Mono:wght@400;500&display=swap'
 
 /**
  * Strip ES module import/export so Babel's classic preset can run.
@@ -73,8 +80,8 @@ export type CodeMode = 'jsx-app' | 'jsx-snippet' | 'html'
  * markup with JSX-only syntax (className, component tags, expression
  * attributes) compiles as a JSX fragment; everything else that reads as
  * markup mounts as plain HTML with live inline scripts. Misclassified
- * snippets fall back to the HTML path inside the iframe when Babel rejects
- * them, so the heuristic only has to be right most of the time.
+ * snippets fall back to the HTML path when Babel rejects them, so the
+ * heuristic only has to be right most of the time.
  */
 export function classifyCode(source: string): CodeMode {
   const stripped = stripModuleSyntax(source)
@@ -86,11 +93,191 @@ export function classifyCode(source: string): CodeMode {
   return 'html'
 }
 
+// ---------------------------------------------------------------------------
+// Parent-side compiler
+
+export interface BabelLike {
+  transform: (code: string, options: Record<string, unknown>) => { code?: string | null }
+}
+
+export interface FramePayload {
+  mode: 'js' | 'html'
+  code: string
+  needsEntry: boolean
+}
+
+export type CompileResult = { ok: true; payload: FramePayload } | { ok: false; error: string }
+
+let babelPromise: Promise<BabelLike> | null = null
+
+/** Lazy-load the vendored Babel standalone once, shared by every frame. */
+export function ensureBabel(): Promise<BabelLike> {
+  const existing = (globalThis as { Babel?: BabelLike }).Babel
+  if (existing) return Promise.resolve(existing)
+  if (!babelPromise) {
+    babelPromise = new Promise<BabelLike>((resolve, reject) => {
+      const script = document.createElement('script')
+      script.src = '/vendor/babel.js'
+      script.onload = () => {
+        const babel = (globalThis as { Babel?: BabelLike }).Babel
+        if (babel) resolve(babel)
+        else reject(new Error('The JSX compiler failed to initialize'))
+      }
+      script.onerror = () => reject(new Error('The JSX compiler failed to load'))
+      document.head.appendChild(script)
+    })
+    // A failed load may be transient (dev server restart); allow a retry.
+    babelPromise.catch(() => {
+      babelPromise = null
+    })
+  }
+  return babelPromise
+}
+
+function firstErrorLine(error: unknown): string {
+  const raw = error instanceof Error ? error.message : String(error)
+  // Babel prefixes messages with the pseudo-filename and appends a code frame.
+  const line = raw.replace(/^unknown: /, '').split('\n')[0]
+  return line.length > 400 ? `${line.slice(0, 400)}…` : line
+}
+
+function transform(babel: BabelLike, source: string, withTypescript: boolean): string {
+  const presets: unknown[] = withTypescript
+    ? [['react', {}], ['typescript', { isTSX: true, allExtensions: true }]]
+    : [['react', {}]]
+  const out = babel.transform(source, { presets })
+  if (typeof out?.code !== 'string') throw new Error('Compilation produced no output')
+  return out.code
+}
+
+/**
+ * Compile a raw code payload into what the frame runtime executes.
+ * Pure so it is unit-testable; `babel` may be null for html-only payloads.
+ * TSX is tried first (agents write TypeScript constantly); plain-React is the
+ * fallback in case the TypeScript preset chokes on valid JSX.
+ */
+export function compileForFrame(source: string, babel: BabelLike | null): CompileResult {
+  const stripped = stripModuleSyntax(source)
+  const mode = classifyCode(source)
+  if (mode === 'html') {
+    return { ok: true, payload: { mode: 'html', code: stripped, needsEntry: false } }
+  }
+  if (!babel) return { ok: false, error: 'The JSX compiler is unavailable' }
+  const jsxSource =
+    mode === 'jsx-snippet' ? `function App() { return <>\n${stripped}\n</> }` : stripped
+  try {
+    let compiled: string
+    try {
+      compiled = transform(babel, jsxSource, true)
+    } catch (tsError) {
+      try {
+        compiled = transform(babel, jsxSource, false)
+      } catch {
+        throw tsError
+      }
+    }
+    return {
+      ok: true,
+      payload: {
+        mode: 'js',
+        code: compiled,
+        needsEntry: mode !== 'jsx-app' || !hasEntryCall(stripped),
+      },
+    }
+  } catch (error) {
+    // A snippet that looked like JSX may be plain HTML after all.
+    if (mode === 'jsx-snippet' && stripped.trim().startsWith('<')) {
+      return { ok: true, payload: { mode: 'html', code: stripped, needsEntry: false } }
+    }
+    return { ok: false, error: firstErrorLine(error) }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Render-status registry: the latest compile/runtime outcome per element,
+// awaited by the agent tool loop so broken code comes back as feedback
+// instead of silently leaving a stale frame on the canvas.
+
+interface RenderRecord {
+  error: string | null
+  at: number
+}
+
+const renderResults = new Map<string, RenderRecord>()
+const renderWaiters = new Map<string, (() => void)[]>()
+
+function reportRender(elementId: string, error: string | null) {
+  renderResults.set(elementId, { error, at: Date.now() })
+  const waiters = renderWaiters.get(elementId)
+  if (waiters) {
+    renderWaiters.delete(elementId)
+    for (const waiter of waiters) waiter()
+  }
+}
+
+const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms))
+
+function frameMounted(elementId: string): boolean {
+  if (typeof document === 'undefined') return false
+  const selector = `iframe[data-element-frame="${elementId.replace(/"/g, '\\"')}"]`
+  return document.querySelector(selector) !== null
+}
+
+/**
+ * Wait for the outcome of the element's current code: `{ok: true}` when it
+ * rendered, `{ok: false, error}` when compile or runtime failed, `null` when
+ * no frame is mounted or nothing settled in time. React surfaces render
+ * errors asynchronously (a window error event a beat after the ok ack), so a
+ * short grace period lets a trailing error override a premature ok.
+ */
+export async function awaitRenderResult(
+  elementId: string,
+  timeoutMs = 1500,
+): Promise<{ ok: boolean; error?: string } | null> {
+  const recent = () => {
+    const record = renderResults.get(elementId)
+    return record && Date.now() - record.at < 5000 ? record : null
+  }
+  if (!recent()) {
+    // Let the frame mount (element creation commits before iframes exist).
+    await sleep(50)
+    if (!frameMounted(elementId)) return null
+    if (!recent()) {
+      await new Promise<void>((resolve) => {
+        const timer = setTimeout(() => {
+          const list = renderWaiters.get(elementId)
+          if (list) {
+            renderWaiters.set(
+              elementId,
+              list.filter((w) => w !== waiter),
+            )
+          }
+          resolve()
+        }, timeoutMs)
+        const waiter = () => {
+          clearTimeout(timer)
+          resolve()
+        }
+        renderWaiters.set(elementId, [...(renderWaiters.get(elementId) ?? []), waiter])
+      })
+    }
+  }
+  if (!renderResults.get(elementId)) return null
+  await sleep(300)
+  const latest = renderResults.get(elementId)
+  if (!latest) return null
+  return latest.error === null ? { ok: true } : { ok: false, error: latest.error }
+}
+
+// ---------------------------------------------------------------------------
+// Frame document
+
 export function buildElementDoc(): string {
   return `<!doctype html>
 <html>
 <head>
 <meta charset="utf-8" />
+<link rel="stylesheet" href="${FONTS_URL}" crossorigin="anonymous" />
 ${VENDOR_SCRIPTS.map((src) => `<script src="${src}"><\/script>`).join('\n')}
 <style>html,body{margin:0;height:100%;background:transparent}#root{height:100%}body{font-family:Archivo,system-ui,sans-serif}</style>
 </head>
@@ -102,6 +289,7 @@ ${REACT_GLOBALS_PRELUDE}
 var __root = document.getElementById('root')
 var __currentRoot = null
 var __seq = 0
+
 // Track roots the agent code creates itself so the previous render can be
 // unmounted before the next code payload runs.
 var __createRoot = ReactDOM.createRoot.bind(ReactDOM)
@@ -109,13 +297,80 @@ ReactDOM.createRoot = function (el, opts) {
   __currentRoot = __createRoot(el, opts)
   return __currentRoot
 }
+
+// Payload code must never navigate this document: forms stay put (state-based
+// demos keep working via their submit handlers) and links are inert except
+// same-document hash jumps.
+document.addEventListener('submit', function (e) { e.preventDefault() })
+document.addEventListener('click', function (e) {
+  var a = e.target && e.target.closest ? e.target.closest('a[href]') : null
+  if (!a) return
+  var href = a.getAttribute('href') || ''
+  if (href.charAt(0) !== '#') e.preventDefault()
+})
+
+// Runtime errors (React render, event handlers, element scripts) surface as
+// a badge in the parent; the DOM is left as-is.
+window.addEventListener('error', function (e) {
+  parent.postMessage(
+    { type: 'loora:error', seq: __seq, message: String(e.message || e.error || 'Element crashed') },
+    '*',
+  )
+})
+window.addEventListener('unhandledrejection', function (e) {
+  var r = e.reason
+  parent.postMessage(
+    { type: 'loora:error', seq: __seq, message: String((r && r.message) || r || 'Unhandled promise rejection') },
+    '*',
+  )
+})
+
+// Every payload re-executes the element code, so timers, animation frames,
+// and window/document listeners it registers are tracked and cleared before
+// the next payload runs — a streamed clock must not end up with 40 intervals.
+// Installed at the very END of this script: every runtime listener above and
+// below stays untracked; only listeners added later (payload code) qualify.
+var __timers = []
+var __intervals = []
+var __rafs = []
+var __listeners = []
+function __installPayloadTracking() {
+  var st = window.setTimeout.bind(window)
+  var si = window.setInterval.bind(window)
+  var rf = window.requestAnimationFrame.bind(window)
+  window.setTimeout = function () { var id = st.apply(null, arguments); __timers.push(id); return id }
+  window.setInterval = function () { var id = si.apply(null, arguments); __intervals.push(id); return id }
+  window.requestAnimationFrame = function (fn) { var id = rf(fn); __rafs.push(id); return id }
+  ;[window, document, document.documentElement, document.body].forEach(function (target) {
+    var add = target.addEventListener.bind(target)
+    target.addEventListener = function (type, listener, opts) {
+      // React delegates selectionchange to the document once per app; removing
+      // it would break inputs on the next mount.
+      if (!(target === document && type === 'selectionchange')) {
+        __listeners.push([target, type, listener, opts])
+      }
+      return add(type, listener, opts)
+    }
+  })
+}
+function __clearPayloadGlobals() {
+  __timers.splice(0).forEach(function (id) { clearTimeout(id) })
+  __intervals.splice(0).forEach(function (id) { clearInterval(id) })
+  __rafs.splice(0).forEach(function (id) { cancelAnimationFrame(id) })
+  __listeners.splice(0).forEach(function (l) {
+    try { l[0].removeEventListener(l[1], l[2], l[3]) } catch (e) {}
+  })
+}
+
 function __teardown() {
   if (__currentRoot) {
     try { __currentRoot.unmount() } catch (e) {}
     __currentRoot = null
   }
+  __clearPayloadGlobals()
   __root.replaceChildren()
 }
+
 function __mountHtml(code) {
   __teardown()
   __root.innerHTML = code
@@ -131,14 +386,7 @@ function __mountHtml(code) {
     old.parentNode.replaceChild(fresh, old)
   }
 }
-// Runtime errors (React render, event handlers, element scripts) surface as
-// a badge in the parent; the DOM is left as-is.
-window.addEventListener('error', function (e) {
-  parent.postMessage(
-    { type: 'loora:error', seq: __seq, message: String(e.message || e.error || 'Element crashed') },
-    '*',
-  )
-})
+
 window.addEventListener('message', function (e) {
   var msg = e.data
   if (!msg) return
@@ -149,7 +397,11 @@ window.addEventListener('message', function (e) {
       parent.postMessage({ type: 'loora:capture-result', token: msg.token, png: png }, '*')
     }
     if (!window.htmlToImage) return reply(null)
-    htmlToImage.toPng(document.body).then(reply, function () { reply(null) })
+    // Cross-origin stylesheets (fonts) can make font embedding throw; retry
+    // without fonts before giving up.
+    htmlToImage.toPng(document.body).catch(function () {
+      return htmlToImage.toPng(document.body, { skipFonts: true })
+    }).then(reply, function () { reply(null) })
     return
   }
   if (msg.type !== 'loora:code' || typeof msg.code !== 'string') return
@@ -158,27 +410,10 @@ window.addEventListener('message', function (e) {
     if (msg.mode === 'html') {
       __mountHtml(msg.code)
     } else {
-      var source = msg.mode === 'jsx-snippet'
-        ? 'function App() { return <>\\n' + msg.code + '\\n</> }'
-        : msg.code
-      var compiled
-      try {
-        // Compile before touching the DOM: a broken payload (streaming chunk,
-        // bad final code) keeps the previous render on screen.
-        compiled = Babel.transform(source, { presets: ['react'] }).code
-      } catch (err) {
-        // A snippet that looked like JSX may be plain HTML after all.
-        if (msg.mode === 'jsx-snippet' && /^</.test(msg.code.trim())) {
-          __mountHtml(msg.code)
-          parent.postMessage({ type: 'loora:ok', seq: __seq }, '*')
-          return
-        }
-        throw err
-      }
       __teardown()
       // Function scope: top-level const/let in the agent code would clash with
       // earlier payloads if evaluated in the global lexical environment.
-      var App = new Function(compiled + '\\n;return typeof App !== "undefined" ? App : null')()
+      var App = new Function(msg.code + '\\n;return typeof App !== "undefined" ? App : null')()
       if (msg.needsEntry) {
         var Root = App || function () {
           return React.createElement('pre', { style: { padding: 10, fontSize: 11 } }, 'Code must define function App()')
@@ -194,6 +429,7 @@ window.addEventListener('message', function (e) {
     )
   }
 })
+__installPayloadTracking()
 parent.postMessage({ type: 'loora:element-ready' }, '*')
 <\/script>
 </body>
@@ -264,27 +500,37 @@ export function ElementFrame({
 
   const send = (source: string) => {
     if (!iframeRef.current?.contentWindow || !readyRef.current) return
-    const stripped = stripModuleSyntax(source)
-    const mode = classifyCode(source)
     seqRef.current += 1
     const seq = seqRef.current
-    void inlineAssetUrls(stripped).then((code) => {
-      // A newer payload was sent while assets were resolving: drop this one.
+    void (async () => {
+      let payload: FramePayload
+      try {
+        const babel = classifyCode(source) === 'html' ? null : await ensureBabel()
+        if (seq !== seqRef.current) return
+        const result = compileForFrame(source, babel)
+        if (!result.ok) {
+          reportRender(elementId, result.error)
+          onErrorRef.current?.(result.error)
+          return
+        }
+        payload = result.payload
+      } catch {
+        const message = 'The JSX compiler failed to load — check the connection and retry.'
+        reportRender(elementId, message)
+        onErrorRef.current?.(message)
+        return
+      }
+      const inlined = await inlineAssetUrls(payload.code)
+      // A newer payload was sent while compiling/inlining: drop this one.
       if (seq !== seqRef.current) return
       const win = iframeRef.current?.contentWindow
       if (!win) return
-      // sandbox="allow-scripts" gives the iframe an opaque origin: '*' required.
+      // sandbox iframes have an opaque origin: '*' required.
       win.postMessage(
-        {
-          type: 'loora:code',
-          code,
-          mode,
-          seq,
-          needsEntry: mode !== 'jsx-app' || !hasEntryCall(stripped),
-        },
+        { type: 'loora:code', code: inlined, mode: payload.mode, seq, needsEntry: payload.needsEntry },
         '*',
       )
-    })
+    })()
   }
 
   useEffect(() => {
@@ -298,10 +544,13 @@ export function ElementFrame({
       }
       // Stale replies (an old payload settling after a newer send) are ignored.
       if (msg?.type === 'loora:ok' && msg.seq === seqRef.current) {
+        reportRender(elementId, null)
         onErrorRef.current?.(null)
       }
       if (msg?.type === 'loora:error' && msg.seq === seqRef.current) {
-        onErrorRef.current?.(msg.message ?? 'Element failed to render')
+        const message = msg.message ?? 'Element failed to render'
+        reportRender(elementId, message)
+        onErrorRef.current?.(message)
       }
     }
     window.addEventListener('message', onMessage)
@@ -316,7 +565,7 @@ export function ElementFrame({
     <iframe
       ref={iframeRef}
       title="Element"
-      sandbox="allow-scripts"
+      sandbox="allow-scripts allow-forms allow-modals"
       srcDoc={ELEMENT_DOC}
       data-element-frame={elementId}
       className="h-full w-full border-0"

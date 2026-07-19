@@ -78,8 +78,11 @@ const HANDLE_CORNERS = [
 const MIN_SCALE = 0.1
 const MAX_SCALE = 16
 
-function loadView(docId?: string): View {
-  if (!docId || typeof localStorage === 'undefined') return { x: 0, y: 0, scale: 1 }
+const DEFAULT_VIEW: View = { x: 0, y: 0, scale: 1 }
+
+// null = nothing persisted for this doc yet (first open → auto-fit).
+function loadView(docId?: string): View | null {
+  if (!docId || typeof localStorage === 'undefined') return DEFAULT_VIEW
   try {
     const raw = localStorage.getItem(`loora:view:${docId}`)
     if (raw) {
@@ -89,7 +92,7 @@ function loadView(docId?: string): View {
   } catch {
     // corrupt entry: fall through to default
   }
-  return { x: 0, y: 0, scale: 1 }
+  return null
 }
 
 export function Canvas({
@@ -106,7 +109,10 @@ export function Canvas({
   onComment,
 }: CanvasProps) {
   const rootRef = useRef<HTMLDivElement>(null)
-  const [view, setView] = useState<View>(() => loadView(docId))
+  const [view, setView] = useState<View>(() => loadView(docId) ?? DEFAULT_VIEW)
+  const needsInitialFit = useRef(loadView(docId) === null)
+  // Holding space temporarily switches to the hand tool (Figma muscle memory).
+  const [spaceHeld, setSpaceHeld] = useState(false)
   const [drag, setDrag] = useState<Drag | null>(null)
   const [guides, setGuides] = useState<{ v: number[]; h: number[] }>({ v: [], h: [] })
   // Element currently in "interact" mode: its iframe receives pointer events
@@ -118,6 +124,7 @@ export function Canvas({
   const commentInputRef = useRef<HTMLTextAreaElement>(null)
   const dragRef = useRef<Drag | null>(null)
   dragRef.current = drag
+  const activeTool: Tool = spaceHeld ? 'hand' : tool
 
   const toScene = (clientX: number, clientY: number) => {
     const rect = rootRef.current!.getBoundingClientRect()
@@ -167,7 +174,7 @@ export function Canvas({
 
     // Comment tool: click an element to pin a comment for the agent.
     // Empty canvas pans.
-    if (tool === 'comment') {
+    if (activeTool === 'comment') {
       if (e.button === 0) {
         const hit = commentHit(e)
         if (hit) {
@@ -189,7 +196,7 @@ export function Canvas({
 
     // Interact tool: clicks on elements belong to their content (hover, buttons,
     // details, …) — never select or move. Empty canvas pans instead.
-    if (tool === 'interact') {
+    if (activeTool === 'interact') {
       if (e.button === 0 && (e.target as Element).closest('[data-element-id]')) return
       ;(e.currentTarget as Element).setPointerCapture(e.pointerId)
       setDragBoth({ mode: 'pan', startX: e.clientX, startY: e.clientY, view })
@@ -198,12 +205,12 @@ export function Canvas({
     ;(e.currentTarget as Element).setPointerCapture(e.pointerId)
     const pt = toScene(e.clientX, e.clientY)
 
-    if (tool === 'hand' || e.button === 1) {
+    if (activeTool === 'hand' || e.button === 1) {
       setDragBoth({ mode: 'pan', startX: e.clientX, startY: e.clientY, view })
       return
     }
 
-    if (tool === 'select') {
+    if (activeTool === 'select') {
       const target = (e.target as Element).closest('[data-element-id]')
       const id = target?.getAttribute('data-element-id') ?? null
       if (id) {
@@ -240,7 +247,7 @@ export function Canvas({
     }
 
     // insert tools: drag out a new element
-    setDragBoth({ mode: 'draw', type: tool, startX: pt.x, startY: pt.y, x: pt.x, y: pt.y, w: 0, h: 0 })
+    setDragBoth({ mode: 'draw', type: activeTool, startX: pt.x, startY: pt.y, x: pt.x, y: pt.y, w: 0, h: 0 })
   }
 
   const startResize = (e: React.PointerEvent, corner: number) => {
@@ -253,7 +260,7 @@ export function Canvas({
 
   const onPointerMove = (e: React.PointerEvent) => {
     // Comment tool: outline the element under the pointer.
-    if (tool === 'comment' && !dragRef.current && !commentDraft) {
+    if (activeTool === 'comment' && !dragRef.current && !commentDraft) {
       const hit = commentHit(e)
       if (hit) {
         const rootRect = rootRef.current!.getBoundingClientRect()
@@ -410,10 +417,52 @@ export function Canvas({
     }
   }, [tool])
 
+  // Space = temporary hand tool while held.
+  useEffect(() => {
+    const down = (e: KeyboardEvent) => {
+      if (e.code !== 'Space' || e.repeat) return
+      const target = e.target as HTMLElement
+      if (target.closest?.('input, textarea, [contenteditable]')) return
+      e.preventDefault()
+      setSpaceHeld(true)
+    }
+    const up = (e: KeyboardEvent) => {
+      if (e.code === 'Space') setSpaceHeld(false)
+    }
+    const reset = () => setSpaceHeld(false)
+    window.addEventListener('keydown', down)
+    window.addEventListener('keyup', up)
+    window.addEventListener('blur', reset)
+    return () => {
+      window.removeEventListener('keydown', down)
+      window.removeEventListener('keyup', up)
+      window.removeEventListener('blur', reset)
+    }
+  }, [])
+
+  // Escape leaves per-element interact mode (clicking outside also works).
+  useEffect(() => {
+    if (!interactiveId) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setInteractiveId(null)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [interactiveId])
+
   // Per-doc pan/zoom: reload on doc switch, persist (debounced) on change.
   useEffect(() => {
-    setView(loadView(docId))
+    const stored = loadView(docId)
+    needsInitialFit.current = stored === null
+    setView(stored ?? DEFAULT_VIEW)
   }, [docId])
+
+  // First open of a doc with no persisted view: frame its content.
+  useEffect(() => {
+    if (!needsInitialFit.current || elements.length === 0) return
+    needsInitialFit.current = false
+    zoomToBounds(elements, 1)
+  }, [elements])
   useEffect(() => {
     if (!docId) return
     const t = window.setTimeout(
@@ -441,7 +490,7 @@ export function Canvas({
     return { w: rect?.width ?? 1200, h: rect?.height ?? 800 }
   }
 
-  const zoomToBounds = (targets: CanvasElement[]) => {
+  const zoomToBounds = (targets: CanvasElement[], maxScale = MAX_SCALE) => {
     if (targets.length === 0) return
     const left = Math.min(...targets.map((el) => el.x))
     const top = Math.min(...targets.map((el) => el.y))
@@ -450,7 +499,7 @@ export function Canvas({
     const { w, h } = viewportSize()
     const pad = 64
     const scale = Math.min(
-      MAX_SCALE,
+      maxScale,
       Math.max(MIN_SCALE, Math.min((w - pad * 2) / (right - left || 1), (h - pad * 2) / (bottom - top || 1))),
     )
     setView({
@@ -502,11 +551,11 @@ export function Canvas({
   const single = selectedElements.length === 1 ? selectedElements[0] : undefined
   const dot = 24 * view.scale
   const cursor =
-    tool === 'hand'
+    activeTool === 'hand'
       ? drag?.mode === 'pan'
         ? 'grabbing'
         : 'grab'
-      : tool === 'select' || tool === 'interact'
+      : activeTool === 'select' || activeTool === 'interact'
         ? 'default'
         : 'crosshair'
 
@@ -525,7 +574,7 @@ export function Canvas({
       onPointerUp={onPointerUp}
       onWheel={onWheel}
       onDoubleClick={(e) => {
-        if (tool !== 'select') return
+        if (activeTool !== 'select') return
         const target = (e.target as Element).closest('[data-element-id]')
         const id = target?.getAttribute('data-element-id')
         const el = elements.find((c) => c.id === id)
@@ -547,7 +596,7 @@ export function Canvas({
           <ElementView
             key={el.id}
             element={el}
-            interactive={el.id === interactiveId || tool === 'interact'}
+            interactive={el.id === interactiveId || activeTool === 'interact'}
           />
         ))}
       </div>
@@ -638,7 +687,7 @@ export function Canvas({
       </svg>
 
       {/* Comment tool: hovered element outline (viewport space). */}
-      {tool === 'comment' && commentHover && !commentDraft && (
+      {activeTool === 'comment' && commentHover && !commentDraft && (
         <div
           className="pointer-events-none absolute border border-cx-accent bg-cx-accent/5"
           style={{
@@ -746,8 +795,8 @@ const ElementView = memo(function ElementView({
         {el.name}
         {interactive ? ' · interacting' : ''}
         {error && (
-          <span title={error} className="text-[#e8442e]">
-            ● error
+          <span title={error} className="max-w-72 truncate text-[#e8442e]">
+            ● {error}
           </span>
         )}
       </div>

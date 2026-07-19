@@ -31,6 +31,7 @@ import {
   PromptInputTextarea,
 } from '#/components/ai-elements/prompt-input'
 import type { CanvasElement, ElementActions } from '#/lib/canvas'
+import { awaitRenderResult } from '#/components/element-frame'
 import { snapshotCanvas } from '#/lib/snapshot'
 import { commitIfChanged } from '#/lib/history'
 import { Sidebar } from '#/components/ui/sidebar'
@@ -128,7 +129,6 @@ export function AgentPanel({
   shapesRef,
   selectedIdsRef,
   docId,
-  mode = 'canvas',
   ready = true,
   sendRef,
 }: {
@@ -136,8 +136,6 @@ export function AgentPanel({
   shapesRef: React.RefObject<CanvasElement[]>
   selectedIdsRef?: React.RefObject<string[]>
   docId: string
-  // 'page' = Web Page mode: each top-level element is one page.
-  mode?: 'canvas' | 'page'
   ready?: boolean
   // Exposes a send-message entry point for canvas comment pins.
   sendRef?: React.RefObject<((text: string) => boolean) | null>
@@ -171,16 +169,6 @@ export function AgentPanel({
   chatsRef.current = chats
   const composerRef = useRef<HTMLTextAreaElement>(null)
   const activeChat = chats.find((chat) => chat.id === activeChatId)
-  const modeValue = useRef(mode)
-  modeValue.current = mode
-
-  // Snapshots in Web Page mode show only the page being viewed (the selected
-  // element); the full-canvas composite would stack every page at (0,0)-ish.
-  const snapshotTargets = () => {
-    if (modeValue.current !== 'page') return shapesRef.current
-    const viewed = shapesRef.current.filter((s) => selectedIdsRef?.current?.includes(s.id))
-    return viewed.length > 0 ? viewed : shapesRef.current.slice(0, 1)
-  }
 
   const { messages, setMessages, sendMessage, regenerate, addToolOutput, status, stop, error } =
     useChat({
@@ -190,7 +178,6 @@ export function AgentPanel({
           shapes: shapesRef.current,
           selectedIds: selectedIdsRef?.current ?? [],
           model: modelRef.current,
-          mode: modeValue.current,
           forceCanvasAction: forceCanvasAction.current,
         }),
       }),
@@ -238,30 +225,86 @@ export function AgentPanel({
             state: 'output-error',
             errorText: message,
           } as Parameters<typeof addToolOutput>[0])
+        // Tool outputs echo geometry but never code (the model just wrote it —
+        // echoing would double the tokens) plus the live render outcome so
+        // broken code comes back as actionable feedback instead of a silent
+        // stale frame.
+        const ackWithRender = async (el: CanvasElement) => {
+          const render = await awaitRenderResult(el.id)
+          return {
+            id: el.id,
+            name: el.name,
+            x: el.x,
+            y: el.y,
+            w: el.w,
+            h: el.h,
+            render: render ? (render.ok ? 'ok' : `error: ${render.error}`) : 'unknown',
+          }
+        }
 
         try {
           switch (toolCall.toolName) {
             case 'createElement': {
               // If a live preview already created this element, finalize it in place.
               const streamedId = streamedCreates.current.get(toolCall.toolCallId)
+              let element: CanvasElement
               if (streamedId) {
                 streamedCreates.current.delete(toolCall.toolCallId)
-                const updated = actions.updateElement(streamedId, input as never)
-                respond(updated ?? actions.createElement(input as never))
+                element =
+                  actions.updateElement(streamedId, input as never) ??
+                  actions.createElement(input as never)
               } else {
-                respond(actions.createElement(input as never))
+                element = actions.createElement(input as never)
               }
+              void ackWithRender(element).then(respond)
               break
             }
-            case 'createElements':
-              respond(
-                actions.createElements((input as { elements: Omit<CanvasElement, 'id'>[] }).elements),
-              )
+            case 'createElements': {
+              const batch = (input as { elements: Omit<CanvasElement, 'id'>[] }).elements
+              const results: CanvasElement[] = new Array(batch.length)
+              const fresh: { element: Omit<CanvasElement, 'id'>; index: number }[] = []
+              batch.forEach((element, index) => {
+                const key = `${toolCall.toolCallId}#${index}`
+                const streamedId = streamedCreates.current.get(key)
+                if (streamedId) {
+                  streamedCreates.current.delete(key)
+                  const updated = actions.updateElement(streamedId, element as never)
+                  if (updated) {
+                    results[index] = updated
+                    return
+                  }
+                }
+                fresh.push({ element, index })
+              })
+              if (fresh.length > 0) {
+                const created = actions.createElements(fresh.map((f) => f.element))
+                fresh.forEach((f, j) => {
+                  results[f.index] = created[j]
+                })
+              }
+              void Promise.all(results.filter(Boolean).map(ackWithRender)).then(respond)
               break
+            }
             case 'updateElement': {
               const { id, ...patch } = input as { id: string } & Partial<CanvasElement>
               const updated = actions.updateElement(id, patch)
-              respond(updated ?? { error: `No element with id ${id}` })
+              if (!updated) {
+                respond({ error: `No element with id ${id}` })
+              } else if (typeof patch.code === 'string') {
+                void ackWithRender(updated).then(respond)
+              } else {
+                respond(updated && { id: updated.id, name: updated.name, x: updated.x, y: updated.y, w: updated.w, h: updated.h })
+              }
+              break
+            }
+            case 'readElement': {
+              const id = (input as { id?: string }).id
+              const el = shapesRef.current.find((s) => s.id === id)
+              respond(
+                el
+                  ? { id: el.id, name: el.name, x: el.x, y: el.y, w: el.w, h: el.h, code: el.code }
+                  : { error: `No element with id ${String(id)}` },
+              )
               break
             }
             case 'viewCanvas':
@@ -269,7 +312,7 @@ export function AgentPanel({
                 respond({ unavailable: true })
                 break
               }
-              void snapshotCanvas(snapshotTargets())
+              void snapshotCanvas(shapesRef.current)
                 .then((image) => respond(image ? { image } : { empty: true }))
                 .catch(() => fail('Could not capture the canvas.'))
               break
@@ -316,7 +359,7 @@ export function AgentPanel({
         })
         .catch((error) => console.error('[history] Failed to save checkpoint:', error))
       void (async () => {
-        const snapshot = imageInputsEnabled ? await snapshotCanvas(snapshotTargets()) : null
+        const snapshot = imageInputsEnabled ? await snapshotCanvas(shapesRef.current) : null
         void sendMessage({
           text,
           files: snapshot
@@ -344,15 +387,19 @@ export function AgentPanel({
       const p = part as unknown as ToolPart
       if (typeof p.type !== 'string' || !p.type.startsWith('tool-')) continue
       if (p.state !== 'input-streaming' || !p.input) continue
-      const input = p.input as Partial<CanvasElement> & { id?: string }
-      if (typeof input.code !== 'string' || input.code.length === 0) continue
+      const input = p.input as Partial<CanvasElement> & {
+        id?: string
+        elements?: Partial<CanvasElement>[]
+      }
       const now = performance.now()
-      if (now - (streamedAppliedAt.current.get(p.toolCallId) ?? 0) < 150) continue
+      if (now - (streamedAppliedAt.current.get(p.toolCallId) ?? 0) < 250) continue
       const name = p.type.slice(5)
-      if (name === 'updateElement' && typeof input.id === 'string') {
+      if (name === 'updateElement') {
+        if (typeof input.id !== 'string' || typeof input.code !== 'string' || input.code.length === 0) continue
         streamedAppliedAt.current.set(p.toolCallId, now)
         actions.updateElement(input.id, { code: input.code })
       } else if (name === 'createElement') {
+        if (typeof input.code !== 'string' || input.code.length === 0) continue
         // Wait until the bounds have fully streamed (code comes last in the JSON).
         if ([input.x, input.y, input.w, input.h].some((n) => typeof n !== 'number')) continue
         streamedAppliedAt.current.set(p.toolCallId, now)
@@ -370,6 +417,32 @@ export function AgentPanel({
           })
           streamedCreates.current.set(p.toolCallId, created.id)
         }
+      } else if (name === 'createElements' && Array.isArray(input.elements)) {
+        // Batch creates stream too: each entry appears as soon as its geometry
+        // and first code chunk have parsed.
+        let applied = false
+        input.elements.forEach((entry, index) => {
+          if (!entry || typeof entry !== 'object') return
+          if (typeof entry.code !== 'string' || entry.code.length === 0) return
+          if ([entry.x, entry.y, entry.w, entry.h].some((n) => typeof n !== 'number')) return
+          const key = `${p.toolCallId}#${index}`
+          const existing = streamedCreates.current.get(key)
+          if (existing) {
+            actions.updateElement(existing, { code: entry.code })
+          } else {
+            const created = actions.createElement({
+              name: entry.name ?? 'Element',
+              x: entry.x!,
+              y: entry.y!,
+              w: entry.w!,
+              h: entry.h!,
+              code: entry.code,
+            })
+            streamedCreates.current.set(key, created.id)
+          }
+          applied = true
+        })
+        if (applied) streamedAppliedAt.current.set(p.toolCallId, now)
       }
     }
   }, [messages, status, actions])
@@ -493,7 +566,7 @@ export function AgentPanel({
       output = { deleted: false, reason: 'User declined the deletion' }
     } else {
       const ok = actions.deleteElement(id)
-      output = ok ? { deleted: true, ...target } : { error: 'No such element' }
+      output = ok ? { deleted: true, id, name: target?.name } : { error: 'No such element' }
     }
     addToolOutput({
       tool: 'deleteElement',
@@ -618,7 +691,7 @@ export function AgentPanel({
                 skipIfUnchanged: true,
               })
               .catch((error) => console.error('[history] Failed to save checkpoint:', error))
-            const snapshot = imageInputsEnabled ? await snapshotCanvas(snapshotTargets()) : null
+            const snapshot = imageInputsEnabled ? await snapshotCanvas(shapesRef.current) : null
             sendMessage({
               text: trimmed,
               files: imageInputsEnabled
@@ -728,6 +801,7 @@ const TOOL_META = {
   createElements: { icon: PlusIcon, label: 'Create' },
   updateElement: { icon: PenLineIcon, label: 'Update' },
   deleteElement: { icon: Trash2Icon, label: 'Delete' },
+  readElement: { icon: BookOpenIcon, label: 'Read' },
   loadSkill: { icon: BookOpenIcon, label: 'Skill' },
   viewCanvas: { icon: EyeIcon, label: 'Verify' },
 } as const
@@ -754,6 +828,9 @@ function toolSummary(name: string, part: ToolPart, elements: CanvasElement[]) {
     return `${batch.length} elements`
   }
   const target = elements.find((s) => s.id === input.id)
+  if (name === 'readElement') {
+    return describeElement(target) || String(input.id ?? '')
+  }
   if (name === 'updateElement') {
     const changed = Object.keys(input)
       .filter((k) => k !== 'id')
@@ -852,6 +929,7 @@ const PAST_TENSE = {
   createElements: 'Created',
   updateElement: 'Updated',
   deleteElement: 'Deleted',
+  readElement: 'Read',
   loadSkill: 'Loaded skill',
   viewCanvas: 'Verified',
 } as const
