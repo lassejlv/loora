@@ -2,7 +2,19 @@
   "$schema": "https://railway.app/railway.schema.json",
   "build": {
     "builder": "DOCKERFILE",
-    "watchPatterns": ["src/**", "Dockerfile"]
+    "watchPatterns": [
+      "src/**",
+      "public/**",
+      "drizzle/**",
+      "package.json",
+      "bun.lock",
+      "Dockerfile",
+      ".dockerignore",
+      "vite.config.ts",
+      "tsconfig.json",
+      "drizzle.config.ts",
+      "railway.json"
+    ]
   },
   "deploy": {
     "sleepApplication": true,
