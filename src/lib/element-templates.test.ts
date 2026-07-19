@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test'
 import { classifyCode } from '#/components/element-frame'
-import { imageTemplate, TEMPLATE_DEFAULTS } from './element-templates'
+import { imageTemplate, pageTemplate, TEMPLATE_DEFAULTS } from './element-templates'
 
 describe('element templates', () => {
   it('produce html-classified starter code', () => {
@@ -27,5 +27,13 @@ describe('element templates', () => {
     const code = imageTemplate()
     expect(code).not.toContain('<img')
     expect(classifyCode(code)).toBe('html')
+  })
+
+  it('pageTemplate produces a full-width html page starter', () => {
+    const first = pageTemplate(1)
+    expect(first.name).toBe('Page')
+    expect(first.w).toBe(1440)
+    expect(classifyCode(first.code)).toBe('html')
+    expect(pageTemplate(3).name).toBe('Page 3')
   })
 })

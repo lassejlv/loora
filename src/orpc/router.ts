@@ -76,7 +76,7 @@ async function ensureDesign(designId: string, userId: string) {
 
 const listDesigns = protectedProcedure.handler(async ({ context }) => {
   return db
-    .select({ id: design.id, name: design.name, shapes: design.shapes })
+    .select({ id: design.id, name: design.name, mode: design.mode, shapes: design.shapes })
     .from(design)
     .where(eq(design.userId, context.user.id))
     .orderBy(asc(design.createdAt))
@@ -87,16 +87,22 @@ const saveDesign = protectedProcedure
     z.object({
       id: z.string().min(1).max(128),
       name: z.string().trim().min(1).max(200),
+      mode: z.enum(['canvas', 'page']).optional(),
       shapes: z.array(shapeSchema).max(10_000),
     }),
   )
   .handler(async ({ context, input }) => {
     const [saved] = await db
       .insert(design)
-      .values({ ...input, userId: context.user.id })
+      .values({ ...input, mode: input.mode ?? 'canvas', userId: context.user.id })
       .onConflictDoUpdate({
         target: [design.id, design.userId],
-        set: { name: input.name, shapes: input.shapes, updatedAt: new Date() },
+        set: {
+          name: input.name,
+          ...(input.mode ? { mode: input.mode } : {}),
+          shapes: input.shapes,
+          updatedAt: new Date(),
+        },
       })
       .returning({ id: design.id, updatedAt: design.updatedAt })
 

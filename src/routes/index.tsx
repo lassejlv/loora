@@ -29,6 +29,7 @@ import {
   MaximizeIcon,
 } from 'lucide-react'
 import { Canvas, type CanvasControls, type Tool } from '#/components/canvas'
+import { PageView } from '#/components/page-view'
 import {
   deleteDocStorage,
   docId,
@@ -37,6 +38,7 @@ import {
   saveDocs,
   saveElements,
   type DocMeta,
+  type DocMode,
 } from '#/lib/docs'
 import {
   DropdownMenu,
@@ -220,6 +222,8 @@ function Editor({ preview = false, userId }: { preview?: boolean; userId?: strin
   )
   const [selectedIds, setSelectedIds] = useState<string[]>([])
   const [tool, setTool] = useState<Tool>('select')
+  // Web Page mode: which top-level element is being viewed as a page.
+  const [activePageId, setActivePageId] = useState<string | null>(null)
   const [databaseReady, setDatabaseReady] = useState(false)
   const [layersOpen, setLayersOpen] = useState(() =>
     preview ? false : localStorage.getItem('loora:layers') === '1',
@@ -243,6 +247,8 @@ function Editor({ preview = false, userId }: { preview?: boolean; userId?: strin
   shapesRef.current = shapes
   const selectedIdsRef = useRef(selectedIds)
   selectedIdsRef.current = selectedIds
+  const activeDoc = docs.find((d) => d.id === activeId)
+  const mode: DocMode = activeDoc?.mode ?? 'canvas'
   const canvasControls = useRef<CanvasControls | null>(null)
   const [zoomPct, setZoomPct] = useState(100)
   // Bridge: canvas comment pins push messages straight into the agent chat.
@@ -260,12 +266,21 @@ function Editor({ preview = false, userId }: { preview?: boolean; userId?: strin
         if (remote.length === 0) {
           await Promise.all(
             docs.map((doc) =>
-              orpc.design.save({ id: doc.id, name: doc.name, shapes: loadElements(doc.id) }),
+              orpc.design.save({
+                id: doc.id,
+                name: doc.name,
+                mode: doc.mode ?? 'canvas',
+                shapes: loadElements(doc.id),
+              }),
             ),
           )
           saveDocs(docs, activeId)
         } else {
-          const remoteDocs = remote.map(({ id, name }) => ({ id, name }))
+          const remoteDocs = remote.map(({ id, name, mode }) => ({
+            id,
+            name,
+            mode: (mode === 'page' ? 'page' : 'canvas') as DocMode,
+          }))
           const nextActive = remote.some((doc) => doc.id === activeId) ? activeId : remote[0].id
           for (const doc of remote) saveElements(doc.id, doc.shapes)
           saveDocs(remoteDocs, nextActive)
@@ -308,7 +323,7 @@ function Editor({ preview = false, userId }: { preview?: boolean; userId?: strin
 
     const timeout = window.setTimeout(() => {
       void orpc.design
-        .save({ id: active.id, name: active.name, shapes })
+        .save({ id: active.id, name: active.name, mode: active.mode ?? 'canvas', shapes })
         .catch((error) => console.error('[designs] Failed to save design:', error))
     }, 500)
 
@@ -331,38 +346,56 @@ function Editor({ preview = false, userId }: { preview?: boolean; userId?: strin
     lastMutation.current = 0
   }
 
-  const switchDoc = (id: string) => {
-    if (id === activeId) return
+  const flushActiveDoc = () => {
     const active = docs.find((doc) => doc.id === activeId)
     if (databaseReady && active) {
       void orpc.design
-        .save({ id: active.id, name: active.name, shapes: shapesRef.current })
+        .save({
+          id: active.id,
+          name: active.name,
+          mode: active.mode ?? 'canvas',
+          shapes: shapesRef.current,
+        })
         .catch((error) => console.error('[designs] Failed to save design:', error))
     }
+  }
+
+  const switchDoc = (id: string) => {
+    if (id === activeId) return
+    flushActiveDoc()
     setDocState((s) => {
       saveDocs(s.docs, id)
       return { ...s, activeId: id }
     })
     setShapes(loadElements(id))
     setSelectedIds([])
+    setActivePageId(null)
     resetHistory()
   }
 
   const newDoc = () => {
-    const active = docs.find((doc) => doc.id === activeId)
-    if (databaseReady && active) {
-      void orpc.design
-        .save({ id: active.id, name: active.name, shapes: shapesRef.current })
-        .catch((error) => console.error('[designs] Failed to save design:', error))
-    }
-    const doc = { id: docId(), name: `Untitled ${docs.length + 1}` }
+    flushActiveDoc()
+    const doc: DocMeta = { id: docId(), name: `Untitled ${docs.length + 1}` }
     const next = [...docs, doc]
     saveElements(doc.id, [])
     saveDocs(next, doc.id)
     setDocState({ docs: next, activeId: doc.id })
     setShapes([])
     setSelectedIds([])
+    setActivePageId(null)
     resetHistory()
+  }
+
+  const setDocMode = (mode: DocMode) => {
+    const next = docs.map((d) => (d.id === activeId ? { ...d, mode } : d))
+    saveDocs(next, activeId)
+    setDocState({ docs: next, activeId })
+    setSelectedIds([])
+    if (databaseReady) {
+      void orpc.design
+        .save({ id: activeId, name: activeDoc?.name ?? 'Untitled', mode, shapes: shapesRef.current })
+        .catch((error) => console.error('[designs] Failed to save design:', error))
+    }
   }
 
   const insertAsset = (a: AssetMeta) => {
@@ -410,6 +443,7 @@ function Editor({ preview = false, userId }: { preview?: boolean; userId?: strin
     setDocState({ docs: next, activeId: next[0].id })
     setShapes(loadElements(next[0].id))
     setSelectedIds([])
+    setActivePageId(null)
     resetHistory()
   }
 
@@ -587,6 +621,8 @@ function Editor({ preview = false, userId }: { preview?: boolean; userId?: strin
         else undo()
         return
       }
+      // Web Page mode has no manual canvas manipulation: only undo/redo above.
+      if (mode !== 'canvas') return
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'g') {
         e.preventDefault()
         if (e.shiftKey) ungroupSelected()
@@ -664,7 +700,7 @@ function Editor({ preview = false, userId }: { preview?: boolean; userId?: strin
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [deleteSelected, duplicateSelected, undo, redo, reorder, copySelected, paste, selectedIds, mutate, preview, groupSelected, ungroupSelected])
+  }, [deleteSelected, duplicateSelected, undo, redo, reorder, copySelected, paste, selectedIds, mutate, preview, groupSelected, ungroupSelected, mode])
 
   const selectedShapes = shapes.filter((s) => selectedIds.includes(s.id))
   const selected = selectedShapes[0]
@@ -685,27 +721,46 @@ function Editor({ preview = false, userId }: { preview?: boolean; userId?: strin
         shapesRef={shapesRef}
         selectedIdsRef={selectedIdsRef}
         docId={activeId}
+        mode={mode}
         ready={databaseReady}
         sendRef={agentSend}
       />
 
       <main className="relative min-w-0 flex-1">
-        <Canvas
-          elements={shapes}
-          selectedIds={selectedIds}
-          tool={tool}
-          docId={preview ? undefined : activeId}
-          controlsRef={canvasControls}
-          onScaleChange={setZoomPct}
-          onSelect={setSelectedIds}
-          onToolChange={setTool}
-          onCreate={(s) => mutate((prev) => [...prev, s])}
-          onUpdate={updateElement}
-          onComment={(text) => {
-            toggleAgent(true)
-            return agentSend.current?.(text) ?? false
-          }}
-        />
+        {mode === 'page' ? (
+          <PageView
+            elements={shapes}
+            activePageId={activePageId}
+            onActivePageChange={(id) => {
+              setActivePageId(id)
+              setSelectedIds([id])
+            }}
+            onCreate={(s) => {
+              mutate((prev) => [...prev, s])
+              setSelectedIds([s.id])
+            }}
+            onUpdate={updateElement}
+            onDelete={deleteElement}
+            docId={activeId}
+          />
+        ) : (
+          <Canvas
+            elements={shapes}
+            selectedIds={selectedIds}
+            tool={tool}
+            docId={preview ? undefined : activeId}
+            controlsRef={canvasControls}
+            onScaleChange={setZoomPct}
+            onSelect={setSelectedIds}
+            onToolChange={setTool}
+            onCreate={(s) => mutate((prev) => [...prev, s])}
+            onUpdate={updateElement}
+            onComment={(text) => {
+              toggleAgent(true)
+              return agentSend.current?.(text) ?? false
+            }}
+          />
+        )}
 
         <div className="absolute top-4 right-4 flex items-center gap-1">
           <Drawer open={layersOpen} onOpenChange={toggleLayers} position="bottom">
@@ -791,8 +846,31 @@ function Editor({ preview = false, userId }: { preview?: boolean; userId?: strin
             onRename={renameDoc}
             onDelete={deleteDoc}
           />
+          <div className="pointer-events-auto ml-1 flex items-center rounded-lg border bg-card p-0.5 shadow-sm">
+            {(
+              [
+                ['canvas', 'Canvas'],
+                ['page', 'Web page'],
+              ] as const
+            ).map(([value, label]) => (
+              <button
+                key={value}
+                type="button"
+                className={cn(
+                  'rounded-md px-2 py-0.5 text-xs',
+                  mode === value
+                    ? 'bg-cx-accent/10 font-medium text-cx-accent'
+                    : 'text-muted-foreground hover:text-foreground',
+                )}
+                onClick={() => setDocMode(value)}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
         </div>
 
+        {mode === 'canvas' && (
         <div className="absolute top-1/2 right-4 flex -translate-y-1/2 flex-col gap-1 rounded-xl border bg-card p-1 shadow-sm">
           {TOOLS.map(({ tool: t, icon: Icon, key, label }) => (
             <Button
@@ -829,7 +907,9 @@ function Editor({ preview = false, userId }: { preview?: boolean; userId?: strin
             <Redo2Icon data-slot="icon" />
           </Button>
         </div>
+        )}
 
+        {mode === 'canvas' && (
         <div className="absolute bottom-4 left-4 flex items-center gap-0.5 rounded-xl border bg-card p-1 shadow-sm">
           <Button
             variant="ghost"
@@ -873,10 +953,11 @@ function Editor({ preview = false, userId }: { preview?: boolean; userId?: strin
             <MaximizeIcon data-slot="icon" />
           </Button>
         </div>
+        )}
 
         <div className="absolute bottom-5 left-1/2 -translate-x-1/2">
           <AnimatePresence>
-            {selected && (
+            {mode === 'canvas' && selected && (
               <motion.div
                 key="selection-bar"
                 className="flex items-center gap-1.5 rounded-full border bg-card px-3 py-2 shadow-sm"

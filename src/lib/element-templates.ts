@@ -17,6 +17,18 @@ export function imageTemplate(src?: string, alt = ''): string {
   return `<img src="${src}" alt="${alt.replace(/"/g, '&quot;')}" class="h-full w-full rounded-lg object-cover" />`
 }
 
+// Web Page mode: one top-level element per page, designed at a fixed width.
+// h is just the initial frame height — page content flows taller and scrolls
+// inside the element iframe.
+export function pageTemplate(index = 1): ElementTemplate {
+  return {
+    name: index > 1 ? `Page ${index}` : 'Page',
+    w: 1440,
+    h: 900,
+    code: '<div class="min-h-full w-full bg-white"></div>',
+  }
+}
+
 export const TEMPLATE_DEFAULTS: Record<InsertTool, ElementTemplate> = {
   text: {
     name: 'Text',

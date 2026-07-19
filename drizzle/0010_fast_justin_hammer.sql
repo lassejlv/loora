@@ -1,0 +1,1 @@
+ALTER TABLE "design" ADD COLUMN "mode" text DEFAULT 'canvas' NOT NULL;

@@ -72,13 +72,15 @@ export const Route = createFileRoute('/api/chat')({
           return Response.json({ error: 'Unauthorized' }, { status: 401 })
         }
 
-        const { messages, shapes, selectedIds, model: modelKey, forceCanvasAction } = (await request.json()) as {
+        const { messages, shapes, selectedIds, model: modelKey, mode, forceCanvasAction } = (await request.json()) as {
           messages: UIMessage[]
           shapes: CanvasElement[]
           selectedIds?: string[]
           model?: string
+          mode?: 'canvas' | 'page'
           forceCanvasAction?: boolean
         }
+        const pageMode = mode === 'page'
 
         const modelConfig = getModel(modelKey ?? '')
         const providerConfig = getProvider(modelConfig.provider)
@@ -203,16 +205,26 @@ export const Route = createFileRoute('/api/chat')({
             DESIGN_SKILL_PROMPT,
             'You manipulate the canvas only through tools. Every canvas element is a positioned box of code: { name, x, y, w, h, code }.',
             'Element code is either plain HTML or JSX. Plain HTML is the default for anything static: headings, paragraphs, images, cards, full page sections. Tailwind v3 utility classes work everywhere; add a <style> block or inline styles for anything beyond utilities; inline <script> tags run too. Write JSX defining function App only when the user wants working interactivity (forms, toggles, counters, mini apps): hooks like useState/useEffect work, imports/exports are stripped at runtime, prefer onClick/onChange over <form> submit, no external npm libraries.',
-            'Each element renders in its own isolated sandboxed document sized exactly w×h with a transparent background — give sections an explicit background class (e.g. bg-white) and design at real widths (375 wide for mobile screens, 1280-1440 for desktop pages).',
-            'Granularity: one cohesive thing per element. A landing page is usually ONE element (a full-page section stack) — or a few section elements stacked vertically when the user wants to rearrange sections. A logo, a headline, or a screenshot placed beside it are their own elements. Do not shred a design into dozens of absolutely positioned fragments.',
+            pageMode
+              ? 'THIS DOCUMENT IS IN WEB PAGE MODE: it is a website, and each top-level element is ONE full page (like one HTML file). Create a new page with createElement at x 0, y 0, w 1440 (the design width; use 375 only if the user asks for mobile). Content flows naturally and may be much taller than h — h is just the initial frame, the page scrolls. Everything belongs inside a page\'s code; never place loose fragments next to a page. Edit a page by sending its complete new code via updateElement.'
+              : 'Each element renders in its own isolated sandboxed document sized exactly w×h with a transparent background — give sections an explicit background class (e.g. bg-white) and design at real widths (375 wide for mobile screens, 1280-1440 for desktop pages).',
+            pageMode
+              ? ''
+              : 'Granularity: one cohesive thing per element. A landing page is usually ONE element (a full-page section stack) — or a few section elements stacked vertically when the user wants to rearrange sections. A logo, a headline, or a screenshot placed beside it are their own elements. Do not shred a design into dozens of absolutely positioned fragments.',
             'Always emit name, x, y, w, h before code (the canvas shows a live preview while code streams). Update an element by sending its complete new code via updateElement — never a diff or fragment.',
             imageInputsEnabled
-              ? 'The user message may include a PNG snapshot of the current canvas. Use it to judge layout, overlap, and balance before and after your edits.'
+              ? pageMode
+                ? 'The user message may include a PNG snapshot of the page they are currently viewing. Use it to judge layout and balance before and after your edits; viewCanvas also shows the viewed page.'
+                : 'The user message may include a PNG snapshot of the current canvas. Use it to judge layout, overlap, and balance before and after your edits.'
               : 'Image input is temporarily disabled. Rely on the current canvas elements JSON and do not call viewCanvas.',
-            'Coordinates: x/y is the top-left corner, y grows downward. The visible canvas is roughly 1200x800 around the origin. Leave 40-80px gaps between separate elements; align edges deliberately.',
+            pageMode
+              ? 'The user is currently viewing the selected page (see selected ids below); apply page edits there unless they name another page.'
+              : 'Coordinates: x/y is the top-left corner, y grows downward. The visible canvas is roughly 1200x800 around the origin. Leave 40-80px gaps between separate elements; align edges deliberately.',
             'Palette to prefer: #1a1917 ink, #ffffff white, #2440e6 ultramarine, #e8442e vermilion, #f5c518 yellow, #23a25d green. Other CSS colors are allowed when asked.',
             'Images: use only asset URLs from the Assets list below, as <img src="/api/asset/...">. Never invent asset URLs; if no fitting asset exists, say so or design with styled markup instead.',
-            'Interactive elements render live: users press I or double-click an element to interact with it. Elements render live in canvas snapshots, so viewCanvas verifies them too.',
+            pageMode
+              ? 'Pages are always live: buttons, hovers, links, and React state work immediately, and render live in snapshots, so viewCanvas verifies them too.'
+              : 'Interactive elements render live: users press I or double-click an element to interact with it. Elements render live in canvas snapshots, so viewCanvas verifies them too.',
             '',
             'Assets available (JSON):',
             JSON.stringify(assets.map((a) => ({ name: a.name, mediaType: a.mediaType, src: `/api/asset/${a.id}` }))),

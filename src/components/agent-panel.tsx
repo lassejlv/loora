@@ -128,6 +128,7 @@ export function AgentPanel({
   shapesRef,
   selectedIdsRef,
   docId,
+  mode = 'canvas',
   ready = true,
   sendRef,
 }: {
@@ -135,6 +136,8 @@ export function AgentPanel({
   shapesRef: React.RefObject<CanvasElement[]>
   selectedIdsRef?: React.RefObject<string[]>
   docId: string
+  // 'page' = Web Page mode: each top-level element is one page.
+  mode?: 'canvas' | 'page'
   ready?: boolean
   // Exposes a send-message entry point for canvas comment pins.
   sendRef?: React.RefObject<((text: string) => boolean) | null>
@@ -168,6 +171,16 @@ export function AgentPanel({
   chatsRef.current = chats
   const composerRef = useRef<HTMLTextAreaElement>(null)
   const activeChat = chats.find((chat) => chat.id === activeChatId)
+  const modeValue = useRef(mode)
+  modeValue.current = mode
+
+  // Snapshots in Web Page mode show only the page being viewed (the selected
+  // element); the full-canvas composite would stack every page at (0,0)-ish.
+  const snapshotTargets = () => {
+    if (modeValue.current !== 'page') return shapesRef.current
+    const viewed = shapesRef.current.filter((s) => selectedIdsRef?.current?.includes(s.id))
+    return viewed.length > 0 ? viewed : shapesRef.current.slice(0, 1)
+  }
 
   const { messages, setMessages, sendMessage, regenerate, addToolOutput, status, stop, error } =
     useChat({
@@ -177,6 +190,7 @@ export function AgentPanel({
           shapes: shapesRef.current,
           selectedIds: selectedIdsRef?.current ?? [],
           model: modelRef.current,
+          mode: modeValue.current,
           forceCanvasAction: forceCanvasAction.current,
         }),
       }),
@@ -255,7 +269,7 @@ export function AgentPanel({
                 respond({ unavailable: true })
                 break
               }
-              void snapshotCanvas(shapesRef.current)
+              void snapshotCanvas(snapshotTargets())
                 .then((image) => respond(image ? { image } : { empty: true }))
                 .catch(() => fail('Could not capture the canvas.'))
               break
@@ -302,7 +316,7 @@ export function AgentPanel({
         })
         .catch((error) => console.error('[history] Failed to save checkpoint:', error))
       void (async () => {
-        const snapshot = imageInputsEnabled ? await snapshotCanvas(shapesRef.current) : null
+        const snapshot = imageInputsEnabled ? await snapshotCanvas(snapshotTargets()) : null
         void sendMessage({
           text,
           files: snapshot
@@ -604,7 +618,7 @@ export function AgentPanel({
                 skipIfUnchanged: true,
               })
               .catch((error) => console.error('[history] Failed to save checkpoint:', error))
-            const snapshot = imageInputsEnabled ? await snapshotCanvas(shapesRef.current) : null
+            const snapshot = imageInputsEnabled ? await snapshotCanvas(snapshotTargets()) : null
             sendMessage({
               text: trimmed,
               files: imageInputsEnabled

@@ -97,6 +97,7 @@ export const design = pgTable(
       .notNull()
       .references(() => user.id, { onDelete: 'cascade' }),
     name: text('name').notNull(),
+    mode: text('mode').default('canvas').notNull(),
     shapes: jsonb('shapes').$type<CanvasElement[]>().default([]).notNull(),
     createdAt: timestamp('created_at').defaultNow().notNull(),
     updatedAt: timestamp('updated_at')

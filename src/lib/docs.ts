@@ -1,9 +1,14 @@
 import type { CanvasElement } from './canvas'
 import { onlyCodeElements } from './canvas'
 
+export type DocMode = 'canvas' | 'page'
+
 export interface DocMeta {
   id: string
   name: string
+  // How the document is viewed: freeform canvas (default) or a Claude-Design
+  // style web page view where each top-level element is one page.
+  mode?: DocMode
 }
 
 const INDEX_KEY = 'loora:docs'
