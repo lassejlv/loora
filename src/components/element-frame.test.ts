@@ -1,8 +1,9 @@
-import { describe, expect, it } from 'bun:test'
+import { describe, expect, it, mock } from 'bun:test'
 import {
   buildElementDoc,
   classifyCode,
   hasEntryCall,
+  inlineAssetUrls,
   REACT_GLOBALS_PRELUDE,
   stripModuleSyntax,
 } from './element-frame'
@@ -143,5 +144,34 @@ describe('buildElementDoc', () => {
 
   it('has a transparent background so text and unstyled elements sit on the canvas', () => {
     expect(doc).toContain('background:transparent')
+  })
+})
+
+describe('inlineAssetUrls', () => {
+  it('returns code without asset urls untouched and without fetching', async () => {
+    const originalFetch = globalThis.fetch
+    const fetchMock = mock()
+    globalThis.fetch = fetchMock as unknown as typeof fetch
+    try {
+      const code = '<div class="p-4">no assets here</div>'
+      expect(await inlineAssetUrls(code)).toBe(code)
+      expect(fetchMock).not.toHaveBeenCalled()
+    } finally {
+      globalThis.fetch = originalFetch
+    }
+  })
+
+  it('keeps the original url when the asset cannot be fetched', async () => {
+    const originalFetch = globalThis.fetch
+    const fetchMock = mock().mockResolvedValue({ ok: false })
+    globalThis.fetch = fetchMock as unknown as typeof fetch
+    try {
+      const code = '<img src="/api/asset/broken404" /><img src="/api/asset/broken404" />'
+      expect(await inlineAssetUrls(code)).toBe(code)
+      // deduped: one fetch for the repeated url
+      expect(fetchMock).toHaveBeenCalledTimes(1)
+    } finally {
+      globalThis.fetch = originalFetch
+    }
   })
 })

@@ -202,6 +202,46 @@ parent.postMessage({ type: 'loora:element-ready' }, '*')
 
 const ELEMENT_DOC = buildElementDoc()
 
+// Sandboxed iframes have an opaque origin: an <img src="/api/asset/…"> inside
+// one sends no session cookie and gets a 401. The parent document is
+// authenticated, so it fetches each asset once and inlines it as a data URL
+// before the code enters the iframe. Cached per asset URL for the session.
+const assetDataUrls = new Map<string, Promise<string | null>>()
+
+function assetToDataUrl(url: string): Promise<string | null> {
+  let pending = assetDataUrls.get(url)
+  if (!pending) {
+    pending = (async () => {
+      try {
+        const res = await fetch(url)
+        if (!res.ok) return null
+        const blob = await res.blob()
+        return await new Promise<string | null>((resolve) => {
+          const reader = new FileReader()
+          reader.onload = () => resolve(String(reader.result))
+          reader.onerror = () => resolve(null)
+          reader.readAsDataURL(blob)
+        })
+      } catch {
+        return null
+      }
+    })()
+    assetDataUrls.set(url, pending)
+  }
+  return pending
+}
+
+export async function inlineAssetUrls(code: string): Promise<string> {
+  const urls = [...new Set([...code.matchAll(/\/api\/asset\/[a-zA-Z0-9_-]+/g)].map((m) => m[0]))]
+  if (urls.length === 0) return code
+  const resolved = await Promise.all(urls.map(async (u) => [u, await assetToDataUrl(u)] as const))
+  let out = code
+  // Unresolvable assets keep their original URL (shows as a broken image
+  // instead of silently vanishing).
+  for (const [url, data] of resolved) if (data) out = out.split(url).join(data)
+  return out
+}
+
 export function ElementFrame({
   elementId,
   code,
@@ -223,22 +263,28 @@ export function ElementFrame({
   onErrorRef.current = onError
 
   const send = (source: string) => {
-    const win = iframeRef.current?.contentWindow
-    if (!win || !readyRef.current) return
+    if (!iframeRef.current?.contentWindow || !readyRef.current) return
     const stripped = stripModuleSyntax(source)
     const mode = classifyCode(source)
     seqRef.current += 1
-    // sandbox="allow-scripts" gives the iframe an opaque origin: '*' required.
-    win.postMessage(
-      {
-        type: 'loora:code',
-        code: stripped,
-        mode,
-        seq: seqRef.current,
-        needsEntry: mode !== 'jsx-app' || !hasEntryCall(stripped),
-      },
-      '*',
-    )
+    const seq = seqRef.current
+    void inlineAssetUrls(stripped).then((code) => {
+      // A newer payload was sent while assets were resolving: drop this one.
+      if (seq !== seqRef.current) return
+      const win = iframeRef.current?.contentWindow
+      if (!win) return
+      // sandbox="allow-scripts" gives the iframe an opaque origin: '*' required.
+      win.postMessage(
+        {
+          type: 'loora:code',
+          code,
+          mode,
+          seq,
+          needsEntry: mode !== 'jsx-app' || !hasEntryCall(stripped),
+        },
+        '*',
+      )
+    })
   }
 
   useEffect(() => {
