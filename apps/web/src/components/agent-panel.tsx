@@ -34,7 +34,7 @@ import {
   PromptInputSubmit,
   PromptInputTextarea,
 } from '#/components/ai-elements/prompt-input'
-import type { CanvasElement, ElementActions } from '#/lib/canvas'
+import { applyCodeEdits, type CanvasElement, type CodeEdit, type ElementActions } from '#/lib/canvas'
 import { awaitRenderResult } from '#/components/element-frame'
 import { snapshotCanvas } from '#/lib/snapshot'
 import { commitIfChanged } from '@loora/rpc/history'
@@ -100,6 +100,7 @@ function hasCanvasMutation(message: UIMessage) {
       'tool-createElement',
       'tool-createElements',
       'tool-updateElement',
+      'tool-editElement',
       'tool-deleteElement',
     ].includes(part.type),
   )
@@ -317,6 +318,26 @@ export const AgentPanel = memo(function AgentPanel({
                 void ackWithRender(updated).then(respond)
               } else {
                 respond(updated && { id: updated.id, name: updated.name, x: updated.x, y: updated.y, w: updated.w, h: updated.h })
+              }
+              break
+            }
+            case 'editElement': {
+              const { id, edits } = input as { id: string; edits: CodeEdit[] }
+              const el = shapesRef.current.find((s) => s.id === id)
+              if (!el) {
+                respond({ error: `No element with id ${id}` })
+                break
+              }
+              const result = applyCodeEdits(el.code, edits ?? [])
+              if (!result.ok) {
+                respond({ error: result.error })
+                break
+              }
+              const updated = actions.updateElement(id, { code: result.code })
+              if (!updated) {
+                respond({ error: `No element with id ${id}` })
+              } else {
+                void ackWithRender(updated).then(respond)
               }
               break
             }
@@ -851,6 +872,7 @@ const TOOL_META = {
   createElement: { icon: PlusIcon, label: 'Create' },
   createElements: { icon: PlusIcon, label: 'Create' },
   updateElement: { icon: PenLineIcon, label: 'Update' },
+  editElement: { icon: PenLineIcon, label: 'Edit' },
   deleteElement: { icon: Trash2Icon, label: 'Delete' },
   readElement: { icon: BookOpenIcon, label: 'Read' },
   loadSkill: { icon: BookOpenIcon, label: 'Skill' },
@@ -887,6 +909,10 @@ function toolSummary(name: string, part: ToolPart, elements: CanvasElement[]) {
       .filter((k) => k !== 'id')
       .join(', ')
     return `${describeElement(target) || String(input.id ?? '')} · ${changed}`
+  }
+  if (name === 'editElement') {
+    const edits = (input.edits as unknown[] | undefined)?.length ?? 0
+    return `${describeElement(target) || String(input.id ?? '')} · ${edits} edit${edits === 1 ? '' : 's'}`
   }
   if (name === 'deleteElement') {
     // after deletion the element is gone from state; fall back to the tool output
@@ -1050,6 +1076,7 @@ const PAST_TENSE = {
   createElement: 'Created',
   createElements: 'Created',
   updateElement: 'Updated',
+  editElement: 'Edited',
   deleteElement: 'Deleted',
   readElement: 'Read',
   loadSkill: 'Loaded skill',

@@ -100,6 +100,15 @@ function compactRecord(value: Record<string, unknown>): Record<string, unknown> 
   const out = { ...value }
   if (typeof out.code === 'string') out.code = truncatedCode(out.code)
   if (typeof out.image === 'string') delete out.image
+  if (Array.isArray(out.edits)) {
+    out.edits = out.edits.map((edit) => {
+      if (!edit || typeof edit !== 'object') return edit
+      const e = { ...(edit as Record<string, unknown>) }
+      if (typeof e.oldCode === 'string') e.oldCode = truncatedCode(e.oldCode)
+      if (typeof e.newCode === 'string') e.newCode = truncatedCode(e.newCode)
+      return e
+    })
+  }
   if (Array.isArray(out.elements)) {
     out.elements = out.elements.map((el) =>
       el && typeof el === 'object' ? compactRecord(el as Record<string, unknown>) : el,
@@ -304,7 +313,7 @@ export const Route = createFileRoute('/api/chat')({
             },
             updateElement: {
               description:
-                'Update an existing element by id. When changing code, send the complete new code, not a diff — and only when you have the element\'s full current code (from this conversation or readElement). Returns a render result: "ok", or "error: …" you must fix.',
+                'Update an existing element by id. When changing code, send the complete new code, not a diff — and only when you have the element\'s full current code (from this conversation or readElement). For small targeted code changes prefer editElement instead of resending everything. Returns a render result: "ok", or "error: …" you must fix.',
               inputSchema: z.object({
                 id: z.string(),
                 name: elementFields.name.optional(),
@@ -313,6 +322,29 @@ export const Route = createFileRoute('/api/chat')({
                 w: elementFields.w.optional(),
                 h: elementFields.h.optional(),
                 code: elementFields.code.optional(),
+              }),
+            },
+            editElement: {
+              description:
+                'Edit an element\'s code in place with exact search/replace edits — the cheap way to make small, targeted changes without resending the whole code. Each edit replaces oldCode (an exact substring of the current code, unique unless replaceAll) with newCode. Edits apply in order and atomically: if any oldCode is missing or ambiguous, the whole call fails and nothing changes. Only use when you have the element\'s full current code (from this conversation or readElement) — never guess oldCode from a truncated preview. For rewrites or large changes use updateElement. Returns a render result: "ok", or "error: …" you must fix.',
+              inputSchema: z.object({
+                id: z.string(),
+                edits: z
+                  .array(
+                    z.object({
+                      oldCode: z
+                        .string()
+                        .min(1)
+                        .describe('exact substring of the current code; include surrounding lines to make it unique'),
+                      newCode: z.string().describe('replacement text; empty string deletes oldCode'),
+                      replaceAll: z
+                        .boolean()
+                        .optional()
+                        .describe('replace every occurrence of oldCode instead of requiring a unique match'),
+                    }),
+                  )
+                  .min(1)
+                  .max(20),
               }),
             },
             readElement: {
@@ -379,10 +411,10 @@ export const Route = createFileRoute('/api/chat')({
             DESIGN_SKILL_PROMPT,
             'You manipulate the canvas only through tools. Every canvas element is a positioned box of code: { name, x, y, w, h, code }.',
             'Element code is either plain HTML or JSX/TSX. Plain HTML is the default for anything static: headings, paragraphs, images, cards, full page sections. Tailwind v3 utility classes work everywhere; add a <style> block or inline styles for anything beyond utilities; inline <script> tags run too. Write JSX defining function App only when the user wants working interactivity (forms, toggles, counters, mini apps): hooks like useState/useEffect work, TypeScript annotations are fine (stripped at compile), imports/exports are stripped at runtime, no external npm libraries. Forms never navigate (submit is always prevented — handle it in onSubmit/onClick state) and links are inert except #hash jumps, so interactive demos are safe.',
-            'Every createElement/createElements/updateElement result reports render: "ok" or "error: <message>". On an error, fix the code and update the element again — never leave an element in an error state and never claim success while a render error is unresolved.',
+            'Every createElement/createElements/updateElement/editElement result reports render: "ok" or "error: <message>". On an error, fix the code and update the element again — never leave an element in an error state and never claim success while a render error is unresolved.',
             'Each element renders in its own isolated sandboxed document sized exactly w×h with a transparent background — give sections an explicit background class (e.g. bg-white) and design at real widths (375 wide for mobile screens, 1280-1440 for desktop pages).',
             'Granularity: one cohesive thing per element. A landing page is usually ONE element (a full-page section stack) — or a few section elements stacked vertically when the user wants to rearrange sections. A logo, a headline, or a screenshot placed beside it are their own elements. Do not shred a design into dozens of absolutely positioned fragments.',
-            'Always emit name, x, y, w, h before code (the canvas shows a live preview while code streams). Update an element by sending its complete new code via updateElement — never a diff or fragment. If you do not have an element\'s complete current code in this conversation (the canvas listing below truncates long code with […]), call readElement first; updating from a truncated preview destroys the element.',
+            'Always emit name, x, y, w, h before code (the canvas shows a live preview while code streams). To change an element\'s code: for small, targeted changes call editElement with exact oldCode/newCode search-replace edits; for rewrites or large restructures send the complete new code via updateElement — never a partial fragment through updateElement. Both require the element\'s complete current code in this conversation (the canvas listing below truncates long code with […]) — call readElement first when you do not have it; editing from a truncated preview fails or destroys the element.',
             imageInputsEnabled
               ? 'The user message may include a PNG snapshot of the current canvas. Use it to judge layout, overlap, and balance before and after your edits.'
               : 'Image input is temporarily disabled. Rely on the current canvas elements JSON and do not call viewCanvas.',
@@ -403,7 +435,7 @@ export const Route = createFileRoute('/api/chat')({
             selectedIds?.length
               ? `The user currently has these element ids selected: ${JSON.stringify(selectedIds)}. When the request says "this", "these", or "the selected", it refers to those elements.`
               : '',
-            'Comment pins: a user message may end with a "Canvas comment pinned to:" block. It names the target element id plus a pin position as percentages inside that element\'s box. Locate what sits at that spot in the element\'s code (and in the canvas snapshot), change only what the comment asks, and send the complete updated code via updateElement. Do not touch other elements.',
+            'Comment pins: a user message may end with a "Canvas comment pinned to:" block. It names the target element id plus a pin position as percentages inside that element\'s box. Locate what sits at that spot in the element\'s code (and in the canvas snapshot), change only what the comment asks, and apply it with editElement (or updateElement with complete code for larger changes). Do not touch other elements.',
           ].join('\n'),
           messages: await convertToModelMessages(
             messagesForModel(messages, imageInputsEnabled),

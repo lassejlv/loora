@@ -26,6 +26,48 @@ export function applyElementPatches(
   })
 }
 
+export interface CodeEdit {
+  oldCode: string
+  newCode: string
+  replaceAll?: boolean
+}
+
+export type CodeEditResult = { ok: true; code: string } | { ok: false; error: string }
+
+// Exact search/replace over an element's code, applied in order and atomically:
+// the first failing edit aborts the whole batch so the agent never lands a
+// half-applied change. String replacement is done with indexOf/slice (not
+// String.replace) so `$&`-style patterns in newCode stay literal.
+export function applyCodeEdits(code: string, edits: readonly CodeEdit[]): CodeEditResult {
+  let next = code
+  for (const [index, edit] of edits.entries()) {
+    const label = edits.length > 1 ? `edit ${index + 1}: ` : ''
+    if (edit.oldCode.length === 0) {
+      return { ok: false, error: `${label}oldCode is empty — provide the exact code to replace` }
+    }
+    const count = next.split(edit.oldCode).length - 1
+    if (count === 0) {
+      return {
+        ok: false,
+        error: `${label}oldCode was not found in the element's current code — call readElement and retry with an exact substring`,
+      }
+    }
+    if (count > 1 && !edit.replaceAll) {
+      return {
+        ok: false,
+        error: `${label}oldCode matches ${count} places — include more surrounding code to make it unique, or set replaceAll`,
+      }
+    }
+    if (edit.replaceAll) {
+      next = next.split(edit.oldCode).join(edit.newCode)
+    } else {
+      const at = next.indexOf(edit.oldCode)
+      next = next.slice(0, at) + edit.newCode + next.slice(at + edit.oldCode.length)
+    }
+  }
+  return { ok: true, code: next }
+}
+
 // Rebuild z-order in one pass. Unknown and duplicate ids are ignored, while
 // elements omitted by the caller keep their existing relative order at the end.
 export function reorderElements(elements: CanvasElement[], orderedIds: string[]): CanvasElement[] {

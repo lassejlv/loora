@@ -51,7 +51,7 @@ The trickiest file in the repo. Read its header comment before touching it.
 
 ### Agent loop
 
-Server `apps/web/src/routes/api.chat.ts` declares tools with **no execute** — `createElement`, `createElements` (≤40), `updateElement`, `readElement`, `deleteElement`, `viewCanvas`, `askQuestion`. Every one runs **client-side** in `agent-panel.tsx`'s `useChat({ onToolCall })` against live canvas state via refs, then reports back. `sendAutomaticallyWhen: lastAssistantMessageIsCompleteWithToolCalls` continues the loop; `stopWhen: stepCountIs(40)` caps it server-side.
+Server `apps/web/src/routes/api.chat.ts` declares tools with **no execute** — `createElement`, `createElements` (≤40), `updateElement`, `editElement` (atomic search/replace edits via `applyCodeEdits`), `readElement`, `deleteElement`, `viewCanvas`, `askQuestion`. Every one runs **client-side** in `agent-panel.tsx`'s `useChat({ onToolCall })` against live canvas state via refs, then reports back. `sendAutomaticallyWhen: lastAssistantMessageIsCompleteWithToolCalls` continues the loop; `stopWhen: stepCountIs(40)` caps it server-side.
 
 What shapes this code:
 
