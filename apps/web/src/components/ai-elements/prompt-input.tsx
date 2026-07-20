@@ -41,14 +41,8 @@ import {
 } from "#/components/ui/tooltip.tsx";
 import { cn } from "#/lib/utils.ts";
 import type { ChatStatus, FileUIPart, SourceDocumentUIPart } from "ai";
-import {
-  CornerDownLeftIcon,
-  ImageIcon,
-  Monitor,
-  PlusIcon,
-  SquareIcon,
-  XIcon,
-} from "lucide-react";
+import { CornerDownLeftIcon, PlusIcon, XIcon } from "#/components/icons";
+import { ImageIcon, Monitor, SquareIcon } from "lucide-react";
 import { nanoid } from "nanoid";
 import type {
   ChangeEvent,

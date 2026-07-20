@@ -1,11 +1,6 @@
 import { useMemo, useState } from 'react'
-import {
-  CheckIcon,
-  ClipboardIcon,
-  DownloadIcon,
-  Link2Icon,
-  LoaderCircleIcon,
-} from 'lucide-react'
+import { CheckIcon, DownloadIcon, LoaderCircleIcon } from '#/components/icons'
+import { ClipboardIcon, Link2Icon } from 'lucide-react'
 import type { DocMeta } from '#/lib/docs'
 import type { CanvasElement } from '#/lib/canvas'
 import { snapshotCanvas } from '#/lib/snapshot'

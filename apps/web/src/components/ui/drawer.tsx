@@ -6,7 +6,7 @@ import { mergeProps } from "@base-ui/react/merge-props";
 import { Radio as RadioPrimitive } from "@base-ui/react/radio";
 import { RadioGroup as RadioGroupPrimitive } from "@base-ui/react/radio-group";
 import { useRender } from "@base-ui/react/use-render";
-import { ChevronRightIcon, XIcon } from "lucide-react";
+import { ChevronRightIcon, XIcon } from "#/components/icons";
 import type React from "react";
 import { createContext, useContext } from "react";
 import { cn } from "#/lib/utils.ts";

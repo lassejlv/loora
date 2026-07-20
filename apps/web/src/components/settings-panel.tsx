@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { LogOutIcon } from 'lucide-react'
+import { LogOutIcon } from '#/components/icons'
 import { Button } from '#/components/ui/button'
 import { Input } from '#/components/ui/input'
 import { Tabs, TabsList, TabsPanel, TabsTab } from '#/components/ui/tabs'

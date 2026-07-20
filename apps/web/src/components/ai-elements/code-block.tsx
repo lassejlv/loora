@@ -9,7 +9,7 @@ import {
   SelectValue,
 } from "#/components/ui/select.tsx";
 import { cn } from "#/lib/utils.ts";
-import { CheckIcon, CopyIcon } from "lucide-react";
+import { CheckIcon, CopyIcon } from "#/components/icons";
 import type { ComponentProps, CSSProperties, HTMLAttributes } from "react";
 import {
   createContext,

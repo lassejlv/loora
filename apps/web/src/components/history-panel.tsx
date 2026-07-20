@@ -1,5 +1,5 @@
 import { lazy, Suspense, useState } from 'react'
-import { HistoryIcon } from 'lucide-react'
+import { HistoryIcon } from '#/components/icons'
 import { nanoid } from 'nanoid'
 import type { CanvasElement } from '#/lib/canvas'
 import { loadHistory, relativeTime, type Commit, type CommitSummary } from '@loora/rpc/history'

@@ -174,7 +174,12 @@ describe('AgentPanel empty response recovery', () => {
     )
 
     const input = await screen.findByPlaceholderText('Describe a change…')
-    expect(screen.getByTitle('Reasoning effort').textContent).toContain('Max')
+    const effortButton = screen.getByTitle('Reasoning effort')
+    expect(effortButton.textContent).toContain('Max')
+    fireEvent.click(effortButton)
+    const effortSlider = await screen.findByRole('slider', { name: 'Reasoning effort' })
+    expect(effortSlider.getAttribute('aria-valuenow')).toBe('4')
+    expect(screen.getByTestId('reasoning-effort-stops').children).toHaveLength(5)
     fireEvent.change(input, { target: { value: 'Review this design' } })
     fireEvent.submit(input.closest('form')!)
 
@@ -397,6 +402,61 @@ describe('AgentPanel empty response recovery', () => {
     expect(snapshotCanvas).not.toHaveBeenCalled()
     const requestBody = (chatFetch.mock.calls[0]?.[1] as RequestInit)?.body as string
     expect(requestBody).not.toContain('"type":"file"')
+  })
+
+  it('shows progress while a tool is running and failure only after an error', () => {
+    const running = {
+      id: 'running-tool',
+      role: 'assistant',
+      parts: [{
+        type: 'tool-readRepositoryFile',
+        toolCallId: 'repository-read',
+        state: 'input-available',
+        input: { repository: 'acme/site', path: 'src/app.tsx' },
+      }],
+    } as UIMessage
+    const failed = {
+      id: 'failed-tool',
+      role: 'assistant',
+      parts: [{
+        type: 'tool-readRepositoryFile',
+        toolCallId: 'repository-read',
+        state: 'output-error',
+        input: { repository: 'acme/site', path: 'src/app.tsx' },
+        errorText: 'Request failed',
+      }],
+    } as UIMessage
+    const shapesRef = { current: [] as CanvasElement[] }
+    const onAnswer = mock()
+    const onResolveDelete = mock()
+
+    const view = render(
+      <ChatMessageRow
+        message={running}
+        isLast
+        streaming
+        shapesRef={shapesRef}
+        onAnswer={onAnswer}
+        onResolveDelete={onResolveDelete}
+      />,
+    )
+
+    expect(screen.getByLabelText('Tool in progress')).toBeTruthy()
+    expect(screen.queryByLabelText('Tool failed')).toBeNull()
+
+    view.rerender(
+      <ChatMessageRow
+        message={failed}
+        isLast
+        streaming={false}
+        shapesRef={shapesRef}
+        onAnswer={onAnswer}
+        onResolveDelete={onResolveDelete}
+      />,
+    )
+
+    expect(screen.getByLabelText('Tool failed')).toBeTruthy()
+    expect(screen.queryByLabelText('Tool in progress')).toBeNull()
   })
 
   it('does not rerender a historical row during streaming or canvas movement', () => {

@@ -17,7 +17,7 @@ import { code } from "@streamdown/code";
 import { math } from "@streamdown/math";
 import { mermaid } from "@streamdown/mermaid";
 import type { UIMessage } from "ai";
-import { ChevronLeftIcon, ChevronRightIcon } from "lucide-react";
+import { ChevronLeftIcon, ChevronRightIcon } from "#/components/icons";
 import type { ComponentProps, HTMLAttributes, ReactElement } from "react";
 import {
   createContext,

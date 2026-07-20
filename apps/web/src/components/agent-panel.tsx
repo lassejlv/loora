@@ -8,22 +8,25 @@ import {
 } from '@opencoredev/loginwithchatgpt-ai'
 import { nanoid } from 'nanoid'
 import {
-  BookOpenIcon,
   CheckIcon,
-  GroupIcon,
   LayersIcon,
-  MoveIcon,
-  ScrollTextIcon,
+  LoaderCircleIcon,
   SearchIcon,
-  UngroupIcon,
   ChevronDownIcon,
   EyeIcon,
   ChevronRightIcon,
   MessageSquareIcon,
-  PenLineIcon,
   PlusIcon,
-  Trash2Icon,
   XIcon,
+} from '#/components/icons'
+import {
+  BookOpenIcon,
+  GroupIcon,
+  MoveIcon,
+  ScrollTextIcon,
+  UngroupIcon,
+  PenLineIcon,
+  Trash2Icon,
 } from 'lucide-react'
 import { cn } from '#/lib/utils'
 import { Button } from '#/components/ui/button'
@@ -46,6 +49,8 @@ import { snapshotCanvas } from '#/lib/snapshot'
 import { commitIfChanged } from '@loora/rpc/history'
 import { sanitizeChatMessagesForStorage } from '@loora/rpc/chat-storage'
 import { Sidebar } from '#/components/ui/sidebar'
+import { Popover, PopoverContent, PopoverTrigger } from '#/components/ui/popover'
+import { SliderPrimitive } from '#/components/ui/slider'
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '#/components/ui/collapsible'
 import { interruptIn, interruptTransition } from '#/lib/motion'
 import { orpc } from '#/lib/orpc-client'
@@ -875,20 +880,22 @@ export const AgentPanel = memo(function AgentPanel({
             className="w-full"
           />
           <PromptInputFooter>
-            <ModelPicker
-              model={model}
-              chatGPTModels={chatGPTModels}
-              chatGPTModelsError={chatGPTModelsError}
-              loadingChatGPTModels={loadingChatGPTModels}
-              onLoadChatGPTModels={loadChatGPTModels}
-              onModelChange={changeModel}
-            />
-            {usingChatGPT ? (
-              <ReasoningEffortPicker
-                effort={reasoningEffort}
-                onChange={changeReasoningEffort}
+            <div className="flex items-center gap-1">
+              <ModelPicker
+                model={model}
+                chatGPTModels={chatGPTModels}
+                chatGPTModelsError={chatGPTModelsError}
+                loadingChatGPTModels={loadingChatGPTModels}
+                onLoadChatGPTModels={loadChatGPTModels}
+                onModelChange={changeModel}
               />
-            ) : null}
+              {usingChatGPT ? (
+                <ReasoningEffortPicker
+                  effort={reasoningEffort}
+                  onChange={changeReasoningEffort}
+                />
+              ) : null}
+            </div>
             <PromptInputSubmit
               status={status}
               onStop={() => stop()}
@@ -928,32 +935,78 @@ function ReasoningEffortPicker({
   effort: ChatGPTReasoningEffort
   onChange: (effort: ChatGPTReasoningEffort) => void
 }) {
-  const label = CHATGPT_REASONING_EFFORTS.find((option) => option.id === effort)?.label
+  const index = CHATGPT_REASONING_EFFORTS.findIndex((option) => option.id === effort)
+  const label = CHATGPT_REASONING_EFFORTS[index]?.label
+  const selectIndex = (next: number) => {
+    const option = CHATGPT_REASONING_EFFORTS[next]
+    if (option) onChange(option.id)
+  }
 
   return (
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <button
-          type="button"
-          className="flex items-center gap-1 rounded-md px-1.5 py-1 text-xs text-muted-foreground outline-none hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
-          title="Reasoning effort"
+    <Popover>
+      <PopoverTrigger
+        className="flex items-center gap-1 rounded-md px-1.5 py-1 text-xs text-muted-foreground outline-none hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+        title="Reasoning effort"
+      >
+        {label}
+        <ChevronDownIcon className="size-3" />
+      </PopoverTrigger>
+      <PopoverContent side="top" align="start" sideOffset={8} className="w-64">
+        <div className="mb-3 text-sm font-medium">Reasoning effort</div>
+        <SliderPrimitive.Root
+          value={index}
+          min={0}
+          max={CHATGPT_REASONING_EFFORTS.length - 1}
+          step={1}
+          onValueChange={selectIndex}
         >
-          {label}
-          <ChevronDownIcon className="size-3" />
-        </button>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="start" className="w-40">
-        <DropdownMenuLabel className="text-xs text-muted-foreground">
-          Reasoning effort
-        </DropdownMenuLabel>
-        {CHATGPT_REASONING_EFFORTS.map((option) => (
-          <DropdownMenuItem key={option.id} onSelect={() => onChange(option.id)}>
-            <span className="flex-1">{option.label}</span>
-            {option.id === effort ? <CheckIcon className="text-foreground" /> : null}
-          </DropdownMenuItem>
-        ))}
-      </DropdownMenuContent>
-    </DropdownMenu>
+          <SliderPrimitive.Control className="flex h-5 touch-none select-none items-center px-1">
+            <SliderPrimitive.Track className="relative h-1.5 grow rounded-full bg-input">
+              <SliderPrimitive.Indicator className="absolute inset-y-0 rounded-full bg-cx-accent" />
+              <span
+                aria-hidden="true"
+                className="pointer-events-none absolute inset-x-[3px] inset-y-0 z-10 flex items-center justify-between"
+                data-testid="reasoning-effort-stops"
+              >
+                {CHATGPT_REASONING_EFFORTS.map((option, stop) => (
+                  <span
+                    key={option.id}
+                    className={cn(
+                      'size-1 rounded-full',
+                      stop <= index ? 'bg-white/70' : 'bg-foreground/25',
+                    )}
+                  />
+                ))}
+              </span>
+              <SliderPrimitive.Thumb
+                index={0}
+                aria-label="Reasoning effort"
+                className="z-20 block size-4 rounded-full border border-black/10 bg-white shadow-md outline-none transition-[scale,box-shadow] has-focus-visible:ring-3 has-focus-visible:ring-ring/30 data-dragging:scale-110"
+              />
+            </SliderPrimitive.Track>
+          </SliderPrimitive.Control>
+        </SliderPrimitive.Root>
+        <div className="mt-1.5 flex justify-between">
+          {CHATGPT_REASONING_EFFORTS.map((option, stop) => (
+            <button
+              key={option.id}
+              type="button"
+              onClick={() => selectIndex(stop)}
+              className={cn(
+                'rounded px-0.5 text-[11px] outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring/30',
+                stop === 0 && 'text-left',
+                stop === CHATGPT_REASONING_EFFORTS.length - 1 && 'text-right',
+                stop === index
+                  ? 'font-medium text-foreground'
+                  : 'text-muted-foreground hover:text-foreground',
+              )}
+            >
+              {option.label}
+            </button>
+          ))}
+        </div>
+      </PopoverContent>
+    </Popover>
   )
 }
 
@@ -1349,9 +1402,12 @@ function ToolGroup({
           <span className="font-medium">{summary}</span>
           <span className="ml-auto shrink-0">
             {failed ? (
-              <XIcon className="size-3.5 text-destructive-foreground" />
+              <XIcon aria-label="Tool failed" className="size-3.5 text-destructive-foreground" />
             ) : busy ? (
-              <span className="size-1.5 animate-pulse rounded-full bg-cx-accent" />
+              <LoaderCircleIcon
+                aria-label="Tool in progress"
+                className="size-3.5 text-cx-accent motion-safe:animate-spin"
+              />
             ) : pendingDeletes.length === 0 ? (
               <CheckIcon className="size-3.5 text-muted-foreground" />
             ) : null}
@@ -1517,13 +1573,16 @@ function ToolRow({
         </span>
         <span className="ml-auto shrink-0">
           {failed ? (
-            <XIcon className="size-3.5 text-destructive-foreground" />
+            <XIcon aria-label="Tool failed" className="size-3.5 text-destructive-foreground" />
           ) : denied ? (
             <span className="text-[11px] text-muted-foreground">denied</span>
           ) : done ? (
             <CheckIcon className="size-3.5 text-muted-foreground" />
           ) : awaitingConfirm ? null : (
-            <span className="size-1.5 animate-pulse rounded-full bg-cx-accent" />
+            <LoaderCircleIcon
+              aria-label="Tool in progress"
+              className="size-3.5 text-cx-accent motion-safe:animate-spin"
+            />
           )}
         </span>
       </div>

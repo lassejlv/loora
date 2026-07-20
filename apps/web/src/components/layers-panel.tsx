@@ -1,5 +1,6 @@
 import { useState } from 'react'
-import { CodeIcon, XIcon } from 'lucide-react'
+import { XIcon } from '#/components/icons'
+import { CodeIcon } from 'lucide-react'
 import type { CanvasElement } from '#/lib/canvas'
 import { Button } from '#/components/ui/button'
 import { DrawerClose } from '#/components/ui/drawer'

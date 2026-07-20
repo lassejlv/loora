@@ -1,6 +1,18 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type ElementType } from 'react'
 import { AnimatePresence, motion, useReducedMotion } from 'motion/react'
 import { createFileRoute } from '@tanstack/react-router'
+import {
+  CheckIcon,
+  ChevronDownIcon,
+  CopyIcon,
+  DownloadIcon,
+  HandIcon,
+  SettingsIcon,
+  MessageSquarePlusIcon,
+  LayersIcon,
+  SparklesIcon,
+  MaximizeIcon,
+} from '#/components/icons'
 import {
   AlignCenterHorizontalIcon,
   AlignCenterVerticalIcon,
@@ -11,20 +23,11 @@ import {
   AlignStartVerticalIcon,
   AlignVerticalDistributeCenterIcon,
   BringToFrontIcon,
-  CheckIcon,
-  ChevronDownIcon,
   CodeXmlIcon,
-  CopyIcon,
-  DownloadIcon,
   EllipsisIcon,
-  HandIcon,
-  SettingsIcon,
   MousePointer2Icon,
   MousePointerClickIcon,
-  MessageSquarePlusIcon,
   ImageIcon,
-  LayersIcon,
-  SparklesIcon,
   Redo2Icon,
   SendToBackIcon,
   SquareIcon,
@@ -35,7 +38,6 @@ import {
   UngroupIcon,
   ZoomInIcon,
   ZoomOutIcon,
-  MaximizeIcon,
 } from 'lucide-react'
 import { Canvas, type CanvasControls, type Tool } from '#/components/canvas'
 import {
@@ -221,7 +223,7 @@ function DocSwitcher({
   )
 }
 
-const TOOLS: { tool: Tool; icon: typeof SquareIcon; key: string; label: string }[] = [
+const TOOLS: { tool: Tool; icon: ElementType; key: string; label: string }[] = [
   { tool: 'select', icon: MousePointer2Icon, key: 'v', label: 'Select' },
   { tool: 'interact', icon: MousePointerClickIcon, key: 'i', label: 'Interact' },
   { tool: 'comment', icon: MessageSquarePlusIcon, key: 'c', label: 'Comment' },

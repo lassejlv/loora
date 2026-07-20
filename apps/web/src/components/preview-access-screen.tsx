@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { LogOutIcon } from 'lucide-react'
+import { LogOutIcon } from '#/components/icons'
 import { authClient } from '@loora/auth/client'
 import { orpc } from '#/lib/orpc-client'
 import { Button } from '#/components/ui/button'

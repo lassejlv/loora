@@ -8,14 +8,8 @@ import {
 } from "#/components/ui/collapsible.tsx";
 import { cn } from "#/lib/utils.ts";
 import type { DynamicToolUIPart, ToolUIPart } from "ai";
-import {
-  CheckCircleIcon,
-  ChevronDownIcon,
-  CircleIcon,
-  ClockIcon,
-  WrenchIcon,
-  XCircleIcon,
-} from "lucide-react";
+import { ChevronDownIcon, ClockIcon, WrenchIcon } from "#/components/icons";
+import { CheckCircleIcon, CircleIcon, XCircleIcon } from "lucide-react";
 import type { ComponentProps, ReactNode } from "react";
 import { isValidElement } from "react";
 

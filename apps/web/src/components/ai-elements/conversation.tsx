@@ -4,7 +4,7 @@ import { Button } from "#/components/ui/button.tsx";
 import { cn } from "#/lib/utils.ts";
 import { fadeUp, uiTransition } from "#/lib/motion.ts";
 import type { UIMessage } from "ai";
-import { ArrowDownIcon, DownloadIcon } from "lucide-react";
+import { ArrowDownIcon, DownloadIcon } from "#/components/icons";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import type { ComponentProps } from "react";
 import { useCallback } from "react";

@@ -7,10 +7,10 @@ import {
   BotIcon,
   CheckIcon,
   CopyIcon,
-  ExternalLinkIcon,
   LoaderCircleIcon,
   LogOutIcon,
-} from 'lucide-react'
+} from '#/components/icons'
+import { ExternalLinkIcon } from 'lucide-react'
 import { Button } from '#/components/ui/button'
 
 export function ChatGPTAccount() {
