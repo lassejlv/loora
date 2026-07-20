@@ -69,6 +69,7 @@ import { imageTemplate } from '#/lib/element-templates'
 import { Button } from '#/components/ui/button'
 import { cn } from '#/lib/utils'
 import { AuthScreen } from '#/components/auth-screen'
+import { PreviewAccessScreen } from '#/components/preview-access-screen'
 import { authClient } from '#/lib/auth-client'
 import { SidebarProvider } from '#/components/ui/sidebar'
 import { orpc } from '#/lib/orpc-client'
@@ -108,7 +109,11 @@ function App() {
     )
   }
 
-  return <Editor userId={session.user.id} />
+  return (
+    <PreviewAccessScreen preview={<Editor preview />}>
+      <Editor userId={session.user.id} />
+    </PreviewAccessScreen>
+  )
 }
 
 function DocSwitcher({

@@ -85,6 +85,13 @@
       "when": 1784503187554,
       "tag": "0011_demonic_marten_broadcloak",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1784508011898,
+      "tag": "0012_tranquil_namora",
+      "breakpoints": true
     }
   ]
 }

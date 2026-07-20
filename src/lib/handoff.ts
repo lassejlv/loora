@@ -1,8 +1,9 @@
 import { and, eq, inArray } from 'drizzle-orm'
 import { db } from '#/db'
-import { asset, design } from '#/db/schema'
+import { asset, design, user } from '#/db/schema'
 import { readHandoffToken } from '#/lib/handoff-token'
 import type { CanvasElement } from '#/lib/canvas'
+import { canUseApp } from '#/lib/preview-access'
 
 export function referencedAssetIds(shapes: CanvasElement[]) {
   const ids = new Set<string>()
@@ -21,12 +22,17 @@ export async function getHandoffDesign(token: string) {
       name: design.name,
       shapes: design.shapes,
       updatedAt: design.updatedAt,
+      isAdmin: user.isAdmin,
+      previewAccess: user.previewAccess,
     })
     .from(design)
+    .innerJoin(user, eq(user.id, design.userId))
     .where(and(eq(design.id, claims.designId), eq(design.userId, claims.userId)))
     .limit(1)
 
-  return found ? { ...found, userId: claims.userId } : null
+  if (!found || !canUseApp(found)) return null
+  const { isAdmin: _isAdmin, previewAccess: _previewAccess, ...handoff } = found
+  return { ...handoff, userId: claims.userId }
 }
 
 export async function buildHandoffPayload(token: string, origin: string) {

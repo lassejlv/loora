@@ -11,6 +11,7 @@ import {
 } from '#/lib/ai-image-inputs'
 import { checkLimits, recordUsage } from '#/lib/ai-limits'
 import { requireSession } from '#/lib/auth'
+import { canUseApp } from '#/lib/preview-access'
 import { DESIGN_SKILL_PROMPT } from '#/skills/design-skills'
 import { desc, eq } from 'drizzle-orm'
 import { db } from '#/db'
@@ -139,6 +140,9 @@ export const Route = createFileRoute('/api/chat')({
         const session = await requireSession(request)
         if (!session) {
           return Response.json({ error: 'Unauthorized' }, { status: 401 })
+        }
+        if (!canUseApp(session.user)) {
+          return Response.json({ error: 'Preview access is required.' }, { status: 403 })
         }
 
         const { messages, shapes, selectedIds, model: modelKey, forceCanvasAction } = (await request.json()) as {

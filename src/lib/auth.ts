@@ -33,6 +33,12 @@ export const auth = betterAuth({
         defaultValue: false,
         input: false,
       },
+      previewAccess: {
+        type: 'boolean',
+        required: false,
+        defaultValue: false,
+        input: false,
+      },
       usageMultiplier: {
         type: 'number',
         required: false,

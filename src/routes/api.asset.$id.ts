@@ -4,6 +4,7 @@ import { and, eq } from 'drizzle-orm'
 import { db } from '#/db'
 import { asset } from '#/db/schema'
 import { requireSession } from '#/lib/auth'
+import { canUseApp } from '#/lib/preview-access'
 import { s3 } from '#/lib/storage'
 
 export const Route = createFileRoute('/api/asset/$id')({
@@ -12,6 +13,9 @@ export const Route = createFileRoute('/api/asset/$id')({
       GET: async ({ request, params }) => {
         const session = await requireSession(request)
         if (!session) return new Response('Unauthorized', { status: 401 })
+        if (!canUseApp(session.user)) {
+          return new Response('Preview access required', { status: 403 })
+        }
 
         const [found] = await db
           .select({ data: asset.data, storageKey: asset.storageKey, mediaType: asset.mediaType })

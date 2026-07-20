@@ -16,6 +16,7 @@ Set these values in `.env`:
 - `DATABASE_URL`: a Neon PostgreSQL connection string
 - `BETTER_AUTH_SECRET`: at least 32 random characters
 - `BETTER_AUTH_URL`: the public app origin, usually `http://localhost:3000` locally
+- `REQUIRE_PREVIEW_ACCESS`: defaults to required; set to `false` to let every signed-in user in
 - `WAFER_API_KEY`: the server-managed Wafer key used by the default models
 
 Google login is enabled only when both of these optional values are set:

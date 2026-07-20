@@ -25,6 +25,8 @@ interface AdminUserUsage {
   name: string
   email: string
   isAdmin: boolean
+  previewAccess: boolean
+  previewAccessRequestedAt: Date | null
   usageMultiplier: number
   dailyUsd: number
   weeklyUsd: number
@@ -99,6 +101,7 @@ function AdminTab() {
   const [error, setError] = useState<string | null>(null)
   const [resetting, setResetting] = useState<string | null>(null)
   const [savingMultiplier, setSavingMultiplier] = useState<string | null>(null)
+  const [savingAccess, setSavingAccess] = useState<string | null>(null)
   const [multiplierDrafts, setMultiplierDrafts] = useState<Record<string, string>>({})
 
   useEffect(() => {
@@ -170,6 +173,32 @@ function AdminTab() {
     }
   }
 
+  async function handlePreviewAccess(account: AdminUserUsage) {
+    const granted = !account.previewAccess
+    setSavingAccess(account.id)
+    setError(null)
+    try {
+      const updated = await orpc.admin.setPreviewAccess({ userId: account.id, granted })
+      setUsers((current) =>
+        current?.map((user) =>
+          user.id === account.id
+            ? {
+                ...user,
+                previewAccess: updated.previewAccess,
+                previewAccessRequestedAt: updated.previewAccess
+                  ? null
+                  : user.previewAccessRequestedAt,
+              }
+            : user,
+        ) ?? null,
+      )
+    } catch {
+      setError(`Could not update preview access for ${account.email}.`)
+    } finally {
+      setSavingAccess(null)
+    }
+  }
+
   if (!users && !error) {
     return <p className="cx-shimmer text-xs">Loading users…</p>
   }
@@ -179,7 +208,7 @@ function AdminTab() {
       <div>
         <h2 className="text-sm font-semibold">Admin</h2>
         <p className="mt-1 text-xs text-muted-foreground">
-          Raise a user&apos;s limits or reset their daily and weekly AI usage.
+          Manage preview access and AI usage limits.
         </p>
       </div>
       {error ? <p className="text-xs text-destructive-foreground">{error}</p> : null}
@@ -197,6 +226,11 @@ function AdminTab() {
                     Admin
                   </span>
                 ) : null}
+                {!account.isAdmin && account.previewAccessRequestedAt ? (
+                  <span className="ml-2 text-[10px] font-semibold uppercase tracking-wide text-cx-accent">
+                    Requested access
+                  </span>
+                ) : null}
               </p>
               <p className="truncate text-xs text-muted-foreground">{account.email}</p>
               <p className="mt-1 font-mono text-[11px] text-muted-foreground">
@@ -204,6 +238,20 @@ function AdminTab() {
               </p>
             </div>
             <div className="flex flex-col gap-2 sm:items-end">
+              {!account.isAdmin ? (
+                <Button
+                  size="xs"
+                  variant={account.previewAccess ? 'secondary' : 'outline'}
+                  disabled={savingAccess === account.id}
+                  onClick={() => handlePreviewAccess(account)}
+                >
+                  {savingAccess === account.id
+                    ? 'Saving…'
+                    : account.previewAccess
+                      ? 'Revoke preview access'
+                      : 'Grant preview access'}
+                </Button>
+              ) : null}
               <div className="flex flex-wrap gap-1">
                 {MULTIPLIER_PRESETS.map((multiplier) => (
                   <Button

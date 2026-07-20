@@ -53,6 +53,8 @@ export async function listUserUsage() {
       name: user.name,
       email: user.email,
       isAdmin: user.isAdmin,
+      previewAccess: user.previewAccess,
+      previewAccessRequestedAt: user.previewAccessRequestedAt,
       usageMultiplier: user.usageMultiplier,
       daily: sql<number>`coalesce(sum(${aiUsage.costMicroUsd}) filter (where ${aiUsage.createdAt} >= ${dayAgo}), 0)::bigint`,
       weekly: sql<number>`coalesce(sum(${aiUsage.costMicroUsd}), 0)::bigint`,

@@ -8,6 +8,7 @@ import type { CanvasElement } from '#/lib/canvas'
 import type { UIMessage } from 'ai'
 import { assetKey, s3 } from '#/lib/storage'
 import { createHandoffToken } from '#/lib/handoff-token'
+import { canUseApp, isPreviewAccessRequired } from '#/lib/preview-access'
 import {
   DAILY_LIMIT_USD,
   WEEKLY_LIMIT_USD,
@@ -35,10 +36,20 @@ const shapeSchema = z.object({
 
 const requireUser = os.$context<ORPCContext>().middleware(async ({ context, next }) => {
   if (!context.session) throw new ORPCError('UNAUTHORIZED')
+  if (!canUseApp(context.session.user)) {
+    throw new ORPCError('FORBIDDEN', { message: 'Preview access is required.' })
+  }
   return next({ context: { user: context.session.user } })
 })
 
 const protectedProcedure = os.$context<ORPCContext>().use(requireUser)
+
+const requireSignedInUser = os.$context<ORPCContext>().middleware(async ({ context, next }) => {
+  if (!context.session) throw new ORPCError('UNAUTHORIZED')
+  return next({ context: { user: context.session.user } })
+})
+
+const signedInProcedure = os.$context<ORPCContext>().use(requireSignedInUser)
 
 const requireAdmin = os.$context<ORPCContext>().middleware(async ({ context, next }) => {
   if (!context.session) throw new ORPCError('UNAUTHORIZED')
@@ -370,6 +381,39 @@ const getCurrentUsage = protectedProcedure.handler(({ context }) =>
 
 const getAuthConfig = os.handler(() => ({ googleOAuthEnabled }))
 
+const getPreviewAccess = signedInProcedure.handler(async ({ context }) => {
+  const [account] = await db
+    .select({
+      isAdmin: user.isAdmin,
+      previewAccess: user.previewAccess,
+      previewAccessRequestedAt: user.previewAccessRequestedAt,
+    })
+    .from(user)
+    .where(eq(user.id, context.user.id))
+    .limit(1)
+
+  if (!account) throw new ORPCError('UNAUTHORIZED')
+  const required = isPreviewAccessRequired()
+  return {
+    required,
+    granted: canUseApp(account, required),
+    requested: account.previewAccessRequestedAt !== null,
+  }
+})
+
+const requestPreviewAccess = signedInProcedure.handler(async ({ context }) => {
+  if (!isPreviewAccessRequired() || canUseApp(context.user)) {
+    return { requested: false, granted: true }
+  }
+
+  await db
+    .update(user)
+    .set({ previewAccessRequestedAt: new Date(), updatedAt: new Date() })
+    .where(eq(user.id, context.user.id))
+
+  return { requested: true, granted: false }
+})
+
 const listUsersWithUsage = adminProcedure.handler(() => listUserUsage())
 
 const resetUserUsage = adminProcedure
@@ -398,9 +442,33 @@ const setUserUsageMultiplier = adminProcedure
     }
   })
 
+const setUserPreviewAccess = adminProcedure
+  .input(
+    z.object({
+      userId: z.string().min(1).max(128),
+      granted: z.boolean(),
+    }),
+  )
+  .handler(async ({ input }) => {
+    const [updated] = await db
+      .update(user)
+      .set({
+        previewAccess: input.granted,
+        previewAccessRequestedAt: null,
+        updatedAt: new Date(),
+      })
+      .where(eq(user.id, input.userId))
+      .returning({ userId: user.id, previewAccess: user.previewAccess })
+
+    if (!updated) throw new ORPCError('NOT_FOUND')
+    return updated
+  })
+
 export const appRouter = {
   auth: {
     config: getAuthConfig,
+    previewAccess: getPreviewAccess,
+    requestPreviewAccess,
   },
   design: {
     list: listDesigns,
@@ -433,5 +501,6 @@ export const appRouter = {
     listUsers: listUsersWithUsage,
     resetUsage: resetUserUsage,
     setUsageMultiplier: setUserUsageMultiplier,
+    setPreviewAccess: setUserPreviewAccess,
   },
 }
