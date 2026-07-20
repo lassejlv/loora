@@ -49,7 +49,14 @@ import { Sidebar } from '#/components/ui/sidebar'
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '#/components/ui/collapsible'
 import { interruptIn, interruptTransition } from '#/lib/motion'
 import { orpc } from '#/lib/orpc-client'
-import { DEFAULT_MODEL, MODELS, PROVIDERS } from '@loora/auth/models'
+import {
+  CHATGPT_REASONING_EFFORTS,
+  DEFAULT_MODEL,
+  getChatGPTReasoningEffort,
+  MODELS,
+  PROVIDERS,
+  type ChatGPTReasoningEffort,
+} from '@loora/auth/models'
 import { modelSupportsImageInput } from '#/lib/ai-image-inputs'
 import {
   DropdownMenu,
@@ -153,15 +160,31 @@ export const AgentPanel = memo(function AgentPanel({
     const stored = typeof localStorage === 'undefined' ? null : localStorage.getItem('loora:model')
     return stored && MODELS.some((m) => m.id === stored) ? stored : DEFAULT_MODEL
   })
+  const [reasoningEffort, setReasoningEffort] = useState<ChatGPTReasoningEffort>(() =>
+    getChatGPTReasoningEffort(
+      typeof localStorage === 'undefined'
+        ? undefined
+        : localStorage.getItem('loora:reasoning-effort'),
+    ),
+  )
   const [chatGPTModels, setChatGPTModels] = useState<string[] | null>(null)
   const [loadingChatGPTModels, setLoadingChatGPTModels] = useState(false)
   const [chatGPTModelsError, setChatGPTModelsError] = useState<'disconnected' | 'failed' | null>(null)
   const modelRef = useRef(model)
   modelRef.current = model
+  const reasoningEffortRef = useRef(reasoningEffort)
+  reasoningEffortRef.current = reasoningEffort
+  const usingChatGPT = MODELS.find((candidate) => candidate.id === model)?.provider === 'chatgpt'
   const imageInputsEnabled = modelSupportsImageInput(model)
   const changeModel = (next: string) => {
     setModel(next)
     if (typeof localStorage !== 'undefined') localStorage.setItem('loora:model', next)
+  }
+  const changeReasoningEffort = (next: ChatGPTReasoningEffort) => {
+    setReasoningEffort(next)
+    if (typeof localStorage !== 'undefined') {
+      localStorage.setItem('loora:reasoning-effort', next)
+    }
   }
   const loadChatGPTModels = async () => {
     if (loadingChatGPTModels) return
@@ -206,6 +229,7 @@ export const AgentPanel = memo(function AgentPanel({
           designId: docId,
           chatId: activeChatId,
           model: modelRef.current,
+          reasoningEffort: reasoningEffortRef.current,
           forceCanvasAction: forceCanvasAction.current,
         }),
       }),
@@ -859,6 +883,12 @@ export const AgentPanel = memo(function AgentPanel({
               onLoadChatGPTModels={loadChatGPTModels}
               onModelChange={changeModel}
             />
+            {usingChatGPT ? (
+              <ReasoningEffortPicker
+                effort={reasoningEffort}
+                onChange={changeReasoningEffort}
+              />
+            ) : null}
             <PromptInputSubmit
               status={status}
               onStop={() => stop()}
@@ -889,6 +919,42 @@ function readableError(message?: string) {
 
 function modelLabel(model: string) {
   return MODELS.find((m) => m.id === model)?.label ?? model
+}
+
+function ReasoningEffortPicker({
+  effort,
+  onChange,
+}: {
+  effort: ChatGPTReasoningEffort
+  onChange: (effort: ChatGPTReasoningEffort) => void
+}) {
+  const label = CHATGPT_REASONING_EFFORTS.find((option) => option.id === effort)?.label
+
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <button
+          type="button"
+          className="flex items-center gap-1 rounded-md px-1.5 py-1 text-xs text-muted-foreground outline-none hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+          title="Reasoning effort"
+        >
+          {label}
+          <ChevronDownIcon className="size-3" />
+        </button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="start" className="w-40">
+        <DropdownMenuLabel className="text-xs text-muted-foreground">
+          Reasoning effort
+        </DropdownMenuLabel>
+        {CHATGPT_REASONING_EFFORTS.map((option) => (
+          <DropdownMenuItem key={option.id} onSelect={() => onChange(option.id)}>
+            <span className="flex-1">{option.label}</span>
+            {option.id === effort ? <CheckIcon className="text-foreground" /> : null}
+          </DropdownMenuItem>
+        ))}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  )
 }
 
 function ModelPicker({

@@ -29,6 +29,23 @@ export const PROVIDERS = {
 
 export type ProviderKey = keyof typeof PROVIDERS
 
+export const CHATGPT_REASONING_EFFORTS = [
+  { id: 'low', label: 'Light' },
+  { id: 'medium', label: 'Medium' },
+  { id: 'high', label: 'High' },
+  { id: 'xhigh', label: 'Xhigh' },
+  { id: 'max', label: 'Max' },
+] as const
+
+export type ChatGPTReasoningEffort = (typeof CHATGPT_REASONING_EFFORTS)[number]['id']
+
+export const DEFAULT_CHATGPT_REASONING_EFFORT: ChatGPTReasoningEffort = 'medium'
+
+export function getChatGPTReasoningEffort(value: unknown): ChatGPTReasoningEffort {
+  return CHATGPT_REASONING_EFFORTS.find((effort) => effort.id === value)?.id
+    ?? DEFAULT_CHATGPT_REASONING_EFFORT
+}
+
 export interface ModelDefinition {
   id: string
   label: string

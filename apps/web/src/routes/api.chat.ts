@@ -5,7 +5,12 @@ import { createChatGPTProxyProvider } from '@opencoredev/loginwithchatgpt-ai'
 import { convertToModelMessages, stepCountIs, streamText, type UIMessage } from 'ai'
 import { z } from 'zod'
 import type { CanvasElement } from '#/lib/canvas'
-import { getModel, getProvider, MODELS } from '@loora/auth/models'
+import {
+  getChatGPTReasoningEffort,
+  getModel,
+  getProvider,
+  MODELS,
+} from '@loora/auth/models'
 import {
   modelSupportsImageInput,
   withoutImageParts,
@@ -240,6 +245,7 @@ export const Route = createFileRoute('/api/chat')({
           designId,
           chatId,
           model: modelKey,
+          reasoningEffort: requestedReasoningEffort,
           forceCanvasAction,
         } = (await request.json()) as {
           messages: UIMessage[]
@@ -248,6 +254,7 @@ export const Route = createFileRoute('/api/chat')({
           designId?: string
           chatId?: string
           model?: string
+          reasoningEffort?: string
           forceCanvasAction?: boolean
         }
         if (!designId || !chatId) {
@@ -266,6 +273,7 @@ export const Route = createFileRoute('/api/chat')({
         const providerConfig = getProvider(modelConfig.provider)
         const key = modelConfig.id
         const usingChatGPT = providerConfig.kind === 'chatgpt'
+        const reasoningEffort = getChatGPTReasoningEffort(requestedReasoningEffort)
         if (!usingChatGPT && !billing.managedAiAccess) {
           return Response.json(
             {
@@ -679,6 +687,9 @@ export const Route = createFileRoute('/api/chat')({
 
         const result = streamText({
           model,
+          providerOptions: usingChatGPT
+            ? { openai: { reasoningEffort } }
+            : undefined,
           system: [
             'You are the design agent inside loora, a minimal canvas tool.',
             'Only touch the canvas when the user explicitly asks for a change. Greetings, questions, or chit-chat get a plain text reply with zero tool calls.',

@@ -142,6 +142,48 @@ describe('AgentPanel empty response recovery', () => {
     expect(secondBody.trigger).toBe('regenerate-message')
   })
 
+  it('sends the selected reasoning effort for ChatGPT models', async () => {
+    localStorage.setItem('loora:model', 'gpt-5.6-sol')
+    localStorage.setItem('loora:reasoning-effort', 'max')
+    const chatFetch = mock().mockResolvedValue(
+      stream(
+        { type: 'start' },
+        { type: 'text-start', id: 'answer' },
+        { type: 'text-delta', id: 'answer', delta: 'Done.' },
+        { type: 'text-end', id: 'answer' },
+        { type: 'finish' },
+      ),
+    )
+    globalThis.fetch = chatFetch as unknown as typeof fetch
+
+    const shapesRef = { current: [] as CanvasElement[] }
+    const actions: ElementActions = {
+      createElement: mock(),
+      createElements: mock(),
+      updateElement: mock(),
+      deleteElement: mock(),
+      reorderElements: mock(),
+      groupElements: mock(),
+      ungroupElements: mock(),
+    }
+
+    render(
+      <SidebarProvider>
+        <AgentPanel actions={actions} shapesRef={shapesRef} docId="test" />
+      </SidebarProvider>,
+    )
+
+    const input = await screen.findByPlaceholderText('Describe a change…')
+    expect(screen.getByTitle('Reasoning effort').textContent).toContain('Max')
+    fireEvent.change(input, { target: { value: 'Review this design' } })
+    fireEvent.submit(input.closest('form')!)
+
+    await waitFor(() => expect(chatFetch).toHaveBeenCalledTimes(1))
+    const body = JSON.parse((chatFetch.mock.calls[0]?.[1] as RequestInit)?.body as string)
+    expect(body.model).toBe('gpt-5.6-sol')
+    expect(body.reasoningEffort).toBe('max')
+  })
+
   it('retries when the server aborts mid-stream (looks like an empty success)', async () => {
     const chatFetch = mock()
       .mockResolvedValueOnce(

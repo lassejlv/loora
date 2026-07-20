@@ -15,12 +15,6 @@
     ]
   },
   "deploy": {
-    "sleepApplication": true,
-    "limitOverride": {
-      "containers": {
-        "cpu": 4,
-        "memoryBytes": 8589934592
-      }
-    }
+    "sleepApplication": true
   }
 }
