@@ -14,7 +14,7 @@ COPY . .
 
 # Keep .gitignore in the image context so Tailwind v4 produces
 # matching CSS hashes for client and SSR builds.
-RUN bun run build
+RUN bun run build --logLevel warn
 
 FROM oven/bun:1.3.14-slim AS runtime
 WORKDIR /app
