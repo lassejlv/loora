@@ -9,6 +9,7 @@ import type { UIMessage } from 'ai'
 import { assetKey, s3 } from '#/lib/storage'
 import { createHandoffToken } from '#/lib/handoff-token'
 import { authorizeBilling, getBillingStatus, refreshBillingStatus } from '#/lib/billing'
+import { canUseApp, isPreviewAccessRequired } from '#/lib/preview-access'
 import { sortCommitsOldestFirst, toHistoryPage } from '#/lib/history'
 import {
   DAILY_LIMIT_USD,
@@ -37,6 +38,9 @@ const shapeSchema = z.object({
 
 const requireUser = os.$context<ORPCContext>().middleware(async ({ context, next }) => {
   if (!context.session) throw new ORPCError('UNAUTHORIZED')
+  if (!canUseApp(context.session.user)) {
+    throw new ORPCError('FORBIDDEN', { message: 'Preview access is required.' })
+  }
   if (!(await authorizeBilling(context.session.user)).access) {
     throw new ORPCError('FORBIDDEN', { message: 'An active Loora plan is required.' })
   }
@@ -51,6 +55,16 @@ const requireSignedInUser = os.$context<ORPCContext>().middleware(async ({ conte
 })
 
 const signedInProcedure = os.$context<ORPCContext>().use(requireSignedInUser)
+
+const requirePreviewUser = os.$context<ORPCContext>().middleware(async ({ context, next }) => {
+  if (!context.session) throw new ORPCError('UNAUTHORIZED')
+  if (!canUseApp(context.session.user)) {
+    throw new ORPCError('FORBIDDEN', { message: 'Preview access is required.' })
+  }
+  return next({ context: { user: context.session.user } })
+})
+
+const previewProcedure = os.$context<ORPCContext>().use(requirePreviewUser)
 
 const requireAdmin = os.$context<ORPCContext>().middleware(async ({ context, next }) => {
   if (!context.session) throw new ORPCError('UNAUTHORIZED')
@@ -512,11 +526,44 @@ const getCurrentUsage = protectedProcedure.handler(({ context }) =>
 
 const getAuthConfig = os.handler(() => ({ googleOAuthEnabled }))
 
-const getCurrentBilling = signedInProcedure.handler(({ context }) =>
+const getPreviewAccess = signedInProcedure.handler(async ({ context }) => {
+  const [account] = await db
+    .select({
+      isAdmin: user.isAdmin,
+      previewAccess: user.previewAccess,
+      previewAccessRequestedAt: user.previewAccessRequestedAt,
+    })
+    .from(user)
+    .where(eq(user.id, context.user.id))
+    .limit(1)
+
+  if (!account) throw new ORPCError('UNAUTHORIZED')
+  const required = isPreviewAccessRequired()
+  return {
+    required,
+    granted: canUseApp(account, required),
+    requested: account.previewAccessRequestedAt !== null,
+  }
+})
+
+const requestPreviewAccess = signedInProcedure.handler(async ({ context }) => {
+  if (!isPreviewAccessRequired() || canUseApp(context.user)) {
+    return { requested: false, granted: true }
+  }
+
+  await db
+    .update(user)
+    .set({ previewAccessRequestedAt: new Date(), updatedAt: new Date() })
+    .where(eq(user.id, context.user.id))
+
+  return { requested: true, granted: false }
+})
+
+const getCurrentBilling = previewProcedure.handler(({ context }) =>
   getBillingStatus(context.user),
 )
 
-const refreshCurrentBilling = signedInProcedure.handler(({ context }) =>
+const refreshCurrentBilling = previewProcedure.handler(({ context }) =>
   refreshBillingStatus(context.user),
 )
 
@@ -548,9 +595,33 @@ const setUserUsageMultiplier = adminProcedure
     }
   })
 
+const setUserPreviewAccess = adminProcedure
+  .input(
+    z.object({
+      userId: z.string().min(1).max(128),
+      granted: z.boolean(),
+    }),
+  )
+  .handler(async ({ input }) => {
+    const [updated] = await db
+      .update(user)
+      .set({
+        previewAccess: input.granted,
+        previewAccessRequestedAt: null,
+        updatedAt: new Date(),
+      })
+      .where(eq(user.id, input.userId))
+      .returning({ userId: user.id, previewAccess: user.previewAccess })
+
+    if (!updated) throw new ORPCError('NOT_FOUND')
+    return updated
+  })
+
 export const appRouter = {
   auth: {
     config: getAuthConfig,
+    previewAccess: getPreviewAccess,
+    requestPreviewAccess,
   },
   billing: {
     status: getCurrentBilling,
@@ -590,5 +661,6 @@ export const appRouter = {
     listUsers: listUsersWithUsage,
     resetUsage: resetUserUsage,
     setUsageMultiplier: setUserUsageMultiplier,
+    setPreviewAccess: setUserPreviewAccess,
   },
 }

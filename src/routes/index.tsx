@@ -79,6 +79,7 @@ import { Button } from '#/components/ui/button'
 import { cn } from '#/lib/utils'
 import { AuthScreen } from '#/components/auth-screen'
 import { SubscriptionScreen } from '#/components/subscription-screen'
+import { PreviewAccessScreen } from '#/components/preview-access-screen'
 import { authClient } from '#/lib/auth-client'
 import { SidebarProvider } from '#/components/ui/sidebar'
 import { orpc } from '#/lib/orpc-client'
@@ -119,9 +120,11 @@ function App() {
   }
 
   return (
-    <SubscriptionScreen preview={<Editor preview />}>
-      <Editor userId={session.user.id} />
-    </SubscriptionScreen>
+    <PreviewAccessScreen preview={<Editor preview />}>
+      <SubscriptionScreen preview={<Editor preview />}>
+        <Editor userId={session.user.id} />
+      </SubscriptionScreen>
+    </PreviewAccessScreen>
   )
 }
 

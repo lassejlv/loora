@@ -4,6 +4,7 @@ import { asset, design, user } from '#/db/schema'
 import { readHandoffToken } from '#/lib/handoff-token'
 import type { CanvasElement } from '#/lib/canvas'
 import { authorizeBilling } from '#/lib/billing'
+import { canUseApp } from '#/lib/preview-access'
 
 export function referencedAssetIds(shapes: CanvasElement[]) {
   const ids = new Set<string>()
@@ -23,16 +24,20 @@ export async function getHandoffDesign(token: string) {
       shapes: design.shapes,
       updatedAt: design.updatedAt,
       isAdmin: user.isAdmin,
+      previewAccess: user.previewAccess,
     })
     .from(design)
     .innerJoin(user, eq(user.id, design.userId))
     .where(and(eq(design.id, claims.designId), eq(design.userId, claims.userId)))
     .limit(1)
 
-  if (!found || !(await authorizeBilling({ id: claims.userId, isAdmin: found.isAdmin })).access) {
+  if (!found || !canUseApp(found) || !(await authorizeBilling({
+    id: claims.userId,
+    isAdmin: found.isAdmin,
+  })).access) {
     return null
   }
-  const { isAdmin: _isAdmin, ...handoff } = found
+  const { isAdmin: _isAdmin, previewAccess: _previewAccess, ...handoff } = found
   return { ...handoff, userId: claims.userId }
 }
 

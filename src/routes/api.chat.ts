@@ -25,6 +25,7 @@ import {
   subscriptionRequiredResponse,
 } from '#/lib/billing'
 import { remainingCredits, usesPolarCredits } from '#/lib/billing-policy'
+import { canUseApp, previewAccessRequiredResponse } from '#/lib/preview-access'
 import { DESIGN_SKILL_PROMPT } from '#/skills/design-skills'
 import { desc, eq } from 'drizzle-orm'
 import { db } from '#/db'
@@ -174,6 +175,7 @@ export const Route = createFileRoute('/api/chat')({
         if (!session) {
           return Response.json({ error: 'Unauthorized' }, { status: 401 })
         }
+        if (!canUseApp(session.user)) return previewAccessRequiredResponse()
         const billing = await authorizeBilling(session.user)
         if (!billing.access) return subscriptionRequiredResponse()
 

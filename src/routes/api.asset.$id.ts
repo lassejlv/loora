@@ -5,6 +5,7 @@ import { db } from '#/db'
 import { asset } from '#/db/schema'
 import { requireSession } from '#/lib/auth'
 import { authorizeBilling, subscriptionRequiredResponse } from '#/lib/billing'
+import { canUseApp, previewAccessRequiredResponse } from '#/lib/preview-access'
 import { s3 } from '#/lib/storage'
 
 export const Route = createFileRoute('/api/asset/$id')({
@@ -13,6 +14,7 @@ export const Route = createFileRoute('/api/asset/$id')({
       GET: async ({ request, params }) => {
         const session = await requireSession(request)
         if (!session) return new Response('Unauthorized', { status: 401 })
+        if (!canUseApp(session.user)) return previewAccessRequiredResponse()
         if (!(await authorizeBilling(session.user)).access) return subscriptionRequiredResponse()
 
         const [found] = await db

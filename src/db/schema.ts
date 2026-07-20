@@ -19,6 +19,8 @@ export const user = pgTable('user', {
   email: text('email').notNull().unique(),
   emailVerified: boolean('email_verified').default(false).notNull(),
   isAdmin: boolean('is_admin').default(false).notNull(),
+  previewAccess: boolean('preview_access').default(false).notNull(),
+  previewAccessRequestedAt: timestamp('preview_access_requested_at'),
   usageMultiplier: integer('usage_multiplier').default(1).notNull(),
   image: text('image'),
   createdAt: timestamp('created_at').defaultNow().notNull(),
