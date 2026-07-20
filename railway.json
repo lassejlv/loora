@@ -18,8 +18,8 @@
     "sleepApplication": true,
     "limitOverride": {
       "containers": {
-        "cpu": 2,
-        "memoryBytes": 4294967296
+        "cpu": 4,
+        "memoryBytes": 8589934592
       }
     }
   }
