@@ -343,20 +343,38 @@ document.addEventListener('click', function (e) {
   if (href.charAt(0) !== '#') e.preventDefault()
 })
 
+// Runtime log buffer: console.error/warn plus uncaught errors, readable by
+// the agent via loora:read-logs. Catches what the render handshake misses —
+// errors thrown after the ok grace period, from timers, or from user
+// interaction with the live element.
+var __logs = []
+function __pushLog(level, message) {
+  __logs.push(level + ': ' + String(message).slice(0, 500))
+  if (__logs.length > 50) __logs.shift()
+}
+;['error', 'warn'].forEach(function (level) {
+  var orig = console[level].bind(console)
+  console[level] = function () {
+    __pushLog(level, Array.prototype.slice.call(arguments).map(function (a) {
+      if (typeof a === 'string') return a
+      try { return JSON.stringify(a) } catch (e) { return String(a) }
+    }).join(' '))
+    return orig.apply(null, arguments)
+  }
+})
+
 // Runtime errors (React render, event handlers, element scripts) surface as
 // a badge in the parent; the DOM is left as-is.
 window.addEventListener('error', function (e) {
-  parent.postMessage(
-    { type: 'loora:error', seq: __seq, message: String(e.message || e.error || 'Element crashed') },
-    '*',
-  )
+  var message = String(e.message || e.error || 'Element crashed')
+  __pushLog('uncaught', message)
+  parent.postMessage({ type: 'loora:error', seq: __seq, message: message }, '*')
 })
 window.addEventListener('unhandledrejection', function (e) {
   var r = e.reason
-  parent.postMessage(
-    { type: 'loora:error', seq: __seq, message: String((r && r.message) || r || 'Unhandled promise rejection') },
-    '*',
-  )
+  var message = String((r && r.message) || r || 'Unhandled promise rejection')
+  __pushLog('uncaught', message)
+  parent.postMessage({ type: 'loora:error', seq: __seq, message: message }, '*')
 })
 
 // Every payload re-executes the element code, so timers, animation frames,
@@ -412,6 +430,8 @@ function __teardown() {
     __currentRoot = null
   }
   __clearPayloadGlobals()
+  // Logs from the torn-down payload would mislead the agent about current code.
+  __logs.length = 0
   __root.replaceChildren()
 }
 
@@ -458,6 +478,10 @@ window.addEventListener('message', function (e) {
     htmlToImage.toPng(document.body).catch(function () {
       return htmlToImage.toPng(document.body, { skipFonts: true })
     }).then(reply, function () { reply(null) })
+    return
+  }
+  if (msg.type === 'loora:read-logs') {
+    parent.postMessage({ type: 'loora:logs-result', token: msg.token, logs: __logs.slice() }, '*')
     return
   }
   if (msg.type !== 'loora:code' || typeof msg.code !== 'string') return
@@ -645,6 +669,32 @@ export interface ElementCapture {
   png: string
   revision: number
   volatile: boolean
+}
+
+// Ask a mounted element iframe for its runtime log buffer (console.error/warn
+// and uncaught errors since the last code payload). Null when the frame is
+// missing or unresponsive.
+export function readElementLogs(elementId: string, timeoutMs = 1000): Promise<string[] | null> {
+  const iframe = document.querySelector<HTMLIFrameElement>(
+    `iframe[data-element-frame="${CSS.escape(elementId)}"]`,
+  )
+  if (!iframe?.contentWindow) return Promise.resolve(null)
+  const token = `${elementId}:${Date.now().toString(36)}:${Math.floor(Math.random() * 1e6)}`
+  return new Promise((resolve) => {
+    const timer = window.setTimeout(() => {
+      window.removeEventListener('message', onMessage)
+      resolve(null)
+    }, timeoutMs)
+    const onMessage = (e: MessageEvent) => {
+      const msg = e.data as { type?: string; token?: string; logs?: unknown }
+      if (e.source !== iframe.contentWindow || msg?.type !== 'loora:logs-result' || msg.token !== token) return
+      window.clearTimeout(timer)
+      window.removeEventListener('message', onMessage)
+      resolve(Array.isArray(msg.logs) ? msg.logs.filter((l): l is string => typeof l === 'string') : [])
+    }
+    window.addEventListener('message', onMessage)
+    iframe.contentWindow!.postMessage({ type: 'loora:read-logs', token }, '*')
+  })
 }
 
 export function captureElement(elementId: string, timeoutMs = 1500): Promise<ElementCapture | null> {

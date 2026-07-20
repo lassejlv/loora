@@ -45,7 +45,16 @@ describe('applyCodeEdits', () => {
       { oldCode: 'Hello', newCode: 'Hi' },
       { oldCode: '<p>World</p>', newCode: '<p>There</p>' },
     ])
-    expect(result).toEqual({ ok: true, code: '<h1>Hi</h1><p>There</p>' })
+    expect(result).toMatchObject({ ok: true, code: '<h1>Hi</h1><p>There</p>' })
+  })
+
+  it('echoes the replaced range with surrounding lines', () => {
+    const code = ['line1', 'line2', 'line3', 'TARGET', 'line5', 'line6', 'line7'].join('\n')
+    const result = applyCodeEdits(code, [{ oldCode: 'TARGET', newCode: 'CHANGED' }])
+    expect(result.ok).toBe(true)
+    if (result.ok) {
+      expect(result.contexts).toEqual(['line2\nline3\nCHANGED\nline5\nline6'])
+    }
   })
 
   it('deletes with an empty newCode and sees prior edits', () => {
@@ -53,7 +62,7 @@ describe('applyCodeEdits', () => {
       { oldCode: 'b', newCode: 'bb' },
       { oldCode: 'bb', newCode: '' },
     ])
-    expect(result).toEqual({ ok: true, code: 'ac' })
+    expect(result).toMatchObject({ ok: true, code: 'ac' })
   })
 
   it('rejects a missing oldCode and points at readElement', () => {
@@ -69,6 +78,7 @@ describe('applyCodeEdits', () => {
     expect(applyCodeEdits('a a', [{ oldCode: 'a', newCode: 'b', replaceAll: true }])).toEqual({
       ok: true,
       code: 'b b',
+      contexts: ['2× b b'],
     })
   })
 
@@ -82,7 +92,7 @@ describe('applyCodeEdits', () => {
   })
 
   it('keeps replacement-pattern characters literal', () => {
-    expect(applyCodeEdits('price', [{ oldCode: 'price', newCode: "$& $' $100" }])).toEqual({
+    expect(applyCodeEdits('price', [{ oldCode: 'price', newCode: "$& $' $100" }])).toMatchObject({
       ok: true,
       code: "$& $' $100",
     })

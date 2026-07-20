@@ -32,7 +32,35 @@ export interface CodeEdit {
   replaceAll?: boolean
 }
 
-export type CodeEditResult = { ok: true; code: string } | { ok: false; error: string }
+export type CodeEditResult =
+  | { ok: true; code: string; contexts: string[] }
+  | { ok: false; error: string }
+
+// The replaced range plus ~2 lines either side, so the agent can confirm an
+// edit landed where intended without a readElement round-trip.
+function editContext(code: string, start: number, end: number): string {
+  let from = start
+  for (let i = 0; i < 3; i++) {
+    const nl = code.lastIndexOf('\n', from - 1)
+    if (nl === -1) {
+      from = 0
+      break
+    }
+    from = nl
+  }
+  if (from !== 0) from += 1
+  let to = end - 1
+  for (let i = 0; i < 3; i++) {
+    const nl = code.indexOf('\n', to + 1)
+    if (nl === -1) {
+      to = code.length
+      break
+    }
+    to = nl
+  }
+  const snippet = code.slice(from, to)
+  return snippet.length > 400 ? `${snippet.slice(0, 400)}…` : snippet
+}
 
 // Exact search/replace over an element's code, applied in order and atomically:
 // the first failing edit aborts the whole batch so the agent never lands a
@@ -40,6 +68,7 @@ export type CodeEditResult = { ok: true; code: string } | { ok: false; error: st
 // String.replace) so `$&`-style patterns in newCode stay literal.
 export function applyCodeEdits(code: string, edits: readonly CodeEdit[]): CodeEditResult {
   let next = code
+  const contexts: string[] = []
   for (const [index, edit] of edits.entries()) {
     const label = edits.length > 1 ? `edit ${index + 1}: ` : ''
     if (edit.oldCode.length === 0) {
@@ -59,13 +88,20 @@ export function applyCodeEdits(code: string, edits: readonly CodeEdit[]): CodeEd
       }
     }
     if (edit.replaceAll) {
+      const firstAt = next.indexOf(edit.oldCode)
       next = next.split(edit.oldCode).join(edit.newCode)
+      // Text before the first occurrence is unchanged, so firstAt still points
+      // at the first replacement in the new string.
+      contexts.push(
+        `${count}× ${editContext(next, firstAt, firstAt + edit.newCode.length)}`,
+      )
     } else {
       const at = next.indexOf(edit.oldCode)
       next = next.slice(0, at) + edit.newCode + next.slice(at + edit.oldCode.length)
+      contexts.push(editContext(next, at, at + edit.newCode.length))
     }
   }
-  return { ok: true, code: next }
+  return { ok: true, code: next, contexts }
 }
 
 // Rebuild z-order in one pass. Unknown and duplicate ids are ignored, while

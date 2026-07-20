@@ -100,6 +100,9 @@ function compactRecord(value: Record<string, unknown>): Record<string, unknown> 
   const out = { ...value }
   if (typeof out.code === 'string') out.code = truncatedCode(out.code)
   if (typeof out.image === 'string') delete out.image
+  // Edit echoes and frame logs describe code that has since moved on.
+  if (Array.isArray(out.applied)) delete out.applied
+  if (Array.isArray(out.logs)) delete out.logs
   if (Array.isArray(out.edits)) {
     out.edits = out.edits.map((edit) => {
       if (!edit || typeof edit !== 'object') return edit
@@ -129,7 +132,7 @@ function compactOldToolPart(part: UIMessage['parts'][number]): UIMessage['parts'
   }
   if (p.state === 'output-available' && p.output && typeof p.output === 'object') {
     next.output =
-      part.type === 'tool-viewCanvas'
+      part.type === 'tool-viewCanvas' || part.type === 'tool-viewElement'
         ? { viewed: true }
         : compactRecord(p.output as Record<string, unknown>)
   }
@@ -299,6 +302,34 @@ export const Route = createFileRoute('/api/chat')({
           console.error('[chat] Failed to load assets:', error)
         }
 
+        // Shared shape for tools whose output is a PNG the model should look at.
+        const imageToolOutput =
+          (emptyMessage: string) =>
+          ({ output }: { output: { image?: string; error?: string } }) => {
+            if (!imageInputsEnabled) {
+              return {
+                type: 'text' as const,
+                value: 'Canvas image viewing is temporarily disabled. Use the current canvas elements JSON.',
+              }
+            }
+            if (typeof output?.error === 'string') {
+              return { type: 'text' as const, value: output.error }
+            }
+            if (!output?.image) {
+              return { type: 'text' as const, value: emptyMessage }
+            }
+            return {
+              type: 'content' as const,
+              value: [
+                {
+                  type: 'file' as const,
+                  data: { type: 'data' as const, data: output.image.split(',')[1] },
+                  mediaType: 'image/png',
+                },
+              ],
+            }
+          }
+
         const tools = {
             // All tools execute on the client against canvas state.
             createElement: {
@@ -326,7 +357,7 @@ export const Route = createFileRoute('/api/chat')({
             },
             editElement: {
               description:
-                'Edit an element\'s code in place with exact search/replace edits — the cheap way to make small, targeted changes without resending the whole code. Each edit replaces oldCode (an exact substring of the current code, unique unless replaceAll) with newCode. Edits apply in order and atomically: if any oldCode is missing or ambiguous, the whole call fails and nothing changes. Only use when you have the element\'s full current code (from this conversation or readElement) — never guess oldCode from a truncated preview. For rewrites or large changes use updateElement. Returns a render result: "ok", or "error: …" you must fix.',
+                'Edit an element\'s code in place with exact search/replace edits — the cheap way to make small, targeted changes without resending the whole code. Each edit replaces oldCode (an exact substring of the current code, unique unless replaceAll) with newCode. Edits apply in order and atomically: if any oldCode is missing or ambiguous, the whole call fails and nothing changes. Only use when you have the element\'s full current code (from this conversation or readElement) — never guess oldCode from a truncated preview. For rewrites or large changes use updateElement. The result echoes a few surrounding lines per applied edit so you can confirm placement, plus a render result: "ok", or "error: …" you must fix.',
               inputSchema: z.object({
                 id: z.string(),
                 edits: z
@@ -365,27 +396,40 @@ export const Route = createFileRoute('/api/chat')({
               inputSchema: z.object({
                 focus: z.string().optional().describe('what you are checking, e.g. "spacing of the header"'),
               }),
-              toModelOutput: ({ output }: { output: { image?: string; empty?: boolean } }) => {
-                if (!imageInputsEnabled) {
-                  return {
-                    type: 'text' as const,
-                    value: 'Canvas image viewing is temporarily disabled. Use the current canvas elements JSON.',
-                  }
-                }
-                if (!output?.image) {
-                  return { type: 'text' as const, value: 'The canvas is empty.' }
-                }
-                return {
-                  type: 'content' as const,
-                  value: [
-                    {
-                      type: 'file' as const,
-                      data: { type: 'data' as const, data: output.image.split(',')[1] },
-                      mediaType: 'image/png',
-                    },
-                  ],
-                }
-              },
+              toModelOutput: imageToolOutput('The canvas is empty.'),
+            },
+            viewElement: {
+              description: imageInputsEnabled
+                ? 'Render ONE element to an image at its native size and look at it — much sharper than viewCanvas for judging text, spacing, or detail inside a single element. Prefer this over viewCanvas when checking one element.'
+                : 'Element image viewing is temporarily unavailable. Use readElement and the canvas JSON instead.',
+              inputSchema: z.object({
+                id: z.string(),
+                focus: z.string().optional().describe('what you are checking, e.g. "button alignment"'),
+              }),
+              toModelOutput: imageToolOutput('The element produced no image.'),
+            },
+            readElementLogs: {
+              description:
+                "Read recent console output (console.error/console.warn) and uncaught runtime errors from an element's live frame, collected since its code last mounted. Use when an interactive element misbehaves, when the user reports broken behavior, or when a render error message lacks detail.",
+              inputSchema: z.object({ id: z.string() }),
+            },
+            arrangeElements: {
+              description:
+                'Move or resize several existing elements in one call — geometry only, code untouched. Use this instead of repeated updateElement calls for layout work: aligning, distributing, restacking sections, closing gaps. Returns the new geometry per element; unknown ids are reported back.',
+              inputSchema: z.object({
+                changes: z
+                  .array(
+                    z.object({
+                      id: z.string(),
+                      x: elementFields.x.optional(),
+                      y: elementFields.y.optional(),
+                      w: elementFields.w.optional(),
+                      h: elementFields.h.optional(),
+                    }),
+                  )
+                  .min(1)
+                  .max(40),
+              }),
             },
             askQuestion: {
               description:
@@ -418,6 +462,7 @@ export const Route = createFileRoute('/api/chat')({
             imageInputsEnabled
               ? 'The user message may include a PNG snapshot of the current canvas. Use it to judge layout, overlap, and balance before and after your edits.'
               : 'Image input is temporarily disabled. Rely on the current canvas elements JSON and do not call viewCanvas.',
+            'Layout-only changes (moving or resizing existing elements) go through arrangeElements — all the moves in one call, never a series of updateElement calls. When an interactive element misbehaves at runtime, call readElementLogs to see its console output and uncaught errors before guessing at a fix.',
             'Coordinates: x/y is the top-left corner, y grows downward. The visible canvas is roughly 1200x800 around the origin. Leave 40-80px gaps between separate elements; align edges deliberately.',
             'Palette to prefer: #1a1917 ink, #ffffff white, #2440e6 ultramarine, #e8442e vermilion, #f5c518 yellow, #23a25d green. Other CSS colors are allowed when asked.',
             'Images: use only asset URLs from the Assets list below, as <img src="/api/asset/...">. Never invent asset URLs; if no fitting asset exists, say so or design with styled markup instead.',
@@ -426,7 +471,7 @@ export const Route = createFileRoute('/api/chat')({
             'Assets available (JSON):',
             JSON.stringify(assets.map((a) => ({ name: a.name, mediaType: a.mediaType, src: `/api/asset/${a.id}` }))),
             imageInputsEnabled
-              ? 'Verify loop: after finishing the edits for a design task, call viewCanvas to see the actual result. If you spot problems (overlap, misalignment, cramped spacing, poor contrast), fix them and check again. Skip verification for trivial single-shape edits.'
+              ? 'Verify loop: after finishing the edits for a design task, call viewCanvas to see the actual result. If you spot problems (overlap, misalignment, cramped spacing, poor contrast), fix them and check again. Use viewElement for a sharp closeup of one element when the full-canvas image is too small to judge text or details. Skip verification for trivial single-shape edits.'
               : 'Canvas image verification is temporarily disabled. Do not call viewCanvas.',
             'Keep replies to one or two short sentences; the user sees the canvas change live.',
             '',

@@ -10,6 +10,8 @@ import { nanoid } from 'nanoid'
 import {
   BookOpenIcon,
   CheckIcon,
+  MoveIcon,
+  ScrollTextIcon,
   ChevronDownIcon,
   EyeIcon,
   ChevronRightIcon,
@@ -35,7 +37,7 @@ import {
   PromptInputTextarea,
 } from '#/components/ai-elements/prompt-input'
 import { applyCodeEdits, type CanvasElement, type CodeEdit, type ElementActions } from '#/lib/canvas'
-import { awaitRenderResult } from '#/components/element-frame'
+import { awaitRenderResult, captureElement, readElementLogs } from '#/components/element-frame'
 import { snapshotCanvas } from '#/lib/snapshot'
 import { commitIfChanged } from '@loora/rpc/history'
 import { Sidebar } from '#/components/ui/sidebar'
@@ -60,7 +62,10 @@ function messagesForStorage(messages: UIMessage[]): UIMessage[] {
   return messages.flatMap((message) => {
     const parts = message.parts.flatMap((part) => {
       if (part.type === 'file' || part.type === 'tool-loadSkill') return []
-      if (part.type === 'tool-viewCanvas' && part.state === 'output-available') {
+      if (
+        (part.type === 'tool-viewCanvas' || part.type === 'tool-viewElement') &&
+        part.state === 'output-available'
+      ) {
         return [{ ...part, output: { viewed: true } }]
       }
       return [part]
@@ -101,6 +106,7 @@ function hasCanvasMutation(message: UIMessage) {
       'tool-createElements',
       'tool-updateElement',
       'tool-editElement',
+      'tool-arrangeElements',
       'tool-deleteElement',
     ].includes(part.type),
   )
@@ -337,8 +343,55 @@ export const AgentPanel = memo(function AgentPanel({
               if (!updated) {
                 respond({ error: `No element with id ${id}` })
               } else {
-                void ackWithRender(updated).then(respond)
+                void ackWithRender(updated).then((ack) => respond({ ...ack, applied: result.contexts }))
               }
+              break
+            }
+            case 'arrangeElements': {
+              const changes =
+                (input as { changes?: ({ id: string } & Partial<CanvasElement>)[] }).changes ?? []
+              const updated: Pick<CanvasElement, 'id' | 'name' | 'x' | 'y' | 'w' | 'h'>[] = []
+              const missing: string[] = []
+              for (const { id, ...patch } of changes) {
+                const el = actions.updateElement(id, patch)
+                if (el) updated.push({ id: el.id, name: el.name, x: el.x, y: el.y, w: el.w, h: el.h })
+                else missing.push(id)
+              }
+              respond(missing.length > 0 ? { updated, missing } : { updated })
+              break
+            }
+            case 'readElementLogs': {
+              const id = (input as { id?: string }).id
+              if (!id || !shapesRef.current.some((s) => s.id === id)) {
+                respond({ error: `No element with id ${String(id)}` })
+                break
+              }
+              void readElementLogs(id).then((logs) =>
+                respond(
+                  logs === null
+                    ? { error: 'The element frame is not mounted or did not respond.' }
+                    : logs.length > 0
+                      ? { logs }
+                      : { logs: [], note: 'No console output or runtime errors since the code last mounted.' },
+                ),
+              )
+              break
+            }
+            case 'viewElement': {
+              if (!modelSupportsImageInput(modelRef.current)) {
+                respond({ unavailable: true })
+                break
+              }
+              const id = (input as { id?: string }).id
+              if (!id || !shapesRef.current.some((s) => s.id === id)) {
+                respond({ error: `No element with id ${String(id)}` })
+                break
+              }
+              void captureElement(id, 4000)
+                .then((capture) =>
+                  respond(capture ? { image: capture.png } : { error: 'Could not capture the element.' }),
+                )
+                .catch(() => fail('Could not capture the element.'))
               break
             }
             case 'readElement': {
@@ -873,6 +926,9 @@ const TOOL_META = {
   createElements: { icon: PlusIcon, label: 'Create' },
   updateElement: { icon: PenLineIcon, label: 'Update' },
   editElement: { icon: PenLineIcon, label: 'Edit' },
+  arrangeElements: { icon: MoveIcon, label: 'Arrange' },
+  readElementLogs: { icon: ScrollTextIcon, label: 'Logs' },
+  viewElement: { icon: EyeIcon, label: 'Inspect' },
   deleteElement: { icon: Trash2Icon, label: 'Delete' },
   readElement: { icon: BookOpenIcon, label: 'Read' },
   loadSkill: { icon: BookOpenIcon, label: 'Skill' },
@@ -900,8 +956,12 @@ function toolSummary(name: string, part: ToolPart, elements: CanvasElement[]) {
     const batch = (input.elements as Partial<CanvasElement>[] | undefined) ?? []
     return `${batch.length} elements`
   }
+  if (name === 'arrangeElements') {
+    const changes = (input.changes as unknown[] | undefined)?.length ?? 0
+    return `${changes} element${changes === 1 ? '' : 's'}`
+  }
   const target = elements.find((s) => s.id === input.id)
-  if (name === 'readElement') {
+  if (name === 'readElement' || name === 'readElementLogs' || name === 'viewElement') {
     return describeElement(target) || String(input.id ?? '')
   }
   if (name === 'updateElement') {
@@ -1077,6 +1137,9 @@ const PAST_TENSE = {
   createElements: 'Created',
   updateElement: 'Updated',
   editElement: 'Edited',
+  arrangeElements: 'Arranged',
+  readElementLogs: 'Read logs from',
+  viewElement: 'Inspected',
   deleteElement: 'Deleted',
   readElement: 'Read',
   loadSkill: 'Loaded skill',
