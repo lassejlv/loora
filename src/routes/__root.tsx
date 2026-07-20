@@ -35,11 +35,7 @@ export const Route = createRootRoute({
         rel: 'stylesheet',
         href: appCss,
       },
-      {
-        rel: 'icon',
-        href: '/favicon.ico',
-        sizes: 'any',
-      },
+      // Prefer PNG in the tab; ICO is the fallback for older clients.
       {
         rel: 'icon',
         type: 'image/png',
@@ -51,6 +47,10 @@ export const Route = createRootRoute({
         type: 'image/png',
         sizes: '16x16',
         href: '/favicon-16x16.png',
+      },
+      {
+        rel: 'shortcut icon',
+        href: '/favicon.ico',
       },
       {
         rel: 'apple-touch-icon',

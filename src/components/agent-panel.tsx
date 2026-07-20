@@ -907,6 +907,28 @@ type Block =
   | { kind: 'tools'; parts: ToolPart[] }
   | { kind: 'question'; part: ToolPart }
 
+function StreamingText({ text, streaming }: { text: string; streaming: boolean }) {
+  const reduceMotion = useReducedMotion()
+  const tokens = useMemo(() => text.match(/\S+\s*|\s+/g) ?? [], [text])
+
+  if (!streaming || reduceMotion) return <span>{text}</span>
+
+  return (
+    <span>
+      {tokens.map((token, index) => (
+        <motion.span
+          key={index}
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          transition={{ duration: 0.5, ease: 'easeOut' }}
+        >
+          {token}
+        </motion.span>
+      ))}
+    </span>
+  )
+}
+
 // Group consecutive tool calls so a burst of 20 creates reads as one line.
 // Questions stay standalone - they need their own interactive card.
 function toBlocks(parts: { type: string }[]): Block[] {
@@ -951,7 +973,11 @@ export const ChatMessageRow = memo(function ChatMessageRow({
       <MessageContent>
         {blocks.map((block, index) =>
           block.kind === 'text' ? (
-            <span key={index}>{block.text}</span>
+            <StreamingText
+              key={index}
+              text={block.text}
+              streaming={message.role === 'assistant' && isLast && streaming}
+            />
           ) : block.kind === 'reasoning' ? (
             isLast && index === blocks.length - 1 && streaming ? (
               <AgentThinking key={index} label="Reasoning" />
