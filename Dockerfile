@@ -3,18 +3,24 @@
 FROM oven/bun:1.3.14 AS deps
 WORKDIR /app
 
-COPY package.json bun.lock ./
+# Workspace manifests only, so dependency layers cache until a package.json,
+# the lockfile, or bunfig (isolated linker config) changes.
+COPY package.json bun.lock bunfig.toml ./
+COPY apps/web/package.json apps/web/
+COPY packages/db/package.json packages/db/
+COPY packages/auth/package.json packages/auth/
+COPY packages/rpc/package.json packages/rpc/
 RUN bun install --frozen-lockfile
 
 FROM oven/bun:1.3.14 AS build
 WORKDIR /app
 
-COPY --from=deps /app/node_modules ./node_modules
-COPY . .
-
+COPY --from=deps /app ./
 # Keep .gitignore in the image context so Tailwind v4 produces
 # matching CSS hashes for client and SSR builds.
-RUN bun run build --logLevel warn
+COPY . .
+
+RUN bun run --cwd apps/web build --logLevel warn
 
 FROM oven/bun:1.3.14-slim AS runtime
 WORKDIR /app
@@ -23,12 +29,22 @@ ENV NODE_ENV=production
 ENV HOST=0.0.0.0
 ENV PORT=3000
 
-COPY --from=build /app/.output ./.output
+# The isolated linker stores real packages in node_modules/.bun and symlinks
+# into it from each workspace's node_modules, so the runtime stage must mirror
+# the full workspace topology (root store + every per-package node_modules).
 COPY --from=deps /app/node_modules ./node_modules
-COPY package.json bun.lock drizzle.config.ts ./
-COPY drizzle ./drizzle
+COPY --from=deps /app/apps/web/node_modules ./apps/web/node_modules
+COPY --from=deps /app/packages/db/node_modules ./packages/db/node_modules
+COPY --from=deps /app/packages/auth/node_modules ./packages/auth/node_modules
+COPY --from=deps /app/packages/rpc/node_modules ./packages/rpc/node_modules
+COPY package.json bun.lock bunfig.toml ./
+COPY apps/web/package.json apps/web/
+COPY packages/auth/package.json packages/auth/
+COPY packages/rpc/package.json packages/rpc/
+COPY packages/db ./packages/db
+COPY --from=build /app/apps/web/.output ./apps/web/.output
 
 USER bun
 EXPOSE 3000
 
-CMD ["sh", "-c", "bun --env-file=.env run drizzle-kit migrate && exec bun run .output/server/index.mjs"]
+CMD ["sh", "-c", "bun run --cwd packages/db migrate:deploy && exec bun run apps/web/.output/server/index.mjs"]

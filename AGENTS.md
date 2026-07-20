@@ -2,7 +2,7 @@
 
 ## Project Structure & Module Organization
 
-Loora is a Bun/TanStack Start application. Route modules and API handlers live in `src/routes/`; `src/routeTree.gen.ts` is generated and must not be edited manually. Reusable UI belongs in `src/components/`, with primitives under `src/components/ui/`. Put shared logic in `src/lib/`, database code in `src/db/`, and authenticated RPC procedures in `src/orpc/`. Static files live in `public/`; Drizzle migrations live in `drizzle/`. Tests are colocated as `*.test.ts` or `*.test.tsx`, with browser setup in `src/test/setup.ts`.
+Loora is a Bun/TanStack Start application. This is a Bun workspaces monorepo. The web app lives in `apps/web` — route modules and API handlers in `apps/web/src/routes/` (`routeTree.gen.ts` is generated, never hand-edited), reusable UI in `apps/web/src/components/` with primitives under `components/ui/`, shared client logic in `apps/web/src/lib/`, static files in `apps/web/public/`. Database code is `packages/db` (`@loora/db`, Drizzle schema + migrations in `packages/db/drizzle/`), auth/billing is `packages/auth` (`@loora/auth`), and the oRPC router is `packages/rpc` (`@loora/rpc`). Tests are colocated as `*.test.ts` or `*.test.tsx`, with browser setup in `apps/web/src/test/setup.ts`.
 
 ## Build, Test, and Development Commands
 
@@ -11,17 +11,17 @@ Loora is a Bun/TanStack Start application. Route modules and API handlers live i
 - `bun run test` runs all `bun:test` suites with the required JSDOM preload.
 - `bun run build` creates the production bundle in `.output/`.
 - `bun run generate-routes` regenerates the TanStack route tree after route changes.
-- `bun run db:generate` creates a migration from `src/db/schema.ts` changes.
+- `bun run db:generate` creates a migration from `packages/db/src/schema.ts` changes.
 - `bun run db:migrate` applies pending migrations using `.env`.
 - `bunx tsc --noEmit` runs strict TypeScript validation.
 
 ## Coding Style & Naming Conventions
 
-Use TypeScript/TSX with strict types, two-space indentation, single quotes, and no semicolons, matching the existing handwritten code. Use `PascalCase` for React components, `camelCase` for functions and variables, and kebab-case filenames such as `preview-access-screen.tsx`. Prefer the `#/` alias for imports rooted at `src/`. Keep server credentials and database operations out of client components. No formatter or linter is configured, so keep changes consistent and run TypeScript checks before submitting.
+Use TypeScript/TSX with strict types, two-space indentation, single quotes, and no semicolons, matching the existing handwritten code. Use `PascalCase` for React components, `camelCase` for functions and variables, and kebab-case filenames such as `preview-access-screen.tsx`. Prefer the `#/` alias for imports rooted at `apps/web/src/`; cross-package imports use `@loora/db|auth|rpc`. Keep server credentials and database operations out of client components. No formatter or linter is configured, so keep changes consistent and run TypeScript checks before submitting.
 
 ## Testing Guidelines
 
-Import helpers from `bun:test`. Add focused regression tests beside the implementation and use Testing Library for DOM behavior. New behavior and bug fixes should exercise important success and failure paths. Run `bun run test`, not plain `bun test`, because DOM-heavy suites require `src/test/setup.ts`.
+Import helpers from `bun:test`. Add focused regression tests beside the implementation and use Testing Library for DOM behavior. New behavior and bug fixes should exercise important success and failure paths. Run `bun run test`, not plain `bun test`, because DOM-heavy suites require `apps/web/src/test/setup.ts`.
 
 ## Commit & Pull Request Guidelines
 

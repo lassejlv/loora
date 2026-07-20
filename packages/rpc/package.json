@@ -1,0 +1,17 @@
+{
+  "name": "@loora/rpc",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/router.ts",
+    "./*": "./src/*.ts"
+  },
+  "dependencies": {
+    "@loora/auth": "workspace:*",
+    "@loora/db": "workspace:*",
+    "@orpc/server": "^1.14.8",
+    "ai": "catalog:",
+    "drizzle-orm": "catalog:",
+    "zod": "catalog:"
+  }
+}

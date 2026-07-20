@@ -3,16 +3,14 @@
   "build": {
     "builder": "DOCKERFILE",
     "watchPatterns": [
-      "src/**",
-      "public/**",
-      "drizzle/**",
+      "apps/**",
+      "packages/**",
       "package.json",
       "bun.lock",
+      "bunfig.toml",
       "Dockerfile",
       ".dockerignore",
-      "vite.config.ts",
       "tsconfig.json",
-      "drizzle.config.ts",
       "railway.json"
     ]
   },

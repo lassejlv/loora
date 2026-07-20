@@ -36,7 +36,21 @@ bun run db:migrate
 bun run dev
 ```
 
-Better Auth and canvas designs use Drizzle ORM through Neon's fetch-based HTTP driver. The generated migrations live in `drizzle/`.
+Better Auth and canvas designs use Drizzle ORM through Neon's fetch-based HTTP driver. The generated migrations live in `packages/db/drizzle/`.
+
+## Monorepo layout
+
+Bun workspaces (no turborepo/pnpm), configured in the root `package.json` and `bunfig.toml`
+(isolated linker, `run.bun`). One `bun.lock` at the root; shared dependency versions are pinned
+in the workspace catalog.
+
+- `apps/web` — the TanStack Start app (routes, components, canvas, agent panel)
+- `packages/db` — Drizzle schema, Neon client, migrations, drizzle-kit config (`@loora/db`)
+- `packages/auth` — Better Auth instance, billing/Polar, spend limits, model catalog (`@loora/auth`)
+- `packages/rpc` — the oRPC router plus storage/handoff/history (`@loora/rpc`)
+
+Packages export TypeScript source directly; Vite and Bun resolve them via workspace symlinks
+and the root `tsconfig.json` paths.
 
 ## Commands
 
@@ -53,7 +67,7 @@ Canvas documents, shapes, version history, and multiple agent chats per design a
 
 ## AI providers and models
 
-Providers and models live in one typed catalog: [`src/lib/models.ts`](src/lib/models.ts).
+Providers and models live in one typed catalog: [`packages/auth/src/models.ts`](packages/auth/src/models.ts).
 Server-managed providers use an OpenAI-compatible API. ChatGPT-backed models use each
 user's connected ChatGPT account and are only shown when that account reports the model as available.
 

@@ -1,0 +1,20 @@
+{
+  "name": "@loora/auth",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/auth.ts",
+    "./*": "./src/*.ts"
+  },
+  "scripts": {
+    "polar:provision": "bun --env-file=../../.env run scripts/provision-polar.ts"
+  },
+  "dependencies": {
+    "@loora/db": "workspace:*",
+    "@opencoredev/loginwithchatgpt-server": "^0.2.0",
+    "@polar-sh/better-auth": "1.8.4",
+    "@polar-sh/sdk": "catalog:",
+    "better-auth": "catalog:",
+    "drizzle-orm": "catalog:"
+  }
+}

@@ -1,12 +1,18 @@
 {
-  "include": ["**/*.ts", "**/*.tsx"],
+  "include": ["apps/**/*.ts", "apps/**/*.tsx", "packages/**/*.ts"],
   "compilerOptions": {
     "target": "ES2022",
     "jsx": "react-jsx",
     "module": "ESNext",
     "paths": {
-      "#/*": ["./src/*"],
-      "@/*": ["./src/*"]
+      "#/*": ["./apps/web/src/*"],
+      "@/*": ["./apps/web/src/*"],
+      "@loora/db": ["./packages/db/src/index.ts"],
+      "@loora/db/*": ["./packages/db/src/*"],
+      "@loora/auth": ["./packages/auth/src/auth.ts"],
+      "@loora/auth/*": ["./packages/auth/src/*"],
+      "@loora/rpc": ["./packages/rpc/src/router.ts"],
+      "@loora/rpc/*": ["./packages/rpc/src/*"]
     },
     "lib": ["ES2022", "DOM", "DOM.Iterable"],
     "types": ["vite/client"],

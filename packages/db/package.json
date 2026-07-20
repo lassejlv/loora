@@ -1,0 +1,24 @@
+{
+  "name": "@loora/db",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./*": "./src/*.ts"
+  },
+  "scripts": {
+    "generate": "bun --env-file=../../.env run drizzle-kit generate",
+    "migrate": "bun --env-file=../../.env run drizzle-kit migrate",
+    "migrate:deploy": "bun run drizzle-kit migrate",
+    "studio": "bun --env-file=../../.env run drizzle-kit studio"
+  },
+  "dependencies": {
+    "@neondatabase/serverless": "^1.1.0",
+    "ai": "catalog:",
+    "drizzle-orm": "catalog:"
+  },
+  "devDependencies": {
+    "drizzle-kit": "^0.31.10",
+    "postgres": "^3.4.9"
+  }
+}
