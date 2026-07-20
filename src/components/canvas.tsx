@@ -66,7 +66,13 @@ type Drag =
     }
   | { mode: 'draw'; type: InsertTool; startX: number; startY: number; x: number; y: number; w: number; h: number }
   | { mode: 'marquee'; additive: boolean; startX: number; startY: number; x: number; y: number; w: number; h: number }
-  | { mode: 'resize'; id: string; corner: number; start: CanvasElement }
+  | {
+      mode: 'resize'
+      corner: number
+      // Selection bounding box at drag start; every origin scales with it.
+      start: { x: number; y: number; w: number; h: number }
+      origins: { id: string; x: number; y: number; w: number; h: number }[]
+    }
 
 const HANDLE_CORNERS = [
   [0, 0],
@@ -252,10 +258,21 @@ export function Canvas({
 
   const startResize = (e: React.PointerEvent, corner: number) => {
     e.stopPropagation()
-    const el = selectedIds.length === 1 ? elements.find((c) => c.id === selectedIds[0]) : undefined
-    if (!el) return
+    const targets = elements.filter((c) => selectedIds.includes(c.id))
+    if (targets.length === 0) return
+    const start = {
+      x: Math.min(...targets.map((el) => el.x)),
+      y: Math.min(...targets.map((el) => el.y)),
+      w: Math.max(...targets.map((el) => el.x + el.w)) - Math.min(...targets.map((el) => el.x)),
+      h: Math.max(...targets.map((el) => el.y + el.h)) - Math.min(...targets.map((el) => el.y)),
+    }
     rootRef.current!.setPointerCapture(e.pointerId)
-    setDragBoth({ mode: 'resize', id: el.id, corner, start: el })
+    setDragBoth({
+      mode: 'resize',
+      corner,
+      start,
+      origins: targets.map((el) => ({ id: el.id, x: el.x, y: el.y, w: el.w, h: el.h })),
+    })
   }
 
   const onPointerMove = (e: React.PointerEvent) => {
@@ -334,7 +351,7 @@ export function Canvas({
     } else if (d.mode === 'resize') {
       const [cx, cy] = HANDLE_CORNERS[d.corner]
       const { start } = d
-      // Anchor: opposite corner, or the element center when alt is held.
+      // Anchor: opposite corner, or the selection center when alt is held.
       const ax = e.altKey ? start.x + start.w / 2 : start.x + (1 - cx) * start.w
       const ay = e.altKey ? start.y + start.h / 2 : start.y + (1 - cy) * start.h
       const grow = e.altKey ? 2 : 1
@@ -345,11 +362,21 @@ export function Canvas({
         if (w / Math.max(h, 1e-6) > ratio) h = w / ratio
         else w = h * ratio
       }
-      w = Math.max(1, Math.round(w))
-      h = Math.max(1, Math.round(h))
+      w = Math.max(1, w)
+      h = Math.max(1, h)
       const x = e.altKey ? ax - w / 2 : pt.x < ax ? ax - w : ax
       const y = e.altKey ? ay - h / 2 : pt.y < ay ? ay - h : ay
-      onUpdate(d.id, { x: Math.round(x), y: Math.round(y), w, h })
+      // Scale every selected element with the box (Figma group resize).
+      const kx = w / Math.max(start.w, 1e-6)
+      const ky = h / Math.max(start.h, 1e-6)
+      for (const o of d.origins) {
+        onUpdate(o.id, {
+          x: Math.round(x + (o.x - start.x) * kx),
+          y: Math.round(y + (o.y - start.y) * ky),
+          w: Math.max(1, Math.round(o.w * kx)),
+          h: Math.max(1, Math.round(o.h * ky)),
+        })
+      }
     }
   }
 
@@ -548,7 +575,19 @@ export function Canvas({
     bottom: ((rootRect?.height ?? 2000) - view.y) / view.scale,
   }
   const selectedElements = elements.filter((el) => selectedIds.includes(el.id))
-  const single = selectedElements.length === 1 ? selectedElements[0] : undefined
+  const selBounds =
+    selectedElements.length > 0
+      ? {
+          x: Math.min(...selectedElements.map((el) => el.x)),
+          y: Math.min(...selectedElements.map((el) => el.y)),
+          w:
+            Math.max(...selectedElements.map((el) => el.x + el.w)) -
+            Math.min(...selectedElements.map((el) => el.x)),
+          h:
+            Math.max(...selectedElements.map((el) => el.y + el.h)) -
+            Math.min(...selectedElements.map((el) => el.y)),
+        }
+      : undefined
   const dot = 24 * view.scale
   const cursor =
     activeTool === 'hand'
@@ -653,13 +692,25 @@ export function Canvas({
             />
           ))}
 
-          {single && (
+          {selBounds && (
             <g>
+              {selectedElements.length > 1 && (
+                <rect
+                  x={selBounds.x}
+                  y={selBounds.y}
+                  width={selBounds.w}
+                  height={selBounds.h}
+                  fill="none"
+                  stroke="var(--cx-accent)"
+                  strokeWidth={1 / view.scale}
+                  strokeDasharray={`${4 / view.scale} ${3 / view.scale}`}
+                />
+              )}
               {HANDLE_CORNERS.map(([cx, cy], i) => (
                 <rect
                   key={i}
-                  x={single.x + cx * single.w - 4 / view.scale}
-                  y={single.y + cy * single.h - 4 / view.scale}
+                  x={selBounds.x + cx * selBounds.w - 4 / view.scale}
+                  y={selBounds.y + cy * selBounds.h - 4 / view.scale}
                   width={8 / view.scale}
                   height={8 / view.scale}
                   fill="#ffffff"
@@ -673,13 +724,13 @@ export function Canvas({
                 />
               ))}
               <text
-                x={single.x}
-                y={single.y + single.h + 16 / view.scale}
+                x={selBounds.x}
+                y={selBounds.y + selBounds.h + 16 / view.scale}
                 fontSize={11 / view.scale}
                 fontFamily="var(--font-mono)"
                 fill="var(--cx-accent)"
               >
-                {`${single.x}, ${single.y} · ${single.w} × ${single.h}`}
+                {`${Math.round(selBounds.x)}, ${Math.round(selBounds.y)} · ${Math.round(selBounds.w)} × ${Math.round(selBounds.h)}`}
               </text>
             </g>
           )}

@@ -2,6 +2,14 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { AnimatePresence, motion, useReducedMotion } from 'motion/react'
 import { createFileRoute } from '@tanstack/react-router'
 import {
+  AlignCenterHorizontalIcon,
+  AlignCenterVerticalIcon,
+  AlignEndHorizontalIcon,
+  AlignEndVerticalIcon,
+  AlignHorizontalDistributeCenterIcon,
+  AlignStartHorizontalIcon,
+  AlignStartVerticalIcon,
+  AlignVerticalDistributeCenterIcon,
   BringToFrontIcon,
   CheckIcon,
   ChevronDownIcon,
@@ -56,6 +64,7 @@ import { snapshotCanvas } from '#/lib/snapshot'
 import { AgentPanel } from '#/components/agent-panel'
 import { ExportDialog } from '#/components/export-dialog'
 import { elementId, type CanvasElement, type ElementActions } from '#/lib/canvas'
+import { alignElements, distributeElements, type AlignEdge } from '#/lib/align'
 import { imageTemplate } from '#/lib/element-templates'
 import { Button } from '#/components/ui/button'
 import { cn } from '#/lib/utils'
@@ -591,6 +600,16 @@ function Editor({ preview = false, userId }: { preview?: boolean; userId?: strin
     mutate((prev) => prev.map((s) => (sel.includes(s.id) ? { ...s, groupId: undefined } : s)))
   }, [mutate])
 
+  const align = useCallback(
+    (edge: AlignEdge) => mutate((prev) => alignElements(prev, selectedIdsRef.current, edge)),
+    [mutate],
+  )
+
+  const distribute = useCallback(
+    (axis: 'x' | 'y') => mutate((prev) => distributeElements(prev, selectedIdsRef.current, axis)),
+    [mutate],
+  )
+
   const actions: ElementActions = { createElement, createElements, updateElement, deleteElement }
 
   const reorder = useCallback(
@@ -662,6 +681,11 @@ function Editor({ preview = false, userId }: { preview?: boolean; userId?: strin
       }
       if (e.shiftKey && !e.metaKey && !e.ctrlKey && e.code === 'Digit2') {
         canvasControls.current?.zoomToSelection()
+        return
+      }
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'a') {
+        e.preventDefault()
+        setSelectedIds(shapesRef.current.map((s) => s.id))
         return
       }
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'd') {
@@ -950,6 +974,55 @@ function Editor({ preview = false, userId }: { preview?: boolean; userId?: strin
             >
               <SendToBackIcon data-slot="icon" />
             </Button>
+            {selectedShapes.length > 1 && (
+              <>
+                <div className="mx-0.5 h-4 w-px bg-border" />
+                {(
+                  [
+                    ['left', AlignStartVerticalIcon, 'Align left'],
+                    ['centerX', AlignCenterVerticalIcon, 'Align horizontal centers'],
+                    ['right', AlignEndVerticalIcon, 'Align right'],
+                    ['top', AlignStartHorizontalIcon, 'Align top'],
+                    ['centerY', AlignCenterHorizontalIcon, 'Align vertical centers'],
+                    ['bottom', AlignEndHorizontalIcon, 'Align bottom'],
+                  ] as const
+                ).map(([edge, Icon, label]) => (
+                  <Button
+                    key={edge}
+                    variant="ghost"
+                    size="icon-sm"
+                    aria-label={label}
+                    title={label}
+                    onClick={() => align(edge)}
+                  >
+                    <Icon data-slot="icon" />
+                  </Button>
+                ))}
+                {selectedShapes.length > 2 && (
+                  <>
+                    <Button
+                      variant="ghost"
+                      size="icon-sm"
+                      aria-label="Distribute horizontally"
+                      title="Distribute horizontally"
+                      onClick={() => distribute('x')}
+                    >
+                      <AlignHorizontalDistributeCenterIcon data-slot="icon" />
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="icon-sm"
+                      aria-label="Distribute vertically"
+                      title="Distribute vertically"
+                      onClick={() => distribute('y')}
+                    >
+                      <AlignVerticalDistributeCenterIcon data-slot="icon" />
+                    </Button>
+                  </>
+                )}
+                <div className="mx-0.5 h-4 w-px bg-border" />
+              </>
+            )}
             {selectedShapes.length > 1 && (
               <Button
                 variant="ghost"

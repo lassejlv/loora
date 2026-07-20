@@ -26,7 +26,11 @@ describe('handoff tokens', () => {
     const current = await createHandoffToken('design-1', 'user-1')
     const expired = await createHandoffToken('design-1', 'user-1', -1)
 
-    expect(await readHandoffToken(`${current.token.slice(0, -1)}x`)).toBeNull()
+    // Tamper the payload, not the signature tail: the final base64url char
+    // only carries 2 significant bits, so many single-char edits there decode
+    // to the same signature bytes. Any payload change breaks the HMAC.
+    const tampered = `${current.token[0] === 'A' ? 'B' : 'A'}${current.token.slice(1)}`
+    expect(await readHandoffToken(tampered)).toBeNull()
     expect(await readHandoffToken(expired.token)).toBeNull()
   })
 })

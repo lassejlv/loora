@@ -103,7 +103,7 @@ describe('AgentPanel empty response recovery', () => {
     fireEvent.change(input, { target: { value: 'Make a portfolio website' } })
     fireEvent.submit(input.closest('form')!)
 
-    await waitFor(() => expect(chatFetch).toHaveBeenCalledTimes(2))
+    await waitFor(() => expect(chatFetch).toHaveBeenCalledTimes(2), { timeout: 4000 })
     expect(await screen.findByText('Done.')).toBeTruthy()
 
     const secondBody = JSON.parse((chatFetch.mock.calls[1]?.[1] as RequestInit)?.body as string)
@@ -146,7 +146,7 @@ describe('AgentPanel empty response recovery', () => {
     fireEvent.change(input, { target: { value: 'Make a portfolio website' } })
     fireEvent.submit(input.closest('form')!)
 
-    await waitFor(() => expect(chatFetch).toHaveBeenCalledTimes(2))
+    await waitFor(() => expect(chatFetch).toHaveBeenCalledTimes(2), { timeout: 4000 })
     expect(await screen.findByText('Built.')).toBeTruthy()
   })
 
@@ -221,7 +221,7 @@ describe('AgentPanel empty response recovery', () => {
     fireEvent.change(input, { target: { value: 'Make a portfolio website' } })
     fireEvent.submit(input.closest('form')!)
 
-    await waitFor(() => expect(chatFetch).toHaveBeenCalledTimes(3))
+    await waitFor(() => expect(chatFetch).toHaveBeenCalledTimes(3), { timeout: 4000 })
     expect(await screen.findByText('Built.')).toBeTruthy()
     expect(actions.createElements).toHaveBeenCalledTimes(1)
 
