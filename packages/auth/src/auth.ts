@@ -88,6 +88,10 @@ export const auth = betterAuth({
     // same database (apps/mcp).
     mcp({
       loginPage: '/',
+      oidcConfig: {
+        loginPage: '/',
+        consentPage: '/mcp-consent',
+      },
       ...(process.env.MCP_RESOURCE_URL?.trim()
         ? { resource: process.env.MCP_RESOURCE_URL.trim() }
         : {}),

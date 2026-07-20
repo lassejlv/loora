@@ -10,6 +10,7 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as McpConsentRouteImport } from './routes/mcp-consent'
 import { Route as DotwellKnownOauthAuthorizationServerRouteImport } from './routes/[.]well-known.oauth-authorization-server'
 import { Route as ApiChatRouteImport } from './routes/api.chat'
 import { Route as ApiAssetIdRouteImport } from './routes/api.asset.$id'
@@ -27,6 +28,11 @@ import { Route as ApiHandoffTokenAssetIdRouteImport } from './routes/api.handoff
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const McpConsentRoute = McpConsentRouteImport.update({
+  id: '/mcp-consent',
+  path: '/mcp-consent',
   getParentRoute: () => rootRouteImport,
 } as any)
 const DotwellKnownOauthAuthorizationServerRoute =
@@ -98,6 +104,7 @@ const ApiHandoffTokenAssetIdRoute = ApiHandoffTokenAssetIdRouteImport.update({
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/mcp-consent': typeof McpConsentRoute
   '/.well-known/oauth-authorization-server': typeof DotwellKnownOauthAuthorizationServerRoute
   '/api/chat': typeof ApiChatRoute
   '/api/asset/$id': typeof ApiAssetIdRoute
@@ -114,6 +121,7 @@ export interface FileRoutesByFullPath {
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/mcp-consent': typeof McpConsentRoute
   '/.well-known/oauth-authorization-server': typeof DotwellKnownOauthAuthorizationServerRoute
   '/api/chat': typeof ApiChatRoute
   '/api/asset/$id': typeof ApiAssetIdRoute
@@ -131,6 +139,7 @@ export interface FileRoutesByTo {
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/mcp-consent': typeof McpConsentRoute
   '/.well-known/oauth-authorization-server': typeof DotwellKnownOauthAuthorizationServerRoute
   '/api/chat': typeof ApiChatRoute
   '/api/asset/$id': typeof ApiAssetIdRoute
@@ -149,6 +158,7 @@ export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | '/'
+    | '/mcp-consent'
     | '/.well-known/oauth-authorization-server'
     | '/api/chat'
     | '/api/asset/$id'
@@ -165,6 +175,7 @@ export interface FileRouteTypes {
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
+    | '/mcp-consent'
     | '/.well-known/oauth-authorization-server'
     | '/api/chat'
     | '/api/asset/$id'
@@ -181,6 +192,7 @@ export interface FileRouteTypes {
   id:
     | '__root__'
     | '/'
+    | '/mcp-consent'
     | '/.well-known/oauth-authorization-server'
     | '/api/chat'
     | '/api/asset/$id'
@@ -198,6 +210,7 @@ export interface FileRouteTypes {
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  McpConsentRoute: typeof McpConsentRoute
   DotwellKnownOauthAuthorizationServerRoute: typeof DotwellKnownOauthAuthorizationServerRoute
   ApiChatRoute: typeof ApiChatRoute
   ApiAssetIdRoute: typeof ApiAssetIdRoute
@@ -219,6 +232,13 @@ declare module '@tanstack/react-router' {
       path: '/'
       fullPath: '/'
       preLoaderRoute: typeof IndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/mcp-consent': {
+      id: '/mcp-consent'
+      path: '/mcp-consent'
+      fullPath: '/mcp-consent'
+      preLoaderRoute: typeof McpConsentRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/.well-known/oauth-authorization-server': {
@@ -329,6 +349,7 @@ const ApiHandoffTokenRouteWithChildren = ApiHandoffTokenRoute._addFileChildren(
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  McpConsentRoute: McpConsentRoute,
   DotwellKnownOauthAuthorizationServerRoute:
     DotwellKnownOauthAuthorizationServerRoute,
   ApiChatRoute: ApiChatRoute,
@@ -346,12 +367,3 @@ const rootRouteChildren: RootRouteChildren = {
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
   ._addFileTypes<FileRouteTypes>()
-
-import type { getRouter } from './router.tsx'
-import type { createStart } from '@tanstack/react-start'
-declare module '@tanstack/react-start' {
-  interface Register {
-    ssr: true
-    router: Awaited<ReturnType<typeof getRouter>>
-  }
-}
