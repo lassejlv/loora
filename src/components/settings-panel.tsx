@@ -26,8 +26,6 @@ interface AdminUserUsage {
   name: string
   email: string
   isAdmin: boolean
-  previewAccess: boolean
-  previewAccessRequestedAt: Date | null
   usageMultiplier: number
   dailyUsd: number
   weeklyUsd: number
@@ -97,12 +95,93 @@ function UsageTab() {
   )
 }
 
+function BillingTab({ isAdmin }: { isAdmin: boolean }) {
+  const [billing, setBilling] = useState<Awaited<ReturnType<typeof orpc.billing.status>> | null>(null)
+  const [error, setError] = useState('')
+  const [openingPortal, setOpeningPortal] = useState(false)
+
+  useEffect(() => {
+    let cancelled = false
+    orpc.billing.status()
+      .then((status) => {
+        if (!cancelled) setBilling(status)
+      })
+      .catch(() => {
+        if (!cancelled) setError('Could not load billing.')
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  if (isAdmin) {
+    return (
+      <div className="flex flex-col gap-6">
+        <div>
+          <h2 className="text-sm font-semibold">Internal access</h2>
+          <p className="mt-1 text-xs text-muted-foreground">
+            Admin accounts bypass subscriptions and use local rolling AI limits.
+          </p>
+        </div>
+        <UsageTab />
+      </div>
+    )
+  }
+  if (error) return <p className="text-xs text-destructive-foreground">{error}</p>
+  if (!billing) return <p className="cx-shimmer text-xs">Loading billing…</p>
+
+  const plan = billing.plan === 'studio' ? 'Studio' : billing.plan === 'pro' ? 'Pro' : 'No plan'
+  return (
+    <div className="flex flex-col gap-5">
+      <div>
+        <h2 className="text-sm font-semibold">Billing</h2>
+        <p className="mt-1 text-xs text-muted-foreground">Manage your plan and monthly AI credits.</p>
+      </div>
+      <div className="rounded-lg border border-border p-4">
+        <p className="text-xs text-muted-foreground">Current plan</p>
+        <p className="mt-1 text-lg font-semibold">{plan}</p>
+        {billing.credits ? (
+          <p className="mt-3 text-sm">
+            {billing.credits.remaining} of {billing.credits.credited} AI credits remaining
+          </p>
+        ) : null}
+        {billing.credits?.resetsAt ? (
+          <p className="mt-1 text-xs text-muted-foreground">
+            Resets {new Date(billing.credits.resetsAt).toLocaleDateString()}
+          </p>
+        ) : null}
+        {billing.cancelAtPeriodEnd && billing.currentPeriodEnd ? (
+          <p className="mt-3 rounded-md bg-secondary px-3 py-2 text-xs">
+            Your plan ends {new Date(billing.currentPeriodEnd).toLocaleDateString()}. Access remains active until then.
+          </p>
+        ) : null}
+      </div>
+      <Button
+        variant="outline"
+        disabled={openingPortal || !billing.plan}
+        onClick={async () => {
+          setOpeningPortal(true)
+          setError('')
+          try {
+            await authClient.customer.portal()
+          } catch {
+            setError('Could not open the billing portal.')
+            setOpeningPortal(false)
+          }
+        }}
+      >
+        {openingPortal ? 'Opening portal…' : 'Manage billing'}
+      </Button>
+      {error ? <p className="text-xs text-destructive-foreground">{error}</p> : null}
+    </div>
+  )
+}
+
 function AdminTab() {
   const [users, setUsers] = useState<AdminUserUsage[] | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [resetting, setResetting] = useState<string | null>(null)
   const [savingMultiplier, setSavingMultiplier] = useState<string | null>(null)
-  const [savingAccess, setSavingAccess] = useState<string | null>(null)
   const [multiplierDrafts, setMultiplierDrafts] = useState<Record<string, string>>({})
 
   useEffect(() => {
@@ -174,32 +253,6 @@ function AdminTab() {
     }
   }
 
-  async function handlePreviewAccess(account: AdminUserUsage) {
-    const granted = !account.previewAccess
-    setSavingAccess(account.id)
-    setError(null)
-    try {
-      const updated = await orpc.admin.setPreviewAccess({ userId: account.id, granted })
-      setUsers((current) =>
-        current?.map((user) =>
-          user.id === account.id
-            ? {
-                ...user,
-                previewAccess: updated.previewAccess,
-                previewAccessRequestedAt: updated.previewAccess
-                  ? null
-                  : user.previewAccessRequestedAt,
-              }
-            : user,
-        ) ?? null,
-      )
-    } catch {
-      setError(`Could not update preview access for ${account.email}.`)
-    } finally {
-      setSavingAccess(null)
-    }
-  }
-
   if (!users && !error) {
     return <p className="cx-shimmer text-xs">Loading users…</p>
   }
@@ -209,7 +262,7 @@ function AdminTab() {
       <div>
         <h2 className="text-sm font-semibold">Admin</h2>
         <p className="mt-1 text-xs text-muted-foreground">
-          Manage preview access and AI usage limits.
+          Manage internal AI usage limits.
         </p>
       </div>
       {error ? <p className="text-xs text-destructive-foreground">{error}</p> : null}
@@ -227,11 +280,6 @@ function AdminTab() {
                     Admin
                   </span>
                 ) : null}
-                {!account.isAdmin && account.previewAccessRequestedAt ? (
-                  <span className="ml-2 text-[10px] font-semibold uppercase tracking-wide text-cx-accent">
-                    Requested access
-                  </span>
-                ) : null}
               </p>
               <p className="truncate text-xs text-muted-foreground">{account.email}</p>
               <p className="mt-1 font-mono text-[11px] text-muted-foreground">
@@ -239,20 +287,6 @@ function AdminTab() {
               </p>
             </div>
             <div className="flex flex-col gap-2 sm:items-end">
-              {!account.isAdmin ? (
-                <Button
-                  size="xs"
-                  variant={account.previewAccess ? 'secondary' : 'outline'}
-                  disabled={savingAccess === account.id}
-                  onClick={() => handlePreviewAccess(account)}
-                >
-                  {savingAccess === account.id
-                    ? 'Saving…'
-                    : account.previewAccess
-                      ? 'Revoke preview access'
-                      : 'Grant preview access'}
-                </Button>
-              ) : null}
               <div className="flex flex-wrap gap-1">
                 {MULTIPLIER_PRESETS.map((multiplier) => (
                   <Button
@@ -328,7 +362,7 @@ export function SettingsPanel() {
         <TabsList className={`grid w-full ${isAdmin ? 'grid-cols-4' : 'grid-cols-3'}`}>
           <TabsTab value="account">Account</TabsTab>
           <TabsTab value="chatgpt">ChatGPT</TabsTab>
-          <TabsTab value="usage">Usage</TabsTab>
+          <TabsTab value="billing">Billing</TabsTab>
           {isAdmin ? <TabsTab value="admin">Admin</TabsTab> : null}
         </TabsList>
 
@@ -364,8 +398,8 @@ export function SettingsPanel() {
           <ChatGPTAccount />
         </TabsPanel>
 
-        <TabsPanel value="usage">
-          <UsageTab />
+        <TabsPanel value="billing">
+          <BillingTab isAdmin={isAdmin} />
         </TabsPanel>
 
         {isAdmin ? (

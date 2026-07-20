@@ -69,3 +69,10 @@ Object.defineProperty(dom.window, 'ResizeObserver', {
   writable: true,
   value: TestResizeObserver,
 })
+
+if (!dom.window.Element.prototype.getAnimations) {
+  Object.defineProperty(dom.window.Element.prototype, 'getAnimations', {
+    configurable: true,
+    value: () => [],
+  })
+}

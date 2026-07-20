@@ -10,9 +10,21 @@ import {
   modelSupportsImageInput,
   withoutImageParts,
 } from '#/lib/ai-image-inputs'
-import { checkLimits, recordUsage } from '#/lib/ai-limits'
+import {
+  checkLimits,
+  flushPendingPolarUsage,
+  recordSubscriberUsage,
+  recordUsage,
+} from '#/lib/ai-limits'
 import { requireSession } from '#/lib/auth'
-import { canUseApp } from '#/lib/preview-access'
+import {
+  acquireGenerationLease,
+  authorizeBilling,
+  refreshEntitlement,
+  releaseGenerationLease,
+  subscriptionRequiredResponse,
+} from '#/lib/billing'
+import { remainingCredits, usesPolarCredits } from '#/lib/billing-policy'
 import { DESIGN_SKILL_PROMPT } from '#/skills/design-skills'
 import { desc, eq } from 'drizzle-orm'
 import { db } from '#/db'
@@ -162,9 +174,8 @@ export const Route = createFileRoute('/api/chat')({
         if (!session) {
           return Response.json({ error: 'Unauthorized' }, { status: 401 })
         }
-        if (!canUseApp(session.user)) {
-          return Response.json({ error: 'Preview access is required.' }, { status: 403 })
-        }
+        const billing = await authorizeBilling(session.user)
+        if (!billing.access) return subscriptionRequiredResponse()
 
         const { messages, shapes, selectedIds, model: modelKey, forceCanvasAction } = (await request.json()) as {
           messages: UIMessage[]
@@ -220,7 +231,41 @@ export const Route = createFileRoute('/api/chat')({
         }
         const imageInputsEnabled = modelSupportsImageInput(key)
 
-        if (!usingChatGPT) {
+        let generationLease: string | null = null
+        const subscriberFunded = usesPolarCredits(usingChatGPT, billing.source)
+
+        if (subscriberFunded) {
+          generationLease = await acquireGenerationLease(session.user.id)
+          if (!generationLease) {
+            return Response.json(
+              { error: 'Another AI generation is already running.', code: 'AI_GENERATION_IN_PROGRESS' },
+              { status: 409 },
+            )
+          }
+          if (!await flushPendingPolarUsage(session.user.id)) {
+            await releaseGenerationLease(session.user.id, generationLease)
+            return Response.json(
+              { error: 'Billing is temporarily unavailable.', code: 'BILLING_TEMPORARILY_UNAVAILABLE' },
+              { status: 503 },
+            )
+          }
+          try {
+            const live = await refreshEntitlement(session.user.id)
+            if (!live || remainingCredits(live.meterBalance) <= 0) {
+              await releaseGenerationLease(session.user.id, generationLease)
+              return Response.json(
+                { error: 'AI credits are exhausted. Open Billing to review your plan.', code: 'AI_CREDITS_EXHAUSTED' },
+                { status: 429 },
+              )
+            }
+          } catch {
+            await releaseGenerationLease(session.user.id, generationLease)
+            return Response.json(
+              { error: 'Billing is temporarily unavailable.', code: 'BILLING_TEMPORARILY_UNAVAILABLE' },
+              { status: 503 },
+            )
+          }
+        } else if (!usingChatGPT) {
           const limitError = await checkLimits(session.user.id)
           if (limitError) {
             return Response.json({ error: limitError }, { status: 429 })
@@ -363,11 +408,17 @@ export const Route = createFileRoute('/api/chat')({
           // Design tasks (multi-shape layouts, components) routinely need >60s; a short abort
           // surfaces to the client as an empty successful stream and trips empty-response retries.
           abortSignal: AbortSignal.timeout(300_000),
-          onError: ({ error }) => console.error('[chat] stream error:', error),
+          onError: ({ error }) => {
+            console.error('[chat] stream error:', error)
+            if (generationLease) {
+              void releaseGenerationLease(session.user.id, generationLease)
+            }
+          },
           onFinish: async ({ totalUsage }) => {
             if (usingChatGPT) return
             try {
-              await recordUsage(
+              const saveUsage = subscriberFunded ? recordSubscriberUsage : recordUsage
+              await saveUsage(
                 session.user.id,
                 key,
                 totalUsage.inputTokens ?? 0,
@@ -375,6 +426,10 @@ export const Route = createFileRoute('/api/chat')({
               )
             } catch (error) {
               console.error('[chat] Failed to record usage:', error)
+            } finally {
+              if (generationLease) {
+                await releaseGenerationLease(session.user.id, generationLease)
+              }
             }
           },
         })

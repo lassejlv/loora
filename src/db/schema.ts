@@ -19,8 +19,6 @@ export const user = pgTable('user', {
   email: text('email').notNull().unique(),
   emailVerified: boolean('email_verified').default(false).notNull(),
   isAdmin: boolean('is_admin').default(false).notNull(),
-  previewAccess: boolean('preview_access').default(false).notNull(),
-  previewAccessRequestedAt: timestamp('preview_access_requested_at'),
   usageMultiplier: integer('usage_multiplier').default(1).notNull(),
   image: text('image'),
   createdAt: timestamp('created_at').defaultNow().notNull(),
@@ -192,10 +190,41 @@ export const aiUsage = pgTable(
     inputTokens: integer('input_tokens').notNull(),
     outputTokens: integer('output_tokens').notNull(),
     costMicroUsd: integer('cost_micro_usd').notNull(),
+    creditUnits: integer('credit_units').default(0).notNull(),
+    polarReportedAt: timestamp('polar_reported_at'),
+    polarReportAttempts: integer('polar_report_attempts').default(0).notNull(),
     createdAt: timestamp('created_at').defaultNow().notNull(),
   },
   (table) => [index('ai_usage_user_created_idx').on(table.userId, table.createdAt)],
 )
+
+export const billingEntitlement = pgTable('billing_entitlement', {
+  userId: text('user_id')
+    .primaryKey()
+    .references(() => user.id, { onDelete: 'cascade' }),
+  polarCustomerId: text('polar_customer_id'),
+  polarSubscriptionId: text('polar_subscription_id'),
+  productId: text('product_id'),
+  plan: text('plan'),
+  accessGranted: boolean('access_granted').default(false).notNull(),
+  currentPeriodStart: timestamp('current_period_start'),
+  currentPeriodEnd: timestamp('current_period_end'),
+  cancelAtPeriodEnd: boolean('cancel_at_period_end').default(false).notNull(),
+  meterBalance: integer('meter_balance').default(0).notNull(),
+  creditedUnits: integer('credited_units').default(0).notNull(),
+  consumedUnits: integer('consumed_units').default(0).notNull(),
+  lastEventAt: timestamp('last_event_at'),
+  syncedAt: timestamp('synced_at').defaultNow().notNull(),
+})
+
+export const aiGenerationLease = pgTable('ai_generation_lease', {
+  userId: text('user_id')
+    .primaryKey()
+    .references(() => user.id, { onDelete: 'cascade' }),
+  token: text('token').notNull(),
+  acquiredAt: timestamp('acquired_at').notNull(),
+  expiresAt: timestamp('expires_at').notNull(),
+})
 
 // Login-with-ChatGPT sessions (tokens encrypted at rest by the handler).
 // Keyed by the handler's opaque session id, not by app user.

@@ -2,14 +2,12 @@ import '@tanstack/react-start'
 import { createFileRoute } from '@tanstack/react-router'
 import { requireSession } from '#/lib/auth'
 import { chatgptAuth } from '#/lib/chatgpt-auth'
-import { canUseApp } from '#/lib/preview-access'
+import { authorizeBilling, subscriptionRequiredResponse } from '#/lib/billing'
 
 async function handle(request: Request) {
   const session = await requireSession(request)
   if (!session) return Response.json({ error: 'Unauthorized' }, { status: 401 })
-  if (!canUseApp(session.user)) {
-    return Response.json({ error: 'Preview access is required.' }, { status: 403 })
-  }
+  if (!(await authorizeBilling(session.user)).access) return subscriptionRequiredResponse()
   return chatgptAuth.handler(request)
 }
 
@@ -21,4 +19,3 @@ export const Route = createFileRoute('/api/chatgpt/$')({
     },
   },
 })
-
