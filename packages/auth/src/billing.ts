@@ -4,6 +4,7 @@ import { db } from '@loora/db'
 import { aiGenerationLease, billingEntitlement, user } from '@loora/db/schema'
 import {
   cachedEntitlementGrantsAccess,
+  entitlementCapabilities,
   normalizeCustomerState,
   remainingCredits,
   type BillingPlan,
@@ -23,6 +24,10 @@ export interface BillingStatus {
   plan: BillingPlan | null
   currentPeriodEnd: string | null
   cancelAtPeriodEnd: boolean
+  trial: {
+    active: true
+    endsAt: string
+  } | null
   credits: {
     remaining: number
     credited: number
@@ -113,9 +118,12 @@ async function clearEntitlement(userId: string) {
     polarSubscriptionId: null,
     productId: null,
     plan: null,
+    subscriptionStatus: null,
     accessGranted: false,
     currentPeriodStart: null,
     currentPeriodEnd: null,
+    trialStart: null,
+    trialEnd: null,
     cancelAtPeriodEnd: false,
     meterBalance: 0,
     creditedUnits: 0,
@@ -132,11 +140,31 @@ async function clearEntitlement(userId: string) {
 
 export async function authorizeBilling(user: BillingUser) {
   const { required } = getPolarRuntime()
-  if (!required) return { access: true, source: 'disabled' as const, entitlement: null }
-  if (user.isAdmin === true) return { access: true, source: 'admin' as const, entitlement: null }
+  if (!required) {
+    return {
+      access: true,
+      managedAiAccess: true,
+      topUpAccess: true,
+      trial: false,
+      source: 'disabled' as const,
+      entitlement: null,
+    }
+  }
+  if (user.isAdmin === true) {
+    return {
+      access: true,
+      managedAiAccess: true,
+      topUpAccess: true,
+      trial: false,
+      source: 'admin' as const,
+      entitlement: null,
+    }
+  }
   const entitlement = await getCachedEntitlement(user.id)
+  const capabilities = entitlementCapabilities(entitlement)
   return {
     access: cachedEntitlementGrantsAccess(entitlement),
+    ...capabilities,
     source: 'cache' as const,
     entitlement,
   }
@@ -148,7 +176,10 @@ async function statusFromEntitlement(
   source: BillingStatus['source'],
   stale: boolean,
 ): Promise<BillingStatus> {
-  const topUp = await getTopUpCreditStatus(userId)
+  const capabilities = entitlementCapabilities(entitlement)
+  const topUp = capabilities.topUpAccess
+    ? await getTopUpCreditStatus(userId)
+    : { granted: 0, refunded: 0, consumed: 0, remaining: 0 }
   const includedRemaining = remainingCredits(entitlement?.meterBalance ?? 0)
   return {
     required: true,
@@ -156,7 +187,10 @@ async function statusFromEntitlement(
     plan: entitlement?.plan === 'pro' || entitlement?.plan === 'studio' ? entitlement.plan : null,
     currentPeriodEnd: entitlement?.currentPeriodEnd?.toISOString() ?? null,
     cancelAtPeriodEnd: entitlement?.cancelAtPeriodEnd ?? false,
-    credits: entitlement?.plan
+    trial: capabilities.trial && entitlement?.trialEnd
+      ? { active: true, endsAt: entitlement.trialEnd.toISOString() }
+      : null,
+    credits: entitlement?.plan && capabilities.managedAiAccess
       ? {
           remaining: includedRemaining + topUp.remaining,
           credited: entitlement.creditedUnits + topUp.granted - topUp.refunded,
@@ -181,6 +215,7 @@ export async function getBillingStatus(user: BillingUser, force = false): Promis
       plan: null,
       currentPeriodEnd: null,
       cancelAtPeriodEnd: false,
+      trial: null,
       credits: null,
       stale: false,
       source: 'disabled',
@@ -193,6 +228,7 @@ export async function getBillingStatus(user: BillingUser, force = false): Promis
       plan: null,
       currentPeriodEnd: null,
       cancelAtPeriodEnd: false,
+      trial: null,
       credits: null,
       stale: false,
       source: 'admin',
@@ -213,6 +249,27 @@ export async function getBillingStatus(user: BillingUser, force = false): Promis
     }
   }
   return statusFromEntitlement(user.id, cached, 'cache', stale)
+}
+
+export async function createPlanCheckout(userId: string, plan: BillingPlan) {
+  const { config } = getPolarRuntime()
+  if (!config) throw new Error('Polar is not configured')
+  const proTrial = plan === 'pro'
+  const checkout = await getPolarClient().checkouts.create({
+    products: [proTrial ? config.proProductId : config.studioProductId],
+    externalCustomerId: userId,
+    allowTrial: proTrial,
+    trialInterval: proTrial ? 'day' : undefined,
+    trialIntervalCount: proTrial ? 3 : undefined,
+    metadata: {
+      loora_kind: 'subscription',
+      loora_plan: plan,
+      loora_user_id: userId,
+    },
+    successUrl: `${config.origin}/?checkout=success&checkout_id={CHECKOUT_ID}`,
+    returnUrl: config.origin,
+  })
+  return { url: checkout.url }
 }
 
 export async function refreshBillingStatus(user: BillingUser) {

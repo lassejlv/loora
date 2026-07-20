@@ -142,16 +142,32 @@ async function ensureProduct(
   name: string,
   amount: number,
   benefits: string[],
+  trial: { interval: 'day'; count: number } | null,
 ) {
   const found = await findProduct(plan)
   if (found) {
     const actualBenefits = found.benefits.map((benefit) => benefit.id).sort()
     const compatible = found.name === name && found.visibility === 'private' &&
       found.recurringInterval === 'month' && found.recurringIntervalCount === 1 &&
-      found.trialInterval === null && fixedPriceAmount(found) === amount &&
+      fixedPriceAmount(found) === amount &&
       sameJson(actualBenefits, [...benefits].sort()) &&
       found.prices.every((price) => !('meterId' in price))
     if (!compatible) throw new Error(`Existing ${name} product is incompatible`)
+    const trialMatches = found.trialInterval === (trial?.interval ?? null) &&
+      found.trialIntervalCount === (trial?.count ?? null)
+    if (!trialMatches) {
+      if (dryRun) {
+        console.error(`[dry-run] Update ${name} trial to ${trial ? `${trial.count} ${trial.interval}s` : 'disabled'}`)
+      } else {
+        await polar.products.update({
+          id: found.id,
+          productUpdate: {
+            trialInterval: trial?.interval ?? null,
+            trialIntervalCount: trial?.count ?? null,
+          },
+        })
+      }
+    }
     return found.id
   }
   if (dryRun) return `<create:${plan}>`
@@ -160,6 +176,8 @@ async function ensureProduct(
     visibility: 'private',
     recurringInterval: 'month',
     recurringIntervalCount: 1,
+    trialInterval: trial?.interval ?? null,
+    trialIntervalCount: trial?.count ?? null,
     prices: [{ amountType: 'fixed', priceCurrency: 'usd', priceAmount: amount }],
     metadata: { ...catalogMetadata, plan },
   })
@@ -211,8 +229,20 @@ const meterId = await ensureMeter()
 const accessBenefitId = await ensureAccessBenefit()
 const proCreditsBenefitId = await ensureCreditBenefit('pro_credits_benefit', 'loora_pro_credits', 100, meterId)
 const studioCreditsBenefitId = await ensureCreditBenefit('studio_credits_benefit', 'loora_studio_credits', 300, meterId)
-const proProductId = await ensureProduct('pro', 'Loora Pro', 2000, [accessBenefitId, proCreditsBenefitId])
-const studioProductId = await ensureProduct('studio', 'Loora Studio', 4900, [accessBenefitId, studioCreditsBenefitId])
+const proProductId = await ensureProduct(
+  'pro',
+  'Loora Pro',
+  2000,
+  [accessBenefitId, proCreditsBenefitId],
+  { interval: 'day', count: 3 },
+)
+const studioProductId = await ensureProduct(
+  'studio',
+  'Loora Studio',
+  4900,
+  [accessBenefitId, studioCreditsBenefitId],
+  null,
+)
 const topUpProductId = await ensureTopUpProduct()
 
 console.log(JSON.stringify({

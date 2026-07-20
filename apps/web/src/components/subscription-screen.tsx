@@ -18,14 +18,21 @@ type BillingStatus = Awaited<ReturnType<typeof orpc.billing.status>>
 interface SubscriptionScreenProps {
   children: React.ReactNode
   preview: React.ReactNode
+  redirect?: (url: string) => void
 }
 
 const plans = [
-  { id: 'pro' as const, name: 'Pro', price: '$20', credits: '100 AI credits each month' },
+  {
+    id: 'pro' as const,
+    name: 'Pro',
+    price: '$20',
+    credits: '100 AI credits each month after trial',
+    note: '3-day free trial',
+  },
   { id: 'studio' as const, name: 'Studio', price: '$49', credits: '300 AI credits each month', note: '3× AI capacity' },
 ]
 
-export function SubscriptionScreen({ children, preview }: SubscriptionScreenProps) {
+export function SubscriptionScreen({ children, preview, redirect }: SubscriptionScreenProps) {
   const [status, setStatus] = useState<BillingStatus | null>(null)
   const [pending, setPending] = useState(true)
   const [selectedPlan, setSelectedPlan] = useState<Plan | null>(null)
@@ -65,7 +72,9 @@ export function SubscriptionScreen({ children, preview }: SubscriptionScreenProp
     setPending(true)
     setError('')
     try {
-      await authClient.checkout({ slug: plan })
+      const checkout = await orpc.billing.checkout({ plan })
+      const goToCheckout = redirect ?? ((url: string) => window.location.assign(url))
+      goToCheckout(checkout.url)
     } catch {
       setError(`Could not open ${plan === 'pro' ? 'Pro' : 'Studio'} checkout. Please retry.`)
       setPending(false)
@@ -106,13 +115,21 @@ export function SubscriptionScreen({ children, preview }: SubscriptionScreenProp
                   <p className="mt-5 text-2xl font-semibold tracking-tight">
                     {plan.price}<span className="text-xs font-normal text-muted-foreground">/month</span>
                   </p>
+                  {plan.id === 'pro' ? (
+                    <p className="mt-2 text-xs text-muted-foreground">
+                      Free for 3 days, then $20/month unless canceled. During the trial, connect ChatGPT for AI;
+                      managed AI and credit top-ups unlock afterward.
+                    </p>
+                  ) : null}
                   <Button
                     className="mt-4"
                     variant={plan.id === 'studio' ? 'default' : 'outline'}
                     disabled={pending}
                     onClick={() => void startCheckout(plan.id)}
                   >
-                    {pending && selectedPlan === plan.id ? 'Opening checkout…' : `Choose ${plan.name}`}
+                    {pending && selectedPlan === plan.id
+                      ? 'Opening checkout…'
+                      : plan.id === 'pro' ? 'Start free trial' : `Choose ${plan.name}`}
                   </Button>
                 </div>
               ))}

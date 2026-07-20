@@ -1,7 +1,7 @@
 import { betterAuth } from 'better-auth'
 import { drizzleAdapter } from 'better-auth/adapters/drizzle'
 import { tanstackStartCookies } from 'better-auth/tanstack-start'
-import { checkout, polar, portal, webhooks } from '@polar-sh/better-auth'
+import { polar, portal, webhooks } from '@polar-sh/better-auth'
 import { db } from '@loora/db'
 import * as schema from '@loora/db/schema'
 import { applyCustomerStateWebhook } from './billing'
@@ -62,15 +62,6 @@ export const auth = betterAuth({
             client: getPolarClient(),
             createCustomerOnSignUp: false,
             use: [
-              checkout({
-                products: [
-                  { productId: polarRuntime.config.proProductId, slug: 'pro' },
-                  { productId: polarRuntime.config.studioProductId, slug: 'studio' },
-                ],
-                successUrl: `${polarRuntime.config.origin}/?checkout=success&checkout_id={CHECKOUT_ID}`,
-                returnUrl: polarRuntime.config.origin,
-                authenticatedUsersOnly: true,
-              }),
               portal({ returnUrl: polarRuntime.config.origin }),
               webhooks({
                 secret: polarRuntime.config.webhookSecret,

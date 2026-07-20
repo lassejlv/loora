@@ -16,6 +16,7 @@ const billing = {
   plan: 'pro' as const,
   currentPeriodEnd: '2026-08-20T00:00:00.000Z',
   cancelAtPeriodEnd: false,
+  trial: null,
   credits: {
     remaining: 200,
     credited: 200,

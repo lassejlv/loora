@@ -134,7 +134,9 @@ function BillingTab({ isAdmin }: { isAdmin: boolean }) {
   if (error) return <p className="text-xs text-destructive-foreground">{error}</p>
   if (!billing) return <p className="cx-shimmer text-xs">Loading billing…</p>
 
-  const plan = billing.plan === 'studio' ? 'Studio' : billing.plan === 'pro' ? 'Pro' : 'No plan'
+  const plan = billing.trial
+    ? 'Pro trial'
+    : billing.plan === 'studio' ? 'Studio' : billing.plan === 'pro' ? 'Pro' : 'No plan'
   return (
     <div className="flex flex-col gap-5">
       <div>
@@ -144,6 +146,14 @@ function BillingTab({ isAdmin }: { isAdmin: boolean }) {
       <div className="rounded-lg border border-border p-4">
         <p className="text-xs text-muted-foreground">Current plan</p>
         <p className="mt-1 text-lg font-semibold">{plan}</p>
+        {billing.trial ? (
+          <div className="mt-3 rounded-md bg-secondary px-3 py-2 text-xs">
+            <p>Your trial ends {new Date(billing.trial.endsAt).toLocaleDateString()}.</p>
+            <p className="mt-1 text-muted-foreground">
+              Connect ChatGPT to use AI. Managed AI and credit top-ups unlock after trial.
+            </p>
+          </div>
+        ) : null}
         {billing.credits ? (
           <div className="mt-3">
             <p className="text-sm">{billing.credits.remaining} AI credits remaining</p>
@@ -165,7 +175,7 @@ function BillingTab({ isAdmin }: { isAdmin: boolean }) {
           </p>
         ) : null}
       </div>
-      <CreditTopUp onBillingChange={setBilling} />
+      {!billing.trial ? <CreditTopUp onBillingChange={setBilling} /> : null}
       <Button
         variant="outline"
         disabled={openingPortal || !billing.plan}

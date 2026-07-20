@@ -266,6 +266,15 @@ export const Route = createFileRoute('/api/chat')({
         const providerConfig = getProvider(modelConfig.provider)
         const key = modelConfig.id
         const usingChatGPT = providerConfig.kind === 'chatgpt'
+        if (!usingChatGPT && !billing.managedAiAccess) {
+          return Response.json(
+            {
+              error: 'Managed AI is unavailable during the Pro trial. Connect ChatGPT in Settings to use AI.',
+              code: 'TRIAL_CHATGPT_REQUIRED',
+            },
+            { status: 403 },
+          )
+        }
         let model
 
         if (usingChatGPT) {

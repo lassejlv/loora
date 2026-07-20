@@ -3,6 +3,7 @@ import type { CustomerState } from '@polar-sh/sdk/models/components/customerstat
 import {
   cachedEntitlementGrantsAccess,
   creditUnitsForCost,
+  entitlementCapabilities,
   leaseAvailable,
   leaseTokenCanRelease,
   normalizeCustomerState,
@@ -31,7 +32,11 @@ function state(overrides: Partial<CustomerState> = {}) {
   } as CustomerState
 }
 
-function subscription(productId: string, end = '2026-08-20T12:00:00Z') {
+function subscription(
+  productId: string,
+  end = '2026-08-20T12:00:00Z',
+  overrides: Partial<CustomerState['activeSubscriptions'][number]> = {},
+) {
   return {
     id: `subscription-${productId}`,
     productId,
@@ -39,6 +44,9 @@ function subscription(productId: string, end = '2026-08-20T12:00:00Z') {
     currentPeriodStart: new Date('2026-07-20T12:00:00Z'),
     currentPeriodEnd: new Date(end),
     cancelAtPeriodEnd: false,
+    trialStart: null,
+    trialEnd: null,
+    ...overrides,
   } as CustomerState['activeSubscriptions'][number]
 }
 
@@ -75,6 +83,47 @@ describe('billing policy', () => {
     }), config, now)
     expect(normalized.accessGranted).toBe(false)
     expect(cachedEntitlementGrantsAccess(normalized, now)).toBe(false)
+  })
+
+  test('grants app access but restricts managed AI and top-ups during a Pro trial', () => {
+    const trialEnd = new Date('2026-07-23T12:00:00Z')
+    const normalized = normalizeCustomerState(state({
+      activeSubscriptions: [subscription('pro', trialEnd.toISOString(), {
+        status: 'trialing',
+        trialStart: now,
+        trialEnd,
+      })],
+    }), config, now)
+
+    expect(normalized.plan).toBe('pro')
+    expect(normalized.subscriptionStatus).toBe('trialing')
+    expect(normalized.accessGranted).toBe(true)
+    expect(cachedEntitlementGrantsAccess(normalized, now)).toBe(true)
+    expect(entitlementCapabilities(normalized, now)).toEqual({
+      trial: true,
+      managedAiAccess: false,
+      topUpAccess: false,
+    })
+  })
+
+  test('does not recognize expired or Studio trials', () => {
+    const expired = subscription('pro', '2026-07-21T12:00:00Z', {
+      status: 'trialing',
+      trialStart: new Date('2026-07-18T12:00:00Z'),
+      trialEnd: new Date('2026-07-21T12:00:00Z'),
+    })
+    const studio = subscription('studio', '2026-07-24T12:00:00Z', {
+      status: 'trialing',
+      trialStart: now,
+      trialEnd: new Date('2026-07-24T12:00:00Z'),
+    })
+    const normalized = normalizeCustomerState(state({
+      activeSubscriptions: [expired, studio],
+      grantedBenefits: [{ benefitId: 'access' } as never],
+    }), config, new Date('2026-07-22T12:00:00Z'))
+
+    expect(normalized.plan).toBeNull()
+    expect(normalized.accessGranted).toBe(false)
   })
 
   test('uses Polar meter balance as remaining credits and rounds one-cent credit units', () => {

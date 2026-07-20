@@ -8,9 +8,12 @@ export interface NormalizedEntitlement {
   polarSubscriptionId: string | null
   productId: string | null
   plan: BillingPlan | null
+  subscriptionStatus: 'active' | 'trialing' | null
   accessGranted: boolean
   currentPeriodStart: Date | null
   currentPeriodEnd: Date | null
+  trialStart: Date | null
+  trialEnd: Date | null
   cancelAtPeriodEnd: boolean
   meterBalance: number
   creditedUnits: number
@@ -52,17 +55,24 @@ export function normalizeCustomerState(
   now = new Date(),
 ): NormalizedEntitlement {
   const recognized = state.activeSubscriptions
-    .filter((subscription) =>
-      subscription.status === 'active' &&
-      subscription.currentPeriodEnd.getTime() > now.getTime() &&
-      (subscription.productId === config.proProductId || subscription.productId === config.studioProductId)
-    )
+    .filter((subscription) => {
+      const recognizedProduct = subscription.productId === config.proProductId ||
+        subscription.productId === config.studioProductId
+      const active = subscription.status === 'active'
+      const proTrial = subscription.status === 'trialing' &&
+        subscription.productId === config.proProductId &&
+        Boolean(subscription.trialEnd && subscription.trialEnd.getTime() > now.getTime())
+      return recognizedProduct && subscription.currentPeriodEnd.getTime() > now.getTime() &&
+        (active || proTrial)
+    })
     .sort((left, right) => {
-      const leftStudio = left.productId === config.studioProductId ? 1 : 0
-      const rightStudio = right.productId === config.studioProductId ? 1 : 0
-      return rightStudio - leftStudio
+      const score = (subscription: typeof left) => subscription.status === 'active'
+        ? subscription.productId === config.studioProductId ? 3 : 2
+        : 1
+      return score(right) - score(left)
     })
   const subscription = recognized[0] ?? null
+  const trial = subscription?.status === 'trialing'
   const accessBenefit = state.grantedBenefits.some(
     (benefit) => benefit.benefitId === config.accessBenefitId,
   )
@@ -77,9 +87,14 @@ export function normalizeCustomerState(
         ? 'studio'
         : 'pro'
       : null,
-    accessGranted: Boolean(subscription && accessBenefit),
+    subscriptionStatus: subscription?.status === 'active'
+      ? 'active'
+      : subscription?.status === 'trialing' ? 'trialing' : null,
+    accessGranted: Boolean(subscription && (accessBenefit || trial)),
     currentPeriodStart: subscription?.currentPeriodStart ?? null,
     currentPeriodEnd: subscription?.currentPeriodEnd ?? null,
+    trialStart: subscription?.trialStart ?? null,
+    trialEnd: subscription?.trialEnd ?? null,
     cancelAtPeriodEnd: subscription?.cancelAtPeriodEnd ?? false,
     meterBalance: Math.round(meter?.balance ?? 0),
     creditedUnits: meter?.creditedUnits ?? 0,
@@ -88,12 +103,42 @@ export function normalizeCustomerState(
   }
 }
 
+type TrialEntitlement = {
+  plan: string | null
+  subscriptionStatus: string | null
+  trialEnd: Date | null
+}
+
+export function entitlementIsTrial(entitlement: TrialEntitlement | null, now = new Date()) {
+  return Boolean(
+    entitlement?.plan === 'pro' &&
+    entitlement.subscriptionStatus === 'trialing' &&
+    entitlement.trialEnd && entitlement.trialEnd.getTime() > now.getTime(),
+  )
+}
+
+export function entitlementCapabilities(entitlement: TrialEntitlement | null, now = new Date()) {
+  const trial = entitlementIsTrial(entitlement, now)
+  return {
+    trial,
+    managedAiAccess: !trial,
+    topUpAccess: !trial,
+  }
+}
+
 export function cachedEntitlementGrantsAccess(
-  entitlement: { accessGranted: boolean; plan: string | null; currentPeriodEnd: Date | null } | null,
+  entitlement: {
+    accessGranted: boolean
+    plan: string | null
+    subscriptionStatus: string | null
+    currentPeriodEnd: Date | null
+    trialEnd: Date | null
+  } | null,
   now = new Date(),
 ) {
   return Boolean(
     entitlement?.accessGranted && entitlement.plan && entitlement.currentPeriodEnd &&
-    entitlement.currentPeriodEnd.getTime() > now.getTime(),
+    entitlement.currentPeriodEnd.getTime() > now.getTime() &&
+    (entitlement.subscriptionStatus !== 'trialing' || entitlementIsTrial(entitlement, now)),
   )
 }

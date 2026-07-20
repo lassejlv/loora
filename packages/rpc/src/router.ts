@@ -14,7 +14,12 @@ import { googleOAuthEnabled, type getSession } from '@loora/auth'
 import type { CanvasElement } from '@loora/db/canvas'
 import { assetKey, s3 } from './storage'
 import { createHandoffToken } from './handoff-token'
-import { authorizeBilling, getBillingStatus, refreshBillingStatus } from '@loora/auth/billing'
+import {
+  authorizeBilling,
+  createPlanCheckout,
+  getBillingStatus,
+  refreshBillingStatus,
+} from '@loora/auth/billing'
 import { canUseApp, isPreviewAccessRequired } from '@loora/auth/preview-access'
 import { completeTopUpCheckout, createTopUpCheckout } from '@loora/auth/credit-top-ups'
 import { MAX_TOP_UP_CENTS, MIN_TOP_UP_CENTS } from '@loora/auth/top-up-policy'
@@ -769,11 +774,31 @@ const refreshCurrentBilling = previewProcedure.handler(({ context }) =>
   refreshBillingStatus(context.user),
 )
 
+const createSubscriptionCheckout = previewProcedure
+  .input(z.object({ plan: z.enum(['pro', 'studio']) }))
+  .handler(async ({ context, input }) => {
+    const billing = await authorizeBilling(context.user)
+    if (billing.access) {
+      throw new ORPCError('FORBIDDEN', {
+        message: 'Manage your existing subscription from Billing.',
+      })
+    }
+    return createPlanCheckout(context.user.id, input.plan)
+  })
+
 const createCreditTopUp = protectedProcedure
   .input(z.object({
     amountCents: z.number().int().min(MIN_TOP_UP_CENTS).max(MAX_TOP_UP_CENTS),
   }))
-  .handler(({ context, input }) => createTopUpCheckout(context.user.id, input.amountCents))
+  .handler(async ({ context, input }) => {
+    const billing = await authorizeBilling(context.user)
+    if (!billing.topUpAccess) {
+      throw new ORPCError('FORBIDDEN', {
+        message: 'Credit top-ups become available after the Pro trial.',
+      })
+    }
+    return createTopUpCheckout(context.user.id, input.amountCents)
+  })
 
 const completeCreditTopUp = previewProcedure
   .input(z.object({ checkoutId: z.string().min(1).max(128) }))
@@ -845,6 +870,7 @@ export const appRouter = {
   billing: {
     status: getCurrentBilling,
     refresh: refreshCurrentBilling,
+    checkout: createSubscriptionCheckout,
     createTopUp: createCreditTopUp,
     completeTopUp: completeCreditTopUp,
   },
