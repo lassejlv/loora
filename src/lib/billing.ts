@@ -10,6 +10,7 @@ import {
 } from '#/lib/billing-policy'
 import { getPolarClient, getPolarRuntime } from '#/lib/polar'
 import { flushPendingPolarUsage } from '#/lib/ai-limits'
+import { getTopUpCreditStatus } from '#/lib/credit-top-ups'
 
 const CACHE_MAX_AGE_MS = 5 * 60 * 1000
 const REFRESH_RATE_LIMIT_MS = 10 * 1000
@@ -26,6 +27,9 @@ export interface BillingStatus {
     remaining: number
     credited: number
     consumed: number
+    includedRemaining: number
+    topUpRemaining: number
+    topUpPurchased: number
     resetsAt: string | null
   } | null
   stale: boolean
@@ -138,11 +142,14 @@ export async function authorizeBilling(user: BillingUser) {
   }
 }
 
-function statusFromEntitlement(
+async function statusFromEntitlement(
+  userId: string,
   entitlement: typeof billingEntitlement.$inferSelect | null,
   source: BillingStatus['source'],
   stale: boolean,
-): BillingStatus {
+): Promise<BillingStatus> {
+  const topUp = await getTopUpCreditStatus(userId)
+  const includedRemaining = remainingCredits(entitlement?.meterBalance ?? 0)
   return {
     required: true,
     access: cachedEntitlementGrantsAccess(entitlement),
@@ -151,9 +158,12 @@ function statusFromEntitlement(
     cancelAtPeriodEnd: entitlement?.cancelAtPeriodEnd ?? false,
     credits: entitlement?.plan
       ? {
-          remaining: remainingCredits(entitlement.meterBalance),
-          credited: entitlement.creditedUnits,
+          remaining: includedRemaining + topUp.remaining,
+          credited: entitlement.creditedUnits + topUp.granted - topUp.refunded,
           consumed: entitlement.consumedUnits,
+          includedRemaining,
+          topUpRemaining: topUp.remaining,
+          topUpPurchased: topUp.granted - topUp.refunded,
           resetsAt: entitlement.currentPeriodEnd?.toISOString() ?? null,
         }
       : null,
@@ -194,15 +204,15 @@ export async function getBillingStatus(user: BillingUser, force = false): Promis
   if (force || stale) {
     try {
       const refreshed = await refreshEntitlement(user.id)
-      return statusFromEntitlement(refreshed, 'polar', false)
+      return statusFromEntitlement(user.id, refreshed, 'polar', false)
     } catch (error) {
       if ((error as { statusCode?: number }).statusCode === 404) {
-        return statusFromEntitlement(await clearEntitlement(user.id), 'polar', false)
+        return statusFromEntitlement(user.id, await clearEntitlement(user.id), 'polar', false)
       }
       if (!cached) throw new Error('BILLING_TEMPORARILY_UNAVAILABLE')
     }
   }
-  return statusFromEntitlement(cached, 'cache', stale)
+  return statusFromEntitlement(user.id, cached, 'cache', stale)
 }
 
 export async function refreshBillingStatus(user: BillingUser) {

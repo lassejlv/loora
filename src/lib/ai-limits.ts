@@ -4,6 +4,8 @@ import { aiUsage, user } from '#/db/schema'
 import { getModel, type ModelKey } from '#/lib/models'
 import { creditUnitsForCost, polarIngestAcknowledged } from '#/lib/billing-policy'
 import { getPolarClient } from '#/lib/polar'
+import { getTopUpCreditStatus } from '#/lib/credit-top-ups'
+import { allocateTopUpCredits } from '#/lib/top-up-policy'
 
 export const DAILY_LIMIT_USD = 0.5
 export const WEEKLY_LIMIT_USD = 2
@@ -79,12 +81,20 @@ export async function listUserUsage() {
 }
 
 export async function resetUsage(userId: string) {
-  const deleted = await db
-    .delete(aiUsage)
-    .where(eq(aiUsage.userId, userId))
-    .returning({ id: aiUsage.id })
-
-  return deleted.length
+  return db.transaction(async (tx) => {
+    // Subscriber rows are also the durable receipt for prepaid-credit consumption.
+    // Keep their billing fields while clearing the cost used by internal rolling limits.
+    const preserved = await tx
+      .update(aiUsage)
+      .set({ costMicroUsd: 0 })
+      .where(and(eq(aiUsage.userId, userId), gt(aiUsage.creditUnits, 0)))
+      .returning({ id: aiUsage.id })
+    const deleted = await tx
+      .delete(aiUsage)
+      .where(and(eq(aiUsage.userId, userId), eq(aiUsage.creditUnits, 0)))
+      .returning({ id: aiUsage.id })
+    return preserved.length + deleted.length
+  })
 }
 
 export async function checkLimits(userId: string): Promise<string | null> {
@@ -172,8 +182,11 @@ export async function recordSubscriberUsage(
   model: ModelKey,
   inputTokens: number,
   outputTokens: number,
+  includedCreditsAvailable: number,
 ) {
   const cost = costMicroUsd(model, inputTokens, outputTokens)
+  const creditUnits = creditUnitsForCost(cost)
+  const topUp = await getTopUpCreditStatus(userId)
   const [saved] = await db
     .insert(aiUsage)
     .values({
@@ -183,7 +196,12 @@ export async function recordSubscriberUsage(
       inputTokens,
       outputTokens,
       costMicroUsd: cost,
-      creditUnits: creditUnitsForCost(cost),
+      creditUnits,
+      topUpCreditUnits: allocateTopUpCredits(
+        creditUnits,
+        includedCreditsAvailable,
+        topUp.remaining,
+      ),
     })
     .returning()
   await reportPolarUsage(saved)

@@ -25,6 +25,7 @@ import {
   subscriptionRequiredResponse,
 } from '#/lib/billing'
 import { remainingCredits, usesPolarCredits } from '#/lib/billing-policy'
+import { getTopUpCreditStatus } from '#/lib/credit-top-ups'
 import { canUseApp, previewAccessRequiredResponse } from '#/lib/preview-access'
 import { DESIGN_SKILL_PROMPT } from '#/skills/design-skills'
 import { desc, eq } from 'drizzle-orm'
@@ -234,6 +235,7 @@ export const Route = createFileRoute('/api/chat')({
         const imageInputsEnabled = modelSupportsImageInput(key)
 
         let generationLease: string | null = null
+        let includedCreditsAvailable = 0
         const subscriberFunded = usesPolarCredits(usingChatGPT, billing.source)
 
         if (subscriberFunded) {
@@ -253,7 +255,9 @@ export const Route = createFileRoute('/api/chat')({
           }
           try {
             const live = await refreshEntitlement(session.user.id)
-            if (!live || remainingCredits(live.meterBalance) <= 0) {
+            includedCreditsAvailable = live ? remainingCredits(live.meterBalance) : 0
+            const topUp = await getTopUpCreditStatus(session.user.id)
+            if (!live || includedCreditsAvailable + topUp.remaining <= 0) {
               await releaseGenerationLease(session.user.id, generationLease)
               return Response.json(
                 { error: 'AI credits are exhausted. Open Billing to review your plan.', code: 'AI_CREDITS_EXHAUSTED' },
@@ -419,13 +423,19 @@ export const Route = createFileRoute('/api/chat')({
           onFinish: async ({ totalUsage }) => {
             if (usingChatGPT) return
             try {
-              const saveUsage = subscriberFunded ? recordSubscriberUsage : recordUsage
-              await saveUsage(
-                session.user.id,
-                key,
-                totalUsage.inputTokens ?? 0,
-                totalUsage.outputTokens ?? 0,
-              )
+              const inputTokens = totalUsage.inputTokens ?? 0
+              const outputTokens = totalUsage.outputTokens ?? 0
+              if (subscriberFunded) {
+                await recordSubscriberUsage(
+                  session.user.id,
+                  key,
+                  inputTokens,
+                  outputTokens,
+                  includedCreditsAvailable,
+                )
+              } else {
+                await recordUsage(session.user.id, key, inputTokens, outputTokens)
+              }
             } catch (error) {
               console.error('[chat] Failed to record usage:', error)
             } finally {

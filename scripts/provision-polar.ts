@@ -120,6 +120,13 @@ function fixedPriceAmount(product: Product) {
   return fixed && 'priceAmount' in fixed ? fixed.priceAmount : null
 }
 
+function customPrice(product: Product) {
+  return product.prices.find((price) =>
+    'amountType' in price && price.amountType === 'custom' &&
+    'priceCurrency' in price && price.priceCurrency === 'usd'
+  )
+}
+
 async function findProduct(plan: 'pro' | 'studio') {
   const all = await items<Product>(await polar.products.list({
     metadata: { app: 'loora', plan, catalog_version: 1 },
@@ -163,16 +170,55 @@ async function ensureProduct(
   return product.id
 }
 
+async function ensureTopUpProduct() {
+  const all = await items<Product>(await polar.products.list({
+    metadata: { ...catalogMetadata, catalog_kind: 'credit_top_up_product' },
+    limit: 100,
+  }))
+  const found = assertSingle(
+    all.filter((item) => exactMetadata(item, 'credit_top_up_product')),
+    'credit top-up product',
+  )
+  if (found) {
+    const price = customPrice(found)
+    const compatible = found.name === 'Loora AI Credit Top-Up' &&
+      found.visibility === 'private' && found.recurringInterval === null &&
+      found.benefits.length === 0 && price &&
+      'minimumAmount' in price && price.minimumAmount === 500 &&
+      'maximumAmount' in price && price.maximumAmount === 50_000 &&
+      'presetAmount' in price && price.presetAmount === 1_000
+    if (!compatible) throw new Error('Existing Loora AI Credit Top-Up product is incompatible')
+    return found.id
+  }
+  if (dryRun) return '<create:credit_top_up>'
+  return (await polar.products.create({
+    name: 'Loora AI Credit Top-Up',
+    description: 'Add prepaid AI credits to your Loora account. $1 adds 10 AI credits.',
+    visibility: 'private',
+    recurringInterval: null,
+    prices: [{
+      amountType: 'custom',
+      priceCurrency: 'usd',
+      minimumAmount: 500,
+      maximumAmount: 50_000,
+      presetAmount: 1_000,
+    }],
+    metadata: { ...catalogMetadata, catalog_kind: 'credit_top_up_product' },
+  })).id
+}
+
 const meterId = await ensureMeter()
 const accessBenefitId = await ensureAccessBenefit()
 const proCreditsBenefitId = await ensureCreditBenefit('pro_credits_benefit', 'loora_pro_credits', 100, meterId)
 const studioCreditsBenefitId = await ensureCreditBenefit('studio_credits_benefit', 'loora_studio_credits', 300, meterId)
 const proProductId = await ensureProduct('pro', 'Loora Pro', 2000, [accessBenefitId, proCreditsBenefitId])
 const studioProductId = await ensureProduct('studio', 'Loora Studio', 4900, [accessBenefitId, studioCreditsBenefitId])
+const topUpProductId = await ensureTopUpProduct()
 
 console.log(JSON.stringify({
   POLAR_AI_METER_ID: meterId,
   POLAR_ACCESS_BENEFIT_ID: accessBenefitId,
   POLAR_PRO_PRODUCT_ID: proProductId,
   POLAR_STUDIO_PRODUCT_ID: studioProductId,
+  POLAR_TOP_UP_PRODUCT_ID: topUpProductId,
 }))

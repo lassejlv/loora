@@ -5,6 +5,7 @@ import { checkout, polar, portal, webhooks } from '@polar-sh/better-auth'
 import { db } from '#/db'
 import * as schema from '#/db/schema'
 import { applyCustomerStateWebhook } from '#/lib/billing'
+import { applyPaidTopUpOrder, applyRefundedTopUpOrder } from '#/lib/credit-top-ups'
 import { getPolarClient, getPolarRuntime } from '#/lib/polar'
 
 const googleClientId = process.env.GOOGLE_CLIENT_ID?.trim()
@@ -75,6 +76,12 @@ export const auth = betterAuth({
                 secret: polarRuntime.config.webhookSecret,
                 onCustomerStateChanged: async (payload) => {
                   await applyCustomerStateWebhook(payload.data, payload.timestamp)
+                },
+                onOrderPaid: async (payload) => {
+                  await applyPaidTopUpOrder(payload.data, payload.timestamp)
+                },
+                onOrderRefunded: async (payload) => {
+                  await applyRefundedTopUpOrder(payload.data, payload.timestamp)
                 },
               }),
             ],

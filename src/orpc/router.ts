@@ -10,6 +10,8 @@ import { assetKey, s3 } from '#/lib/storage'
 import { createHandoffToken } from '#/lib/handoff-token'
 import { authorizeBilling, getBillingStatus, refreshBillingStatus } from '#/lib/billing'
 import { canUseApp, isPreviewAccessRequired } from '#/lib/preview-access'
+import { completeTopUpCheckout, createTopUpCheckout } from '#/lib/credit-top-ups'
+import { MAX_TOP_UP_CENTS, MIN_TOP_UP_CENTS } from '#/lib/top-up-policy'
 import { sortCommitsOldestFirst, toHistoryPage } from '#/lib/history'
 import {
   DAILY_LIMIT_USD,
@@ -567,6 +569,23 @@ const refreshCurrentBilling = previewProcedure.handler(({ context }) =>
   refreshBillingStatus(context.user),
 )
 
+const createCreditTopUp = protectedProcedure
+  .input(z.object({
+    amountCents: z.number().int().min(MIN_TOP_UP_CENTS).max(MAX_TOP_UP_CENTS),
+  }))
+  .handler(({ context, input }) => createTopUpCheckout(context.user.id, input.amountCents))
+
+const completeCreditTopUp = previewProcedure
+  .input(z.object({ checkoutId: z.string().min(1).max(128) }))
+  .handler(async ({ context, input }) => {
+    const order = await completeTopUpCheckout(context.user.id, input.checkoutId)
+    return {
+      completed: order !== null,
+      addedCredits: order?.creditUnits ?? 0,
+      billing: await getBillingStatus(context.user),
+    }
+  })
+
 const listUsersWithUsage = adminProcedure.handler(() => listUserUsage())
 
 const resetUserUsage = adminProcedure
@@ -626,6 +645,8 @@ export const appRouter = {
   billing: {
     status: getCurrentBilling,
     refresh: refreshCurrentBilling,
+    createTopUp: createCreditTopUp,
+    completeTopUp: completeCreditTopUp,
   },
   design: {
     list: listDesigns,

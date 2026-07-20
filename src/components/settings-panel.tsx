@@ -13,6 +13,7 @@ import {
 import { authClient } from '#/lib/auth-client'
 import { orpc } from '#/lib/orpc-client'
 import { ChatGPTAccount } from '#/components/chatgpt-account'
+import { CreditTopUp } from '#/components/credit-top-up'
 
 interface UsageStatus {
   dailyUsd: number
@@ -143,13 +144,18 @@ function BillingTab({ isAdmin }: { isAdmin: boolean }) {
         <p className="text-xs text-muted-foreground">Current plan</p>
         <p className="mt-1 text-lg font-semibold">{plan}</p>
         {billing.credits ? (
-          <p className="mt-3 text-sm">
-            {billing.credits.remaining} of {billing.credits.credited} AI credits remaining
-          </p>
+          <div className="mt-3">
+            <p className="text-sm">{billing.credits.remaining} AI credits remaining</p>
+            {billing.credits.topUpPurchased > 0 ? (
+              <p className="mt-1 text-xs text-muted-foreground">
+                {billing.credits.includedRemaining} monthly + {billing.credits.topUpRemaining} prepaid
+              </p>
+            ) : null}
+          </div>
         ) : null}
         {billing.credits?.resetsAt ? (
           <p className="mt-1 text-xs text-muted-foreground">
-            Resets {new Date(billing.credits.resetsAt).toLocaleDateString()}
+            Monthly credits reset {new Date(billing.credits.resetsAt).toLocaleDateString()}
           </p>
         ) : null}
         {billing.cancelAtPeriodEnd && billing.currentPeriodEnd ? (
@@ -158,6 +164,7 @@ function BillingTab({ isAdmin }: { isAdmin: boolean }) {
           </p>
         ) : null}
       </div>
+      <CreditTopUp onBillingChange={setBilling} />
       <Button
         variant="outline"
         disabled={openingPortal || !billing.plan}
@@ -397,6 +404,10 @@ function AdminTab() {
 export function SettingsPanel() {
   const { data: session } = authClient.useSession()
   const isAdmin = session?.user.isAdmin === true
+  const defaultTab = typeof window !== 'undefined' &&
+    new URLSearchParams(window.location.search).get('topup') === 'success'
+    ? 'billing'
+    : 'account'
 
   async function signOut() {
     // Do not leave one Loora account's ChatGPT cookie available after switching users.
@@ -406,7 +417,7 @@ export function SettingsPanel() {
 
   return (
     <div className="flex h-full min-h-0 flex-col overflow-y-auto p-6">
-      <Tabs defaultValue="account" className="flex max-w-md flex-col gap-6">
+      <Tabs defaultValue={defaultTab} className="flex max-w-md flex-col gap-6">
         <TabsList className={`grid w-full ${isAdmin ? 'grid-cols-4' : 'grid-cols-3'}`}>
           <TabsTab value="account">Account</TabsTab>
           <TabsTab value="chatgpt">ChatGPT</TabsTab>

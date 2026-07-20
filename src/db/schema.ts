@@ -193,6 +193,7 @@ export const aiUsage = pgTable(
     outputTokens: integer('output_tokens').notNull(),
     costMicroUsd: integer('cost_micro_usd').notNull(),
     creditUnits: integer('credit_units').default(0).notNull(),
+    topUpCreditUnits: integer('top_up_credit_units').default(0).notNull(),
     polarReportedAt: timestamp('polar_reported_at'),
     polarReportAttempts: integer('polar_report_attempts').default(0).notNull(),
     createdAt: timestamp('created_at').defaultNow().notNull(),
@@ -218,6 +219,30 @@ export const billingEntitlement = pgTable('billing_entitlement', {
   lastEventAt: timestamp('last_event_at'),
   syncedAt: timestamp('synced_at').defaultNow().notNull(),
 })
+
+export const billingCreditTopUp = pgTable(
+  'billing_credit_top_up',
+  {
+    polarOrderId: text('polar_order_id').primaryKey(),
+    userId: text('user_id')
+      .notNull()
+      .references(() => user.id, { onDelete: 'cascade' }),
+    polarCheckoutId: text('polar_checkout_id'),
+    polarCustomerId: text('polar_customer_id').notNull(),
+    productId: text('product_id').notNull(),
+    amountCents: integer('amount_cents').notNull(),
+    creditUnits: integer('credit_units').notNull(),
+    refundedAmountCents: integer('refunded_amount_cents').default(0).notNull(),
+    refundedCreditUnits: integer('refunded_credit_units').default(0).notNull(),
+    paidAt: timestamp('paid_at').notNull(),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+    updatedAt: timestamp('updated_at')
+      .defaultNow()
+      .$onUpdate(() => new Date())
+      .notNull(),
+  },
+  (table) => [index('billing_credit_top_up_user_paid_idx').on(table.userId, table.paidAt)],
+)
 
 export const aiGenerationLease = pgTable('ai_generation_lease', {
   userId: text('user_id')
