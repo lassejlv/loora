@@ -12,6 +12,7 @@ import {
 } from '#/components/ui/progress'
 import { authClient } from '#/lib/auth-client'
 import { orpc } from '#/lib/orpc-client'
+import { ChatGPTAccount } from '#/components/chatgpt-account'
 
 interface UsageStatus {
   dailyUsd: number
@@ -315,11 +316,18 @@ export function SettingsPanel() {
   const { data: session } = authClient.useSession()
   const isAdmin = session?.user.isAdmin === true
 
+  async function signOut() {
+    // Do not leave one Loora account's ChatGPT cookie available after switching users.
+    await fetch('/api/chatgpt/logout', { method: 'POST' }).catch(() => undefined)
+    await authClient.signOut()
+  }
+
   return (
     <div className="flex h-full min-h-0 flex-col overflow-y-auto p-6">
       <Tabs defaultValue="account" className="flex max-w-md flex-col gap-6">
-        <TabsList className={`grid w-full ${isAdmin ? 'grid-cols-3' : 'grid-cols-2'}`}>
+        <TabsList className={`grid w-full ${isAdmin ? 'grid-cols-4' : 'grid-cols-3'}`}>
           <TabsTab value="account">Account</TabsTab>
+          <TabsTab value="chatgpt">ChatGPT</TabsTab>
           <TabsTab value="usage">Usage</TabsTab>
           {isAdmin ? <TabsTab value="admin">Admin</TabsTab> : null}
         </TabsList>
@@ -339,11 +347,21 @@ export function SettingsPanel() {
             </div>
           </div>
           <div>
-            <Button variant="outline" size="sm" onClick={() => authClient.signOut()}>
+            <Button variant="outline" size="sm" onClick={() => void signOut()}>
               <LogOutIcon data-slot="icon" />
               Sign out
             </Button>
           </div>
+        </TabsPanel>
+
+        <TabsPanel value="chatgpt" className="flex flex-col gap-5">
+          <div>
+            <h2 className="text-sm font-semibold">ChatGPT</h2>
+            <p className="mt-1 text-xs text-muted-foreground">
+              Connect your own account for ChatGPT-backed AI models.
+            </p>
+          </div>
+          <ChatGPTAccount />
         </TabsPanel>
 
         <TabsPanel value="usage">

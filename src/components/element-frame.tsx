@@ -205,6 +205,18 @@ interface RenderRecord {
 
 const renderResults = new Map<string, RenderRecord>()
 const renderWaiters = new Map<string, (() => void)[]>()
+const frameRevisions = new Map<string, number>()
+
+function noteFrameRevision(elementId: string, revision?: number) {
+  const current = frameRevisions.get(elementId) ?? 0
+  const next = revision === undefined ? current + 1 : Math.max(current, revision)
+  frameRevisions.set(elementId, next)
+  return next
+}
+
+export function getElementCaptureRevision(elementId: string) {
+  return frameRevisions.get(elementId) ?? 0
+}
 
 function reportRender(elementId: string, error: string | null) {
   renderResults.set(elementId, { error, at: Date.now() })
@@ -289,6 +301,28 @@ ${REACT_GLOBALS_PRELUDE}
 var __root = document.getElementById('root')
 var __currentRoot = null
 var __seq = 0
+var __revision = 0
+var __dirty = false
+
+function __postDirty() {
+  parent.postMessage({ type: 'loora:dirty', revision: __revision }, '*')
+}
+function __markDirty() {
+  __revision += 1
+  if (__dirty) return
+  __dirty = true
+  __postDirty()
+}
+
+new MutationObserver(__markDirty).observe(__root, {
+  subtree: true,
+  childList: true,
+  attributes: true,
+  characterData: true,
+})
+;['input', 'change', 'pointerdown', 'keydown'].forEach(function (type) {
+  document.addEventListener(type, __markDirty, true)
+})
 
 // Track roots the agent code creates itself so the previous render can be
 // unmounted before the next code payload runs.
@@ -338,9 +372,19 @@ function __installPayloadTracking() {
   var st = window.setTimeout.bind(window)
   var si = window.setInterval.bind(window)
   var rf = window.requestAnimationFrame.bind(window)
-  window.setTimeout = function () { var id = st.apply(null, arguments); __timers.push(id); return id }
-  window.setInterval = function () { var id = si.apply(null, arguments); __intervals.push(id); return id }
-  window.requestAnimationFrame = function (fn) { var id = rf(fn); __rafs.push(id); return id }
+  window.setTimeout = function (fn) {
+    var args = Array.prototype.slice.call(arguments, 1)
+    var wrapped = typeof fn === 'function' ? function () { __markDirty(); return fn.apply(this, arguments) } : fn
+    var id = st.apply(null, [wrapped].concat(args)); __timers.push(id); return id
+  }
+  window.setInterval = function (fn) {
+    var args = Array.prototype.slice.call(arguments, 1)
+    var wrapped = typeof fn === 'function' ? function () { __markDirty(); return fn.apply(this, arguments) } : fn
+    var id = si.apply(null, [wrapped].concat(args)); __intervals.push(id); return id
+  }
+  window.requestAnimationFrame = function (fn) {
+    var id = rf(function (at) { __markDirty(); return fn(at) }); __rafs.push(id); return id
+  }
   ;[window, document, document.documentElement, document.body].forEach(function (target) {
     var add = target.addEventListener.bind(target)
     target.addEventListener = function (type, listener, opts) {
@@ -393,8 +437,20 @@ window.addEventListener('message', function (e) {
   // Canvas snapshots can't see into the sandboxed iframe, so the frame
   // captures itself on request and posts the PNG back to the parent.
   if (msg.type === 'loora:capture') {
+    var captureRevision = __revision
+    var volatile = !!(document.getAnimations && document.getAnimations().some(function (animation) {
+      return animation.playState === 'running' || animation.playState === 'pending'
+    }))
     var reply = function (png) {
-      parent.postMessage({ type: 'loora:capture-result', token: msg.token, png: png }, '*')
+      parent.postMessage({
+        type: 'loora:capture-result',
+        token: msg.token,
+        png: png,
+        revision: captureRevision,
+        volatile: volatile,
+      }, '*')
+      if (__revision === captureRevision) __dirty = false
+      else __postDirty()
     }
     if (!window.htmlToImage) return reply(null)
     // Cross-origin stylesheets (fonts) can make font embedding throw; retry
@@ -421,6 +477,7 @@ window.addEventListener('message', function (e) {
         ReactDOM.createRoot(__root).render(React.createElement(Root))
       }
     }
+    __markDirty()
     parent.postMessage({ type: 'loora:ok', seq: __seq }, '*')
   } catch (err) {
     parent.postMessage(
@@ -525,6 +582,7 @@ export function ElementFrame({
       if (seq !== seqRef.current) return
       const win = iframeRef.current?.contentWindow
       if (!win) return
+      noteFrameRevision(elementId)
       // sandbox iframes have an opaque origin: '*' required.
       win.postMessage(
         { type: 'loora:code', code: inlined, mode: payload.mode, seq, needsEntry: payload.needsEntry },
@@ -536,10 +594,14 @@ export function ElementFrame({
   useEffect(() => {
     const onMessage = (e: MessageEvent) => {
       if (e.source !== iframeRef.current?.contentWindow) return
-      const msg = e.data as { type?: string; seq?: number; message?: string } | null
+      const msg = e.data as { type?: string; seq?: number; message?: string; revision?: number } | null
       if (msg?.type === 'loora:element-ready') {
         readyRef.current = true
         send(codeRef.current)
+        return
+      }
+      if (msg?.type === 'loora:dirty') {
+        noteFrameRevision(elementId, msg.revision)
         return
       }
       // Stale replies (an old payload settling after a newer send) are ignored.
@@ -554,7 +616,10 @@ export function ElementFrame({
       }
     }
     window.addEventListener('message', onMessage)
-    return () => window.removeEventListener('message', onMessage)
+    return () => {
+      window.removeEventListener('message', onMessage)
+      frameRevisions.delete(elementId)
+    }
   }, [])
 
   useEffect(() => {
@@ -576,7 +641,13 @@ export function ElementFrame({
 
 // Ask a mounted element iframe for a PNG of itself. Resolves null when the
 // frame is missing, still booting, or slow to respond.
-export function captureElement(elementId: string, timeoutMs = 1500): Promise<string | null> {
+export interface ElementCapture {
+  png: string
+  revision: number
+  volatile: boolean
+}
+
+export function captureElement(elementId: string, timeoutMs = 1500): Promise<ElementCapture | null> {
   const iframe = document.querySelector<HTMLIFrameElement>(
     `iframe[data-element-frame="${CSS.escape(elementId)}"]`,
   )
@@ -588,11 +659,20 @@ export function captureElement(elementId: string, timeoutMs = 1500): Promise<str
       resolve(null)
     }, timeoutMs)
     const onMessage = (e: MessageEvent) => {
-      const msg = e.data as { type?: string; token?: string; png?: string | null }
-      if (msg?.type !== 'loora:capture-result' || msg.token !== token) return
+      const msg = e.data as {
+        type?: string
+        token?: string
+        png?: string | null
+        revision?: number
+        volatile?: boolean
+      }
+      if (e.source !== iframe.contentWindow || msg?.type !== 'loora:capture-result' || msg.token !== token) return
       window.clearTimeout(timer)
       window.removeEventListener('message', onMessage)
-      resolve(typeof msg.png === 'string' ? msg.png : null)
+      if (typeof msg.png !== 'string') return resolve(null)
+      const revision = typeof msg.revision === 'number' ? msg.revision : getElementCaptureRevision(elementId)
+      noteFrameRevision(elementId, revision)
+      resolve({ png: msg.png, revision, volatile: msg.volatile === true })
     }
     window.addEventListener('message', onMessage)
     iframe.contentWindow!.postMessage({ type: 'loora:capture', token }, '*')

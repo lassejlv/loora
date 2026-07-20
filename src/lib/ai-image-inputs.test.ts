@@ -7,6 +7,7 @@ describe('AI image input capabilities', () => {
     expect(modelSupportsImageInput('mini')).toBe(true)
     expect(modelSupportsImageInput('max')).toBe(false)
     expect(modelSupportsImageInput('max-fast')).toBe(false)
+    expect(modelSupportsImageInput('gpt-5.6-sol')).toBe(true)
     expect(modelSupportsImageInput('unknown')).toBe(true)
   })
 

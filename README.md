@@ -18,6 +18,8 @@ Set these values in `.env`:
 - `BETTER_AUTH_URL`: the public app origin, usually `http://localhost:3000` locally
 - `REQUIRE_PREVIEW_ACCESS`: defaults to required; set to `false` to let every signed-in user in
 - `WAFER_API_KEY`: the server-managed Wafer key used by the default models
+- `LWC_SECRET`: a stable random secret used to encrypt Login with ChatGPT sessions (`openssl rand -hex 32`)
+- `CODEX_CLIENT_VERSION`: Codex protocol version used for ChatGPT model discovery (defaults to `0.145.0`)
 
 Google login is enabled only when both of these optional values are set:
 
@@ -52,18 +54,21 @@ Canvas documents, shapes, version history, and multiple agent chats per design a
 ## AI providers and models
 
 Providers and models live in one typed catalog: [`src/lib/models.ts`](src/lib/models.ts).
-Providers must expose an OpenAI-compatible API.
+Server-managed providers use an OpenAI-compatible API. ChatGPT-backed models use each
+user's connected ChatGPT account and are only shown when that account reports the model as available.
 
 To add a provider, add its label, base URL, and API-key environment variable:
 
 ```ts
 export const PROVIDERS = {
   wafer: {
+    kind: 'openai-compatible',
     label: 'Wafer',
     baseURL: 'https://pass.wafer.ai/v1',
     apiKeyEnv: 'WAFER_API_KEY',
   },
   openrouter: {
+    kind: 'openai-compatible',
     label: 'OpenRouter',
     baseURL: 'https://openrouter.ai/api/v1',
     apiKeyEnv: 'OPENROUTER_API_KEY',

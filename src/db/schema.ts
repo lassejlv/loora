@@ -201,7 +201,7 @@ export const aiUsage = pgTable(
 // Keyed by the handler's opaque session id, not by app user.
 export const chatgptSession = pgTable('chatgpt_session', {
   key: text('key').primaryKey(),
-  value: jsonb('value').notNull(),
+  value: jsonb('value').$type<unknown>().notNull(),
   expiresAt: timestamp('expires_at'),
   updatedAt: timestamp('updated_at')
     .defaultNow()

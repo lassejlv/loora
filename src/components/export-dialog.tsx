@@ -102,7 +102,7 @@ export function ExportDialog({
     setPngBusy(true)
     setError(null)
     try {
-      const image = await snapshotCanvas(targets, { pixelRatio: 2 })
+      const image = await snapshotCanvas(targets, { pixelRatio: 2, freshness: 'fresh' })
       if (!image) throw new Error('Snapshot failed')
       downloadDataUrl(image, safeExportName(doc.name, 'png'))
     } catch {

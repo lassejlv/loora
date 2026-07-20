@@ -1,7 +1,11 @@
-import { useEffect, useRef, useState } from 'react'
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { AnimatePresence, motion, useReducedMotion } from 'motion/react'
 import { useChat } from '@ai-sdk/react'
 import { DefaultChatTransport, lastAssistantMessageIsCompleteWithToolCalls, type UIMessage } from 'ai'
+import {
+  ChatGPTProxyError,
+  createChatGPTProxyProvider,
+} from '@opencoredev/loginwithchatgpt-ai'
 import { nanoid } from 'nanoid'
 import {
   BookOpenIcon,
@@ -124,7 +128,7 @@ function AgentThinking({ label = 'Thinking' }: { label?: string }) {
   )
 }
 
-export function AgentPanel({
+export const AgentPanel = memo(function AgentPanel({
   actions,
   shapesRef,
   selectedIdsRef,
@@ -146,12 +150,31 @@ export function AgentPanel({
     const stored = typeof localStorage === 'undefined' ? null : localStorage.getItem('loora:model')
     return stored && MODELS.some((m) => m.id === stored) ? stored : DEFAULT_MODEL
   })
+  const [chatGPTModels, setChatGPTModels] = useState<string[] | null>(null)
+  const [loadingChatGPTModels, setLoadingChatGPTModels] = useState(false)
+  const [chatGPTModelsError, setChatGPTModelsError] = useState<'disconnected' | 'failed' | null>(null)
   const modelRef = useRef(model)
   modelRef.current = model
   const imageInputsEnabled = modelSupportsImageInput(model)
   const changeModel = (next: string) => {
     setModel(next)
     if (typeof localStorage !== 'undefined') localStorage.setItem('loora:model', next)
+  }
+  const loadChatGPTModels = async () => {
+    if (loadingChatGPTModels) return
+    setLoadingChatGPTModels(true)
+    setChatGPTModelsError(null)
+    try {
+      const provider = createChatGPTProxyProvider()
+      setChatGPTModels(await provider.listModels())
+    } catch (error) {
+      setChatGPTModels([])
+      setChatGPTModelsError(
+        error instanceof ChatGPTProxyError && error.status === 401 ? 'disconnected' : 'failed',
+      )
+    } finally {
+      setLoadingChatGPTModels(false)
+    }
   }
   const [chatReady, setChatReady] = useState(false)
   // Elements created from a still-streaming createElement call: toolCallId →
@@ -312,7 +335,7 @@ export function AgentPanel({
                 respond({ unavailable: true })
                 break
               }
-              void snapshotCanvas(shapesRef.current)
+              void snapshotCanvas(shapesRef.current, { freshness: 'fresh' })
                 .then((image) => respond(image ? { image } : { empty: true }))
                 .catch(() => fail('Could not capture the canvas.'))
               break
@@ -328,6 +351,8 @@ export function AgentPanel({
         }
       },
     })
+  const addToolOutputRef = useRef(addToolOutput)
+  addToolOutputRef.current = addToolOutput
 
   retryResponse.current = () => {
     setStallError(null)
@@ -551,15 +576,15 @@ export function AgentPanel({
     setActiveChatId(created.id)
   }
 
-  const answerQuestion = (toolCallId: string, answer: string) => {
-    addToolOutput({
+  const answerQuestion = useCallback((toolCallId: string, answer: string) => {
+    addToolOutputRef.current({
       tool: 'askQuestion',
       toolCallId,
       output: { answer },
     } as Parameters<typeof addToolOutput>[0])
-  }
+  }, [])
 
-  const resolveDelete = (toolCallId: string, allow: boolean, id: string) => {
+  const resolveDelete = useCallback((toolCallId: string, allow: boolean, id: string) => {
     let output: unknown
     const target = shapesRef.current.find((s) => s.id === id)
     if (!allow) {
@@ -568,12 +593,12 @@ export function AgentPanel({
       const ok = actions.deleteElement(id)
       output = ok ? { deleted: true, id, name: target?.name } : { error: 'No such element' }
     }
-    addToolOutput({
+    addToolOutputRef.current({
       tool: 'deleteElement',
       toolCallId,
       output,
     } as Parameters<typeof addToolOutput>[0])
-  }
+  }, [actions, shapesRef])
 
   return (
     <Sidebar
@@ -626,31 +651,19 @@ export function AgentPanel({
               description='Try "add a title that says Hello" or "make three blue squares in a row".'
             />
           )}
-          {messages.map((message, mi) => (
-            <Message from={message.role} key={message.id}>
-              <MessageContent>
-                {toBlocks(message.parts).map((block, i, blocks) =>
-                  block.kind === 'text' ? (
-                    <span key={i}>{block.text}</span>
-                  ) : block.kind === 'reasoning' ? (
-                    mi === messages.length - 1 &&
-                    i === blocks.length - 1 &&
-                    (status === 'streaming' || status === 'submitted') ? (
-                      <AgentThinking key={i} label="Reasoning" />
-                    ) : null
-                  ) : block.kind === 'question' ? (
-                    <QuestionCard key={i} part={block.part} onAnswer={answerQuestion} />
-                  ) : (
-                    <ToolGroup
-                      key={i}
-                      parts={block.parts}
-                      shapesRef={shapesRef}
-                      onResolveDelete={resolveDelete}
-                    />
-                  ),
-                )}
-              </MessageContent>
-            </Message>
+          {messages.map((message, index) => (
+            <ChatMessageRow
+              key={message.id}
+              message={message}
+              isLast={index === messages.length - 1}
+              streaming={
+                index === messages.length - 1 &&
+                (status === 'streaming' || status === 'submitted')
+              }
+              shapesRef={shapesRef}
+              onAnswer={answerQuestion}
+              onResolveDelete={resolveDelete}
+            />
           ))}
           {isThinking(status, messages) && (
             <AgentThinking />
@@ -714,7 +727,14 @@ export function AgentPanel({
             className="w-full"
           />
           <PromptInputFooter>
-            <ModelPicker model={model} onModelChange={changeModel} />
+            <ModelPicker
+              model={model}
+              chatGPTModels={chatGPTModels}
+              chatGPTModelsError={chatGPTModelsError}
+              loadingChatGPTModels={loadingChatGPTModels}
+              onLoadChatGPTModels={loadChatGPTModels}
+              onModelChange={changeModel}
+            />
             <PromptInputSubmit
               status={status}
               onStop={() => stop()}
@@ -729,8 +749,7 @@ export function AgentPanel({
       </div>
     </Sidebar>
   )
-}
-
+})
 
 // Non-OK API responses reach useChat as their raw JSON body, e.g. '{"error":"…"}'.
 function readableError(message?: string) {
@@ -750,13 +769,26 @@ function modelLabel(model: string) {
 
 function ModelPicker({
   model,
+  chatGPTModels,
+  chatGPTModelsError,
+  loadingChatGPTModels,
+  onLoadChatGPTModels,
   onModelChange,
 }: {
   model: string
+  chatGPTModels: string[] | null
+  chatGPTModelsError: 'disconnected' | 'failed' | null
+  loadingChatGPTModels: boolean
+  onLoadChatGPTModels: () => Promise<void>
   onModelChange: (model: string) => void
 }) {
+  const standardModels = MODELS.filter(({ provider }) => provider !== 'chatgpt')
+  const availableChatGPTModels = MODELS.filter(
+    ({ provider, modelId }) => provider === 'chatgpt' && chatGPTModels?.includes(modelId),
+  )
+
   return (
-    <DropdownMenu>
+    <DropdownMenu onOpenChange={(open) => open && void onLoadChatGPTModels()}>
       <DropdownMenuTrigger asChild>
         <button
           type="button"
@@ -768,13 +800,32 @@ function ModelPicker({
       </DropdownMenuTrigger>
       <DropdownMenuContent align="start" className="w-48">
         <DropdownMenuLabel className="text-xs text-muted-foreground">Model</DropdownMenuLabel>
-        {MODELS.map(({ id, label, provider }) => (
+        {standardModels.map(({ id, label, provider }) => (
           <DropdownMenuItem key={id} onSelect={() => onModelChange(id)}>
             <span className="min-w-0 flex-1 truncate">{label}</span>
             <span className="text-xs text-muted-foreground">{PROVIDERS[provider].label}</span>
             {model === id && <CheckIcon className="text-foreground" />}
           </DropdownMenuItem>
         ))}
+        <DropdownMenuSeparator />
+        {availableChatGPTModels.map(({ id, label, provider }) => (
+          <DropdownMenuItem key={id} onSelect={() => onModelChange(id)}>
+            <span className="min-w-0 flex-1 truncate">{label}</span>
+            <span className="text-xs text-muted-foreground">{PROVIDERS[provider].label}</span>
+            {model === id && <CheckIcon className="text-foreground" />}
+          </DropdownMenuItem>
+        ))}
+        {availableChatGPTModels.length === 0 ? (
+          <DropdownMenuItem disabled>
+            {loadingChatGPTModels || chatGPTModels === null
+              ? 'Checking ChatGPT…'
+              : chatGPTModelsError === 'disconnected'
+                ? 'Reconnect ChatGPT in Settings'
+                : chatGPTModelsError === 'failed'
+                  ? 'Could not load ChatGPT models'
+                  : 'GPT-5.6 Sol unavailable on this account'}
+          </DropdownMenuItem>
+        ) : null}
       </DropdownMenuContent>
     </DropdownMenu>
   )
@@ -875,6 +926,51 @@ function toBlocks(parts: { type: string }[]): Block[] {
   }
   return blocks
 }
+
+export const ChatMessageRow = memo(function ChatMessageRow({
+  message,
+  isLast,
+  streaming,
+  shapesRef,
+  onAnswer,
+  onResolveDelete,
+  onRenderMeasure,
+}: {
+  message: UIMessage
+  isLast: boolean
+  streaming: boolean
+  shapesRef: React.RefObject<CanvasElement[]>
+  onAnswer: (toolCallId: string, answer: string) => void
+  onResolveDelete: (toolCallId: string, allow: boolean, id: string) => void
+  onRenderMeasure?: () => void
+}) {
+  onRenderMeasure?.()
+  const blocks = useMemo(() => toBlocks(message.parts), [message.parts])
+  return (
+    <Message from={message.role}>
+      <MessageContent>
+        {blocks.map((block, index) =>
+          block.kind === 'text' ? (
+            <span key={index}>{block.text}</span>
+          ) : block.kind === 'reasoning' ? (
+            isLast && index === blocks.length - 1 && streaming ? (
+              <AgentThinking key={index} label="Reasoning" />
+            ) : null
+          ) : block.kind === 'question' ? (
+            <QuestionCard key={index} part={block.part} onAnswer={onAnswer} />
+          ) : (
+            <ToolGroup
+              key={index}
+              parts={block.parts}
+              shapesRef={shapesRef}
+              onResolveDelete={onResolveDelete}
+            />
+          ),
+        )}
+      </MessageContent>
+    </Message>
+  )
+})
 
 function QuestionCard({
   part,

@@ -1,10 +1,21 @@
 import type { CanvasElement } from './canvas'
-import { captureElement } from '#/components/element-frame'
+import {
+  captureElement,
+  getElementCaptureRevision,
+  type ElementCapture,
+} from '#/components/element-frame'
+import { CaptureCache, shouldReuseCapture } from './snapshot-cache'
 
 // Cache the latest successful capture per element, keyed by its code and
 // size, so snapshots reuse PNGs for unchanged elements and have a fallback
 // while an iframe is booting.
-const captureCache = new Map<string, { key: string; png: string }>()
+interface CaptureCacheEntry extends ElementCapture {
+  key: string
+  image: HTMLImageElement
+}
+
+const MAX_CAPTURE_CACHE = 256
+const captureCache = new CaptureCache<CaptureCacheEntry>(MAX_CAPTURE_CACHE)
 
 function cacheKey(el: CanvasElement) {
   // djb2 over the code keeps the key short without hashing dependencies.
@@ -13,15 +24,28 @@ function cacheKey(el: CanvasElement) {
   return `${hash}:${el.w}:${el.h}`
 }
 
-async function elementShot(el: CanvasElement): Promise<string | null> {
+async function elementShot(
+  el: CanvasElement,
+  freshness: 'reuse-clean' | 'fresh',
+): Promise<HTMLImageElement | null> {
   const key = cacheKey(el)
-  const png = await captureElement(el.id)
-  if (png) {
-    captureCache.set(el.id, { key, png })
-    return png
-  }
   const cached = captureCache.get(el.id)
-  return cached?.key === key ? cached.png : null
+  if (cached && shouldReuseCapture(cached, key, getElementCaptureRevision(el.id), freshness)) {
+    return cached.image
+  }
+
+  const capture = await captureElement(el.id)
+  if (capture) {
+    const image = await loadImage(capture.png)
+    if (image) {
+      captureCache.set(el.id, { key, image, ...capture })
+      return image
+    }
+  }
+
+  // A failed fresh capture may still use the latest image for the same code
+  // and size, but never a capture belonging to different element contents.
+  return cached?.key === key ? cached.image : null
 }
 
 function loadImage(src: string): Promise<HTMLImageElement | null> {
@@ -37,7 +61,10 @@ function loadImage(src: string): Promise<HTMLImageElement | null> {
 // (agent snapshots and file export).
 export async function snapshotCanvas(
   elements: CanvasElement[],
-  { pixelRatio = 1 }: { pixelRatio?: number } = {},
+  {
+    pixelRatio = 1,
+    freshness = 'reuse-clean',
+  }: { pixelRatio?: number; freshness?: 'reuse-clean' | 'fresh' } = {},
 ): Promise<string | null> {
   if (elements.length === 0) return null
 
@@ -52,8 +79,8 @@ export async function snapshotCanvas(
 
   const shots = await Promise.all(
     elements.map(async (el) => {
-      const png = await elementShot(el)
-      return { el, img: png ? await loadImage(png) : null }
+      const img = await elementShot(el, freshness)
+      return { el, img }
     }),
   )
 

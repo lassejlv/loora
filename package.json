@@ -18,10 +18,15 @@
     "db:studio": "bun --env-file=.env run drizzle-kit studio"
   },
   "dependencies": {
+    "@ai-sdk/openai": "^4.0.16",
     "@ai-sdk/openai-compatible": "^3.0.12",
     "@ai-sdk/react": "^4.0.34",
     "@base-ui/react": "^1.6.0",
+    "@monaco-editor/react": "^4.7.0",
     "@neondatabase/serverless": "^1.1.0",
+    "@opencoredev/loginwithchatgpt-ai": "^0.2.0",
+    "@opencoredev/loginwithchatgpt-react": "^0.2.0",
+    "@opencoredev/loginwithchatgpt-server": "^0.2.0",
     "@orpc/client": "^1.14.8",
     "@orpc/server": "^1.14.8",
     "@pierre/diffs": "^1.2.12",
@@ -46,6 +51,7 @@
     "cmdk": "^1.1.1",
     "drizzle-orm": "^0.45.2",
     "lucide-react": "^0.577.0",
+    "monaco-editor": "^0.56.0",
     "motion": "^12.42.2",
     "nanoid": "^6.0.0",
     "nitro": "^3.0.260610-beta",

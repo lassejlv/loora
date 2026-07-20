@@ -1,4 +1,4 @@
-import { and, asc, desc, eq } from 'drizzle-orm'
+import { and, asc, desc, eq, lt, or } from 'drizzle-orm'
 import { ORPCError, os } from '@orpc/server'
 import { z } from 'zod'
 import { db } from '#/db'
@@ -9,6 +9,7 @@ import type { UIMessage } from 'ai'
 import { assetKey, s3 } from '#/lib/storage'
 import { createHandoffToken } from '#/lib/handoff-token'
 import { canUseApp, isPreviewAccessRequired } from '#/lib/preview-access'
+import { sortCommitsOldestFirst, toHistoryPage } from '#/lib/history'
 import {
   DAILY_LIMIT_USD,
   WEEKLY_LIMIT_USD,
@@ -87,11 +88,25 @@ async function ensureDesign(designId: string, userId: string) {
 
 const listDesigns = protectedProcedure.handler(async ({ context }) => {
   return db
-    .select({ id: design.id, name: design.name, shapes: design.shapes })
+    .select({ id: design.id, name: design.name, updatedAt: design.updatedAt })
     .from(design)
     .where(eq(design.userId, context.user.id))
     .orderBy(asc(design.createdAt))
+    .then((rows) => rows.map(({ updatedAt, ...row }) => ({ ...row, updatedAt: updatedAt.getTime() })))
 })
+
+const getDesign = protectedProcedure
+  .input(z.object({ id: z.string().min(1).max(128) }))
+  .handler(async ({ context, input }) => {
+    const [found] = await db
+      .select({ id: design.id, name: design.name, shapes: design.shapes, updatedAt: design.updatedAt })
+      .from(design)
+      .where(and(eq(design.id, input.id), eq(design.userId, context.user.id)))
+      .limit(1)
+
+    if (!found) throw new ORPCError('NOT_FOUND')
+    return { ...found, updatedAt: found.updatedAt.getTime() }
+  })
 
 const saveDesign = protectedProcedure
   .input(
@@ -142,23 +157,140 @@ const createDesignHandoff = protectedProcedure
   })
 
 const listVersions = protectedProcedure
-  .input(z.object({ designId: z.string().min(1).max(128) }))
+  .input(
+    z.object({
+      designId: z.string().min(1).max(128),
+      limit: z.number().int().min(1).max(50).default(20),
+      cursor: z
+        .object({
+          at: z.number().int().min(0).max(8_640_000_000_000_000),
+          id: z.string().min(1).max(128),
+        })
+        .optional(),
+    }),
+  )
   .handler(async ({ context, input }) => {
+    const cursorDate = input.cursor ? new Date(input.cursor.at) : null
     const versions = await db
-      .select()
+      .select({
+        id: designVersion.id,
+        message: designVersion.message,
+        added: designVersion.added,
+        removed: designVersion.removed,
+        changed: designVersion.changed,
+        createdAt: designVersion.createdAt,
+      })
       .from(designVersion)
       .where(
         and(
           eq(designVersion.designId, input.designId),
           eq(designVersion.userId, context.user.id),
+          cursorDate
+            ? or(
+                lt(designVersion.createdAt, cursorDate),
+                and(eq(designVersion.createdAt, cursorDate), lt(designVersion.id, input.cursor!.id)),
+              )
+            : undefined,
         ),
       )
-      .orderBy(desc(designVersion.createdAt))
+      .orderBy(desc(designVersion.createdAt), desc(designVersion.id))
+      .limit(input.limit + 1)
 
-    return versions.map(({ createdAt, userId: _userId, designId: _designId, ...version }) => ({
-      ...version,
-      at: createdAt.getTime(),
-    }))
+    return toHistoryPage(versions, input.limit)
+  })
+
+const compareVersion = protectedProcedure
+  .input(
+    z.object({
+      designId: z.string().min(1).max(128),
+      id: z.string().min(1).max(128),
+    }),
+  )
+  .handler(async ({ context, input }) => {
+    const [current] = await db
+      .select({
+        id: designVersion.id,
+        message: designVersion.message,
+        shapes: designVersion.shapes,
+        createdAt: designVersion.createdAt,
+      })
+      .from(designVersion)
+      .where(
+        and(
+          eq(designVersion.id, input.id),
+          eq(designVersion.designId, input.designId),
+          eq(designVersion.userId, context.user.id),
+        ),
+      )
+      .limit(1)
+
+    if (!current) throw new ORPCError('NOT_FOUND')
+    const [previous] = await db
+      .select({
+        id: designVersion.id,
+        message: designVersion.message,
+        shapes: designVersion.shapes,
+        createdAt: designVersion.createdAt,
+      })
+      .from(designVersion)
+      .where(
+        and(
+          eq(designVersion.designId, input.designId),
+          eq(designVersion.userId, context.user.id),
+          or(
+            lt(designVersion.createdAt, current.createdAt),
+            and(eq(designVersion.createdAt, current.createdAt), lt(designVersion.id, current.id)),
+          ),
+        ),
+      )
+      .orderBy(desc(designVersion.createdAt), desc(designVersion.id))
+      .limit(1)
+
+    const detail = (version: typeof current) => ({
+      id: version.id,
+      message: version.message,
+      shapes: version.shapes,
+      at: version.createdAt.getTime(),
+    })
+    return { current: detail(current), previous: previous ? detail(previous) : null }
+  })
+
+const importVersions = protectedProcedure
+  .input(
+    z.object({
+      designId: z.string().min(1).max(128),
+      commits: z
+        .array(
+          z.object({
+            id: z.string().min(1).max(128),
+            message: z.string().trim().min(1).max(200),
+            at: z.number().int().min(0).max(8_640_000_000_000_000),
+            shapes: z.array(shapeSchema).max(10_000),
+            added: z.number().int().nonnegative(),
+            removed: z.number().int().nonnegative(),
+            changed: z.number().int().nonnegative(),
+          }),
+        )
+        .min(1)
+        .max(50),
+    }),
+  )
+  .handler(async ({ context, input }) => {
+    await ensureDesign(input.designId, context.user.id)
+    const queries = sortCommitsOldestFirst(input.commits).map((commit) => {
+      const { at, ...values } = commit
+      return db
+        .insert(designVersion)
+        .values({
+          ...values,
+          designId: input.designId,
+          userId: context.user.id,
+          createdAt: new Date(at),
+        })
+        .onConflictDoNothing({ target: [designVersion.id, designVersion.userId] })
+    })
+    await db.batch(queries as [typeof queries[number], ...typeof queries])
+    return { processed: input.commits.length }
   })
 
 const commitVersion = protectedProcedure
@@ -181,7 +313,7 @@ const commitVersion = protectedProcedure
           eq(designVersion.userId, context.user.id),
         ),
       )
-      .orderBy(desc(designVersion.createdAt))
+      .orderBy(desc(designVersion.createdAt), desc(designVersion.id))
       .limit(1)
 
     if (
@@ -208,7 +340,6 @@ const commitVersion = protectedProcedure
     return {
       id: version.id,
       message: version.message,
-      shapes: version.shapes,
       added: version.added,
       removed: version.removed,
       changed: version.changed,
@@ -472,6 +603,7 @@ export const appRouter = {
   },
   design: {
     list: listDesigns,
+    get: getDesign,
     save: saveDesign,
     delete: deleteDesign,
   },
@@ -480,6 +612,8 @@ export const appRouter = {
   },
   history: {
     list: listVersions,
+    compare: compareVersion,
+    import: importVersions,
     commit: commitVersion,
   },
   chat: {

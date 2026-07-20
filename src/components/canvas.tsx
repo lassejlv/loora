@@ -1,5 +1,5 @@
-import { memo, useEffect, useRef, useState } from 'react'
-import type { CanvasElement } from '#/lib/canvas'
+import { memo, useEffect, useMemo, useRef, useState } from 'react'
+import type { CanvasElement, ElementPatch } from '#/lib/canvas'
 import { elementId } from '#/lib/canvas'
 import { TEMPLATE_DEFAULTS, type InsertTool } from '#/lib/element-templates'
 import { ElementFrame } from '#/components/element-frame'
@@ -50,7 +50,7 @@ interface CanvasProps {
   onSelect: (ids: string[]) => void
   onToolChange: (tool: Tool) => void
   onCreate: (element: CanvasElement) => void
-  onUpdate: (id: string, patch: Partial<CanvasElement>) => void
+  onUpdateMany: (patches: ReadonlyMap<string, ElementPatch>) => void
   // Returns false when the message could not be sent (agent busy) so the
   // comment popover stays open instead of losing the user's text.
   onComment?: (text: string) => boolean | void
@@ -63,6 +63,8 @@ type Drag =
       startX: number
       startY: number
       origins: { id: string; ox: number; oy: number; w: number; h: number }[]
+      movingIds: Set<string>
+      bounds: { left: number; top: number; right: number; bottom: number }
     }
   | { mode: 'draw'; type: InsertTool; startX: number; startY: number; x: number; y: number; w: number; h: number }
   | { mode: 'marquee'; additive: boolean; startX: number; startY: number; x: number; y: number; w: number; h: number }
@@ -111,7 +113,7 @@ export function Canvas({
   onSelect,
   onToolChange,
   onCreate,
-  onUpdate,
+  onUpdateMany,
   onComment,
 }: CanvasProps) {
   const rootRef = useRef<HTMLDivElement>(null)
@@ -131,6 +133,7 @@ export function Canvas({
   const dragRef = useRef<Drag | null>(null)
   dragRef.current = drag
   const activeTool: Tool = spaceHeld ? 'hand' : tool
+  const selectedIdSet = useMemo(() => new Set(selectedIds), [selectedIds])
 
   const toScene = (clientX: number, clientY: number) => {
     const rect = rootRef.current!.getBoundingClientRect()
@@ -223,20 +226,31 @@ export function Canvas({
         // Clicking a grouped element acts on the whole group.
         const gid = elements.find((el) => el.id === id)?.groupId
         const member = gid ? elements.filter((el) => el.groupId === gid).map((el) => el.id) : [id]
+        const memberSet = new Set(member)
         if (e.shiftKey) {
           onSelect(
-            selectedIds.includes(id)
-              ? selectedIds.filter((i) => !member.includes(i))
+            selectedIdSet.has(id)
+              ? selectedIds.filter((i) => !memberSet.has(i))
               : [...new Set([...selectedIds, ...member])],
           )
           return
         }
-        const ids = selectedIds.includes(id) ? selectedIds : member
+        const ids = selectedIdSet.has(id) ? selectedIds : member
         if (ids !== selectedIds) onSelect(ids)
+        const idSet = new Set(ids)
         const origins = elements
-          .filter((el) => ids.includes(el.id))
+          .filter((el) => idSet.has(el.id))
           .map((el) => ({ id: el.id, ox: el.x, oy: el.y, w: el.w, h: el.h }))
-        setDragBoth({ mode: 'move', startX: pt.x, startY: pt.y, origins })
+        const bounds = origins.reduce(
+          (box, origin) => ({
+            left: Math.min(box.left, origin.ox),
+            top: Math.min(box.top, origin.oy),
+            right: Math.max(box.right, origin.ox + origin.w),
+            bottom: Math.max(box.bottom, origin.oy + origin.h),
+          }),
+          { left: Infinity, top: Infinity, right: -Infinity, bottom: -Infinity },
+        )
+        setDragBoth({ mode: 'move', startX: pt.x, startY: pt.y, origins, movingIds: idSet, bounds })
       } else {
         setDragBoth({
           mode: 'marquee',
@@ -258,7 +272,7 @@ export function Canvas({
 
   const startResize = (e: React.PointerEvent, corner: number) => {
     e.stopPropagation()
-    const targets = elements.filter((c) => selectedIds.includes(c.id))
+    const targets = elements.filter((c) => selectedIdSet.has(c.id))
     if (targets.length === 0) return
     const start = {
       x: Math.min(...targets.map((el) => el.x)),
@@ -304,13 +318,12 @@ export function Canvas({
       let dy = pt.y - d.startY
 
       // Snap the selection bounding box to edges/centers of other elements.
-      const movingIds = new Set(d.origins.map((o) => o.id))
-      const left = Math.min(...d.origins.map((o) => o.ox)) + dx
-      const top = Math.min(...d.origins.map((o) => o.oy)) + dy
-      const right = Math.max(...d.origins.map((o) => o.ox + o.w)) + dx
-      const bottom = Math.max(...d.origins.map((o) => o.oy + o.h)) + dy
+      const left = d.bounds.left + dx
+      const top = d.bounds.top + dy
+      const right = d.bounds.right + dx
+      const bottom = d.bounds.bottom + dy
       const threshold = 6 / view.scale
-      const others = elements.filter((el) => !movingIds.has(el.id))
+      const others = elements.filter((el) => !d.movingIds.has(el.id))
 
       let bestX: { corr: number; line: number } | null = null
       let bestY: { corr: number; line: number } | null = null
@@ -336,9 +349,11 @@ export function Canvas({
       if (bestY) dy += bestY.corr
       setGuides({ v: bestX ? [bestX.line] : [], h: bestY ? [bestY.line] : [] })
 
+      const patches = new Map<string, ElementPatch>()
       for (const o of d.origins) {
-        onUpdate(o.id, { x: Math.round(o.ox + dx), y: Math.round(o.oy + dy) })
+        patches.set(o.id, { x: Math.round(o.ox + dx), y: Math.round(o.oy + dy) })
       }
+      onUpdateMany(patches)
     } else if (d.mode === 'draw' || d.mode === 'marquee') {
       const next = {
         ...d,
@@ -369,14 +384,16 @@ export function Canvas({
       // Scale every selected element with the box (Figma group resize).
       const kx = w / Math.max(start.w, 1e-6)
       const ky = h / Math.max(start.h, 1e-6)
+      const patches = new Map<string, ElementPatch>()
       for (const o of d.origins) {
-        onUpdate(o.id, {
+        patches.set(o.id, {
           x: Math.round(x + (o.x - start.x) * kx),
           y: Math.round(y + (o.y - start.y) * ky),
           w: Math.max(1, Math.round(o.w * kx)),
           h: Math.max(1, Math.round(o.h * ky)),
         })
       }
+      onUpdateMany(patches)
     }
   }
 
@@ -403,9 +420,8 @@ export function Canvas({
         .filter((el) => el.x < d.x + d.w && el.x + el.w > d.x && el.y < d.y + d.h && el.y + el.h > d.y)
         .map((el) => el.id)
       // A marquee touching any group member catches the whole group.
-      const groups = new Set(
-        elements.filter((el) => hits.includes(el.id) && el.groupId).map((el) => el.groupId),
-      )
+      const hitSet = new Set(hits)
+      const groups = new Set(elements.filter((el) => hitSet.has(el.id) && el.groupId).map((el) => el.groupId))
       const expanded = [
         ...new Set([
           ...hits,
@@ -574,7 +590,7 @@ export function Canvas({
     right: ((rootRect?.width ?? 2000) - view.x) / view.scale,
     bottom: ((rootRect?.height ?? 2000) - view.y) / view.scale,
   }
-  const selectedElements = elements.filter((el) => selectedIds.includes(el.id))
+  const selectedElements = elements.filter((el) => selectedIdSet.has(el.id))
   const selBounds =
     selectedElements.length > 0
       ? {

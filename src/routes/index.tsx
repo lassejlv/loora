@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { AnimatePresence, motion, useReducedMotion } from 'motion/react'
 import { createFileRoute } from '@tanstack/react-router'
 import {
@@ -41,6 +41,7 @@ import { Canvas, type CanvasControls, type Tool } from '#/components/canvas'
 import {
   deleteDocStorage,
   docId,
+  hasStoredElements,
   loadDocs,
   loadElements,
   saveDocs,
@@ -59,11 +60,19 @@ import { LayersPanel } from '#/components/layers-panel'
 import { AssetsPanel, type AssetMeta } from '#/components/assets-panel'
 import { SettingsPanel } from '#/components/settings-panel'
 import { HistoryPopover } from '#/components/history-panel'
+import { CodeEditorPanel } from '#/components/code-editor-panel'
 import { deleteHistory } from '#/lib/history'
 import { snapshotCanvas } from '#/lib/snapshot'
 import { AgentPanel } from '#/components/agent-panel'
 import { ExportDialog } from '#/components/export-dialog'
-import { elementId, type CanvasElement, type ElementActions } from '#/lib/canvas'
+import {
+  applyElementPatches,
+  elementId,
+  reorderElements,
+  type CanvasElement,
+  type ElementActions,
+  type ElementPatch,
+} from '#/lib/canvas'
 import { alignElements, distributeElements, type AlignEdge } from '#/lib/align'
 import { imageTemplate } from '#/lib/element-templates'
 import { Button } from '#/components/ui/button'
@@ -209,44 +218,6 @@ function DocSwitcher({
   )
 }
 
-// Direct code access for the selected element — the manual escape hatch when
-// the agent isn't the right tool for a tweak.
-function CodeEditorPanel({
-  element,
-  onApply,
-}: {
-  element: CanvasElement
-  onApply: (code: string) => void
-}) {
-  const [draft, setDraft] = useState(element.code)
-  const dirty = draft !== element.code
-  return (
-    <div className="flex h-full min-h-0 flex-col gap-2 p-3">
-      <div className="flex items-center justify-between gap-2">
-        <span className="min-w-0 truncate font-mono text-xs text-muted-foreground">
-          {element.name} · {element.w}×{element.h}
-        </span>
-        <Button size="sm" disabled={!dirty} onClick={() => onApply(draft)}>
-          Apply
-        </Button>
-      </div>
-      <textarea
-        value={draft}
-        onChange={(e) => setDraft(e.target.value)}
-        spellCheck={false}
-        className="min-h-0 flex-1 resize-none rounded-md border bg-background p-3 font-mono text-xs leading-relaxed outline-none focus-visible:ring-2 focus-visible:ring-ring"
-        onKeyDown={(e) => {
-          e.stopPropagation()
-          if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') onApply(draft)
-        }}
-      />
-      <p className="text-[11px] text-muted-foreground">
-        HTML/CSS/JS or JSX defining function App — Tailwind and React are available. ⌘⏎ applies.
-      </p>
-    </div>
-  )
-}
-
 const TOOLS: { tool: Tool; icon: typeof SquareIcon; key: string; label: string }[] = [
   { tool: 'select', icon: MousePointer2Icon, key: 'v', label: 'Select' },
   { tool: 'interact', icon: MousePointerClickIcon, key: 'i', label: 'Interact' },
@@ -274,6 +245,11 @@ function Editor({ preview = false, userId }: { preview?: boolean; userId?: strin
   const [selectedIds, setSelectedIds] = useState<string[]>([])
   const [tool, setTool] = useState<Tool>('select')
   const [databaseReady, setDatabaseReady] = useState(false)
+  const [loadedDocId, setLoadedDocId] = useState<string | null>(() =>
+    preview || (!cacheOwnedByAnotherUser && hasStoredElements(activeId)) ? activeId : null,
+  )
+  const [docLoading, setDocLoading] = useState(false)
+  const [docLoadError, setDocLoadError] = useState<string | null>(null)
   const [layersOpen, setLayersOpen] = useState(() =>
     preview ? false : localStorage.getItem('loora:layers') === '1',
   )
@@ -297,10 +273,45 @@ function Editor({ preview = false, userId }: { preview?: boolean; userId?: strin
   shapesRef.current = shapes
   const selectedIdsRef = useRef(selectedIds)
   selectedIdsRef.current = selectedIds
+  const activeIdRef = useRef(activeId)
+  activeIdRef.current = activeId
+  const documentRequest = useRef(0)
+  const documentMutationVersions = useRef(new Map<string, number>())
+  const mutationsBlockedRef = useRef(false)
+  mutationsBlockedRef.current = !preview && loadedDocId !== activeId
   const canvasControls = useRef<CanvasControls | null>(null)
   const [zoomPct, setZoomPct] = useState(100)
   // Bridge: canvas comment pins push messages straight into the agent chat.
   const agentSend = useRef<((text: string) => boolean) | null>(null)
+
+  const fetchDocument = useCallback(async (id: string, cached: boolean) => {
+    const request = ++documentRequest.current
+    const mutationVersion = documentMutationVersions.current.get(id) ?? 0
+    setDocLoading(true)
+    setDocLoadError(null)
+    if (!cached) setLoadedDocId(null)
+    try {
+      const remote = await orpc.design.get({ id })
+      const changedWhileLoading = (documentMutationVersions.current.get(id) ?? 0) !== mutationVersion
+      if (!changedWhileLoading) saveElements(id, remote.shapes)
+      if (request !== documentRequest.current || activeIdRef.current !== id) return false
+      if (!changedWhileLoading) setShapes(remote.shapes)
+      setLoadedDocId(id)
+      setDocLoading(false)
+      return true
+    } catch (error) {
+      console.error('[designs] Failed to load design:', error)
+      if (request !== documentRequest.current || activeIdRef.current !== id) return false
+      if (cached) setLoadedDocId(id)
+      setDocLoading(false)
+      setDocLoadError(
+        cached
+          ? 'Could not refresh this document. Your saved local copy is still available.'
+          : 'Could not load this document.',
+      )
+      return false
+    }
+  }, [])
 
   useEffect(() => {
     if (preview) return
@@ -321,15 +332,20 @@ function Editor({ preview = false, userId }: { preview?: boolean; userId?: strin
               }),
             ),
           )
+          if (!hasStoredElements(activeId)) saveElements(activeId, shapesRef.current)
           saveDocs(docs, activeId)
+          setLoadedDocId(activeId)
         } else {
           const remoteDocs = remote.map(({ id, name }) => ({ id, name }))
           const nextActive = remote.some((doc) => doc.id === activeId) ? activeId : remote[0].id
-          for (const doc of remote) saveElements(doc.id, doc.shapes)
+          const cached = hasStoredElements(nextActive)
           saveDocs(remoteDocs, nextActive)
+          activeIdRef.current = nextActive
           setDocState({ docs: remoteDocs, activeId: nextActive })
-          setShapes(remote.find((doc) => doc.id === nextActive)?.shapes ?? [])
+          setShapes(cached ? loadElements(nextActive) : [])
+          setLoadedDocId(cached ? nextActive : null)
           setSelectedIds([])
+          await fetchDocument(nextActive, cached)
         }
 
         if (!cancelled) {
@@ -345,7 +361,7 @@ function Editor({ preview = false, userId }: { preview?: boolean; userId?: strin
     return () => {
       cancelled = true
     }
-  }, [preview, userId])
+  }, [preview, userId, fetchDocument])
 
   // Undo history: mutations within 800ms coalesce into one step
   // (a drag, a typed number, an agent burst each become a single undo).
@@ -355,12 +371,12 @@ function Editor({ preview = false, userId }: { preview?: boolean; userId?: strin
   const [, bumpHistory] = useState(0)
 
   useEffect(() => {
-    if (preview) return
+    if (preview || loadedDocId !== activeId || docLoading) return
     saveElements(activeId, shapes)
-  }, [shapes, activeId, preview])
+  }, [shapes, activeId, preview, loadedDocId, docLoading])
 
   useEffect(() => {
-    if (preview || !databaseReady) return
+    if (preview || !databaseReady || loadedDocId !== activeId || docLoadError) return
     const active = docs.find((doc) => doc.id === activeId)
     if (!active) return
 
@@ -371,7 +387,7 @@ function Editor({ preview = false, userId }: { preview?: boolean; userId?: strin
     }, 1500)
 
     return () => window.clearTimeout(timeout)
-  }, [activeId, databaseReady, docs, preview, shapes])
+  }, [activeId, databaseReady, docs, preview, shapes, loadedDocId, docLoadError])
 
   // Dev-only hook for end-to-end tests to seed and inspect canvas state.
   useEffect(() => {
@@ -391,7 +407,7 @@ function Editor({ preview = false, userId }: { preview?: boolean; userId?: strin
 
   const flushActiveDoc = () => {
     const active = docs.find((doc) => doc.id === activeId)
-    if (databaseReady && active) {
+    if (databaseReady && active && loadedDocId === activeId && !docLoadError) {
       void orpc.design
         .save({
           id: active.id,
@@ -405,13 +421,18 @@ function Editor({ preview = false, userId }: { preview?: boolean; userId?: strin
   const switchDoc = (id: string) => {
     if (id === activeId) return
     flushActiveDoc()
+    activeIdRef.current = id
     setDocState((s) => {
       saveDocs(s.docs, id)
       return { ...s, activeId: id }
     })
-    setShapes(loadElements(id))
+    const cached = hasStoredElements(id)
+    setShapes(cached ? loadElements(id) : [])
+    setLoadedDocId(cached ? id : null)
+    setDocLoadError(null)
     setSelectedIds([])
     resetHistory()
+    if (databaseReady) void fetchDocument(id, cached)
   }
 
   const newDoc = () => {
@@ -420,8 +441,12 @@ function Editor({ preview = false, userId }: { preview?: boolean; userId?: strin
     const next = [...docs, doc]
     saveElements(doc.id, [])
     saveDocs(next, doc.id)
+    activeIdRef.current = doc.id
     setDocState({ docs: next, activeId: doc.id })
     setShapes([])
+    setLoadedDocId(doc.id)
+    setDocLoading(false)
+    setDocLoadError(null)
     setSelectedIds([])
     resetHistory()
   }
@@ -468,14 +493,21 @@ function Editor({ preview = false, userId }: { preview?: boolean; userId?: strin
       saveElements(next[0].id, [])
     }
     saveDocs(next, next[0].id)
-    setDocState({ docs: next, activeId: next[0].id })
-    setShapes(loadElements(next[0].id))
+    const nextId = next[0].id
+    activeIdRef.current = nextId
+    const cached = hasStoredElements(nextId)
+    setDocState({ docs: next, activeId: nextId })
+    setShapes(cached ? loadElements(nextId) : [])
+    setLoadedDocId(cached ? nextId : null)
+    setDocLoadError(null)
     setSelectedIds([])
     resetHistory()
+    if (databaseReady) void fetchDocument(nextId, cached)
   }
 
   const mutate = useCallback((fn: (prev: CanvasElement[]) => CanvasElement[]) => {
     setShapes((prev) => {
+      if (mutationsBlockedRef.current) return prev
       const now = Date.now()
       if (now - lastMutation.current > 800) {
         past.current.push(prev)
@@ -483,11 +515,20 @@ function Editor({ preview = false, userId }: { preview?: boolean; userId?: strin
         future.current = []
       }
       lastMutation.current = now
-      return fn(prev)
+      const next = fn(prev)
+      if (next !== prev) {
+        const id = activeIdRef.current
+        documentMutationVersions.current.set(
+          id,
+          (documentMutationVersions.current.get(id) ?? 0) + 1,
+        )
+      }
+      return next
     })
   }, [])
 
   const undo = useCallback(() => {
+    if (mutationsBlockedRef.current) return
     const prev = past.current.pop()
     if (!prev) return
     future.current.push(shapesRef.current)
@@ -497,6 +538,7 @@ function Editor({ preview = false, userId }: { preview?: boolean; userId?: strin
   }, [])
 
   const redo = useCallback(() => {
+    if (mutationsBlockedRef.current) return
     const next = future.current.pop()
     if (!next) return
     past.current.push(shapesRef.current)
@@ -538,6 +580,11 @@ function Editor({ preview = false, userId }: { preview?: boolean; userId?: strin
     [mutate],
   )
 
+  const updateElements = useCallback(
+    (patches: ReadonlyMap<string, ElementPatch>) => mutate((prev) => applyElementPatches(prev, patches)),
+    [mutate],
+  )
+
   const deleteElement = useCallback(
     (id: string) => {
       const exists = shapesRef.current.some((s) => s.id === id)
@@ -550,7 +597,10 @@ function Editor({ preview = false, userId }: { preview?: boolean; userId?: strin
 
   const deleteSelected = useCallback(() => {
     setSelectedIds((sel) => {
-      if (sel.length > 0) mutate((prev) => prev.filter((s) => !sel.includes(s.id)))
+      if (sel.length > 0) {
+        const selected = new Set(sel)
+        mutate((prev) => prev.filter((s) => !selected.has(s.id)))
+      }
       return []
     })
   }, [mutate])
@@ -567,7 +617,8 @@ function Editor({ preview = false, userId }: { preview?: boolean; userId?: strin
   }
 
   const duplicateSelected = useCallback(() => {
-    const targets = shapesRef.current.filter((s) => selectedIds.includes(s.id))
+    const selected = new Set(selectedIds)
+    const targets = shapesRef.current.filter((s) => selected.has(s.id))
     if (targets.length === 0) return
     const copies = remapGroups(targets).map((s) => ({ ...s, id: elementId(), x: s.x + 16, y: s.y + 16 }))
     mutate((prev) => [...prev, ...copies])
@@ -578,7 +629,8 @@ function Editor({ preview = false, userId }: { preview?: boolean; userId?: strin
   const clipboard = useRef<{ elements: CanvasElement[]; pastes: number }>({ elements: [], pastes: 0 })
 
   const copySelected = useCallback(() => {
-    const targets = shapesRef.current.filter((s) => selectedIds.includes(s.id))
+    const selected = new Set(selectedIds)
+    const targets = shapesRef.current.filter((s) => selected.has(s.id))
     if (targets.length > 0) clipboard.current = { elements: targets, pastes: 0 }
   }, [selectedIds])
 
@@ -596,13 +648,15 @@ function Editor({ preview = false, userId }: { preview?: boolean; userId?: strin
   const groupSelected = useCallback(() => {
     const sel = selectedIdsRef.current
     if (sel.length < 2) return
+    const selected = new Set(sel)
     const gid = `g${elementId()}`
-    mutate((prev) => prev.map((s) => (sel.includes(s.id) ? { ...s, groupId: gid } : s)))
+    mutate((prev) => prev.map((s) => (selected.has(s.id) ? { ...s, groupId: gid } : s)))
   }, [mutate])
 
   const ungroupSelected = useCallback(() => {
     const sel = selectedIdsRef.current
-    mutate((prev) => prev.map((s) => (sel.includes(s.id) ? { ...s, groupId: undefined } : s)))
+    const selected = new Set(sel)
+    mutate((prev) => prev.map((s) => (selected.has(s.id) ? { ...s, groupId: undefined } : s)))
   }, [mutate])
 
   const align = useCallback(
@@ -615,7 +669,10 @@ function Editor({ preview = false, userId }: { preview?: boolean; userId?: strin
     [mutate],
   )
 
-  const actions: ElementActions = { createElement, createElements, updateElement, deleteElement }
+  const actions = useMemo<ElementActions>(
+    () => ({ createElement, createElements, updateElement, deleteElement }),
+    [createElement, createElements, updateElement, deleteElement],
+  )
 
   const reorder = useCallback(
     (dir: 'forward' | 'backward' | 'front' | 'back') => {
@@ -728,21 +785,21 @@ function Editor({ preview = false, userId }: { preview?: boolean; userId?: strin
         setSelectedIds([])
         setTool('select')
       }
-      if (e.key.startsWith('Arrow') && selectedIds.length > 0) {
+      if (!mutationsBlockedRef.current && e.key.startsWith('Arrow') && selectedIds.length > 0) {
         e.preventDefault()
         const step = e.shiftKey ? 10 : 1
         const dx = e.key === 'ArrowLeft' ? -step : e.key === 'ArrowRight' ? step : 0
         const dy = e.key === 'ArrowUp' ? -step : e.key === 'ArrowDown' ? step : 0
-        mutate((prev) =>
-          prev.map((s) => (selectedIds.includes(s.id) ? { ...s, x: s.x + dx, y: s.y + dy } : s)),
-        )
+        const selected = new Set(selectedIds)
+        mutate((prev) => prev.map((s) => (selected.has(s.id) ? { ...s, x: s.x + dx, y: s.y + dy } : s)))
       }
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
   }, [deleteSelected, duplicateSelected, undo, redo, reorder, copySelected, paste, selectedIds, mutate, preview, groupSelected, ungroupSelected])
 
-  const selectedShapes = shapes.filter((s) => selectedIds.includes(s.id))
+  const selectedIdSet = new Set(selectedIds)
+  const selectedShapes = shapes.filter((s) => selectedIdSet.has(s.id))
   const selected = selectedShapes[0]
   const reduceMotion = useReducedMotion()
   const barMotion = fadeUp(reduceMotion)
@@ -761,7 +818,7 @@ function Editor({ preview = false, userId }: { preview?: boolean; userId?: strin
         shapesRef={shapesRef}
         selectedIdsRef={selectedIdsRef}
         docId={activeId}
-        ready={databaseReady}
+        ready={databaseReady && loadedDocId === activeId && !docLoadError}
         sendRef={agentSend}
       />
 
@@ -776,12 +833,45 @@ function Editor({ preview = false, userId }: { preview?: boolean; userId?: strin
           onSelect={setSelectedIds}
           onToolChange={setTool}
           onCreate={(s) => mutate((prev) => [...prev, s])}
-          onUpdate={updateElement}
+          onUpdateMany={updateElements}
           onComment={(text) => {
             toggleAgent(true)
             return agentSend.current?.(text) ?? false
           }}
         />
+
+        {loadedDocId !== activeId && (
+          <div className="absolute inset-0 z-20 grid place-items-center bg-cx-canvas/80 backdrop-blur-[1px]">
+            <div className="flex max-w-sm flex-col items-center gap-3 rounded-xl border bg-card px-5 py-4 text-center shadow-sm">
+              <p className="text-sm text-muted-foreground">
+                {docLoading ? 'Loading document…' : 'Document is not ready.'}
+              </p>
+              {!docLoading && (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => void fetchDocument(activeId, hasStoredElements(activeId))}
+                >
+                  Retry
+                </Button>
+              )}
+            </div>
+          </div>
+        )}
+        {!docLoading && loadedDocId === activeId && docLoadError && (
+          <div className="absolute inset-x-0 bottom-4 z-20 flex justify-center px-4">
+            <div className="flex items-center gap-3 rounded-lg border bg-card px-3 py-2 text-xs text-muted-foreground shadow-sm">
+              <span>{docLoadError}</span>
+              <Button
+                size="xs"
+                variant="outline"
+                onClick={() => void fetchDocument(activeId, hasStoredElements(activeId))}
+              >
+                Retry
+              </Button>
+            </div>
+          </div>
+        )}
 
         <div className="absolute top-4 right-4 flex items-center gap-1">
           <Drawer open={layersOpen} onOpenChange={toggleLayers} position="bottom">
@@ -794,11 +884,7 @@ function Editor({ preview = false, userId }: { preview?: boolean; userId?: strin
                 elements={shapes}
                 selectedIds={selectedIds}
                 onSelect={setSelectedIds}
-                onReorderList={(orderedIds) =>
-                  mutate((prev) =>
-                    [...prev].sort((a, b) => orderedIds.indexOf(a.id) - orderedIds.indexOf(b.id)),
-                  )
-                }
+                onReorderList={(orderedIds) => mutate((prev) => reorderElements(prev, orderedIds))}
                 onRename={(id, name) => updateElement(id, { name })}
               />
             </DrawerPopup>

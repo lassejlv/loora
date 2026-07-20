@@ -92,6 +92,13 @@
       "when": 1784508011898,
       "tag": "0012_tranquil_namora",
       "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1784555996439,
+      "tag": "0013_chatgpt_sessions",
+      "breakpoints": true
     }
   ]
 }

@@ -246,6 +246,13 @@ describe('buildElementDoc', () => {
     expect(doc).toContain('htmlToImage.toPng')
   })
 
+  it('tracks runtime changes and marks animated captures as volatile', () => {
+    expect(doc).toContain("type: 'loora:dirty'")
+    expect(doc).toContain('new MutationObserver(__markDirty)')
+    expect(doc).toContain('document.getAnimations()')
+    expect(doc).toContain('volatile: volatile')
+  })
+
   it('has a transparent background so text and unstyled elements sit on the canvas', () => {
     expect(doc).toContain('background:transparent')
   })

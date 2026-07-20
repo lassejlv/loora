@@ -13,6 +13,7 @@ import { Route as IndexRouteImport } from './routes/index'
 import { Route as ApiChatRouteImport } from './routes/api.chat'
 import { Route as ApiAssetIdRouteImport } from './routes/api.asset.$id'
 import { Route as ApiAuthSplatRouteImport } from './routes/api.auth.$'
+import { Route as ApiChatgptSplatRouteImport } from './routes/api.chatgpt.$'
 import { Route as ApiHandoffTokenRouteImport } from './routes/api.handoff.$token'
 import { Route as ApiRpcSplatRouteImport } from './routes/api.rpc.$'
 import { Route as ApiHandoffTokenAssetIdRouteImport } from './routes/api.handoff.$token.asset.$id'
@@ -37,6 +38,11 @@ const ApiAuthSplatRoute = ApiAuthSplatRouteImport.update({
   path: '/api/auth/$',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiChatgptSplatRoute = ApiChatgptSplatRouteImport.update({
+  id: '/api/chatgpt/$',
+  path: '/api/chatgpt/$',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ApiHandoffTokenRoute = ApiHandoffTokenRouteImport.update({
   id: '/api/handoff/$token',
   path: '/api/handoff/$token',
@@ -58,6 +64,7 @@ export interface FileRoutesByFullPath {
   '/api/chat': typeof ApiChatRoute
   '/api/asset/$id': typeof ApiAssetIdRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
+  '/api/chatgpt/$': typeof ApiChatgptSplatRoute
   '/api/handoff/$token': typeof ApiHandoffTokenRouteWithChildren
   '/api/rpc/$': typeof ApiRpcSplatRoute
   '/api/handoff/$token/asset/$id': typeof ApiHandoffTokenAssetIdRoute
@@ -67,6 +74,7 @@ export interface FileRoutesByTo {
   '/api/chat': typeof ApiChatRoute
   '/api/asset/$id': typeof ApiAssetIdRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
+  '/api/chatgpt/$': typeof ApiChatgptSplatRoute
   '/api/handoff/$token': typeof ApiHandoffTokenRouteWithChildren
   '/api/rpc/$': typeof ApiRpcSplatRoute
   '/api/handoff/$token/asset/$id': typeof ApiHandoffTokenAssetIdRoute
@@ -77,6 +85,7 @@ export interface FileRoutesById {
   '/api/chat': typeof ApiChatRoute
   '/api/asset/$id': typeof ApiAssetIdRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
+  '/api/chatgpt/$': typeof ApiChatgptSplatRoute
   '/api/handoff/$token': typeof ApiHandoffTokenRouteWithChildren
   '/api/rpc/$': typeof ApiRpcSplatRoute
   '/api/handoff/$token/asset/$id': typeof ApiHandoffTokenAssetIdRoute
@@ -88,6 +97,7 @@ export interface FileRouteTypes {
     | '/api/chat'
     | '/api/asset/$id'
     | '/api/auth/$'
+    | '/api/chatgpt/$'
     | '/api/handoff/$token'
     | '/api/rpc/$'
     | '/api/handoff/$token/asset/$id'
@@ -97,6 +107,7 @@ export interface FileRouteTypes {
     | '/api/chat'
     | '/api/asset/$id'
     | '/api/auth/$'
+    | '/api/chatgpt/$'
     | '/api/handoff/$token'
     | '/api/rpc/$'
     | '/api/handoff/$token/asset/$id'
@@ -106,6 +117,7 @@ export interface FileRouteTypes {
     | '/api/chat'
     | '/api/asset/$id'
     | '/api/auth/$'
+    | '/api/chatgpt/$'
     | '/api/handoff/$token'
     | '/api/rpc/$'
     | '/api/handoff/$token/asset/$id'
@@ -116,6 +128,7 @@ export interface RootRouteChildren {
   ApiChatRoute: typeof ApiChatRoute
   ApiAssetIdRoute: typeof ApiAssetIdRoute
   ApiAuthSplatRoute: typeof ApiAuthSplatRoute
+  ApiChatgptSplatRoute: typeof ApiChatgptSplatRoute
   ApiHandoffTokenRoute: typeof ApiHandoffTokenRouteWithChildren
   ApiRpcSplatRoute: typeof ApiRpcSplatRoute
 }
@@ -148,6 +161,13 @@ declare module '@tanstack/react-router' {
       path: '/api/auth/$'
       fullPath: '/api/auth/$'
       preLoaderRoute: typeof ApiAuthSplatRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/chatgpt/$': {
+      id: '/api/chatgpt/$'
+      path: '/api/chatgpt/$'
+      fullPath: '/api/chatgpt/$'
+      preLoaderRoute: typeof ApiChatgptSplatRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/api/handoff/$token': {
@@ -191,6 +211,7 @@ const rootRouteChildren: RootRouteChildren = {
   ApiChatRoute: ApiChatRoute,
   ApiAssetIdRoute: ApiAssetIdRoute,
   ApiAuthSplatRoute: ApiAuthSplatRoute,
+  ApiChatgptSplatRoute: ApiChatgptSplatRoute,
   ApiHandoffTokenRoute: ApiHandoffTokenRouteWithChildren,
   ApiRpcSplatRoute: ApiRpcSplatRoute,
 }

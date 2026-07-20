@@ -1,18 +1,29 @@
-export interface ProviderDefinition {
-  label: string
-  baseURL: string
-  apiKeyEnv: string
-  includeUsage?: boolean
-  headers?: Record<string, string>
-}
+export type ProviderDefinition =
+  | {
+      kind: 'openai-compatible'
+      label: string
+      baseURL: string
+      apiKeyEnv: string
+      includeUsage?: boolean
+      headers?: Record<string, string>
+    }
+  | {
+      kind: 'chatgpt'
+      label: string
+    }
 
 // Add any OpenAI-compatible provider here. API keys are read from the named
 // environment variable on the server and are never included in this config.
 export const PROVIDERS = {
   wafer: {
+    kind: 'openai-compatible',
     label: 'Wafer',
     baseURL: 'https://pass.wafer.ai/v1',
     apiKeyEnv: 'WAFER_API_KEY',
+  },
+  chatgpt: {
+    kind: 'chatgpt',
+    label: 'ChatGPT',
   },
 } as const satisfies Record<string, ProviderDefinition>
 
@@ -56,6 +67,15 @@ export const MODELS = [
     modelId: 'glm5.2-fast',
     supportsImageInput: false,
     price: { input: 4, output: 12 },
+  },
+  {
+    id: 'gpt-5.6-sol',
+    label: 'GPT-5.6 Sol',
+    provider: 'chatgpt',
+    modelId: 'gpt-5.6-sol',
+    supportsImageInput: true,
+    // Requests use the signed-in user's ChatGPT plan, not Loora's provider bill.
+    price: { input: 0, output: 0 },
   },
 ] as const satisfies readonly ModelDefinition[]
 

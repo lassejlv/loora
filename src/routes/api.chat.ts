@@ -1,6 +1,7 @@
 import '@tanstack/react-start'
 import { createFileRoute } from '@tanstack/react-router'
 import { createOpenAICompatible } from '@ai-sdk/openai-compatible'
+import { createChatGPTProxyProvider } from '@opencoredev/loginwithchatgpt-ai'
 import { convertToModelMessages, stepCountIs, streamText, type UIMessage } from 'ai'
 import { z } from 'zod'
 import type { CanvasElement } from '#/lib/canvas'
@@ -16,6 +17,24 @@ import { DESIGN_SKILL_PROMPT } from '#/skills/design-skills'
 import { desc, eq } from 'drizzle-orm'
 import { db } from '#/db'
 import { asset } from '#/db/schema'
+import { chatgptAuth } from '#/lib/chatgpt-auth'
+
+type BunRuntimeRequest = Request & {
+  runtime?: {
+    bun?: {
+      server?: {
+        timeout(request: Request, seconds: number): void
+      }
+    }
+  }
+}
+
+function allowLongRunningChatRequest(request: Request) {
+  // Bun.serve defaults to 10 seconds of inactivity. A reasoning model can
+  // legitimately take longer before emitting its first stream chunk.
+  const bunServer = (request as BunRuntimeRequest).runtime?.bun?.server
+  bunServer?.timeout(request, 0)
+}
 
 const elementFields = {
   name: z.string().max(200).describe('short layer label shown to the user, e.g. "Hero section"'),
@@ -137,6 +156,8 @@ export const Route = createFileRoute('/api/chat')({
   server: {
     handlers: {
       POST: async ({ request }) => {
+        allowLongRunningChatRequest(request)
+
         const session = await requireSession(request)
         if (!session) {
           return Response.json({ error: 'Unauthorized' }, { status: 401 })
@@ -155,29 +176,55 @@ export const Route = createFileRoute('/api/chat')({
 
         const modelConfig = getModel(modelKey ?? '')
         const providerConfig = getProvider(modelConfig.provider)
-        const apiKey = process.env[providerConfig.apiKeyEnv]
-        if (!apiKey) {
-          return Response.json(
-            {
-              error: `${providerConfig.label} is not configured. Set ${providerConfig.apiKeyEnv} on the server.`,
-            },
-            { status: 503 },
-          )
-        }
-        const provider = createOpenAICompatible({
-          name: modelConfig.provider,
-          baseURL: providerConfig.baseURL,
-          apiKey,
-          headers: providerConfig.headers,
-          includeUsage: providerConfig.includeUsage,
-        })
         const key = modelConfig.id
-        const model = provider(modelConfig.modelId)
+        const usingChatGPT = providerConfig.kind === 'chatgpt'
+        let model
+
+        if (usingChatGPT) {
+          const availableModels = await chatgptAuth.getModels(request)
+          if (!availableModels) {
+            return Response.json(
+              { error: 'Connect ChatGPT in Settings before using this model.' },
+              { status: 401 },
+            )
+          }
+          if (!availableModels.includes(modelConfig.modelId)) {
+            return Response.json(
+              { error: `${modelConfig.label} is not available on this ChatGPT account.` },
+              { status: 403 },
+            )
+          }
+          const provider = createChatGPTProxyProvider({
+            fetch: chatgptAuth.proxyFetch(request),
+            defaultModel: modelConfig.modelId,
+          })
+          model = provider(modelConfig.modelId)
+        } else {
+          const apiKey = process.env[providerConfig.apiKeyEnv]
+          if (!apiKey) {
+            return Response.json(
+              {
+                error: `${providerConfig.label} is not configured. Set ${providerConfig.apiKeyEnv} on the server.`,
+              },
+              { status: 503 },
+            )
+          }
+          const provider = createOpenAICompatible({
+            name: modelConfig.provider,
+            baseURL: providerConfig.baseURL,
+            apiKey,
+            headers: providerConfig.headers,
+            includeUsage: providerConfig.includeUsage,
+          })
+          model = provider(modelConfig.modelId)
+        }
         const imageInputsEnabled = modelSupportsImageInput(key)
 
-        const limitError = await checkLimits(session.user.id)
-        if (limitError) {
-          return Response.json({ error: limitError }, { status: 429 })
+        if (!usingChatGPT) {
+          const limitError = await checkLimits(session.user.id)
+          if (limitError) {
+            return Response.json({ error: limitError }, { status: 429 })
+          }
         }
 
         let assets: { id: string; name: string; mediaType: string }[] = []
@@ -318,6 +365,7 @@ export const Route = createFileRoute('/api/chat')({
           abortSignal: AbortSignal.timeout(300_000),
           onError: ({ error }) => console.error('[chat] stream error:', error),
           onFinish: async ({ totalUsage }) => {
+            if (usingChatGPT) return
             try {
               await recordUsage(
                 session.user.id,

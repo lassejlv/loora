@@ -8,7 +8,8 @@ export function alignElements(
   ids: string[],
   edge: AlignEdge,
 ): CanvasElement[] {
-  const targets = elements.filter((el) => ids.includes(el.id))
+  const selected = new Set(ids)
+  const targets = elements.filter((el) => selected.has(el.id))
   if (targets.length < 2) return elements
   const left = Math.min(...targets.map((el) => el.x))
   const right = Math.max(...targets.map((el) => el.x + el.w))
@@ -18,7 +19,7 @@ export function alignElements(
   const cy = (top + bottom) / 2
 
   return elements.map((el) => {
-    if (!ids.includes(el.id)) return el
+    if (!selected.has(el.id)) return el
     switch (edge) {
       case 'left':
         return { ...el, x: Math.round(left) }
@@ -43,7 +44,8 @@ export function distributeElements(
   ids: string[],
   axis: 'x' | 'y',
 ): CanvasElement[] {
-  const targets = elements.filter((el) => ids.includes(el.id))
+  const selected = new Set(ids)
+  const targets = elements.filter((el) => selected.has(el.id))
   if (targets.length < 3) return elements
 
   const pos = (el: CanvasElement) => (axis === 'x' ? el.x : el.y)

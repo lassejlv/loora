@@ -42,6 +42,10 @@ export function loadElements(id: string): CanvasElement[] {
   return onlyCodeElements(readJson<unknown>(docKey(id), []))
 }
 
+export function hasStoredElements(id: string) {
+  return localStorage.getItem(docKey(id)) !== null
+}
+
 export function saveElements(id: string, elements: CanvasElement[]) {
   localStorage.setItem(docKey(id), JSON.stringify(elements))
 }

@@ -11,6 +11,45 @@ export interface Commit {
   changed: number
 }
 
+export type CommitSummary = Omit<Commit, 'shapes'>
+
+export interface StoredHistorySummary {
+  id: string
+  message: string
+  added: number
+  removed: number
+  changed: number
+  createdAt: Date
+}
+
+export function compareHistoryKeys(
+  left: { at: number; id: string },
+  right: { at: number; id: string },
+) {
+  if (left.at !== right.at) return left.at - right.at
+  return left.id < right.id ? -1 : left.id > right.id ? 1 : 0
+}
+
+export function sortCommitsOldestFirst<T extends { at: number; id: string }>(commits: T[]): T[] {
+  return [...commits].sort(compareHistoryKeys)
+}
+
+export function toHistoryPage(rows: StoredHistorySummary[], limit: number) {
+  const items: CommitSummary[] = rows.slice(0, limit).map((row) => ({
+    id: row.id,
+    message: row.message,
+    added: row.added,
+    removed: row.removed,
+    changed: row.changed,
+    at: row.createdAt.getTime(),
+  }))
+  const last = items.at(-1)
+  return {
+    items,
+    nextCursor: rows.length > limit && last ? { at: last.at, id: last.id } : null,
+  }
+}
+
 const key = (docId: string) => `loora:history:${docId}`
 const MAX_COMMITS = 50
 

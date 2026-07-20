@@ -1,5 +1,7 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, mock } from 'bun:test'
+import { Profiler } from 'react'
+import type { UIMessage } from 'ai'
 import { SidebarProvider } from '#/components/ui/sidebar'
 import type { CanvasElement, ElementActions } from '#/lib/canvas'
 
@@ -14,11 +16,10 @@ const orpc = {
 }
 
 mock.module('#/lib/orpc-client', () => ({ orpc }))
-mock.module('#/lib/history', () => ({ commitIfChanged: mock() }))
 const snapshotCanvas = mock().mockResolvedValue('data:image/png;base64,test')
 mock.module('#/lib/snapshot', () => ({ snapshotCanvas }))
 
-const { AgentPanel } = await import('./agent-panel')
+const { AgentPanel, ChatMessageRow } = await import('./agent-panel')
 const originalFetch = globalThis.fetch
 const originalLocalStorage = Object.getOwnPropertyDescriptor(globalThis, 'localStorage')
 
@@ -312,5 +313,65 @@ describe('AgentPanel empty response recovery', () => {
     expect(snapshotCanvas).not.toHaveBeenCalled()
     const requestBody = (chatFetch.mock.calls[0]?.[1] as RequestInit)?.body as string
     expect(requestBody).not.toContain('"type":"file"')
+  })
+
+  it('does not rerender a historical row during streaming or canvas movement', () => {
+    const historical = {
+      id: 'historical',
+      role: 'assistant',
+      parts: [{ type: 'text', text: 'Already finished.' }],
+    } as UIMessage
+    const active = {
+      id: 'active',
+      role: 'assistant',
+      parts: [{ type: 'text', text: 'Working…' }],
+    } as UIMessage
+    const shapesRef = { current: [] as CanvasElement[] }
+    const onAnswer = mock()
+    const onResolveDelete = mock()
+    const historicalRenders = mock()
+    const historicalDurations: number[] = []
+
+    function Transcript({ streaming, dragTick }: { streaming: boolean; dragTick: number }) {
+      return (
+        <div data-drag-tick={dragTick}>
+          <Profiler
+            id="historical-row"
+            onRender={(_id, _phase, actualDuration) => historicalDurations.push(actualDuration)}
+          >
+            <ChatMessageRow
+              message={historical}
+              isLast={false}
+              streaming={false}
+              shapesRef={shapesRef}
+              onAnswer={onAnswer}
+              onResolveDelete={onResolveDelete}
+              onRenderMeasure={historicalRenders}
+            />
+          </Profiler>
+          <ChatMessageRow
+            message={active}
+            isLast
+            streaming={streaming}
+            shapesRef={shapesRef}
+            onAnswer={onAnswer}
+            onResolveDelete={onResolveDelete}
+          />
+        </div>
+      )
+    }
+
+    const view = render(<Transcript streaming={false} dragTick={0} />)
+    const samplesAfterMount = historicalDurations.length
+    expect(historicalRenders).toHaveBeenCalledTimes(1)
+    view.rerender(<Transcript streaming dragTick={0} />)
+    shapesRef.current = [
+      { id: 'moving', name: 'Moving', x: 10, y: 10, w: 100, h: 100, code: '<div />' },
+    ]
+    view.rerender(<Transcript streaming dragTick={1} />)
+
+    const updateSamples = historicalDurations.slice(samplesAfterMount)
+    expect(historicalRenders).toHaveBeenCalledTimes(1)
+    expect(updateSamples.every((duration) => Number.isFinite(duration))).toBe(true)
   })
 })
