@@ -14,6 +14,7 @@ import { authClient } from '@loora/auth/client'
 import { orpc } from '#/lib/orpc-client'
 import { ChatGPTAccount } from '#/components/chatgpt-account'
 import { CreditTopUp } from '#/components/credit-top-up'
+import { GitHubAccount } from '#/components/github-account'
 
 interface UsageStatus {
   dailyUsd: number
@@ -405,9 +406,12 @@ export function SettingsPanel() {
   const { data: session } = authClient.useSession()
   const isAdmin = session?.user.isAdmin === true
   const defaultTab = typeof window !== 'undefined' &&
-    new URLSearchParams(window.location.search).get('topup') === 'success'
-    ? 'billing'
-    : 'account'
+    new URLSearchParams(window.location.search).get('settings') === 'github'
+    ? 'github'
+    : typeof window !== 'undefined' &&
+        new URLSearchParams(window.location.search).get('topup') === 'success'
+      ? 'billing'
+      : 'account'
 
   async function signOut() {
     // Do not leave one Loora account's ChatGPT cookie available after switching users.
@@ -418,9 +422,10 @@ export function SettingsPanel() {
   return (
     <div className="flex h-full min-h-0 flex-col overflow-y-auto p-6">
       <Tabs defaultValue={defaultTab} className="flex max-w-md flex-col gap-6">
-        <TabsList className={`grid w-full ${isAdmin ? 'grid-cols-4' : 'grid-cols-3'}`}>
+        <TabsList className={`grid w-full ${isAdmin ? 'grid-cols-5' : 'grid-cols-4'}`}>
           <TabsTab value="account">Account</TabsTab>
           <TabsTab value="chatgpt">ChatGPT</TabsTab>
+          <TabsTab value="github">GitHub</TabsTab>
           <TabsTab value="billing">Billing</TabsTab>
           {isAdmin ? <TabsTab value="admin">Admin</TabsTab> : null}
         </TabsList>
@@ -455,6 +460,16 @@ export function SettingsPanel() {
             </p>
           </div>
           <ChatGPTAccount />
+        </TabsPanel>
+
+        <TabsPanel value="github" className="flex flex-col gap-5">
+          <div>
+            <h2 className="text-sm font-semibold">GitHub</h2>
+            <p className="mt-1 text-xs text-muted-foreground">
+              Attach read-only repository context to individual Loora designs.
+            </p>
+          </div>
+          <GitHubAccount />
         </TabsPanel>
 
         <TabsPanel value="billing">

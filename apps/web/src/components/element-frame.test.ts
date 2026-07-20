@@ -186,6 +186,14 @@ describe('compileForFrame', () => {
     expect(result.error).toContain('Unexpected token (2:14)')
     expect(result.error).not.toContain('unknown:')
   })
+
+  it('echoes the offending source line alongside the compile error position', () => {
+    const source = 'function App() {\n  return <div }\n}'
+    const result = compileForFrame(source, failingBabel)
+    if (result.ok) throw new Error('expected error')
+    expect(result.error).toContain('Unexpected token (2:14)')
+    expect(result.error).toContain('return <div }')
+  })
 })
 
 describe('buildElementDoc', () => {

@@ -10,14 +10,21 @@ import { nanoid } from 'nanoid'
 import {
   BookOpenIcon,
   CheckIcon,
+  GithubIcon,
+  GitBranchIcon,
+  GroupIcon,
+  LayersIcon,
   MoveIcon,
   ScrollTextIcon,
+  SearchIcon,
+  UngroupIcon,
   ChevronDownIcon,
   EyeIcon,
   ChevronRightIcon,
   MessageSquareIcon,
   PenLineIcon,
   PlusIcon,
+  RefreshCwIcon,
   Trash2Icon,
   XIcon,
 } from 'lucide-react'
@@ -40,6 +47,7 @@ import { applyCodeEdits, type CanvasElement, type CodeEdit, type ElementActions 
 import { awaitRenderResult, captureElement, readElementLogs } from '#/components/element-frame'
 import { snapshotCanvas } from '#/lib/snapshot'
 import { commitIfChanged } from '@loora/rpc/history'
+import { sanitizeChatMessagesForStorage } from '@loora/rpc/chat-storage'
 import { Sidebar } from '#/components/ui/sidebar'
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '#/components/ui/collapsible'
 import { interruptIn, interruptTransition } from '#/lib/motion'
@@ -56,23 +64,16 @@ import {
 } from '#/components/ui/dropdown-menu'
 
 type ChatState = ReturnType<typeof useChat>
-type ChatSummary = { id: string; title: string; updatedAt: number }
-
-function messagesForStorage(messages: UIMessage[]): UIMessage[] {
-  return messages.flatMap((message) => {
-    const parts = message.parts.flatMap((part) => {
-      if (part.type === 'file' || part.type === 'tool-loadSkill') return []
-      if (
-        (part.type === 'tool-viewCanvas' || part.type === 'tool-viewElement') &&
-        part.state === 'output-available'
-      ) {
-        return [{ ...part, output: { viewed: true } }]
-      }
-      return [part]
-    })
-    return parts.length > 0 ? [{ ...message, parts }] : []
-  })
+type ChatSummary = {
+  id: string
+  title: string
+  githubRepositoryId: string | null
+  githubRepositoryFullName: string | null
+  updatedAt: number
 }
+type GitHubStatus = Awaited<ReturnType<typeof orpc.github.status>>
+type GitHubRepository = Awaited<ReturnType<typeof orpc.github.repositories>>[number]
+type RepositoryBinding = Exclude<Awaited<ReturnType<typeof orpc.github.binding>>, null>
 
 // Shimmer until the assistant starts producing visible text (covers tool rounds too).
 function isThinking(status: ChatState['status'], messages: ChatState['messages']) {
@@ -107,6 +108,9 @@ function hasCanvasMutation(message: UIMessage) {
       'tool-updateElement',
       'tool-editElement',
       'tool-arrangeElements',
+      'tool-reorderElements',
+      'tool-groupElements',
+      'tool-ungroupElements',
       'tool-deleteElement',
     ].includes(part.type),
   )
@@ -192,6 +196,10 @@ export const AgentPanel = memo(function AgentPanel({
   const [stallError, setStallError] = useState<string | null>(null)
   const [chats, setChats] = useState<ChatSummary[]>([])
   const [activeChatId, setActiveChatId] = useState<string | null>(null)
+  const [githubStatus, setGitHubStatus] = useState<GitHubStatus | null>(null)
+  const [repositories, setRepositories] = useState<GitHubRepository[]>([])
+  const [repositoriesLoading, setRepositoriesLoading] = useState(false)
+  const [repositoryBinding, setRepositoryBinding] = useState<RepositoryBinding | null | undefined>(undefined)
   const recoveryRetries = useRef(0)
   const retryResponse = useRef<() => void>(() => {})
   const forceCanvasAction = useRef(false)
@@ -199,6 +207,9 @@ export const AgentPanel = memo(function AgentPanel({
   chatsRef.current = chats
   const composerRef = useRef<HTMLTextAreaElement>(null)
   const activeChat = chats.find((chat) => chat.id === activeChatId)
+  const chatRepositoryMatches =
+    repositoryBinding !== undefined &&
+    (activeChat?.githubRepositoryId ?? null) === (repositoryBinding?.id ?? null)
 
   const { messages, setMessages, sendMessage, regenerate, addToolOutput, status, stop, error } =
     useChat({
@@ -207,6 +218,8 @@ export const AgentPanel = memo(function AgentPanel({
         body: () => ({
           shapes: shapesRef.current,
           selectedIds: selectedIdsRef?.current ?? [],
+          designId: docId,
+          chatId: activeChatId,
           model: modelRef.current,
           forceCanvasAction: forceCanvasAction.current,
         }),
@@ -360,6 +373,50 @@ export const AgentPanel = memo(function AgentPanel({
               respond(missing.length > 0 ? { updated, missing } : { updated })
               break
             }
+            case 'searchCanvas': {
+              const query = String((input as { query?: string }).query ?? '')
+              const needle = query.toLowerCase()
+              const matches: { id: string; name: string; line: number; text: string }[] = []
+              let truncated = false
+              for (const el of shapesRef.current) {
+                const lines = el.code.split('\n')
+                for (let i = 0; i < lines.length; i++) {
+                  if (!lines[i].toLowerCase().includes(needle)) continue
+                  if (matches.length >= 50) {
+                    truncated = true
+                    break
+                  }
+                  const text = lines[i].trim()
+                  matches.push({
+                    id: el.id,
+                    name: el.name,
+                    line: i + 1,
+                    text: text.length > 200 ? `${text.slice(0, 200)}…` : text,
+                  })
+                }
+                if (truncated) break
+              }
+              respond(truncated ? { matches, truncated: true } : { matches })
+              break
+            }
+            case 'reorderElements': {
+              const orderedIds = (input as { orderedIds?: string[] }).orderedIds ?? []
+              respond({ order: actions.reorderElements(orderedIds) })
+              break
+            }
+            case 'groupElements': {
+              const ids = (input as { ids?: string[] }).ids ?? []
+              const group = actions.groupElements(ids)
+              respond(
+                group ?? { error: 'Fewer than 2 of the given ids exist on the canvas — nothing was grouped.' },
+              )
+              break
+            }
+            case 'ungroupElements': {
+              const ids = (input as { ids?: string[] }).ids ?? []
+              respond({ ungrouped: actions.ungroupElements(ids) })
+              break
+            }
             case 'readElementLogs': {
               const id = (input as { id?: string }).id
               if (!id || !shapesRef.current.some((s) => s.id === id)) {
@@ -437,7 +494,7 @@ export const AgentPanel = memo(function AgentPanel({
   // busy or still loading so the caller can keep the comment draft open.
   if (sendRef) {
     sendRef.current = (text: string): boolean => {
-      if (!chatReady || status === 'streaming' || status === 'submitted') return false
+      if (!chatReady || !chatRepositoryMatches || status === 'streaming' || status === 'submitted') return false
       setStallError(null)
       recoveryRetries.current = 0
       if (activeChat?.title === 'New chat') {
@@ -595,6 +652,28 @@ export const AgentPanel = memo(function AgentPanel({
   }, [docId, ready, setMessages])
 
   useEffect(() => {
+    let cancelled = false
+    setRepositoryBinding(undefined)
+    if (!ready) return
+    void Promise.all([
+      orpc.github.binding({ designId: docId }),
+      orpc.github.status(),
+    ])
+      .then(([binding, github]) => {
+        if (!cancelled) {
+          setRepositoryBinding(binding)
+          setGitHubStatus(github)
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setRepositoryBinding(null)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [docId, ready])
+
+  useEffect(() => {
     if (!activeChatId) return
     let cancelled = false
     setChatReady(false)
@@ -622,7 +701,7 @@ export const AgentPanel = memo(function AgentPanel({
         .save({
           id: activeChatId,
           title: activeChat.title,
-          messages: messagesForStorage(messages),
+          messages: sanitizeChatMessagesForStorage(messages),
         })
         .catch((error) => console.error('[chat] Failed to save chat:', error))
     }, 500)
@@ -635,7 +714,11 @@ export const AgentPanel = memo(function AgentPanel({
     return () => {
       const title = chatsRef.current.find((chat) => chat.id === chatId)?.title ?? 'New chat'
       void orpc.chat
-        .save({ id: chatId, title, messages: messagesForStorage(messagesRef.current) })
+        .save({
+          id: chatId,
+          title,
+          messages: sanitizeChatMessagesForStorage(messagesRef.current),
+        })
         .catch((error) => console.error('[chat] Failed to save chat:', error))
     }
   }, [activeChatId, chatReady])
@@ -648,6 +731,48 @@ export const AgentPanel = memo(function AgentPanel({
     })
     setChats((current) => [created, ...current])
     setActiveChatId(created.id)
+  }
+
+  const loadGithubRepositories = async () => {
+    if (repositoriesLoading) return
+    setRepositoriesLoading(true)
+    try {
+      const github = await orpc.github.status()
+      setGitHubStatus(github)
+      setRepositories(github.connected ? await orpc.github.repositories() : [])
+      setRepositoryBinding(await orpc.github.binding({ designId: docId }))
+    } catch {
+      setRepositories([])
+    } finally {
+      setRepositoriesLoading(false)
+    }
+  }
+
+  const selectRepository = async (repository: GitHubRepository | null) => {
+    if (status === 'streaming' || status === 'submitted') return
+    const currentId = repositoryBinding?.id ?? null
+    const currentInstallationId = repositoryBinding?.installationId ?? null
+    if (
+      (repository?.id ?? null) === currentId &&
+      (repository?.installationId ?? null) === currentInstallationId
+    ) return
+    setStallError(null)
+    try {
+      if (repository) {
+        const binding = await orpc.github.bind({
+          designId: docId,
+          installationId: repository.installationId,
+          repositoryId: repository.id,
+        })
+        setRepositoryBinding(binding)
+      } else {
+        await orpc.github.clear({ designId: docId })
+        setRepositoryBinding(null)
+      }
+      await createChat()
+    } catch {
+      setStallError('Could not change the repository. Refresh GitHub access and try again.')
+    }
   }
 
   const answerQuestion = useCallback((toolCallId: string, answer: string) => {
@@ -679,7 +804,7 @@ export const AgentPanel = memo(function AgentPanel({
       variant="floating"
       className="[&_[data-slot=sidebar-inner]]:overflow-hidden [&_[data-slot=sidebar-inner]]:rounded-2xl [&_[data-slot=sidebar-inner]]:shadow-sm"
     >
-      <header className="flex items-center border-b px-3 py-2.5">
+      <header className="flex items-center gap-2 border-b px-3 py-2.5">
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <button
@@ -715,6 +840,62 @@ export const AgentPanel = memo(function AgentPanel({
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
+        <DropdownMenu onOpenChange={(open) => open && void loadGithubRepositories()}>
+          <DropdownMenuTrigger asChild>
+            <button
+              type="button"
+              disabled={status === 'streaming' || status === 'submitted'}
+              className="ml-auto flex min-w-0 max-w-36 items-center gap-1.5 rounded-md px-2 py-1 text-xs text-muted-foreground outline-none hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none"
+              title={repositoryBinding?.fullName ?? 'Repository context'}
+            >
+              <GitBranchIcon className="size-3.5 shrink-0" />
+              <span className="truncate">{repositoryBinding?.fullName ?? 'No repository'}</span>
+              <ChevronDownIcon className="size-3 shrink-0" />
+            </button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="max-h-80 w-72 overflow-y-auto">
+            <DropdownMenuLabel className="text-xs text-muted-foreground">
+              Repository for this design
+            </DropdownMenuLabel>
+            {repositoriesLoading || !githubStatus ? (
+              <DropdownMenuItem disabled>Checking GitHub…</DropdownMenuItem>
+            ) : !githubStatus.enabled ? (
+              <DropdownMenuItem disabled>GitHub is not configured</DropdownMenuItem>
+            ) : !githubStatus.connected ? (
+              <DropdownMenuItem onSelect={() => window.location.assign('/api/github/connect')}>
+                <GithubIcon />
+                Connect GitHub
+              </DropdownMenuItem>
+            ) : (
+              <>
+                <DropdownMenuItem onSelect={() => void selectRepository(null)}>
+                  <XIcon />
+                  No repository
+                  {!repositoryBinding ? <CheckIcon className="ml-auto" /> : null}
+                </DropdownMenuItem>
+                {repositories.slice(0, 100).map((repository) => (
+                  <DropdownMenuItem
+                    key={`${repository.installationId}:${repository.id}`}
+                    onSelect={() => void selectRepository(repository)}
+                  >
+                    <GithubIcon />
+                    <span className="min-w-0 flex-1 truncate">{repository.fullName}</span>
+                    {repository.id === repositoryBinding?.id ? <CheckIcon /> : null}
+                  </DropdownMenuItem>
+                ))}
+                <DropdownMenuSeparator />
+                <DropdownMenuItem onSelect={() => void loadGithubRepositories()}>
+                  <RefreshCwIcon />
+                  Refresh repositories
+                </DropdownMenuItem>
+                <DropdownMenuItem onSelect={() => window.location.assign('/api/github/install')}>
+                  <PlusIcon />
+                  Add repositories
+                </DropdownMenuItem>
+              </>
+            )}
+          </DropdownMenuContent>
+        </DropdownMenu>
       </header>
 
       <Conversation className="min-h-0 flex-1">
@@ -747,6 +928,12 @@ export const AgentPanel = memo(function AgentPanel({
               {stallError || readableError(error?.message) || 'Request failed.'}
             </p>
           )}
+          {activeChat && repositoryBinding !== undefined && !chatRepositoryMatches ? (
+            <p className="rounded-md border bg-muted px-3 py-2 text-xs text-muted-foreground">
+              This chat used {activeChat.githubRepositoryFullName ?? 'no repository'}. Start a new chat to use{' '}
+              {repositoryBinding?.fullName ?? 'no repository'}.
+            </p>
+          ) : null}
         </ConversationContent>
         <ConversationScrollButton />
       </Conversation>
@@ -756,7 +943,7 @@ export const AgentPanel = memo(function AgentPanel({
           accept={imageInputsEnabled ? 'image/*' : 'application/x-loora-disabled'}
           onSubmit={async ({ text, files }) => {
             const trimmed = text.trim()
-            if (!trimmed || !chatReady || status === 'streaming' || status === 'submitted') return
+            if (!trimmed || !chatReady || !chatRepositoryMatches || status === 'streaming' || status === 'submitted') return
             setInput('')
             setStallError(null)
             recoveryRetries.current = 0
@@ -796,8 +983,14 @@ export const AgentPanel = memo(function AgentPanel({
             ref={composerRef}
             value={input}
             onChange={(e) => setInput(e.target.value)}
-            placeholder={chatReady ? 'Describe a change…' : 'Loading chat…'}
-            disabled={!chatReady}
+            placeholder={
+              !chatReady
+                ? 'Loading chat…'
+                : chatRepositoryMatches
+                  ? 'Describe a change…'
+                  : 'Start a new chat for this repository…'
+            }
+            disabled={!chatReady || !chatRepositoryMatches}
             className="w-full"
           />
           <PromptInputFooter>
@@ -815,7 +1008,7 @@ export const AgentPanel = memo(function AgentPanel({
               disabled={
                 status !== 'streaming' &&
                 status !== 'submitted' &&
-                (!chatReady || !input.trim())
+                (!chatReady || !chatRepositoryMatches || !input.trim())
               }
             />
           </PromptInputFooter>
@@ -927,12 +1120,20 @@ const TOOL_META = {
   updateElement: { icon: PenLineIcon, label: 'Update' },
   editElement: { icon: PenLineIcon, label: 'Edit' },
   arrangeElements: { icon: MoveIcon, label: 'Arrange' },
+  reorderElements: { icon: LayersIcon, label: 'Reorder' },
+  groupElements: { icon: GroupIcon, label: 'Group' },
+  ungroupElements: { icon: UngroupIcon, label: 'Ungroup' },
+  searchCanvas: { icon: SearchIcon, label: 'Search' },
   readElementLogs: { icon: ScrollTextIcon, label: 'Logs' },
   viewElement: { icon: EyeIcon, label: 'Inspect' },
   deleteElement: { icon: Trash2Icon, label: 'Delete' },
   readElement: { icon: BookOpenIcon, label: 'Read' },
   loadSkill: { icon: BookOpenIcon, label: 'Skill' },
   viewCanvas: { icon: EyeIcon, label: 'Verify' },
+  listRepositoryTree: { icon: LayersIcon, label: 'Browsed repository' },
+  searchRepositoryCode: { icon: SearchIcon, label: 'Searched repository' },
+  readRepositoryFile: { icon: BookOpenIcon, label: 'Read repository file' },
+  viewRepositoryImage: { icon: EyeIcon, label: 'Viewed repository image' },
 } as const
 
 function describeElement(s: Partial<CanvasElement> | undefined) {
@@ -959,6 +1160,26 @@ function toolSummary(name: string, part: ToolPart, elements: CanvasElement[]) {
   if (name === 'arrangeElements') {
     const changes = (input.changes as unknown[] | undefined)?.length ?? 0
     return `${changes} element${changes === 1 ? '' : 's'}`
+  }
+  if (name === 'searchCanvas') {
+    return String(input.query ?? '')
+  }
+  if (name === 'reorderElements') {
+    const count = (input.orderedIds as unknown[] | undefined)?.length ?? 0
+    return `${count} element${count === 1 ? '' : 's'}`
+  }
+  if (name === 'groupElements' || name === 'ungroupElements') {
+    const count = (input.ids as unknown[] | undefined)?.length ?? 0
+    return `${count} element${count === 1 ? '' : 's'}`
+  }
+  if (name === 'listRepositoryTree') {
+    return String(input.pathPrefix ?? 'repository root')
+  }
+  if (name === 'searchRepositoryCode') {
+    return String(input.query ?? '')
+  }
+  if (name === 'readRepositoryFile' || name === 'viewRepositoryImage') {
+    return String(input.path ?? '')
   }
   const target = elements.find((s) => s.id === input.id)
   if (name === 'readElement' || name === 'readElementLogs' || name === 'viewElement') {
@@ -1138,12 +1359,20 @@ const PAST_TENSE = {
   updateElement: 'Updated',
   editElement: 'Edited',
   arrangeElements: 'Arranged',
+  reorderElements: 'Reordered',
+  groupElements: 'Grouped',
+  ungroupElements: 'Ungrouped',
+  searchCanvas: 'Searched',
   readElementLogs: 'Read logs from',
   viewElement: 'Inspected',
   deleteElement: 'Deleted',
   readElement: 'Read',
   loadSkill: 'Loaded skill',
   viewCanvas: 'Verified',
+  listRepositoryTree: 'Browsed',
+  searchRepositoryCode: 'Searched',
+  readRepositoryFile: 'Read',
+  viewRepositoryImage: 'Viewed',
 } as const
 
 function ToolGroup({

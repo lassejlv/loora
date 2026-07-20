@@ -270,7 +270,10 @@ function Editor({ preview = false, userId }: { preview?: boolean; userId?: strin
   const [assetsOpen, setAssetsOpen] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(() =>
     !preview && typeof window !== 'undefined' &&
-    new URLSearchParams(window.location.search).get('topup') === 'success'
+    (
+      new URLSearchParams(window.location.search).get('topup') === 'success' ||
+      new URLSearchParams(window.location.search).get('settings') === 'github'
+    )
   )
   const [exportOpen, setExportOpen] = useState(false)
   const [codeOpen, setCodeOpen] = useState(false)
@@ -675,9 +678,52 @@ function Editor({ preview = false, userId }: { preview?: boolean; userId?: strin
     [mutate],
   )
 
+  const reorderForAgent = useCallback(
+    (orderedIds: string[]) => {
+      let order = shapesRef.current.map((s) => s.id)
+      mutate((prev) => {
+        const next = reorderElements(prev, orderedIds)
+        order = next.map((s) => s.id)
+        return next
+      })
+      return order
+    },
+    [mutate],
+  )
+
+  const groupForAgent = useCallback(
+    (ids: string[]) => {
+      const wanted = new Set(ids)
+      const targets = shapesRef.current.filter((s) => wanted.has(s.id))
+      if (targets.length < 2) return null
+      const gid = `g${elementId()}`
+      mutate((prev) => prev.map((s) => (wanted.has(s.id) ? { ...s, groupId: gid } : s)))
+      return { groupId: gid, ids: targets.map((t) => t.id) }
+    },
+    [mutate],
+  )
+
+  const ungroupForAgent = useCallback(
+    (ids: string[]) => {
+      const wanted = new Set(ids)
+      const count = shapesRef.current.filter((s) => wanted.has(s.id) && s.groupId).length
+      mutate((prev) => prev.map((s) => (wanted.has(s.id) ? { ...s, groupId: undefined } : s)))
+      return count
+    },
+    [mutate],
+  )
+
   const actions = useMemo<ElementActions>(
-    () => ({ createElement, createElements, updateElement, deleteElement }),
-    [createElement, createElements, updateElement, deleteElement],
+    () => ({
+      createElement,
+      createElements,
+      updateElement,
+      deleteElement,
+      reorderElements: reorderForAgent,
+      groupElements: groupForAgent,
+      ungroupElements: ungroupForAgent,
+    }),
+    [createElement, createElements, updateElement, deleteElement, reorderForAgent, groupForAgent, ungroupForAgent],
   )
 
   const reorder = useCallback(

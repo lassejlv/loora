@@ -7,8 +7,11 @@ import {
 import { eq } from 'drizzle-orm'
 import { db } from '@loora/db'
 import { chatgptSession } from '@loora/db/schema'
+import { MODELS } from './models'
 
-const CHATGPT_MODEL = 'gpt-5.6-sol'
+// Every ChatGPT-backed model in the catalog must pass the proxy's allowlist.
+const CHATGPT_MODELS = MODELS.filter((m) => m.provider === 'chatgpt').map((m) => m.modelId)
+const CHATGPT_MODEL = CHATGPT_MODELS[0]
 // OpenAI gates newly released Codex models by the reported client version.
 // Keep this overridable so production can move forward without a code release.
 const CODEX_CLIENT_VERSION = process.env.CODEX_CLIENT_VERSION?.trim() || '0.145.0'
@@ -64,7 +67,7 @@ export const chatgptAuth = createChatGPTHandler({
   defaultModel: CHATGPT_MODEL,
   sessionStore: new PostgresStore<StoredSession>('session'),
   responsesProxy: {
-    allowedModels: [CHATGPT_MODEL],
+    allowedModels: CHATGPT_MODELS,
     rateLimit: {
       store: new PostgresStore<RateLimitBucket>('rate'),
     },

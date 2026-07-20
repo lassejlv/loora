@@ -144,6 +144,8 @@ export const designChat = pgTable(
     userId: text('user_id').notNull(),
     title: text('title').default('New chat').notNull(),
     messages: jsonb('messages').$type<UIMessage[]>().default([]).notNull(),
+    githubRepositoryId: text('github_repository_id'),
+    githubRepositoryFullName: text('github_repository_full_name'),
     createdAt: timestamp('created_at').defaultNow().notNull(),
     updatedAt: timestamp('updated_at')
       .defaultNow()
@@ -158,6 +160,88 @@ export const designChat = pgTable(
       name: 'design_chat_design_fk',
     }).onDelete('cascade'),
     index('design_chat_design_idx').on(table.userId, table.designId, table.updatedAt),
+  ],
+)
+
+// GitHub App user tokens are encrypted before they reach these columns. A user
+// token keeps repository access intersected with the person's current GitHub
+// permissions, unlike a long-lived installation-only association.
+export const githubAccount = pgTable('github_account', {
+  userId: text('user_id')
+    .primaryKey()
+    .references(() => user.id, { onDelete: 'cascade' }),
+  githubUserId: text('github_user_id').notNull(),
+  login: text('login').notNull(),
+  avatarUrl: text('avatar_url'),
+  accessToken: text('access_token').notNull(),
+  accessTokenExpiresAt: timestamp('access_token_expires_at'),
+  refreshToken: text('refresh_token'),
+  refreshTokenExpiresAt: timestamp('refresh_token_expires_at'),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  updatedAt: timestamp('updated_at')
+    .defaultNow()
+    .$onUpdate(() => new Date())
+    .notNull(),
+})
+
+export const githubInstallation = pgTable(
+  'github_installation',
+  {
+    userId: text('user_id')
+      .notNull()
+      .references(() => githubAccount.userId, { onDelete: 'cascade' }),
+    installationId: text('installation_id').notNull(),
+    targetId: text('target_id').notNull(),
+    accountLogin: text('account_login').notNull(),
+    accountType: text('account_type').notNull(),
+    avatarUrl: text('avatar_url'),
+    repositorySelection: text('repository_selection').notNull(),
+    suspendedAt: timestamp('suspended_at'),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+    updatedAt: timestamp('updated_at')
+      .defaultNow()
+      .$onUpdate(() => new Date())
+      .notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.userId, table.installationId] }),
+    index('github_installation_id_idx').on(table.installationId),
+  ],
+)
+
+export const designGithubRepository = pgTable(
+  'design_github_repository',
+  {
+    designId: text('design_id').notNull(),
+    userId: text('user_id').notNull(),
+    installationId: text('installation_id').notNull(),
+    repositoryId: text('repository_id').notNull(),
+    owner: text('owner').notNull(),
+    name: text('name').notNull(),
+    defaultBranch: text('default_branch').notNull(),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+    updatedAt: timestamp('updated_at')
+      .defaultNow()
+      .$onUpdate(() => new Date())
+      .notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.designId, table.userId] }),
+    foreignKey({
+      columns: [table.designId, table.userId],
+      foreignColumns: [design.id, design.userId],
+      name: 'design_github_repository_design_fk',
+    }).onDelete('cascade'),
+    foreignKey({
+      columns: [table.userId, table.installationId],
+      foreignColumns: [githubInstallation.userId, githubInstallation.installationId],
+      name: 'design_github_repository_installation_fk',
+    }).onDelete('cascade'),
+    index('design_github_repository_repo_idx').on(
+      table.userId,
+      table.installationId,
+      table.repositoryId,
+    ),
   ],
 )
 

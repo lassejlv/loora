@@ -141,6 +141,23 @@ function firstErrorLine(error: unknown): string {
   return line.length > 400 ? `${line.slice(0, 400)}…` : line
 }
 
+/**
+ * Babel messages carry a (line:col) into the compiled source; echo that source
+ * line so the agent sees the offending code instead of guessing from a bare
+ * position — import stripping shifts line numbers relative to what it wrote.
+ */
+export function describeCompileError(error: unknown, source: string): string {
+  const line = firstErrorLine(error)
+  const loc = line.match(/\((\d+):\d+\)/)
+  if (loc) {
+    const text = source.split('\n')[Number(loc[1]) - 1]?.trim()
+    if (text) {
+      return `${line} — ${text.length > 200 ? `${text.slice(0, 200)}…` : text}`
+    }
+  }
+  return line
+}
+
 function transform(babel: BabelLike, source: string, withTypescript: boolean): string {
   const presets: unknown[] = withTypescript
     ? [['react', {}], ['typescript', { isTSX: true, allExtensions: true }]]
@@ -189,7 +206,7 @@ export function compileForFrame(source: string, babel: BabelLike | null): Compil
     if (mode === 'jsx-snippet' && stripped.trim().startsWith('<')) {
       return { ok: true, payload: { mode: 'html', code: stripped, needsEntry: false } }
     }
-    return { ok: false, error: firstErrorLine(error) }
+    return { ok: false, error: describeCompileError(error, jsxSource) }
   }
 }
 

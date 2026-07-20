@@ -14,6 +14,11 @@ import { Route as ApiChatRouteImport } from './routes/api.chat'
 import { Route as ApiAssetIdRouteImport } from './routes/api.asset.$id'
 import { Route as ApiAuthSplatRouteImport } from './routes/api.auth.$'
 import { Route as ApiChatgptSplatRouteImport } from './routes/api.chatgpt.$'
+import { Route as ApiGithubCallbackRouteImport } from './routes/api.github.callback'
+import { Route as ApiGithubConnectRouteImport } from './routes/api.github.connect'
+import { Route as ApiGithubInstallRouteImport } from './routes/api.github.install'
+import { Route as ApiGithubSetupRouteImport } from './routes/api.github.setup'
+import { Route as ApiGithubWebhookRouteImport } from './routes/api.github.webhook'
 import { Route as ApiHandoffTokenRouteImport } from './routes/api.handoff.$token'
 import { Route as ApiRpcSplatRouteImport } from './routes/api.rpc.$'
 import { Route as ApiHandoffTokenAssetIdRouteImport } from './routes/api.handoff.$token.asset.$id'
@@ -43,6 +48,31 @@ const ApiChatgptSplatRoute = ApiChatgptSplatRouteImport.update({
   path: '/api/chatgpt/$',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiGithubCallbackRoute = ApiGithubCallbackRouteImport.update({
+  id: '/api/github/callback',
+  path: '/api/github/callback',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiGithubConnectRoute = ApiGithubConnectRouteImport.update({
+  id: '/api/github/connect',
+  path: '/api/github/connect',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiGithubInstallRoute = ApiGithubInstallRouteImport.update({
+  id: '/api/github/install',
+  path: '/api/github/install',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiGithubSetupRoute = ApiGithubSetupRouteImport.update({
+  id: '/api/github/setup',
+  path: '/api/github/setup',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiGithubWebhookRoute = ApiGithubWebhookRouteImport.update({
+  id: '/api/github/webhook',
+  path: '/api/github/webhook',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ApiHandoffTokenRoute = ApiHandoffTokenRouteImport.update({
   id: '/api/handoff/$token',
   path: '/api/handoff/$token',
@@ -65,6 +95,11 @@ export interface FileRoutesByFullPath {
   '/api/asset/$id': typeof ApiAssetIdRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
   '/api/chatgpt/$': typeof ApiChatgptSplatRoute
+  '/api/github/callback': typeof ApiGithubCallbackRoute
+  '/api/github/connect': typeof ApiGithubConnectRoute
+  '/api/github/install': typeof ApiGithubInstallRoute
+  '/api/github/setup': typeof ApiGithubSetupRoute
+  '/api/github/webhook': typeof ApiGithubWebhookRoute
   '/api/handoff/$token': typeof ApiHandoffTokenRouteWithChildren
   '/api/rpc/$': typeof ApiRpcSplatRoute
   '/api/handoff/$token/asset/$id': typeof ApiHandoffTokenAssetIdRoute
@@ -75,6 +110,11 @@ export interface FileRoutesByTo {
   '/api/asset/$id': typeof ApiAssetIdRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
   '/api/chatgpt/$': typeof ApiChatgptSplatRoute
+  '/api/github/callback': typeof ApiGithubCallbackRoute
+  '/api/github/connect': typeof ApiGithubConnectRoute
+  '/api/github/install': typeof ApiGithubInstallRoute
+  '/api/github/setup': typeof ApiGithubSetupRoute
+  '/api/github/webhook': typeof ApiGithubWebhookRoute
   '/api/handoff/$token': typeof ApiHandoffTokenRouteWithChildren
   '/api/rpc/$': typeof ApiRpcSplatRoute
   '/api/handoff/$token/asset/$id': typeof ApiHandoffTokenAssetIdRoute
@@ -86,6 +126,11 @@ export interface FileRoutesById {
   '/api/asset/$id': typeof ApiAssetIdRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
   '/api/chatgpt/$': typeof ApiChatgptSplatRoute
+  '/api/github/callback': typeof ApiGithubCallbackRoute
+  '/api/github/connect': typeof ApiGithubConnectRoute
+  '/api/github/install': typeof ApiGithubInstallRoute
+  '/api/github/setup': typeof ApiGithubSetupRoute
+  '/api/github/webhook': typeof ApiGithubWebhookRoute
   '/api/handoff/$token': typeof ApiHandoffTokenRouteWithChildren
   '/api/rpc/$': typeof ApiRpcSplatRoute
   '/api/handoff/$token/asset/$id': typeof ApiHandoffTokenAssetIdRoute
@@ -98,6 +143,11 @@ export interface FileRouteTypes {
     | '/api/asset/$id'
     | '/api/auth/$'
     | '/api/chatgpt/$'
+    | '/api/github/callback'
+    | '/api/github/connect'
+    | '/api/github/install'
+    | '/api/github/setup'
+    | '/api/github/webhook'
     | '/api/handoff/$token'
     | '/api/rpc/$'
     | '/api/handoff/$token/asset/$id'
@@ -108,6 +158,11 @@ export interface FileRouteTypes {
     | '/api/asset/$id'
     | '/api/auth/$'
     | '/api/chatgpt/$'
+    | '/api/github/callback'
+    | '/api/github/connect'
+    | '/api/github/install'
+    | '/api/github/setup'
+    | '/api/github/webhook'
     | '/api/handoff/$token'
     | '/api/rpc/$'
     | '/api/handoff/$token/asset/$id'
@@ -118,6 +173,11 @@ export interface FileRouteTypes {
     | '/api/asset/$id'
     | '/api/auth/$'
     | '/api/chatgpt/$'
+    | '/api/github/callback'
+    | '/api/github/connect'
+    | '/api/github/install'
+    | '/api/github/setup'
+    | '/api/github/webhook'
     | '/api/handoff/$token'
     | '/api/rpc/$'
     | '/api/handoff/$token/asset/$id'
@@ -129,6 +189,11 @@ export interface RootRouteChildren {
   ApiAssetIdRoute: typeof ApiAssetIdRoute
   ApiAuthSplatRoute: typeof ApiAuthSplatRoute
   ApiChatgptSplatRoute: typeof ApiChatgptSplatRoute
+  ApiGithubCallbackRoute: typeof ApiGithubCallbackRoute
+  ApiGithubConnectRoute: typeof ApiGithubConnectRoute
+  ApiGithubInstallRoute: typeof ApiGithubInstallRoute
+  ApiGithubSetupRoute: typeof ApiGithubSetupRoute
+  ApiGithubWebhookRoute: typeof ApiGithubWebhookRoute
   ApiHandoffTokenRoute: typeof ApiHandoffTokenRouteWithChildren
   ApiRpcSplatRoute: typeof ApiRpcSplatRoute
 }
@@ -168,6 +233,41 @@ declare module '@tanstack/react-router' {
       path: '/api/chatgpt/$'
       fullPath: '/api/chatgpt/$'
       preLoaderRoute: typeof ApiChatgptSplatRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/github/callback': {
+      id: '/api/github/callback'
+      path: '/api/github/callback'
+      fullPath: '/api/github/callback'
+      preLoaderRoute: typeof ApiGithubCallbackRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/github/connect': {
+      id: '/api/github/connect'
+      path: '/api/github/connect'
+      fullPath: '/api/github/connect'
+      preLoaderRoute: typeof ApiGithubConnectRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/github/install': {
+      id: '/api/github/install'
+      path: '/api/github/install'
+      fullPath: '/api/github/install'
+      preLoaderRoute: typeof ApiGithubInstallRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/github/setup': {
+      id: '/api/github/setup'
+      path: '/api/github/setup'
+      fullPath: '/api/github/setup'
+      preLoaderRoute: typeof ApiGithubSetupRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/github/webhook': {
+      id: '/api/github/webhook'
+      path: '/api/github/webhook'
+      fullPath: '/api/github/webhook'
+      preLoaderRoute: typeof ApiGithubWebhookRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/api/handoff/$token': {
@@ -212,9 +312,23 @@ const rootRouteChildren: RootRouteChildren = {
   ApiAssetIdRoute: ApiAssetIdRoute,
   ApiAuthSplatRoute: ApiAuthSplatRoute,
   ApiChatgptSplatRoute: ApiChatgptSplatRoute,
+  ApiGithubCallbackRoute: ApiGithubCallbackRoute,
+  ApiGithubConnectRoute: ApiGithubConnectRoute,
+  ApiGithubInstallRoute: ApiGithubInstallRoute,
+  ApiGithubSetupRoute: ApiGithubSetupRoute,
+  ApiGithubWebhookRoute: ApiGithubWebhookRoute,
   ApiHandoffTokenRoute: ApiHandoffTokenRouteWithChildren,
   ApiRpcSplatRoute: ApiRpcSplatRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
   ._addFileTypes<FileRouteTypes>()
+
+import type { getRouter } from './router.tsx'
+import type { createStart } from '@tanstack/react-start'
+declare module '@tanstack/react-start' {
+  interface Register {
+    ssr: true
+    router: Awaited<ReturnType<typeof getRouter>>
+  }
+}

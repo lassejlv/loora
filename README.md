@@ -1,6 +1,6 @@
-# loora
+# Loora
 
-A local-first canvas editor with an AI design agent, built with TanStack Start and Bun.
+The design harness for AI-assisted UI and UX, built with Bun, TanStack Start, Drizzle ORM, and Better Auth.
 
 ## Setup
 
@@ -28,6 +28,29 @@ Google login is enabled only when both of these optional values are set:
 
 Register `${BETTER_AUTH_URL}/api/auth/callback/google` as an authorized redirect URI in Google
 Cloud (for example, `http://localhost:3000/api/auth/callback/google` locally).
+
+### GitHub repository access
+
+Create a GitHub App when you want users to attach repository context to a Loora design. Configure
+the app with only **Contents: read-only** repository permission (Metadata is added by GitHub), enable
+expiring user authorization tokens and **Redirect on update**, and use these URLs. Leave **Request
+user authorization (OAuth) during installation** off because Loora starts the PKCE authorization
+flow before installation.
+
+- Callback URL: `${BETTER_AUTH_URL}/api/github/callback`
+- Setup URL: `${BETTER_AUTH_URL}/api/github/setup`
+- Webhook URL: `${BETTER_AUTH_URL}/api/github/webhook`
+
+Subscribe to the `GitHub App authorization`, `Installation`, and `Installation repositories` events.
+Then set `GITHUB_APP_CLIENT_ID`, `GITHUB_APP_CLIENT_SECRET`, `GITHUB_APP_SLUG`, and
+`GITHUB_WEBHOOK_SECRET`. Generate the separate encryption key with `openssl rand -base64 32` and
+set it as `GITHUB_DATA_ENCRYPTION_KEY`. Changing that key invalidates stored GitHub credentials, so
+keep it stable and secret.
+
+Loora stores encrypted GitHub App user tokens and always rechecks the intersection of the user's
+GitHub permissions and the app installation before reading. The agent can list, search, and read
+bounded source/image files; it has no repository write tools. Repository payloads are not retained
+in saved chats.
 
 Create the Better Auth tables and start the app:
 

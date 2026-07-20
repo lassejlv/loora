@@ -13,6 +13,15 @@ const orpc = {
     save: mock(),
   },
   history: { commit: mock() },
+  github: {
+    status: mock(),
+    repositories: mock(),
+    refresh: mock(),
+    binding: mock(),
+    bind: mock(),
+    clear: mock(),
+    disconnect: mock(),
+  },
 }
 
 mock.module('#/lib/orpc-client', () => ({ orpc }))
@@ -36,10 +45,24 @@ describe('AgentPanel empty response recovery', () => {
     })
     localStorage.clear()
     snapshotCanvas.mockClear()
-    orpc.chat.list.mockResolvedValue([{ id: 'chat:test', title: 'New chat', updatedAt: 1 }])
+    orpc.chat.list.mockResolvedValue([{
+      id: 'chat:test',
+      title: 'New chat',
+      githubRepositoryId: null,
+      githubRepositoryFullName: null,
+      updatedAt: 1,
+    }])
     orpc.chat.get.mockResolvedValue({ messages: [] })
     orpc.chat.save.mockResolvedValue({})
     orpc.history.commit.mockResolvedValue({})
+    orpc.github.status.mockResolvedValue({
+      enabled: false,
+      connected: false,
+      account: null,
+      installations: [],
+    })
+    orpc.github.binding.mockResolvedValue(null)
+    orpc.github.repositories.mockResolvedValue([])
 
     Object.defineProperty(window, 'matchMedia', {
       configurable: true,
@@ -91,6 +114,9 @@ describe('AgentPanel empty response recovery', () => {
       createElements: mock(),
       updateElement: mock(),
       deleteElement: mock(),
+      reorderElements: mock(),
+      groupElements: mock(),
+      ungroupElements: mock(),
     }
 
     render(
@@ -107,6 +133,9 @@ describe('AgentPanel empty response recovery', () => {
     await waitFor(() => expect(chatFetch).toHaveBeenCalledTimes(2), { timeout: 4000 })
     expect(await screen.findByText('Done.')).toBeTruthy()
 
+    const firstBody = JSON.parse((chatFetch.mock.calls[0]?.[1] as RequestInit)?.body as string)
+    expect(firstBody.designId).toBe('test')
+    expect(firstBody.chatId).toBe('chat:test')
     const secondBody = JSON.parse((chatFetch.mock.calls[1]?.[1] as RequestInit)?.body as string)
     // regenerate must drop the empty assistant turn instead of resubmitting it
     expect(secondBody.trigger).toBe('regenerate-message')
@@ -134,6 +163,9 @@ describe('AgentPanel empty response recovery', () => {
       createElements: mock(),
       updateElement: mock(),
       deleteElement: mock(),
+      reorderElements: mock(),
+      groupElements: mock(),
+      ungroupElements: mock(),
     }
 
     render(
@@ -209,6 +241,9 @@ describe('AgentPanel empty response recovery', () => {
       ]),
       updateElement: mock(),
       deleteElement: mock(),
+      reorderElements: mock(),
+      groupElements: mock(),
+      ungroupElements: mock(),
     }
 
     render(
@@ -253,6 +288,9 @@ describe('AgentPanel empty response recovery', () => {
       createElements: mock(),
       updateElement: mock(),
       deleteElement: mock(),
+      reorderElements: mock(),
+      groupElements: mock(),
+      ungroupElements: mock(),
     }
 
     render(
@@ -296,6 +334,9 @@ describe('AgentPanel empty response recovery', () => {
       createElements: mock(),
       updateElement: mock(),
       deleteElement: mock(),
+      reorderElements: mock(),
+      groupElements: mock(),
+      ungroupElements: mock(),
     }
 
     render(

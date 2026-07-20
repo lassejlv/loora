@@ -77,6 +77,22 @@ export const MODELS = [
     // Requests use the signed-in user's ChatGPT plan, not Loora's provider bill.
     price: { input: 0, output: 0 },
   },
+  {
+    id: 'gpt-5.6-terra',
+    label: 'GPT-5.6 Terra',
+    provider: 'chatgpt',
+    modelId: 'gpt-5.6-terra',
+    supportsImageInput: true,
+    price: { input: 0, output: 0 },
+  },
+  {
+    id: 'gpt-5.6-luna',
+    label: 'GPT-5.6 Luna',
+    provider: 'chatgpt',
+    modelId: 'gpt-5.6-luna',
+    supportsImageInput: true,
+    price: { input: 0, output: 0 },
+  },
 ] as const satisfies readonly ModelDefinition[]
 
 export type ModelKey = (typeof MODELS)[number]['id']

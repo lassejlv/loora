@@ -2,10 +2,16 @@ import { and, asc, desc, eq, lt, or } from 'drizzle-orm'
 import { ORPCError, os } from '@orpc/server'
 import { z } from 'zod'
 import { db } from '@loora/db'
-import { asset, design, designChat, designVersion, user } from '@loora/db/schema'
+import {
+  asset,
+  design,
+  designChat,
+  designGithubRepository,
+  designVersion,
+  user,
+} from '@loora/db/schema'
 import { googleOAuthEnabled, type getSession } from '@loora/auth'
 import type { CanvasElement } from '@loora/db/canvas'
-import type { UIMessage } from 'ai'
 import { assetKey, s3 } from './storage'
 import { createHandoffToken } from './handoff-token'
 import { authorizeBilling, getBillingStatus, refreshBillingStatus } from '@loora/auth/billing'
@@ -20,6 +26,15 @@ import {
   listUserUsage,
   resetUsage,
 } from '@loora/auth/ai-limits'
+import {
+  disconnectGitHub,
+  getGitHubStatus,
+  githubEnabled,
+  GitHubIntegrationError,
+  listGitHubRepositories,
+  syncGitHubInstallations,
+} from '@loora/auth/github'
+import { sanitizeChatMessagesForStorage } from './chat-storage'
 
 type Session = Awaited<ReturnType<typeof getSession>>
 
@@ -367,7 +382,13 @@ const listChats = protectedProcedure
   .input(z.object({ designId: z.string().min(1).max(128) }))
   .handler(async ({ context, input }) => {
     const chats = await db
-      .select({ id: designChat.id, title: designChat.title, updatedAt: designChat.updatedAt })
+      .select({
+        id: designChat.id,
+        title: designChat.title,
+        githubRepositoryId: designChat.githubRepositoryId,
+        githubRepositoryFullName: designChat.githubRepositoryFullName,
+        updatedAt: designChat.updatedAt,
+      })
       .from(designChat)
       .where(
         and(eq(designChat.designId, input.designId), eq(designChat.userId, context.user.id)),
@@ -387,16 +408,50 @@ const createChat = protectedProcedure
   )
   .handler(async ({ context, input }) => {
     await ensureDesign(input.designId, context.user.id)
+    const [repository] = await db
+      .select({
+        id: designGithubRepository.repositoryId,
+        fullName: designGithubRepository.owner,
+        name: designGithubRepository.name,
+      })
+      .from(designGithubRepository)
+      .where(
+        and(
+          eq(designGithubRepository.designId, input.designId),
+          eq(designGithubRepository.userId, context.user.id),
+        ),
+      )
+      .limit(1)
     const [chat] = await db
       .insert(designChat)
-      .values({ ...input, userId: context.user.id, messages: [] })
+      .values({
+        ...input,
+        userId: context.user.id,
+        messages: [],
+        githubRepositoryId: repository?.id ?? null,
+        githubRepositoryFullName: repository
+          ? `${repository.fullName}/${repository.name}`
+          : null,
+      })
       .onConflictDoNothing({ target: [designChat.id, designChat.userId] })
-      .returning({ id: designChat.id, title: designChat.title, updatedAt: designChat.updatedAt })
+      .returning({
+        id: designChat.id,
+        title: designChat.title,
+        githubRepositoryId: designChat.githubRepositoryId,
+        githubRepositoryFullName: designChat.githubRepositoryFullName,
+        updatedAt: designChat.updatedAt,
+      })
 
     if (chat) return { ...chat, updatedAt: chat.updatedAt.getTime() }
 
     const [existing] = await db
-      .select({ id: designChat.id, title: designChat.title, updatedAt: designChat.updatedAt })
+      .select({
+        id: designChat.id,
+        title: designChat.title,
+        githubRepositoryId: designChat.githubRepositoryId,
+        githubRepositoryFullName: designChat.githubRepositoryFullName,
+        updatedAt: designChat.updatedAt,
+      })
       .from(designChat)
       .where(and(eq(designChat.id, input.id), eq(designChat.userId, context.user.id)))
       .limit(1)
@@ -431,7 +486,7 @@ const saveChat = protectedProcedure
       .update(designChat)
       .set({
         title: input.title,
-        messages: input.messages as UIMessage[],
+        messages: sanitizeChatMessagesForStorage(input.messages),
         updatedAt: new Date(),
       })
       .where(and(eq(designChat.id, input.id), eq(designChat.userId, context.user.id)))
@@ -526,7 +581,152 @@ const getCurrentUsage = protectedProcedure.handler(({ context }) =>
   getUsageStatus(context.user.id),
 )
 
-const getAuthConfig = os.handler(() => ({ googleOAuthEnabled }))
+function githubProcedureError(error: unknown): never {
+  if (error instanceof GitHubIntegrationError) {
+    if (error.code === 'RECONNECT_REQUIRED') {
+      throw new ORPCError('UNAUTHORIZED', { message: error.message })
+    }
+    if (error.code === 'ACCESS_DENIED') {
+      throw new ORPCError('FORBIDDEN', { message: error.message })
+    }
+    if (error.code === 'RATE_LIMITED') {
+      throw new ORPCError('TOO_MANY_REQUESTS', { message: error.message })
+    }
+    throw new ORPCError('BAD_REQUEST', { message: error.message })
+  }
+  throw error
+}
+
+const getGithubStatus = protectedProcedure.handler(async ({ context }) => {
+  try {
+    return await getGitHubStatus(context.user.id)
+  } catch (error) {
+    return githubProcedureError(error)
+  }
+})
+
+const listGithubRepositories = protectedProcedure.handler(async ({ context }) => {
+  try {
+    return await listGitHubRepositories(context.user.id)
+  } catch (error) {
+    return githubProcedureError(error)
+  }
+})
+
+const refreshGithub = protectedProcedure.handler(async ({ context }) => {
+  try {
+    await syncGitHubInstallations(context.user.id)
+    return await listGitHubRepositories(context.user.id)
+  } catch (error) {
+    return githubProcedureError(error)
+  }
+})
+
+const getDesignGithubRepository = protectedProcedure
+  .input(z.object({ designId: z.string().min(1).max(128) }))
+  .handler(async ({ context, input }) => {
+    const [repository] = await db
+      .select({
+        installationId: designGithubRepository.installationId,
+        id: designGithubRepository.repositoryId,
+        owner: designGithubRepository.owner,
+        name: designGithubRepository.name,
+        defaultBranch: designGithubRepository.defaultBranch,
+      })
+      .from(designGithubRepository)
+      .where(
+        and(
+          eq(designGithubRepository.designId, input.designId),
+          eq(designGithubRepository.userId, context.user.id),
+        ),
+      )
+      .limit(1)
+    return repository ? { ...repository, fullName: `${repository.owner}/${repository.name}` } : null
+  })
+
+const bindDesignGithubRepository = protectedProcedure
+  .input(
+    z.object({
+      designId: z.string().min(1).max(128),
+      installationId: z.string().min(1).max(64),
+      repositoryId: z.string().min(1).max(64),
+    }),
+  )
+  .handler(async ({ context, input }) => {
+    const [ownedDesign] = await db
+      .select({ id: design.id })
+      .from(design)
+      .where(and(eq(design.id, input.designId), eq(design.userId, context.user.id)))
+      .limit(1)
+    if (!ownedDesign) throw new ORPCError('NOT_FOUND')
+
+    try {
+      const repositories = await listGitHubRepositories(context.user.id)
+      const repository = repositories.find(
+        (candidate) =>
+          candidate.installationId === input.installationId &&
+          candidate.id === input.repositoryId,
+      )
+      if (!repository) throw new ORPCError('FORBIDDEN', { message: 'Repository access was not granted.' })
+      await db
+        .insert(designGithubRepository)
+        .values({
+          designId: input.designId,
+          userId: context.user.id,
+          installationId: repository.installationId,
+          repositoryId: repository.id,
+          owner: repository.owner,
+          name: repository.name,
+          defaultBranch: repository.defaultBranch,
+        })
+        .onConflictDoUpdate({
+          target: [designGithubRepository.designId, designGithubRepository.userId],
+          set: {
+            installationId: repository.installationId,
+            repositoryId: repository.id,
+            owner: repository.owner,
+            name: repository.name,
+            defaultBranch: repository.defaultBranch,
+            updatedAt: new Date(),
+          },
+        })
+      return {
+        installationId: repository.installationId,
+        id: repository.id,
+        owner: repository.owner,
+        name: repository.name,
+        fullName: repository.fullName,
+        defaultBranch: repository.defaultBranch,
+      }
+    } catch (error) {
+      return githubProcedureError(error)
+    }
+  })
+
+const clearDesignGithubRepository = protectedProcedure
+  .input(z.object({ designId: z.string().min(1).max(128) }))
+  .handler(async ({ context, input }) => {
+    const deleted = await db
+      .delete(designGithubRepository)
+      .where(
+        and(
+          eq(designGithubRepository.designId, input.designId),
+          eq(designGithubRepository.userId, context.user.id),
+        ),
+      )
+      .returning({ id: designGithubRepository.repositoryId })
+    return { cleared: deleted.length > 0 }
+  })
+
+const disconnectGithub = protectedProcedure.handler(async ({ context }) => {
+  try {
+    return await disconnectGitHub(context.user.id)
+  } catch (error) {
+    return githubProcedureError(error)
+  }
+})
+
+const getAuthConfig = os.handler(() => ({ googleOAuthEnabled, githubEnabled }))
 
 const getPreviewAccess = signedInProcedure.handler(async ({ context }) => {
   const [account] = await db
@@ -677,6 +877,15 @@ export const appRouter = {
   },
   usage: {
     get: getCurrentUsage,
+  },
+  github: {
+    status: getGithubStatus,
+    repositories: listGithubRepositories,
+    refresh: refreshGithub,
+    binding: getDesignGithubRepository,
+    bind: bindDesignGithubRepository,
+    clear: clearDesignGithubRepository,
+    disconnect: disconnectGithub,
   },
   admin: {
     listUsers: listUsersWithUsage,

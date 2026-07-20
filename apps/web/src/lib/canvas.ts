@@ -11,6 +11,12 @@ export interface ElementActions {
   createElements: (els: Omit<CanvasElement, 'id'>[]) => CanvasElement[]
   updateElement: (id: string, patch: Partial<Omit<CanvasElement, 'id'>>) => CanvasElement | null
   deleteElement: (id: string) => boolean
+  // Returns the resulting bottom-to-top id order.
+  reorderElements: (orderedIds: string[]) => string[]
+  // Assigns a fresh shared groupId; null when fewer than 2 of the ids exist.
+  groupElements: (ids: string[]) => { groupId: string; ids: string[] } | null
+  // Clears groupId on the given ids; returns how many were actually grouped.
+  ungroupElements: (ids: string[]) => number
 }
 
 export type ElementPatch = Partial<Omit<CanvasElement, 'id'>>
