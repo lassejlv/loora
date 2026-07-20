@@ -364,7 +364,7 @@ export const oauthApplication = pgTable(
     metadata: text('metadata'),
     clientId: text('client_id').unique(),
     clientSecret: text('client_secret'),
-    redirectURLs: text('redirect_urls'),
+    redirectUrls: text('redirect_urls'),
     type: text('type'),
     disabled: boolean('disabled').default(false),
     userId: text('user_id'),
