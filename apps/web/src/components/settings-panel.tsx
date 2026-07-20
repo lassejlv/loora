@@ -15,6 +15,7 @@ import { orpc } from '#/lib/orpc-client'
 import { ChatGPTAccount } from '#/components/chatgpt-account'
 import { CreditTopUp } from '#/components/credit-top-up'
 import { GitHubAccount } from '#/components/github-account'
+import { McpSessions } from '#/components/mcp-sessions'
 
 interface UsageStatus {
   dailyUsd: number
@@ -415,9 +416,14 @@ function AdminTab() {
 export function SettingsPanel() {
   const { data: session } = authClient.useSession()
   const isAdmin = session?.user.isAdmin === true
-  const defaultTab = typeof window !== 'undefined' &&
-    new URLSearchParams(window.location.search).get('settings') === 'github'
-    ? 'github'
+  const integrationSettings = typeof window !== 'undefined'
+    ? new URLSearchParams(window.location.search).get('settings')
+    : null
+  const defaultTab = integrationSettings === 'github' ||
+    integrationSettings === 'chatgpt' ||
+    integrationSettings === 'mcp' ||
+    integrationSettings === 'integrations'
+    ? 'integrations'
     : typeof window !== 'undefined' &&
         new URLSearchParams(window.location.search).get('topup') === 'success'
       ? 'billing'
@@ -432,10 +438,9 @@ export function SettingsPanel() {
   return (
     <div className="flex h-full min-h-0 flex-col overflow-y-auto p-6">
       <Tabs defaultValue={defaultTab} className="flex max-w-md flex-col gap-6">
-        <TabsList className={`grid w-full ${isAdmin ? 'grid-cols-5' : 'grid-cols-4'}`}>
+        <TabsList className={`grid w-full ${isAdmin ? 'grid-cols-4' : 'grid-cols-3'}`}>
           <TabsTab value="account">Account</TabsTab>
-          <TabsTab value="chatgpt">ChatGPT</TabsTab>
-          <TabsTab value="github">GitHub</TabsTab>
+          <TabsTab value="integrations">Integrations</TabsTab>
           <TabsTab value="billing">Billing</TabsTab>
           {isAdmin ? <TabsTab value="admin">Admin</TabsTab> : null}
         </TabsList>
@@ -462,24 +467,36 @@ export function SettingsPanel() {
           </div>
         </TabsPanel>
 
-        <TabsPanel value="chatgpt" className="flex flex-col gap-5">
-          <div>
-            <h2 className="text-sm font-semibold">ChatGPT</h2>
-            <p className="mt-1 text-xs text-muted-foreground">
-              Connect your own account for ChatGPT-backed AI models.
-            </p>
-          </div>
-          <ChatGPTAccount />
-        </TabsPanel>
+        <TabsPanel value="integrations" className="flex flex-col gap-8">
+          <section className="flex flex-col gap-5">
+            <div>
+              <h2 className="text-sm font-semibold">ChatGPT</h2>
+              <p className="mt-1 text-xs text-muted-foreground">
+                Connect your own account for ChatGPT-backed AI models.
+              </p>
+            </div>
+            <ChatGPTAccount />
+          </section>
 
-        <TabsPanel value="github" className="flex flex-col gap-5">
-          <div>
-            <h2 className="text-sm font-semibold">GitHub</h2>
-            <p className="mt-1 text-xs text-muted-foreground">
-              Attach read-only repository context to individual Loora designs.
-            </p>
-          </div>
-          <GitHubAccount />
+          <section className="flex flex-col gap-5 border-t border-border pt-8">
+            <div>
+              <h2 className="text-sm font-semibold">GitHub</h2>
+              <p className="mt-1 text-xs text-muted-foreground">
+                Attach read-only repository context to individual Loora designs.
+              </p>
+            </div>
+            <GitHubAccount />
+          </section>
+
+          <section className="flex flex-col gap-5 border-t border-border pt-8">
+            <div>
+              <h2 className="text-sm font-semibold">MCP</h2>
+              <p className="mt-1 text-xs text-muted-foreground">
+                Review and revoke clients connected through the Loora MCP server.
+              </p>
+            </div>
+            <McpSessions />
+          </section>
         </TabsPanel>
 
         <TabsPanel value="billing">

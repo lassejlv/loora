@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, lt, or } from 'drizzle-orm'
+import { and, asc, desc, eq, isNotNull, lt, or } from 'drizzle-orm'
 import { ORPCError, os } from '@orpc/server'
 import { z } from 'zod'
 import { db } from '@loora/db'
@@ -8,6 +8,9 @@ import {
   designChat,
   designGithubRepository,
   designVersion,
+  oauthAccessToken,
+  oauthApplication,
+  oauthConsent,
   user,
 } from '@loora/db/schema'
 import { googleOAuthEnabled, type getSession } from '@loora/auth'
@@ -40,6 +43,7 @@ import {
   syncGitHubInstallations,
 } from '@loora/auth/github'
 import { sanitizeChatMessagesForStorage } from './chat-storage'
+import { summarizeMcpSessions } from './mcp-sessions'
 
 type Session = Awaited<ReturnType<typeof getSession>>
 
@@ -731,6 +735,56 @@ const disconnectGithub = protectedProcedure.handler(async ({ context }) => {
   }
 })
 
+const listMcpSessions = signedInProcedure.handler(async ({ context }) => {
+  const rows = await db
+    .select({
+      clientId: oauthAccessToken.clientId,
+      clientName: oauthApplication.name,
+      createdAt: oauthAccessToken.createdAt,
+      updatedAt: oauthAccessToken.updatedAt,
+      accessTokenExpiresAt: oauthAccessToken.accessTokenExpiresAt,
+      refreshTokenExpiresAt: oauthAccessToken.refreshTokenExpiresAt,
+    })
+    .from(oauthAccessToken)
+    .leftJoin(oauthApplication, eq(oauthAccessToken.clientId, oauthApplication.clientId))
+    .where(
+      and(
+        eq(oauthAccessToken.userId, context.user.id),
+        isNotNull(oauthAccessToken.clientId),
+      ),
+    )
+    .orderBy(desc(oauthAccessToken.updatedAt))
+
+  return summarizeMcpSessions(rows)
+})
+
+const revokeMcpSession = signedInProcedure
+  .input(z.object({ clientId: z.string().min(1).max(256) }))
+  .handler(async ({ context, input }) => {
+    const [tokens, consents] = await Promise.all([
+      db
+        .delete(oauthAccessToken)
+        .where(
+          and(
+            eq(oauthAccessToken.userId, context.user.id),
+            eq(oauthAccessToken.clientId, input.clientId),
+          ),
+        )
+        .returning({ id: oauthAccessToken.id }),
+      db
+        .delete(oauthConsent)
+        .where(
+          and(
+            eq(oauthConsent.userId, context.user.id),
+            eq(oauthConsent.clientId, input.clientId),
+          ),
+        )
+        .returning({ id: oauthConsent.id }),
+    ])
+
+    return { revoked: tokens.length > 0 || consents.length > 0 }
+  })
+
 const getAuthConfig = os.handler(() => ({ googleOAuthEnabled, githubEnabled }))
 
 const getPreviewAccess = signedInProcedure.handler(async ({ context }) => {
@@ -912,6 +966,10 @@ export const appRouter = {
     bind: bindDesignGithubRepository,
     clear: clearDesignGithubRepository,
     disconnect: disconnectGithub,
+  },
+  mcp: {
+    sessions: listMcpSessions,
+    revoke: revokeMcpSession,
   },
   admin: {
     listUsers: listUsersWithUsage,

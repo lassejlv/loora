@@ -25,7 +25,7 @@ export const Route = createFileRoute('/api/github/install')({
             headers: { Location: flow.url, 'Set-Cookie': flow.cookie },
           })
         } catch {
-          return Response.redirect(new URL('/?settings=github&github=failed', request.url), 302)
+          return Response.redirect(new URL('/?settings=integrations&github=failed', request.url), 302)
         }
       },
     },
