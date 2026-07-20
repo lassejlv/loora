@@ -10,6 +10,7 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as DotwellKnownOauthAuthorizationServerRouteImport } from './routes/[.]well-known.oauth-authorization-server'
 import { Route as ApiChatRouteImport } from './routes/api.chat'
 import { Route as ApiAssetIdRouteImport } from './routes/api.asset.$id'
 import { Route as ApiAuthSplatRouteImport } from './routes/api.auth.$'
@@ -28,6 +29,12 @@ const IndexRoute = IndexRouteImport.update({
   path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
+const DotwellKnownOauthAuthorizationServerRoute =
+  DotwellKnownOauthAuthorizationServerRouteImport.update({
+    id: '/.well-known/oauth-authorization-server',
+    path: '/.well-known/oauth-authorization-server',
+    getParentRoute: () => rootRouteImport,
+  } as any)
 const ApiChatRoute = ApiChatRouteImport.update({
   id: '/api/chat',
   path: '/api/chat',
@@ -91,6 +98,7 @@ const ApiHandoffTokenAssetIdRoute = ApiHandoffTokenAssetIdRouteImport.update({
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/.well-known/oauth-authorization-server': typeof DotwellKnownOauthAuthorizationServerRoute
   '/api/chat': typeof ApiChatRoute
   '/api/asset/$id': typeof ApiAssetIdRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
@@ -106,6 +114,7 @@ export interface FileRoutesByFullPath {
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/.well-known/oauth-authorization-server': typeof DotwellKnownOauthAuthorizationServerRoute
   '/api/chat': typeof ApiChatRoute
   '/api/asset/$id': typeof ApiAssetIdRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
@@ -122,6 +131,7 @@ export interface FileRoutesByTo {
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/.well-known/oauth-authorization-server': typeof DotwellKnownOauthAuthorizationServerRoute
   '/api/chat': typeof ApiChatRoute
   '/api/asset/$id': typeof ApiAssetIdRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
@@ -139,6 +149,7 @@ export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | '/'
+    | '/.well-known/oauth-authorization-server'
     | '/api/chat'
     | '/api/asset/$id'
     | '/api/auth/$'
@@ -154,6 +165,7 @@ export interface FileRouteTypes {
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
+    | '/.well-known/oauth-authorization-server'
     | '/api/chat'
     | '/api/asset/$id'
     | '/api/auth/$'
@@ -169,6 +181,7 @@ export interface FileRouteTypes {
   id:
     | '__root__'
     | '/'
+    | '/.well-known/oauth-authorization-server'
     | '/api/chat'
     | '/api/asset/$id'
     | '/api/auth/$'
@@ -185,6 +198,7 @@ export interface FileRouteTypes {
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  DotwellKnownOauthAuthorizationServerRoute: typeof DotwellKnownOauthAuthorizationServerRoute
   ApiChatRoute: typeof ApiChatRoute
   ApiAssetIdRoute: typeof ApiAssetIdRoute
   ApiAuthSplatRoute: typeof ApiAuthSplatRoute
@@ -205,6 +219,13 @@ declare module '@tanstack/react-router' {
       path: '/'
       fullPath: '/'
       preLoaderRoute: typeof IndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/.well-known/oauth-authorization-server': {
+      id: '/.well-known/oauth-authorization-server'
+      path: '/.well-known/oauth-authorization-server'
+      fullPath: '/.well-known/oauth-authorization-server'
+      preLoaderRoute: typeof DotwellKnownOauthAuthorizationServerRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/api/chat': {
@@ -308,6 +329,8 @@ const ApiHandoffTokenRouteWithChildren = ApiHandoffTokenRoute._addFileChildren(
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  DotwellKnownOauthAuthorizationServerRoute:
+    DotwellKnownOauthAuthorizationServerRoute,
   ApiChatRoute: ApiChatRoute,
   ApiAssetIdRoute: ApiAssetIdRoute,
   ApiAuthSplatRoute: ApiAuthSplatRoute,

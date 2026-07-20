@@ -1,0 +1,16 @@
+{
+  "$schema": "https://railway.app/railway.schema.json",
+  "build": {
+    "builder": "DOCKERFILE",
+    "dockerfilePath": "apps/mcp/Dockerfile",
+    "watchPatterns": [
+      "apps/mcp/**",
+      "packages/db/**",
+      "packages/auth/**",
+      "package.json",
+      "bun.lock",
+      "bunfig.toml",
+      "apps/mcp/Dockerfile"
+    ]
+  }
+}

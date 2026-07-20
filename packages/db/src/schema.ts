@@ -352,6 +352,67 @@ export const chatgptSession = pgTable('chatgpt_session', {
     .notNull(),
 })
 
+// OAuth 2.1 provider tables for the Better Auth `mcp` plugin (remote MCP
+// server auth). Clients self-register (RFC 7591) as public PKCE clients, so
+// clientSecret and userId are nullable.
+export const oauthApplication = pgTable(
+  'oauth_application',
+  {
+    id: text('id').primaryKey(),
+    name: text('name'),
+    icon: text('icon'),
+    metadata: text('metadata'),
+    clientId: text('client_id').unique(),
+    clientSecret: text('client_secret'),
+    redirectURLs: text('redirect_urls'),
+    type: text('type'),
+    disabled: boolean('disabled').default(false),
+    userId: text('user_id'),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+    updatedAt: timestamp('updated_at')
+      .defaultNow()
+      .$onUpdate(() => new Date())
+      .notNull(),
+  },
+)
+
+export const oauthAccessToken = pgTable(
+  'oauth_access_token',
+  {
+    id: text('id').primaryKey(),
+    accessToken: text('access_token').unique(),
+    refreshToken: text('refresh_token').unique(),
+    accessTokenExpiresAt: timestamp('access_token_expires_at'),
+    refreshTokenExpiresAt: timestamp('refresh_token_expires_at'),
+    clientId: text('client_id'),
+    userId: text('user_id').references(() => user.id, { onDelete: 'cascade' }),
+    scopes: text('scopes'),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+    updatedAt: timestamp('updated_at')
+      .defaultNow()
+      .$onUpdate(() => new Date())
+      .notNull(),
+  },
+  (table) => [index('oauth_access_token_user_id_idx').on(table.userId)],
+)
+
+export const oauthConsent = pgTable(
+  'oauth_consent',
+  {
+    id: text('id').primaryKey(),
+    clientId: text('client_id'),
+    userId: text('user_id').references(() => user.id, { onDelete: 'cascade' }),
+    scopes: text('scopes'),
+    consentGiven: boolean('consent_given'),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+    updatedAt: timestamp('updated_at')
+      .defaultNow()
+      .$onUpdate(() => new Date())
+      .notNull(),
+  },
+  (table) => [index('oauth_consent_user_id_idx').on(table.userId)],
+)
+
 export const userRelations = relations(user, ({ many }) => ({
   sessions: many(session),
   accounts: many(account),

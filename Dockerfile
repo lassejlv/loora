@@ -7,6 +7,7 @@ WORKDIR /app
 # the lockfile, or bunfig (isolated linker config) changes.
 COPY package.json bun.lock bunfig.toml ./
 COPY apps/web/package.json apps/web/
+COPY apps/mcp/package.json apps/mcp/
 COPY packages/db/package.json packages/db/
 COPY packages/auth/package.json packages/auth/
 COPY packages/rpc/package.json packages/rpc/

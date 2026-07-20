@@ -1,5 +1,6 @@
 import { betterAuth } from 'better-auth'
 import { drizzleAdapter } from 'better-auth/adapters/drizzle'
+import { mcp, oAuthDiscoveryMetadata } from 'better-auth/plugins'
 import { tanstackStartCookies } from 'better-auth/tanstack-start'
 import { polar, portal, webhooks } from '@polar-sh/better-auth'
 import { db } from '@loora/db'
@@ -79,9 +80,25 @@ export const auth = betterAuth({
           }),
         ]
       : []),
+    // OAuth 2.1 authorization server for the remote MCP server
+    // (mcp.loora.design). Handles dynamic client registration, PKCE authorize
+    // and token endpoints under /api/auth/mcp/*; unauthenticated authorize
+    // requests land on the app root, and the flow resumes once a session
+    // exists. The resource server validates the issued tokens against the
+    // same database (apps/mcp).
+    mcp({
+      loginPage: '/',
+      ...(process.env.MCP_RESOURCE_URL?.trim()
+        ? { resource: process.env.MCP_RESOURCE_URL.trim() }
+        : {}),
+    }),
     tanstackStartCookies(),
   ],
 })
+
+// Some MCP clients skip the WWW-Authenticate pointer and probe the site root
+// for /.well-known/oauth-authorization-server; apps/web mounts this there.
+export const mcpOAuthDiscoveryHandler = oAuthDiscoveryMetadata(auth)
 
 export async function getSession(request: Request) {
   return auth.api.getSession({ headers: request.headers })
