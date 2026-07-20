@@ -19,7 +19,7 @@ export interface NormalizedEntitlement {
 }
 
 export function remainingCredits(balance: number) {
-  return Math.max(0, -balance)
+  return Math.max(0, balance)
 }
 
 export function creditUnitsForCost(costMicroUsd: number) {

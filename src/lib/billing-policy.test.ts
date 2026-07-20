@@ -77,13 +77,31 @@ describe('billing policy', () => {
     expect(cachedEntitlementGrantsAccess(normalized, now)).toBe(false)
   })
 
-  test('converts negative balances and rounds one-cent credit units', () => {
-    expect(remainingCredits(-37)).toBe(37)
+  test('uses Polar meter balance as remaining credits and rounds one-cent credit units', () => {
+    expect(remainingCredits(100)).toBe(100)
     expect(remainingCredits(0)).toBe(0)
-    expect(remainingCredits(12)).toBe(0)
+    expect(remainingCredits(-12)).toBe(0)
     expect(creditUnitsForCost(0)).toBe(1)
     expect(creditUnitsForCost(10_000)).toBe(1)
     expect(creditUnitsForCost(10_001)).toBe(2)
+  })
+
+  test('keeps a newly credited Pro meter available for generation', () => {
+    const normalized = normalizeCustomerState(state({
+      activeSubscriptions: [subscription('pro')],
+      grantedBenefits: [{ benefitId: 'access' } as never],
+      activeMeters: [{
+        meterId: 'meter',
+        balance: 100,
+        creditedUnits: 100,
+        consumedUnits: 0,
+      } as never],
+    }), config, now)
+
+    expect(normalized.meterBalance).toBe(100)
+    expect(normalized.creditedUnits).toBe(100)
+    expect(normalized.consumedUnits).toBe(0)
+    expect(remainingCredits(normalized.meterBalance)).toBe(100)
   })
 
   test('accepts duplicate timestamps and rejects older webhook events', () => {
