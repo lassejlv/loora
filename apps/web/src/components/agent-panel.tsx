@@ -10,8 +10,6 @@ import { nanoid } from 'nanoid'
 import {
   BookOpenIcon,
   CheckIcon,
-  GithubIcon,
-  GitBranchIcon,
   GroupIcon,
   LayersIcon,
   MoveIcon,
@@ -24,7 +22,6 @@ import {
   MessageSquareIcon,
   PenLineIcon,
   PlusIcon,
-  RefreshCwIcon,
   Trash2Icon,
   XIcon,
 } from 'lucide-react'
@@ -67,13 +64,8 @@ type ChatState = ReturnType<typeof useChat>
 type ChatSummary = {
   id: string
   title: string
-  githubRepositoryId: string | null
-  githubRepositoryFullName: string | null
   updatedAt: number
 }
-type GitHubStatus = Awaited<ReturnType<typeof orpc.github.status>>
-type GitHubRepository = Awaited<ReturnType<typeof orpc.github.repositories>>[number]
-type RepositoryBinding = Exclude<Awaited<ReturnType<typeof orpc.github.binding>>, null>
 
 // Shimmer until the assistant starts producing visible text (covers tool rounds too).
 function isThinking(status: ChatState['status'], messages: ChatState['messages']) {
@@ -196,10 +188,6 @@ export const AgentPanel = memo(function AgentPanel({
   const [stallError, setStallError] = useState<string | null>(null)
   const [chats, setChats] = useState<ChatSummary[]>([])
   const [activeChatId, setActiveChatId] = useState<string | null>(null)
-  const [githubStatus, setGitHubStatus] = useState<GitHubStatus | null>(null)
-  const [repositories, setRepositories] = useState<GitHubRepository[]>([])
-  const [repositoriesLoading, setRepositoriesLoading] = useState(false)
-  const [repositoryBinding, setRepositoryBinding] = useState<RepositoryBinding | null | undefined>(undefined)
   const recoveryRetries = useRef(0)
   const retryResponse = useRef<() => void>(() => {})
   const forceCanvasAction = useRef(false)
@@ -207,9 +195,6 @@ export const AgentPanel = memo(function AgentPanel({
   chatsRef.current = chats
   const composerRef = useRef<HTMLTextAreaElement>(null)
   const activeChat = chats.find((chat) => chat.id === activeChatId)
-  const chatRepositoryMatches =
-    repositoryBinding !== undefined &&
-    (activeChat?.githubRepositoryId ?? null) === (repositoryBinding?.id ?? null)
 
   const { messages, setMessages, sendMessage, regenerate, addToolOutput, status, stop, error } =
     useChat({
@@ -494,7 +479,7 @@ export const AgentPanel = memo(function AgentPanel({
   // busy or still loading so the caller can keep the comment draft open.
   if (sendRef) {
     sendRef.current = (text: string): boolean => {
-      if (!chatReady || !chatRepositoryMatches || status === 'streaming' || status === 'submitted') return false
+      if (!chatReady || status === 'streaming' || status === 'submitted') return false
       setStallError(null)
       recoveryRetries.current = 0
       if (activeChat?.title === 'New chat') {
@@ -652,28 +637,6 @@ export const AgentPanel = memo(function AgentPanel({
   }, [docId, ready, setMessages])
 
   useEffect(() => {
-    let cancelled = false
-    setRepositoryBinding(undefined)
-    if (!ready) return
-    void Promise.all([
-      orpc.github.binding({ designId: docId }),
-      orpc.github.status(),
-    ])
-      .then(([binding, github]) => {
-        if (!cancelled) {
-          setRepositoryBinding(binding)
-          setGitHubStatus(github)
-        }
-      })
-      .catch(() => {
-        if (!cancelled) setRepositoryBinding(null)
-      })
-    return () => {
-      cancelled = true
-    }
-  }, [docId, ready])
-
-  useEffect(() => {
     if (!activeChatId) return
     let cancelled = false
     setChatReady(false)
@@ -731,48 +694,6 @@ export const AgentPanel = memo(function AgentPanel({
     })
     setChats((current) => [created, ...current])
     setActiveChatId(created.id)
-  }
-
-  const loadGithubRepositories = async () => {
-    if (repositoriesLoading) return
-    setRepositoriesLoading(true)
-    try {
-      const github = await orpc.github.status()
-      setGitHubStatus(github)
-      setRepositories(github.connected ? await orpc.github.repositories() : [])
-      setRepositoryBinding(await orpc.github.binding({ designId: docId }))
-    } catch {
-      setRepositories([])
-    } finally {
-      setRepositoriesLoading(false)
-    }
-  }
-
-  const selectRepository = async (repository: GitHubRepository | null) => {
-    if (status === 'streaming' || status === 'submitted') return
-    const currentId = repositoryBinding?.id ?? null
-    const currentInstallationId = repositoryBinding?.installationId ?? null
-    if (
-      (repository?.id ?? null) === currentId &&
-      (repository?.installationId ?? null) === currentInstallationId
-    ) return
-    setStallError(null)
-    try {
-      if (repository) {
-        const binding = await orpc.github.bind({
-          designId: docId,
-          installationId: repository.installationId,
-          repositoryId: repository.id,
-        })
-        setRepositoryBinding(binding)
-      } else {
-        await orpc.github.clear({ designId: docId })
-        setRepositoryBinding(null)
-      }
-      await createChat()
-    } catch {
-      setStallError('Could not change the repository. Refresh GitHub access and try again.')
-    }
   }
 
   const answerQuestion = useCallback((toolCallId: string, answer: string) => {
@@ -840,62 +761,6 @@ export const AgentPanel = memo(function AgentPanel({
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
-        <DropdownMenu onOpenChange={(open) => open && void loadGithubRepositories()}>
-          <DropdownMenuTrigger asChild>
-            <button
-              type="button"
-              disabled={status === 'streaming' || status === 'submitted'}
-              className="ml-auto flex min-w-0 max-w-36 items-center gap-1.5 rounded-md px-2 py-1 text-xs text-muted-foreground outline-none hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none"
-              title={repositoryBinding?.fullName ?? 'Repository context'}
-            >
-              <GitBranchIcon className="size-3.5 shrink-0" />
-              <span className="truncate">{repositoryBinding?.fullName ?? 'No repository'}</span>
-              <ChevronDownIcon className="size-3 shrink-0" />
-            </button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" className="max-h-80 w-72 overflow-y-auto">
-            <DropdownMenuLabel className="text-xs text-muted-foreground">
-              Repository for this design
-            </DropdownMenuLabel>
-            {repositoriesLoading || !githubStatus ? (
-              <DropdownMenuItem disabled>Checking GitHub…</DropdownMenuItem>
-            ) : !githubStatus.enabled ? (
-              <DropdownMenuItem disabled>GitHub is not configured</DropdownMenuItem>
-            ) : !githubStatus.connected ? (
-              <DropdownMenuItem onSelect={() => window.location.assign('/api/github/connect')}>
-                <GithubIcon />
-                Connect GitHub
-              </DropdownMenuItem>
-            ) : (
-              <>
-                <DropdownMenuItem onSelect={() => void selectRepository(null)}>
-                  <XIcon />
-                  No repository
-                  {!repositoryBinding ? <CheckIcon className="ml-auto" /> : null}
-                </DropdownMenuItem>
-                {repositories.slice(0, 100).map((repository) => (
-                  <DropdownMenuItem
-                    key={`${repository.installationId}:${repository.id}`}
-                    onSelect={() => void selectRepository(repository)}
-                  >
-                    <GithubIcon />
-                    <span className="min-w-0 flex-1 truncate">{repository.fullName}</span>
-                    {repository.id === repositoryBinding?.id ? <CheckIcon /> : null}
-                  </DropdownMenuItem>
-                ))}
-                <DropdownMenuSeparator />
-                <DropdownMenuItem onSelect={() => void loadGithubRepositories()}>
-                  <RefreshCwIcon />
-                  Refresh repositories
-                </DropdownMenuItem>
-                <DropdownMenuItem onSelect={() => window.location.assign('/api/github/install')}>
-                  <PlusIcon />
-                  Add repositories
-                </DropdownMenuItem>
-              </>
-            )}
-          </DropdownMenuContent>
-        </DropdownMenu>
       </header>
 
       <Conversation className="min-h-0 flex-1">
@@ -928,12 +793,6 @@ export const AgentPanel = memo(function AgentPanel({
               {stallError || readableError(error?.message) || 'Request failed.'}
             </p>
           )}
-          {activeChat && repositoryBinding !== undefined && !chatRepositoryMatches ? (
-            <p className="rounded-md border bg-muted px-3 py-2 text-xs text-muted-foreground">
-              This chat used {activeChat.githubRepositoryFullName ?? 'no repository'}. Start a new chat to use{' '}
-              {repositoryBinding?.fullName ?? 'no repository'}.
-            </p>
-          ) : null}
         </ConversationContent>
         <ConversationScrollButton />
       </Conversation>
@@ -943,7 +802,7 @@ export const AgentPanel = memo(function AgentPanel({
           accept={imageInputsEnabled ? 'image/*' : 'application/x-loora-disabled'}
           onSubmit={async ({ text, files }) => {
             const trimmed = text.trim()
-            if (!trimmed || !chatReady || !chatRepositoryMatches || status === 'streaming' || status === 'submitted') return
+            if (!trimmed || !chatReady || status === 'streaming' || status === 'submitted') return
             setInput('')
             setStallError(null)
             recoveryRetries.current = 0
@@ -986,11 +845,9 @@ export const AgentPanel = memo(function AgentPanel({
             placeholder={
               !chatReady
                 ? 'Loading chat…'
-                : chatRepositoryMatches
-                  ? 'Describe a change…'
-                  : 'Start a new chat for this repository…'
+                : 'Describe a change…'
             }
-            disabled={!chatReady || !chatRepositoryMatches}
+            disabled={!chatReady}
             className="w-full"
           />
           <PromptInputFooter>
@@ -1008,7 +865,7 @@ export const AgentPanel = memo(function AgentPanel({
               disabled={
                 status !== 'streaming' &&
                 status !== 'submitted' &&
-                (!chatReady || !chatRepositoryMatches || !input.trim())
+                (!chatReady || !input.trim())
               }
             />
           </PromptInputFooter>
@@ -1130,6 +987,7 @@ const TOOL_META = {
   readElement: { icon: BookOpenIcon, label: 'Read' },
   loadSkill: { icon: BookOpenIcon, label: 'Skill' },
   viewCanvas: { icon: EyeIcon, label: 'Verify' },
+  listGitHubRepositories: { icon: LayersIcon, label: 'Listed repositories' },
   listRepositoryTree: { icon: LayersIcon, label: 'Browsed repository' },
   searchRepositoryCode: { icon: SearchIcon, label: 'Searched repository' },
   readRepositoryFile: { icon: BookOpenIcon, label: 'Read repository file' },
@@ -1172,14 +1030,17 @@ function toolSummary(name: string, part: ToolPart, elements: CanvasElement[]) {
     const count = (input.ids as unknown[] | undefined)?.length ?? 0
     return `${count} element${count === 1 ? '' : 's'}`
   }
+  if (name === 'listGitHubRepositories') {
+    return String(input.query ?? 'all accessible repositories')
+  }
   if (name === 'listRepositoryTree') {
-    return String(input.pathPrefix ?? 'repository root')
+    return `${String(input.repository ?? 'repository')} · ${String(input.pathPrefix ?? 'root')}`
   }
   if (name === 'searchRepositoryCode') {
-    return String(input.query ?? '')
+    return `${String(input.repository ?? 'repository')} · ${String(input.query ?? '')}`
   }
   if (name === 'readRepositoryFile' || name === 'viewRepositoryImage') {
-    return String(input.path ?? '')
+    return `${String(input.repository ?? 'repository')} · ${String(input.path ?? '')}`
   }
   const target = elements.find((s) => s.id === input.id)
   if (name === 'readElement' || name === 'readElementLogs' || name === 'viewElement') {
@@ -1369,6 +1230,7 @@ const PAST_TENSE = {
   readElement: 'Read',
   loadSkill: 'Loaded skill',
   viewCanvas: 'Verified',
+  listGitHubRepositories: 'Listed',
   listRepositoryTree: 'Browsed',
   searchRepositoryCode: 'Searched',
   readRepositoryFile: 'Read',

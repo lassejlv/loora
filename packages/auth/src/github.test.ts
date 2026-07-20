@@ -5,10 +5,59 @@ import {
   isSensitiveRepositoryPath,
   normalizeRepositoryPath,
   redactRepositorySecrets,
+  selectGitHubRepository,
   verifyGitHubWebhookSignature,
+  type GitHubRepository,
 } from './github'
 
+const repositories: GitHubRepository[] = [
+  {
+    installationId: '1',
+    id: '10',
+    owner: 'Acme',
+    name: 'website',
+    fullName: 'Acme/website',
+    private: true,
+    archived: false,
+    defaultBranch: 'main',
+    updatedAt: null,
+  },
+  {
+    installationId: '2',
+    id: '20',
+    owner: 'Loora',
+    name: 'website',
+    fullName: 'Loora/website',
+    private: false,
+    archived: false,
+    defaultBranch: 'main',
+    updatedAt: null,
+  },
+  {
+    installationId: '2',
+    id: '21',
+    owner: 'Loora',
+    name: 'canvas',
+    fullName: 'Loora/canvas',
+    private: false,
+    archived: false,
+    defaultBranch: 'main',
+    updatedAt: null,
+  },
+]
+
 describe('GitHub repository safety', () => {
+  it('resolves exact repository names and rejects ambiguous shorthand', () => {
+    expect(selectGitHubRepository(repositories, 'github.com/acme/WEBSITE/').id).toBe('10')
+    expect(selectGitHubRepository(repositories, 'canvas').id).toBe('21')
+    expect(() => selectGitHubRepository(repositories, 'website')).toThrow(
+      'More than one accessible repository',
+    )
+    expect(() => selectGitHubRepository(repositories, 'missing/repository')).toThrow(
+      'is not accessible',
+    )
+  })
+
   it('normalizes relative repository paths and rejects traversal', () => {
     expect(normalizeRepositoryPath('./src\\app.tsx')).toBe('src/app.tsx')
 

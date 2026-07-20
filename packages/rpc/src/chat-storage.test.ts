@@ -9,10 +9,20 @@ describe('sanitizeChatMessagesForStorage', () => {
         role: 'assistant',
         parts: [
           {
+            type: 'tool-listGitHubRepositories',
+            toolCallId: 'repos-1',
+            state: 'output-available',
+            input: { query: 'acme', injected: 'do not save me' },
+            output: {
+              repositories: [{ fullName: 'acme/private-site', private: true }],
+              total: 1,
+            },
+          },
+          {
             type: 'tool-readRepositoryFile',
             toolCallId: 'read-1',
             state: 'output-available',
-            input: { path: 'src/app.ts', injected: 'do not save me' },
+            input: { repository: 'acme/site', path: 'src/app.ts', injected: 'do not save me' },
             output: {
               repository: 'acme/site',
               commitSha: 'abc123',
@@ -25,7 +35,7 @@ describe('sanitizeChatMessagesForStorage', () => {
             type: 'tool-viewRepositoryImage',
             toolCallId: 'image-1',
             state: 'output-available',
-            input: { path: 'public/hero.png' },
+            input: { repository: 'acme/site', path: 'public/hero.png' },
             output: {
               repository: 'acme/site',
               path: 'public/hero.png',
@@ -39,9 +49,10 @@ describe('sanitizeChatMessagesForStorage', () => {
 
     expect(JSON.stringify(message)).not.toContain('private source')
     expect(JSON.stringify(message)).not.toContain('very-large-base64')
+    expect(JSON.stringify(message)).not.toContain('acme/private-site')
     expect(JSON.stringify(message)).not.toContain('do not save me')
-    expect(message.parts[0]).toMatchObject({
-      input: { path: 'src/app.ts' },
+    expect(message.parts[1]).toMatchObject({
+      input: { repository: 'acme/site', path: 'src/app.ts' },
       output: {
         repository: 'acme/site',
         commitSha: 'abc123',

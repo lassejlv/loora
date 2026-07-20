@@ -1,6 +1,7 @@
 import type { UIMessage } from 'ai'
 
 const repositoryTools = new Set([
+  'listGitHubRepositories',
   'listRepositoryTree',
   'searchRepositoryCode',
   'readRepositoryFile',
@@ -24,8 +25,12 @@ function toolName(part: Record<string, unknown>): string | null {
 function compactRepositoryInput(name: string, value: unknown) {
   const input = record(value)
   if (!input) return value
+  if (name === 'listGitHubRepositories') {
+    return { query: input.query }
+  }
   if (name === 'listRepositoryTree') {
     return {
+      repository: input.repository,
       pathPrefix: input.pathPrefix,
       depth: input.depth,
       includeGenerated: input.includeGenerated,
@@ -33,6 +38,7 @@ function compactRepositoryInput(name: string, value: unknown) {
   }
   if (name === 'searchRepositoryCode') {
     return {
+      repository: input.repository,
       query: input.query,
       pathPrefix: input.pathPrefix,
       extension: input.extension,
@@ -41,12 +47,13 @@ function compactRepositoryInput(name: string, value: unknown) {
   }
   if (name === 'readRepositoryFile') {
     return {
+      repository: input.repository,
       path: input.path,
       startLine: input.startLine,
       endLine: input.endLine,
     }
   }
-  return { path: input.path }
+  return { repository: input.repository, path: input.path }
 }
 
 function compactRepositoryOutput(value: unknown) {

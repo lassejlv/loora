@@ -709,6 +709,65 @@ export interface GitHubRepositoryContext extends GitHubRepository {
   treeSha: string
 }
 
+export function selectGitHubRepository(
+  repositories: GitHubRepository[],
+  requestedRepository: string,
+): GitHubRepository {
+  const requested = requestedRepository.trim().replace(/^github\.com\//i, '').replace(/\/$/, '')
+  if (!requested || requested.split('/').some((part) => !part)) {
+    throw new GitHubIntegrationError('Use a repository name like owner/repository.', 'INVALID_PATH')
+  }
+
+  const exact = repositories.find(
+    (repository) => repository.fullName.toLowerCase() === requested.toLowerCase(),
+  )
+  if (exact) return exact
+
+  if (!requested.includes('/')) {
+    const matches = repositories.filter(
+      (repository) => repository.name.toLowerCase() === requested.toLowerCase(),
+    )
+    if (matches.length === 1) return matches[0]
+    if (matches.length > 1) {
+      throw new GitHubIntegrationError(
+        `More than one accessible repository is named ${requested}. Use owner/repository.`,
+        'INVALID_PATH',
+      )
+    }
+  }
+
+  throw new GitHubIntegrationError(
+    `Repository ${requested} is not accessible. List repositories to see the available names.`,
+    'ACCESS_DENIED',
+  )
+}
+
+async function hydrateGitHubRepositoryContext(
+  userId: string,
+  repository: GitHubRepository,
+): Promise<GitHubRepositoryContext> {
+  const accessToken = await getGitHubAccessToken(userId)
+  const commit = await githubRequest<{
+    sha: string
+    commit: { tree: { sha: string } }
+  }>(
+    `/repos/${encodeURIComponent(repository.owner)}/${encodeURIComponent(repository.name)}/commits/${encodeURIComponent(repository.defaultBranch)}`,
+    accessToken,
+  )
+  return { ...repository, accessToken, commitSha: commit.sha, treeSha: commit.commit.tree.sha }
+}
+
+export async function getGitHubRepositoryContextByName(
+  userId: string,
+  requestedRepository: string,
+): Promise<GitHubRepositoryContext> {
+  const repositories = await listGitHubRepositories(userId)
+  return hydrateGitHubRepositoryContext(
+    userId,
+    selectGitHubRepository(repositories, requestedRepository),
+  )
+}
+
 export async function getGitHubRepositoryContext(
   userId: string,
   designId: string,
@@ -795,15 +854,7 @@ export async function getGitHubRepositoryContext(
       )
   }
 
-  const accessToken = await getGitHubAccessToken(userId)
-  const commit = await githubRequest<{
-    sha: string
-    commit: { tree: { sha: string } }
-  }>(
-    `/repos/${encodeURIComponent(repository.owner)}/${encodeURIComponent(repository.name)}/commits/${encodeURIComponent(repository.defaultBranch)}`,
-    accessToken,
-  )
-  return { ...repository, accessToken, commitSha: commit.sha, treeSha: commit.commit.tree.sha }
+  return hydrateGitHubRepositoryContext(userId, repository)
 }
 
 const hiddenSegments = new Set([

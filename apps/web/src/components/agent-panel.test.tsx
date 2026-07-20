@@ -127,6 +127,7 @@ describe('AgentPanel empty response recovery', () => {
 
     const input = await screen.findByPlaceholderText('Describe a change…')
     await waitFor(() => expect((input as HTMLTextAreaElement).disabled).toBe(false))
+    expect(screen.queryByText('No repository')).toBeNull()
     fireEvent.change(input, { target: { value: 'Make a portfolio website' } })
     fireEvent.submit(input.closest('form')!)
 
