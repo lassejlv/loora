@@ -14,7 +14,10 @@ function finish(request: Request, result: string) {
   return new Response(null, {
     status: 302,
     headers: {
-      Location: new URL(`/?settings=integrations&github=${result}`, request.url).toString(),
+      Location: new URL(
+        `/?settings=integrations&integration=github&github=${result}`,
+        request.url,
+      ).toString(),
       'Set-Cookie': clearGitHubFlowCookie(githubFlowCookie.install),
     },
   })

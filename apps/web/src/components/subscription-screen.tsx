@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { LogOutIcon } from '#/components/icons'
+import { clearWelcomeSeen } from '#/components/welcome-dialog'
 import { authClient } from '@loora/auth/client'
 import { orpc } from '#/lib/orpc-client'
 import { Button } from '#/components/ui/button'
@@ -146,7 +147,13 @@ export function SubscriptionScreen({ children, preview, redirect }: Subscription
                 Retry billing check
               </Button>
             ) : null}
-            <Button variant="ghost" onClick={() => authClient.signOut()}>
+            <Button
+              variant="ghost"
+              onClick={() => {
+                clearWelcomeSeen()
+                void authClient.signOut()
+              }}
+            >
               <LogOutIcon data-slot="icon" />
               Sign out
             </Button>

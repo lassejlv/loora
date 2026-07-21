@@ -22,7 +22,7 @@ const DEFAULT_TRANSITION: Transition = {
 };
 
 const ChevronDownIcon = forwardRef<ChevronDownIconHandle, ChevronDownIconProps>(
-  ({ onMouseEnter, onMouseLeave, className, size = 28, ...props }, ref) => {
+  ({ onMouseEnter, onMouseLeave, className, size, ...props }, ref) => {
     const controls = useAnimation();
     const isControlledRef = useRef(false);
 
@@ -58,21 +58,26 @@ const ChevronDownIcon = forwardRef<ChevronDownIconHandle, ChevronDownIconProps>(
 
     return (
       <div
-        className={cn("inline-flex shrink-0 [&>svg]:size-full", className)}
+        className={cn(
+          // size-* from callers wins; otherwise match surrounding text.
+          "inline-flex shrink-0 items-center justify-center [&>svg]:block [&>svg]:size-full",
+          size == null && "size-[1em]",
+          className,
+        )}
+        style={size != null ? { width: size, height: size } : undefined}
         onMouseEnter={handleMouseEnter}
         onMouseLeave={handleMouseLeave}
         {...props}
       >
         <svg
           fill="none"
-          height={size}
           stroke="currentColor"
           strokeLinecap="round"
           strokeLinejoin="round"
           strokeWidth="2"
           viewBox="0 0 24 24"
-          width={size}
           xmlns="http://www.w3.org/2000/svg"
+          aria-hidden="true"
         >
           <motion.path
             animate={controls}

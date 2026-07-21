@@ -3,7 +3,8 @@ import {
   LoginWithChatGPT,
   openLoginWithChatGPTConsentPopup,
 } from '@opencoredev/loginwithchatgpt-react'
-import { CopyIcon, LoaderCircleIcon, LogOutIcon } from '#/components/icons'
+import { CopyIcon, LogOutIcon } from '#/components/icons'
+import { Spinner } from '#/components/ui/spinner'
 import { ExternalLinkIcon } from 'lucide-react'
 import { Button } from '#/components/ui/button'
 import { IntegrationCard, IntegrationStatus } from '#/components/integration-card'
@@ -122,7 +123,7 @@ export function ChatGPTAccount() {
           >
             <Button size="sm" className="w-fit" disabled={state.isConnecting} onClick={startLogin}>
               {state.isConnecting ? (
-                <LoaderCircleIcon className="animate-spin" data-slot="icon" />
+                <Spinner data-slot="icon" />
               ) : null}
               {state.isConnecting ? 'Connecting…' : 'Connect ChatGPT'}
             </Button>

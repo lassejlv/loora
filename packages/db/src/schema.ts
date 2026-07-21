@@ -12,6 +12,8 @@ import {
 } from 'drizzle-orm/pg-core'
 import type { UIMessage } from 'ai'
 import type { CanvasElement } from './canvas'
+import type { ShortcutConfig } from './shortcuts'
+import { EMPTY_SHORTCUT_CONFIG } from './shortcuts'
 
 export const user = pgTable('user', {
   id: text('id').primaryKey(),
@@ -284,6 +286,20 @@ export const aiUsage = pgTable(
   },
   (table) => [index('ai_usage_user_created_idx').on(table.userId, table.createdAt)],
 )
+
+export const userPreferences = pgTable('user_preferences', {
+  userId: text('user_id')
+    .primaryKey()
+    .references(() => user.id, { onDelete: 'cascade' }),
+  shortcuts: jsonb('shortcuts')
+    .$type<ShortcutConfig>()
+    .default(EMPTY_SHORTCUT_CONFIG)
+    .notNull(),
+  updatedAt: timestamp('updated_at')
+    .defaultNow()
+    .$onUpdate(() => new Date())
+    .notNull(),
+})
 
 export const billingEntitlement = pgTable('billing_entitlement', {
   userId: text('user_id')

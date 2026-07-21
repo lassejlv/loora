@@ -31,6 +31,12 @@ const SIDEBAR_WIDTH: string = "16rem";
 const SIDEBAR_WIDTH_MOBILE: string = "18rem";
 const SIDEBAR_WIDTH_ICON: string = "3rem";
 const SIDEBAR_KEYBOARD_SHORTCUT: string = "b";
+const SIDEBAR_WIDTH_MIN_PX = 280;
+const SIDEBAR_WIDTH_MAX_PX = 640;
+
+function clampSidebarWidth(width: number): number {
+  return Math.min(SIDEBAR_WIDTH_MAX_PX, Math.max(SIDEBAR_WIDTH_MIN_PX, Math.round(width)));
+}
 
 const sidebarMenuButtonVariants = cva(
   "peer/menu-button flex w-full items-center gap-2 overflow-hidden rounded-lg p-2 text-left text-sm outline-hidden ring-sidebar-ring transition-[width,height,padding] hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:ring-2 active:bg-sidebar-accent active:text-sidebar-accent-foreground disabled:pointer-events-none disabled:opacity-50 group-has-data-[sidebar=menu-action]/menu-item:pe-8 aria-disabled:pointer-events-none aria-disabled:opacity-50 data-[active=true]:bg-sidebar-accent data-[active=true]:font-medium data-[active=true]:text-sidebar-accent-foreground data-[state=open]:hover:bg-sidebar-accent data-[state=open]:hover:text-sidebar-accent-foreground group-data-[collapsible=icon]:size-8! group-data-[collapsible=icon]:p-2! [&>span:last-child]:truncate [&>svg:not([class*='size-'])]:size-4 [&>svg]:shrink-0",
@@ -62,6 +68,10 @@ export type SidebarContextProps = {
   setOpenMobile: (open: boolean) => void;
   isMobile: boolean;
   toggleSidebar: () => void;
+  widthPx: number | null;
+  setWidthPx: ((width: number) => void) | null;
+  resizing: boolean;
+  setResizing: (resizing: boolean) => void;
 };
 
 export const SidebarContext: React.Context<SidebarContextProps | null> =
@@ -80,6 +90,9 @@ export function SidebarProvider({
   defaultOpen = true,
   open: openProp,
   onOpenChange: setOpenProp,
+  enableKeyboardShortcut = true,
+  width: widthProp,
+  onWidthChange,
   className,
   style,
   children,
@@ -88,14 +101,31 @@ export function SidebarProvider({
   defaultOpen?: boolean;
   open?: boolean;
   onOpenChange?: (open: boolean) => void;
+  /** When false, ⌘/Ctrl+B is left to the app shortcut registry. */
+  enableKeyboardShortcut?: boolean;
+  /** Controlled sidebar width in px. When set with onWidthChange, enables drag-resize. */
+  width?: number;
+  onWidthChange?: (width: number) => void;
 }): React.ReactElement {
   const isMobile = useMediaQuery("max-md");
-  const [openMobile, setOpenMobile] = React.useState(false);
+  // Keep mobile sheet state in sync with desktop `open` so controlled
+  // consumers (e.g. agent panel) don't write one path and read the other.
+  const [openMobile, setOpenMobileState] = React.useState(
+    () => openProp ?? defaultOpen,
+  );
+  const [resizing, setResizing] = React.useState(false);
 
   // This is the internal state of the sidebar.
   // We use openProp and setOpenProp for control from outside the component.
   const [_open, _setOpen] = React.useState(defaultOpen);
   const open = openProp ?? _open;
+  const widthPx = widthProp == null ? null : clampSidebarWidth(widthProp);
+  const setWidthPx = React.useCallback(
+    (next: number) => {
+      onWidthChange?.(clampSidebarWidth(next));
+    },
+    [onWidthChange],
+  );
   const setOpen = React.useCallback(
     async (value: boolean | ((value: boolean) => boolean)) => {
       const openState = typeof value === "function" ? value(open) : value;
@@ -104,6 +134,7 @@ export function SidebarProvider({
       } else {
         _setOpen(openState);
       }
+      setOpenMobileState(openState);
 
       // This sets the cookie to keep the sidebar state.
       await cookieStore.set({
@@ -116,13 +147,31 @@ export function SidebarProvider({
     [setOpenProp, open],
   );
 
+  // Sheet dismiss / mobile toggle: route through setOpen so desktop + mobile
+  // stay on one source of truth.
+  const setOpenMobile = React.useCallback(
+    (value: boolean | ((value: boolean) => boolean)) => {
+      const openState =
+        typeof value === "function" ? value(openMobile) : value;
+      void setOpen(openState);
+    },
+    [openMobile, setOpen],
+  );
+
+  // Controlled `open` can change without going through setOpen (e.g. parent
+  // toggle). Mirror it into the mobile sheet.
+  React.useEffect(() => {
+    setOpenMobileState(open);
+  }, [open]);
+
   // Helper to toggle the sidebar.
   const toggleSidebar = React.useCallback(() => {
-    return isMobile ? setOpenMobile((open) => !open) : setOpen((open) => !open);
-  }, [isMobile, setOpen]);
+    return setOpen((current) => !current);
+  }, [setOpen]);
 
-  // Adds a keyboard shortcut to toggle the sidebar.
+  // Optional built-in toggle; the editor disables this and uses the shortcut registry.
   React.useEffect(() => {
+    if (!enableKeyboardShortcut) return;
     const handleKeyDown = (event: KeyboardEvent): void => {
       if (
         event.key === SIDEBAR_KEYBOARD_SHORTCUT &&
@@ -135,7 +184,7 @@ export function SidebarProvider({
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [toggleSidebar]);
+  }, [enableKeyboardShortcut, toggleSidebar]);
 
   // We add a state so that we can do data-state="expanded" or "collapsed".
   // This makes it easier to style the sidebar with Tailwind classes.
@@ -150,8 +199,23 @@ export function SidebarProvider({
       setOpenMobile,
       state,
       toggleSidebar,
+      widthPx,
+      setWidthPx: widthPx == null ? null : setWidthPx,
+      resizing,
+      setResizing,
     }),
-    [state, open, setOpen, isMobile, openMobile, toggleSidebar],
+    [
+      state,
+      open,
+      setOpen,
+      setOpenMobile,
+      isMobile,
+      openMobile,
+      toggleSidebar,
+      widthPx,
+      setWidthPx,
+      resizing,
+    ],
   );
 
   return (
@@ -161,10 +225,11 @@ export function SidebarProvider({
           "group/sidebar-wrapper flex min-h-svh w-full has-data-[variant=inset]:bg-sidebar",
           className,
         )}
+        data-resizing={resizing ? "" : undefined}
         data-slot="sidebar-wrapper"
         style={
           {
-            "--sidebar-width": SIDEBAR_WIDTH,
+            "--sidebar-width": widthPx != null ? `${widthPx}px` : SIDEBAR_WIDTH,
             "--sidebar-width-icon": SIDEBAR_WIDTH_ICON,
             ...style,
           } as React.CSSProperties
@@ -181,6 +246,7 @@ export function Sidebar({
   side = "left",
   variant = "sidebar",
   collapsible = "offcanvas",
+  resizable = false,
   className,
   children,
   ...props
@@ -188,6 +254,7 @@ export function Sidebar({
   side?: "left" | "right";
   variant?: "sidebar" | "floating" | "inset";
   collapsible?: "offcanvas" | "icon" | "none";
+  resizable?: boolean;
 }): React.ReactElement {
   const { isMobile, state, openMobile, setOpenMobile } = useSidebar();
 
@@ -243,7 +310,7 @@ export function Sidebar({
       {/* This is what handles the sidebar gap on desktop */}
       <div
         className={cn(
-          "relative w-(--sidebar-width) bg-transparent transition-[width] duration-200 ease-linear",
+          "relative w-(--sidebar-width) bg-transparent transition-[width] duration-200 ease-linear in-data-resizing:transition-none",
           "group-data-[collapsible=offcanvas]:w-0",
           "group-data-[side=right]:rotate-180",
           variant === "floating" || variant === "inset"
@@ -254,7 +321,7 @@ export function Sidebar({
       />
       <div
         className={cn(
-          "fixed inset-y-0 z-10 hidden h-svh w-(--sidebar-width) transition-[left,right,width] duration-200 ease-linear md:flex",
+          "fixed inset-y-0 z-10 hidden h-svh w-(--sidebar-width) transition-[left,right,width] duration-200 ease-linear in-data-resizing:transition-none md:flex",
           side === "left"
             ? "left-0 group-data-[collapsible=offcanvas]:left-[calc(var(--sidebar-width)*-1)]"
             : "right-0 group-data-[collapsible=offcanvas]:right-[calc(var(--sidebar-width)*-1)]",
@@ -268,14 +335,79 @@ export function Sidebar({
         {...props}
       >
         <div
-          className="flex h-full w-full flex-col bg-sidebar group-data-[variant=floating]:rounded-lg group-data-[variant=floating]:border group-data-[variant=floating]:border-sidebar-border group-data-[variant=floating]:shadow-sm/5"
+          className="relative flex h-full w-full flex-col bg-sidebar group-data-[variant=floating]:rounded-lg group-data-[variant=floating]:border group-data-[variant=floating]:border-sidebar-border group-data-[variant=floating]:shadow-sm/5"
           data-sidebar="sidebar"
           data-slot="sidebar-inner"
         >
           {children}
+          {resizable ? <SidebarResizeHandle side={side} /> : null}
         </div>
       </div>
     </div>
+  );
+}
+
+function SidebarResizeHandle({ side }: { side: "left" | "right" }) {
+  const { setWidthPx, setResizing, widthPx } = useSidebar();
+
+  if (setWidthPx == null || widthPx == null) return null;
+
+  return (
+    <div
+      role="separator"
+      aria-orientation="vertical"
+      aria-label="Resize sidebar"
+      aria-valuenow={widthPx}
+      aria-valuemin={SIDEBAR_WIDTH_MIN_PX}
+      aria-valuemax={SIDEBAR_WIDTH_MAX_PX}
+      tabIndex={0}
+      data-slot="sidebar-resize-handle"
+      className={cn(
+        "absolute inset-y-3 z-30 w-1.5 cursor-col-resize touch-none rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring",
+        "before:absolute before:inset-y-0 before:-inset-x-2 before:content-['']",
+        "after:absolute after:inset-y-6 after:left-1/2 after:w-0.5 after:-translate-x-1/2 after:rounded-full after:bg-border after:opacity-0 after:transition-opacity after:content-[''] hover:after:opacity-100 hover:after:bg-cx-accent/60 in-data-resizing:after:opacity-100 in-data-resizing:after:bg-cx-accent",
+        side === "left" ? "right-0 translate-x-1/2" : "left-0 -translate-x-1/2",
+      )}
+      onKeyDown={(event) => {
+        const step = event.shiftKey ? 24 : 8;
+        if (event.key === "ArrowLeft") {
+          event.preventDefault();
+          setWidthPx(widthPx + (side === "left" ? -step : step));
+        } else if (event.key === "ArrowRight") {
+          event.preventDefault();
+          setWidthPx(widthPx + (side === "left" ? step : -step));
+        }
+      }}
+      onPointerDown={(event) => {
+        event.preventDefault();
+        const target = event.currentTarget;
+        target.setPointerCapture(event.pointerId);
+        setResizing(true);
+        const previousUserSelect = document.body.style.userSelect;
+        const previousCursor = document.body.style.cursor;
+        document.body.style.userSelect = "none";
+        document.body.style.cursor = "col-resize";
+        const startX = event.clientX;
+        const startWidth = widthPx;
+
+        const onMove = (moveEvent: PointerEvent) => {
+          const delta = moveEvent.clientX - startX;
+          setWidthPx(startWidth + (side === "left" ? delta : -delta));
+        };
+        const onUp = (upEvent: PointerEvent) => {
+          target.releasePointerCapture(upEvent.pointerId);
+          setResizing(false);
+          document.body.style.userSelect = previousUserSelect;
+          document.body.style.cursor = previousCursor;
+          target.removeEventListener("pointermove", onMove);
+          target.removeEventListener("pointerup", onUp);
+          target.removeEventListener("pointercancel", onUp);
+        };
+        target.addEventListener("pointermove", onMove);
+        target.addEventListener("pointerup", onUp);
+        target.addEventListener("pointercancel", onUp);
+      }}
+    />
   );
 }
 

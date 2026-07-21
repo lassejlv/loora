@@ -1,6 +1,7 @@
 import { HeadContent, Scripts, createRootRoute } from '@tanstack/react-router'
 import { TanStackRouterDevtoolsPanel } from '@tanstack/react-router-devtools'
 import { TanStackDevtools } from '@tanstack/react-devtools'
+import { NuqsAdapter } from 'nuqs/adapters/tanstack-router'
 
 import appCss from '../styles.css?url'
 
@@ -19,7 +20,7 @@ export const Route = createRootRoute({
       },
       {
         name: 'theme-color',
-        content: '#1E41DE',
+        content: '#2440e6',
       },
       {
         name: 'application-name',
@@ -73,7 +74,7 @@ function RootDocument({ children }: { children: React.ReactNode }) {
         <HeadContent />
       </head>
       <body>
-        {children}
+        <NuqsAdapter>{children}</NuqsAdapter>
         <TanStackDevtools
           config={{
             position: 'bottom-right',

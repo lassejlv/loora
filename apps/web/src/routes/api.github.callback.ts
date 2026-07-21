@@ -15,7 +15,10 @@ import {
 
 function redirect(request: Request, result: string, cookie?: string) {
   const headers: Record<string, string> = {
-    Location: new URL(`/?settings=integrations&github=${result}`, request.url).toString(),
+    Location: new URL(
+      `/?settings=integrations&integration=github&github=${result}`,
+      request.url,
+    ).toString(),
   }
   if (cookie) headers['Set-Cookie'] = cookie
   return new Response(null, { status: 302, headers })

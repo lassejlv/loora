@@ -1,5 +1,16 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useState } from 'react'
+import { useQueryStates } from 'nuqs'
 import { LogOutIcon } from '#/components/icons'
+import {
+  AlertDialog,
+  AlertDialogClose,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogPopup,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from '#/components/ui/alert-dialog'
 import { Button } from '#/components/ui/button'
 import { Input } from '#/components/ui/input'
 import { Tabs, TabsList, TabsPanel, TabsTab } from '#/components/ui/tabs'
@@ -16,39 +27,11 @@ import { ChatGPTAccount } from '#/components/chatgpt-account'
 import { CreditTopUp } from '#/components/credit-top-up'
 import { GitHubAccount } from '#/components/github-account'
 import { McpSessions } from '#/components/mcp-sessions'
-import { cn } from '#/lib/utils'
-
-const INTEGRATION_DEEP_LINKS = new Set(['integrations', 'github', 'chatgpt', 'mcp'])
-
-function IntegrationAnchor({
-  id,
-  highlighted,
-  children,
-}: {
-  id: string
-  highlighted: boolean
-  children: ReactNode
-}) {
-  const ref = useRef<HTMLDivElement>(null)
-
-  useEffect(() => {
-    if (!highlighted || !ref.current) return
-    ref.current.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
-  }, [highlighted])
-
-  return (
-    <div
-      ref={ref}
-      id={id}
-      className={cn(
-        'rounded-xl transition-[box-shadow,background-color] duration-500',
-        highlighted && 'bg-cx-accent/5 ring-2 ring-cx-accent/40',
-      )}
-    >
-      {children}
-    </div>
-  )
-}
+import { PanelLoading, PanelShell } from '#/components/panel-shell'
+import { ShortcutsSettings } from '#/components/shortcuts-settings'
+import { clearWelcomeSeen } from '#/components/welcome-dialog'
+import { editorSearchParams, type IntegrationTab, type SettingsTab } from '#/lib/url-state'
+import type { ShortcutConfig } from '#/lib/shortcuts'
 
 interface UsageStatus {
   dailyUsd: number
@@ -116,7 +99,7 @@ function UsageTab() {
     return <p className="text-xs text-destructive-foreground">Could not load usage.</p>
   }
   if (!usage) {
-    return <p className="cx-shimmer text-xs">Loading usage…</p>
+    return <PanelLoading label="Loading usage…" />
   }
 
   return (
@@ -166,7 +149,7 @@ function BillingTab({ isAdmin }: { isAdmin: boolean }) {
     )
   }
   if (error) return <p className="text-xs text-destructive-foreground">{error}</p>
-  if (!billing) return <p className="cx-shimmer text-xs">Loading billing…</p>
+  if (!billing) return <PanelLoading label="Loading billing…" />
 
   const plan = billing.trial
     ? 'Pro trial'
@@ -335,7 +318,7 @@ function AdminTab() {
   }
 
   if (!users && !error) {
-    return <p className="cx-shimmer text-xs">Loading users…</p>
+    return <PanelLoading label="Loading users…" rows={4} />
   }
 
   return (
@@ -446,45 +429,107 @@ function AdminTab() {
   )
 }
 
-export function SettingsPanel() {
+function DeleteAccountSection() {
+  const [deleting, setDeleting] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  async function deleteAccount() {
+    setDeleting(true)
+    setError(null)
+    try {
+      await orpc.auth.deleteAccount()
+      clearWelcomeSeen()
+      await fetch('/api/chatgpt/logout', { method: 'POST' }).catch(() => undefined)
+      window.location.href = '/'
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to delete account.')
+      setDeleting(false)
+    }
+  }
+
+  return (
+    <div className="flex flex-col gap-3 border-t pt-6">
+      <div>
+        <h2 className="text-sm font-semibold text-destructive">Danger zone</h2>
+        <p className="mt-1 text-xs text-muted-foreground">
+          Permanently delete your account, designs, chats, and assets.
+        </p>
+      </div>
+      {error ? <p className="text-xs text-destructive">{error}</p> : null}
+      <div>
+        <AlertDialog>
+          <AlertDialogTrigger
+            render={
+              <Button variant="destructive" size="sm" disabled={deleting}>
+                {deleting ? 'Deleting…' : 'Delete account'}
+              </Button>
+            }
+          />
+          <AlertDialogPopup>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Delete account?</AlertDialogTitle>
+              <AlertDialogDescription>
+                This permanently deletes your account and all designs, chats, assets, and
+                connected integrations. This cannot be undone.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogClose render={<Button variant="outline" size="sm">Cancel</Button>} />
+              <AlertDialogClose
+                render={
+                  <Button variant="destructive" size="sm" onClick={() => void deleteAccount()}>
+                    Delete account
+                  </Button>
+                }
+              />
+            </AlertDialogFooter>
+          </AlertDialogPopup>
+        </AlertDialog>
+      </div>
+    </div>
+  )
+}
+
+export function SettingsPanel({
+  onClose,
+  shortcutConfig,
+  onShortcutConfigChange,
+}: {
+  onClose?: () => void
+  shortcutConfig: ShortcutConfig
+  onShortcutConfigChange: (next: ShortcutConfig) => void
+}) {
   const { data: session } = authClient.useSession()
   const isAdmin = session?.user.isAdmin === true
-  const settingsParam = typeof window !== 'undefined'
-    ? new URLSearchParams(window.location.search).get('settings')
-    : null
-  const defaultTab = settingsParam && INTEGRATION_DEEP_LINKS.has(settingsParam)
-    ? 'integrations'
-    : typeof window !== 'undefined' &&
-        new URLSearchParams(window.location.search).get('topup') === 'success'
-      ? 'billing'
-      : 'account'
-  const focusIntegration =
-    settingsParam === 'github' || settingsParam === 'chatgpt' || settingsParam === 'mcp'
-      ? settingsParam
-      : null
-  const [highlightedIntegration, setHighlightedIntegration] = useState<string | null>(
-    focusIntegration,
-  )
-
-  useEffect(() => {
-    if (!highlightedIntegration) return
-    const timer = window.setTimeout(() => setHighlightedIntegration(null), 1800)
-    return () => window.clearTimeout(timer)
-  }, [highlightedIntegration])
+  const [{ settings, integration }, setUrlState] = useQueryStates(editorSearchParams, {
+    history: 'replace',
+  })
+  const tab: SettingsTab = settings ?? 'account'
+  const integrationTab: IntegrationTab = integration ?? 'chatgpt'
 
   async function signOut() {
     // Do not leave one Loora account's ChatGPT cookie available after switching users.
+    clearWelcomeSeen()
     await fetch('/api/chatgpt/logout', { method: 'POST' }).catch(() => undefined)
     await authClient.signOut()
   }
 
   return (
-    <div className="flex h-full min-h-0 flex-col overflow-y-auto p-6">
-      <Tabs defaultValue={defaultTab} className="flex max-w-lg flex-col gap-6">
-        <TabsList className={`grid w-full ${isAdmin ? 'grid-cols-4' : 'grid-cols-3'}`}>
+    <PanelShell title="Settings" onClose={onClose} bodyClassName="p-6">
+      <Tabs
+        value={tab}
+        onValueChange={(value) => {
+          const next = value as SettingsTab
+          if (next === 'integrations') void setUrlState({ settings: next })
+          else void setUrlState({ settings: next, integration: null })
+        }}
+        className="flex flex-col gap-6"
+      >
+        <TabsList className={`grid w-full ${isAdmin ? 'grid-cols-5' : 'grid-cols-4'}`}>
           <TabsTab value="account">Account</TabsTab>
           <TabsTab value="integrations">Integrations</TabsTab>
           <TabsTab value="billing">Billing</TabsTab>
+          <TabsTab value="shortcuts">Shortcuts</TabsTab>
           {isAdmin ? <TabsTab value="admin">Admin</TabsTab> : null}
         </TabsList>
 
@@ -508,39 +553,52 @@ export function SettingsPanel() {
               Sign out
             </Button>
           </div>
+          <DeleteAccountSection />
         </TabsPanel>
 
-        <TabsPanel value="integrations" className="flex flex-col gap-5">
+        <TabsPanel value="integrations" className="flex flex-col gap-4">
           <div>
             <h2 className="text-sm font-semibold">Integrations</h2>
             <p className="mt-1 text-xs text-muted-foreground">
               Connect external accounts and agents to Loora.
             </p>
           </div>
-          <div className="flex flex-col gap-3">
-            <IntegrationAnchor
-              id="integration-chatgpt"
-              highlighted={highlightedIntegration === 'chatgpt'}
-            >
+          <Tabs
+            value={integrationTab}
+            onValueChange={(value) => {
+              void setUrlState({
+                settings: 'integrations',
+                integration: value as IntegrationTab,
+              })
+            }}
+            className="flex flex-col gap-4"
+          >
+            <TabsList className="grid w-full grid-cols-3">
+              <TabsTab value="chatgpt">ChatGPT</TabsTab>
+              <TabsTab value="github">GitHub</TabsTab>
+              <TabsTab value="mcp">MCP</TabsTab>
+            </TabsList>
+            <TabsPanel value="chatgpt" id="integration-chatgpt">
               <ChatGPTAccount />
-            </IntegrationAnchor>
-            <IntegrationAnchor
-              id="integration-github"
-              highlighted={highlightedIntegration === 'github'}
-            >
+            </TabsPanel>
+            <TabsPanel value="github" id="integration-github">
               <GitHubAccount />
-            </IntegrationAnchor>
-            <IntegrationAnchor
-              id="integration-mcp"
-              highlighted={highlightedIntegration === 'mcp'}
-            >
+            </TabsPanel>
+            <TabsPanel value="mcp" id="integration-mcp">
               <McpSessions />
-            </IntegrationAnchor>
-          </div>
+            </TabsPanel>
+          </Tabs>
         </TabsPanel>
 
         <TabsPanel value="billing">
           <BillingTab isAdmin={isAdmin} />
+        </TabsPanel>
+
+        <TabsPanel value="shortcuts">
+          <ShortcutsSettings
+            config={shortcutConfig}
+            onChange={onShortcutConfigChange}
+          />
         </TabsPanel>
 
         {isAdmin ? (
@@ -549,6 +607,6 @@ export function SettingsPanel() {
           </TabsPanel>
         ) : null}
       </Tabs>
-    </div>
+    </PanelShell>
   )
 }

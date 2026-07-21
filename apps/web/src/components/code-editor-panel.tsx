@@ -2,6 +2,7 @@ import { lazy, Suspense, useCallback, useMemo, useRef, useState } from 'react'
 import type { BeforeMount, EditorProps, OnMount } from '@monaco-editor/react'
 import type { CanvasElement } from '#/lib/canvas'
 import { classifyCode } from '#/components/element-frame'
+import { PanelShell } from '#/components/panel-shell'
 import { Button } from '#/components/ui/button'
 
 const MonacoEditor = lazy(async () => {
@@ -64,9 +65,11 @@ const configureEditor: BeforeMount = (monaco) => {
 export function CodeEditorPanel({
   element,
   onApply,
+  onClose,
 }: {
   element: CanvasElement
   onApply: (code: string) => void
+  onClose?: () => void
 }) {
   const [draft, setDraft] = useState(element.code)
   const applyRef = useRef(onApply)
@@ -90,16 +93,21 @@ export function CodeEditorPanel({
   }, [])
 
   return (
-    <div className="flex h-full min-h-0 flex-col gap-2 p-3">
-      <div className="flex items-center justify-between gap-2">
-        <span className="min-w-0 truncate font-mono text-xs text-muted-foreground">
+    <PanelShell
+      title="Code"
+      description={
+        <span className="font-mono">
           {element.name} · {element.w}×{element.h}
         </span>
-        <Button size="sm" disabled={!dirty} onClick={() => onApply(draft)}>
+      }
+      onClose={onClose}
+      actions={
+        <Button size="xs" disabled={!dirty} onClick={() => onApply(draft)}>
           Apply
         </Button>
-      </div>
-
+      }
+      bodyClassName="gap-2 p-3"
+    >
       <div className="min-h-0 flex-1 overflow-hidden rounded-md border bg-background ring-ring/24 focus-within:border-ring focus-within:ring-2">
         <Suspense
           fallback={
@@ -130,6 +138,6 @@ export function CodeEditorPanel({
       <p className="text-[11px] text-muted-foreground">
         HTML/CSS/JS or JSX defining function App — Tailwind and React are available. ⌘⏎ applies.
       </p>
-    </div>
+    </PanelShell>
   )
 }

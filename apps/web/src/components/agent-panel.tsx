@@ -10,7 +10,6 @@ import { nanoid } from 'nanoid'
 import {
   CheckIcon,
   LayersIcon,
-  LoaderCircleIcon,
   SearchIcon,
   ChevronDownIcon,
   EyeIcon,
@@ -19,6 +18,7 @@ import {
   PlusIcon,
   XIcon,
 } from '#/components/icons'
+import { Spinner } from '#/components/ui/spinner'
 import {
   BookOpenIcon,
   GroupIcon,
@@ -752,6 +752,7 @@ export const AgentPanel = memo(function AgentPanel({
   return (
     <Sidebar
       variant="floating"
+      resizable
       className="[&_[data-slot=sidebar-inner]]:overflow-hidden [&_[data-slot=sidebar-inner]]:rounded-2xl [&_[data-slot=sidebar-inner]]:shadow-sm"
     >
       <header className="flex items-center gap-2 border-b px-3 py-2.5">
@@ -760,7 +761,7 @@ export const AgentPanel = memo(function AgentPanel({
             <button
               type="button"
               disabled={status === 'streaming' || status === 'submitted' || !activeChat}
-              className="flex min-w-0 max-w-full items-center gap-2 rounded-md px-2 py-1 text-left text-sm font-semibold outline-none hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none"
+              className="inline-flex min-w-0 max-w-full items-center gap-2 rounded-md px-2 py-1 text-left text-sm font-semibold leading-none outline-none hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none"
             >
               <span
                 className={cn(
@@ -770,8 +771,8 @@ export const AgentPanel = memo(function AgentPanel({
                     : 'bg-muted-foreground/40',
                 )}
               />
-              <span className="truncate">{activeChat?.title ?? 'Loading…'}</span>
-              <ChevronDownIcon className="size-3.5 shrink-0 text-muted-foreground" />
+              <span className="truncate leading-none">{activeChat?.title ?? 'Loading…'}</span>
+              <ChevronDownIcon className="size-3.5 shrink-0 text-muted-foreground opacity-70" />
             </button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="start" className="w-64">
@@ -945,11 +946,11 @@ function ReasoningEffortPicker({
   return (
     <Popover>
       <PopoverTrigger
-        className="flex items-center gap-1 rounded-md px-1.5 py-1 text-xs text-muted-foreground outline-none hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+        className="inline-flex items-center gap-0.5 rounded-md px-1.5 py-1 text-xs leading-none text-muted-foreground outline-none hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
         title="Reasoning effort"
       >
-        {label}
-        <ChevronDownIcon className="size-3" />
+        <span>{label}</span>
+        <ChevronDownIcon className="size-3 opacity-70" />
       </PopoverTrigger>
       <PopoverContent side="top" align="start" sideOffset={8} className="w-64">
         <div className="mb-3 text-sm font-medium">Reasoning effort</div>
@@ -1035,10 +1036,10 @@ function ModelPicker({
       <DropdownMenuTrigger asChild>
         <button
           type="button"
-          className="flex items-center gap-1 rounded-md px-1.5 py-1 text-xs text-muted-foreground outline-none hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+          className="inline-flex items-center gap-0.5 rounded-md px-1.5 py-1 text-xs leading-none text-muted-foreground outline-none hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
         >
-          {modelLabel(model)}
-          <ChevronDownIcon className="size-3" />
+          <span>{modelLabel(model)}</span>
+          <ChevronDownIcon className="size-3 opacity-70" />
         </button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="start" className="w-48">
@@ -1404,10 +1405,7 @@ function ToolGroup({
             {failed ? (
               <XIcon aria-label="Tool failed" className="size-3.5 text-destructive-foreground" />
             ) : busy ? (
-              <LoaderCircleIcon
-                aria-label="Tool in progress"
-                className="size-3.5 text-cx-accent motion-safe:animate-spin"
-              />
+              <Spinner aria-label="Tool in progress" className="size-3.5 text-cx-accent" />
             ) : pendingDeletes.length === 0 ? (
               <CheckIcon className="size-3.5 text-muted-foreground" />
             ) : null}
@@ -1579,10 +1577,7 @@ function ToolRow({
           ) : done ? (
             <CheckIcon className="size-3.5 text-muted-foreground" />
           ) : awaitingConfirm ? null : (
-            <LoaderCircleIcon
-              aria-label="Tool in progress"
-              className="size-3.5 text-cx-accent motion-safe:animate-spin"
-            />
+            <Spinner aria-label="Tool in progress" className="size-3.5 text-cx-accent" />
           )}
         </span>
       </div>

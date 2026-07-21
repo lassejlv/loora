@@ -12,7 +12,10 @@ import {
   oauthApplication,
   oauthConsent,
   user,
+  userPreferences,
 } from '@loora/db/schema'
+import { EMPTY_SHORTCUT_CONFIG } from '@loora/db/shortcuts'
+import { parseShortcutConfig, shortcutConfigSchema } from './shortcuts'
 import { googleOAuthEnabled, type getSession } from '@loora/auth'
 import type { CanvasElement } from '@loora/db/canvas'
 import { assetKey, s3 } from './storage'
@@ -820,6 +823,27 @@ const requestPreviewAccess = signedInProcedure.handler(async ({ context }) => {
   return { requested: true, granted: false }
 })
 
+const deleteAccount = signedInProcedure.handler(async ({ context }) => {
+  // S3 objects don't cascade with the user row; collect and delete them first.
+  if (s3) {
+    const keys = await db
+      .select({ storageKey: asset.storageKey })
+      .from(asset)
+      .where(and(eq(asset.userId, context.user.id), isNotNull(asset.storageKey)))
+    for (const { storageKey } of keys) {
+      if (storageKey) {
+        await s3
+          .delete(storageKey)
+          .catch((error) => console.error('[account] S3 delete failed:', error))
+      }
+    }
+  }
+
+  // Everything else (designs, chats, sessions, oauth tokens, usage) cascades.
+  await db.delete(user).where(eq(user.id, context.user.id))
+  return { deleted: true }
+})
+
 const getCurrentBilling = previewProcedure.handler(({ context }) =>
   getBillingStatus(context.user),
 )
@@ -915,11 +939,48 @@ const setUserPreviewAccess = adminProcedure
     return updated
   })
 
+const getPreferences = protectedProcedure.handler(async ({ context }) => {
+  const [row] = await db
+    .select({ shortcuts: userPreferences.shortcuts })
+    .from(userPreferences)
+    .where(eq(userPreferences.userId, context.user.id))
+    .limit(1)
+  return {
+    shortcuts: row ? parseShortcutConfig(row.shortcuts) : { ...EMPTY_SHORTCUT_CONFIG, custom: [] },
+  }
+})
+
+const savePreferences = protectedProcedure
+  .input(z.object({ shortcuts: shortcutConfigSchema }))
+  .handler(async ({ context, input }) => {
+    const shortcuts = parseShortcutConfig(input.shortcuts)
+    await db
+      .insert(userPreferences)
+      .values({
+        userId: context.user.id,
+        shortcuts,
+        updatedAt: new Date(),
+      })
+      .onConflictDoUpdate({
+        target: userPreferences.userId,
+        set: {
+          shortcuts,
+          updatedAt: new Date(),
+        },
+      })
+    return { shortcuts }
+  })
+
 export const appRouter = {
   auth: {
     config: getAuthConfig,
     previewAccess: getPreviewAccess,
     requestPreviewAccess,
+    deleteAccount,
+  },
+  preferences: {
+    get: getPreferences,
+    save: savePreferences,
   },
   billing: {
     status: getCurrentBilling,

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { ImagePlusIcon, Trash2Icon } from 'lucide-react'
 import { Button } from '#/components/ui/button'
+import { Skeleton } from '#/components/ui/skeleton'
 import { orpc } from '#/lib/orpc-client'
 import { cn } from '#/lib/utils'
 
@@ -33,15 +34,28 @@ export function AssetsPanel({
   onInsert: (asset: AssetMeta) => void
 }) {
   const [assets, setAssets] = useState<AssetMeta[]>([])
+  const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
+    let cancelled = false
     orpc.asset
       .list()
-      .then(setAssets)
-      .catch((err) => console.error('[assets] Failed to list assets:', err))
+      .then((items) => {
+        if (!cancelled) setAssets(items)
+      })
+      .catch((err) => {
+        console.error('[assets] Failed to list assets:', err)
+        if (!cancelled) setError('Could not load assets.')
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false)
+      })
+    return () => {
+      cancelled = true
+    }
   }, [])
 
   const upload = async (files: FileList | null) => {
@@ -74,9 +88,9 @@ export function AssetsPanel({
   }
 
   return (
-    <div className="flex h-full flex-col gap-3 p-4">
-      <div className="flex items-center justify-between">
-        <div>
+    <div className="flex h-full min-h-0 flex-col gap-3 p-4">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
           <h2 className="text-sm font-semibold">Assets</h2>
           <p className="text-xs text-muted-foreground">
             Click an image to place it on the canvas. The agent can use them too.
@@ -96,15 +110,22 @@ export function AssetsPanel({
         />
       </div>
 
-      {error && <p className="text-xs text-destructive-foreground">{error}</p>}
+      {error ? <p className="text-xs text-destructive-foreground">{error}</p> : null}
 
-      {assets.length === 0 ? (
-        <div
-          className="flex flex-1 cursor-pointer items-center justify-center rounded-lg border border-dashed text-sm text-muted-foreground"
+      {loading ? (
+        <div className="grid grid-cols-[repeat(auto-fill,minmax(8rem,1fr))] gap-3" aria-busy="true" aria-label="Loading assets">
+          {Array.from({ length: 4 }, (_, index) => (
+            <Skeleton key={index} className="aspect-square w-full rounded-lg" />
+          ))}
+        </div>
+      ) : assets.length === 0 ? (
+        <button
+          type="button"
+          className="flex flex-1 cursor-pointer items-center justify-center rounded-lg border border-dashed border-black/15 text-sm text-muted-foreground hover:bg-secondary/50"
           onClick={() => fileInputRef.current?.click()}
         >
           No assets yet — drop in some images.
-        </div>
+        </button>
       ) : (
         <div className="grid flex-1 auto-rows-min grid-cols-[repeat(auto-fill,minmax(8rem,1fr))] gap-3 overflow-y-auto">
           {assets.map((a) => (
@@ -112,7 +133,7 @@ export function AssetsPanel({
               <button
                 type="button"
                 className={cn(
-                  'block w-full overflow-hidden rounded-lg border bg-white outline-none',
+                  'block w-full overflow-hidden rounded-lg border border-black/12 bg-white outline-none',
                   'hover:border-cx-accent focus-visible:ring-2 focus-visible:ring-ring',
                 )}
                 title={`Place ${a.name}`}

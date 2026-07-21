@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react'
 import { cn } from '#/lib/utils'
 
+/** Flat integration section — used under the Integrations top nav, not as stacked cards. */
 export function IntegrationCard({
   title,
   status,
@@ -15,22 +16,17 @@ export function IntegrationCard({
   className?: string
 }) {
   return (
-    <section
-      className={cn(
-        'flex flex-col overflow-hidden rounded-xl border border-border sm:flex-row',
-        className,
-      )}
-    >
-      <aside className="flex shrink-0 flex-row items-center justify-between gap-3 border-b border-border bg-muted/40 px-3 py-3 sm:w-32 sm:flex-col sm:items-stretch sm:justify-between sm:border-b-0 sm:border-r sm:py-4">
-        <h3 className="text-sm font-semibold leading-snug">{title}</h3>
-        {status ? <div className="sm:mt-auto">{status}</div> : null}
-      </aside>
-      <div className="flex min-w-0 flex-1 flex-col gap-3 p-4">
+    <section className={cn('flex flex-col gap-4', className)}>
+      <header className="flex flex-col gap-1">
+        <div className="flex flex-wrap items-center gap-2">
+          <h3 className="text-sm font-semibold leading-none">{title}</h3>
+          {status}
+        </div>
         {description ? (
           <div className="text-xs leading-relaxed text-muted-foreground">{description}</div>
         ) : null}
-        {children}
-      </div>
+      </header>
+      {children ? <div className="flex flex-col gap-3">{children}</div> : null}
     </section>
   )
 }
@@ -46,9 +42,9 @@ export function IntegrationStatus({
     <span
       className={cn(
         'inline-flex max-w-full items-center rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide',
-        tone === 'success' && 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-400',
-        tone === 'warning' && 'bg-amber-500/10 text-amber-800 dark:text-amber-300',
-        tone === 'neutral' && 'bg-background text-muted-foreground ring-1 ring-border',
+        tone === 'success' && 'bg-success/10 text-success-foreground',
+        tone === 'warning' && 'bg-warning/10 text-warning-foreground',
+        tone === 'neutral' && 'bg-muted text-muted-foreground',
       )}
     >
       {children}

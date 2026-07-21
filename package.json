@@ -17,6 +17,8 @@
   "scripts": {
     "dev": "bun run --cwd apps/web dev",
     "build": "bun run --cwd apps/web build",
+    "docs:dev": "bun run --cwd apps/docs dev",
+    "docs:build": "bun run --cwd apps/docs build",
     "preview": "bun run --cwd apps/web preview",
     "start": "bun run --cwd apps/web start",
     "test": "bun test --preload ./apps/web/src/test/setup.ts",

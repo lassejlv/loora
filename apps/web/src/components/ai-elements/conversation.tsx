@@ -52,7 +52,7 @@ export const ConversationEmptyState = ({
 }: ConversationEmptyStateProps) => (
   <div
     className={cn(
-      "flex size-full flex-col items-center justify-center gap-3 p-8 text-center",
+      "flex w-full flex-col items-start gap-2 px-1 py-2 text-left",
       className
     )}
     {...props}

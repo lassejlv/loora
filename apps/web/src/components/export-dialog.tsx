@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react'
-import { CheckIcon, DownloadIcon, LoaderCircleIcon } from '#/components/icons'
+import { CheckIcon, DownloadIcon } from '#/components/icons'
+import { Spinner } from '#/components/ui/spinner'
 import { ClipboardIcon, Link2Icon } from 'lucide-react'
 import type { DocMeta } from '#/lib/docs'
 import type { CanvasElement } from '#/lib/canvas'
@@ -144,7 +145,7 @@ export function ExportDialog({
                 <span className="block text-sm font-medium">Image</span>
                 <span className="block text-xs text-muted-foreground">High-resolution canvas snapshot</span>
               </span>
-              {pngBusy ? <LoaderCircleIcon className="size-4 animate-spin" /> : <DownloadIcon className="size-4 text-muted-foreground" />}
+              {pngBusy ? <Spinner className="size-4" /> : <DownloadIcon className="size-4 text-muted-foreground" />}
             </button>
             <button
               type="button"
@@ -157,7 +158,7 @@ export function ExportDialog({
                 <span className="block text-sm font-medium">Web page</span>
                 <span className="block text-xs text-muted-foreground">Static and safe to open</span>
               </span>
-              {htmlBusy ? <LoaderCircleIcon className="size-4 animate-spin" /> : <DownloadIcon className="size-4 text-muted-foreground" />}
+              {htmlBusy ? <Spinner className="size-4" /> : <DownloadIcon className="size-4 text-muted-foreground" />}
             </button>
             <button
               type="button"
@@ -201,7 +202,7 @@ export function ExportDialog({
                     {copied ? 'Copied' : 'Copy prompt'}
                   </Button>
                   <Button variant="ghost" onClick={createHandoff} disabled={handoffBusy}>
-                    {handoffBusy ? <LoaderCircleIcon className="animate-spin" data-slot="icon" /> : null}
+                    {handoffBusy ? <Spinner data-slot="icon" /> : null}
                     New link
                   </Button>
                   <span className="ml-auto text-[11px] text-muted-foreground">
@@ -216,7 +217,7 @@ export function ExportDialog({
                 disabled={!databaseReady || shapes.length === 0 || handoffBusy}
                 onClick={createHandoff}
               >
-                {handoffBusy ? <LoaderCircleIcon className="animate-spin" data-slot="icon" /> : <Link2Icon data-slot="icon" />}
+                {handoffBusy ? <Spinner data-slot="icon" /> : <Link2Icon data-slot="icon" />}
                 {handoffBusy ? 'Creating link…' : 'Create handoff link'}
               </Button>
             )}

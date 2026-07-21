@@ -38,14 +38,14 @@
   --chart-4: oklch(0.828 0.189 84.429);
   --chart-5: oklch(0.769 0.188 70.08);
   --radius: 0.75rem;
-  --sidebar: oklch(0.985 0 0);
-  --sidebar-foreground: oklch(0.141 0.005 285.823);
-  --sidebar-primary: oklch(0.21 0.006 285.885);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.967 0.001 286.375);
-  --sidebar-accent-foreground: oklch(0.21 0.006 285.885);
-  --sidebar-border: oklch(0.92 0.004 286.32);
-  --sidebar-ring: oklch(0.871 0.006 286.286);
+  --sidebar: var(--background);
+  --sidebar-foreground: var(--foreground);
+  --sidebar-primary: var(--cx-accent);
+  --sidebar-primary-foreground: #fafaf8;
+  --sidebar-accent: --alpha(var(--color-black) / 4%);
+  --sidebar-accent-foreground: var(--cx-ink);
+  --sidebar-border: var(--border);
+  --sidebar-ring: var(--cx-accent);
   --info: var(--color-blue-500);
   --info-foreground: var(--color-blue-700);
   --success: var(--color-emerald-500);
@@ -56,6 +56,7 @@
 
 @theme inline {
   --font-sans: 'Archivo', ui-sans-serif, system-ui, sans-serif;
+  --font-heading: 'Archivo', ui-sans-serif, system-ui, sans-serif;
   --font-mono: 'Spline Sans Mono', ui-monospace, monospace;
   --color-cx-canvas: var(--cx-canvas);
   --color-cx-dot: var(--cx-dot);

@@ -40,6 +40,12 @@ export interface CanvasControls {
   zoomToSelection: () => void
 }
 
+export interface CanvasContextMenuInfo {
+  x: number
+  y: number
+  nextSelectedIds: string[]
+}
+
 interface CanvasProps {
   elements: CanvasElement[]
   selectedIds: string[]
@@ -54,6 +60,7 @@ interface CanvasProps {
   // Returns false when the message could not be sent (agent busy) so the
   // comment popover stays open instead of losing the user's text.
   onComment?: (text: string) => boolean | void
+  onCanvasContextMenu?: (info: CanvasContextMenuInfo) => void
 }
 
 type Drag =
@@ -115,6 +122,7 @@ export function Canvas({
   onCreate,
   onUpdateMany,
   onComment,
+  onCanvasContextMenu,
 }: CanvasProps) {
   const rootRef = useRef<HTMLDivElement>(null)
   const [view, setView] = useState<View>(() => loadView(docId) ?? DEFAULT_VIEW)
@@ -173,6 +181,26 @@ export function Canvas({
     if (onComment?.(composeComment(text, commentDraft.target)) === false) return
     setCommentDraft(null)
     onToolChange('select')
+  }
+
+  // Right-click: group-atomic select (or clear), then let the Editor menu open.
+  const onContextMenu = (e: React.MouseEvent) => {
+    e.preventDefault()
+    if (interactiveId) setInteractiveId(null)
+    const pt = toScene(e.clientX, e.clientY)
+    const target = (e.target as Element).closest('[data-element-id]')
+    const id = target?.getAttribute('data-element-id')
+    let nextSelectedIds: string[]
+    if (id) {
+      const gid = elements.find((el) => el.id === id)?.groupId
+      const member = gid ? elements.filter((el) => el.groupId === gid).map((el) => el.id) : [id]
+      nextSelectedIds = selectedIdSet.has(id) ? selectedIds : member
+      if (nextSelectedIds !== selectedIds) onSelect(nextSelectedIds)
+    } else {
+      nextSelectedIds = []
+      if (selectedIds.length > 0) onSelect([])
+    }
+    onCanvasContextMenu?.({ x: pt.x, y: pt.y, nextSelectedIds })
   }
 
   const onPointerDown = (e: React.PointerEvent) => {
@@ -628,6 +656,7 @@ export function Canvas({
       onPointerMove={onPointerMove}
       onPointerUp={onPointerUp}
       onWheel={onWheel}
+      onContextMenu={onContextMenu}
       onDoubleClick={(e) => {
         if (activeTool !== 'select') return
         const target = (e.target as Element).closest('[data-element-id]')

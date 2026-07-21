@@ -81,6 +81,10 @@ export function ContextMenuGroup(
   );
 }
 
+const contextMenuItemIconClass =
+  // Match Button: size descendant SVGs (lucide) and [data-slot=icon] wrappers (animated icons).
+  "[&_[data-slot=icon]:not([class*='size-'])]:size-4.5 sm:[&_[data-slot=icon]:not([class*='size-'])]:size-4 [&_svg:not([class*='opacity-'])]:opacity-80 [&_svg:not([class*='size-'])]:size-4.5 sm:[&_svg:not([class*='size-'])]:size-4 [&_svg]:pointer-events-none [&_svg]:-mx-0.5 [&_svg]:shrink-0";
+
 export function ContextMenuItem({
   className,
   inset,
@@ -93,7 +97,8 @@ export function ContextMenuItem({
   return (
     <ContextMenuPrimitive.Item
       className={cn(
-        "flex min-h-8 cursor-default select-none items-center gap-2 rounded-sm px-2 py-1 text-base text-foreground outline-none data-disabled:pointer-events-none data-highlighted:bg-accent data-inset:ps-8 data-[variant=destructive]:text-destructive-foreground data-highlighted:text-accent-foreground data-disabled:opacity-64 sm:min-h-7 sm:text-sm [&>svg:not([class*='opacity-'])]:opacity-80 [&>svg:not([class*='size-'])]:size-4.5 sm:[&>svg:not([class*='size-'])]:size-4 [&>svg]:pointer-events-none [&>svg]:-mx-0.5 [&>svg]:shrink-0",
+        "flex min-h-8 cursor-default select-none items-center gap-2 rounded-sm px-2 py-1 text-base text-foreground outline-none data-disabled:pointer-events-none data-highlighted:bg-accent data-inset:ps-8 data-[variant=destructive]:text-destructive-foreground data-highlighted:text-accent-foreground data-disabled:opacity-64 sm:min-h-7 sm:text-sm",
+        contextMenuItemIconClass,
         className,
       )}
       data-inset={inset}
@@ -117,7 +122,8 @@ export function ContextMenuLinkItem({
   return (
     <ContextMenuPrimitive.LinkItem
       className={cn(
-        "flex min-h-8 cursor-default select-none items-center gap-2 rounded-sm px-2 py-1 text-base text-foreground outline-none data-disabled:pointer-events-none data-highlighted:bg-accent data-inset:ps-8 data-[variant=destructive]:text-destructive-foreground data-highlighted:text-accent-foreground data-disabled:opacity-64 sm:min-h-7 sm:text-sm [&>svg:not([class*='opacity-'])]:opacity-80 [&>svg:not([class*='size-'])]:size-4.5 sm:[&>svg:not([class*='size-'])]:size-4 [&>svg]:pointer-events-none [&>svg]:-mx-0.5 [&>svg]:shrink-0",
+        "flex min-h-8 cursor-default select-none items-center gap-2 rounded-sm px-2 py-1 text-base text-foreground outline-none data-disabled:pointer-events-none data-highlighted:bg-accent data-inset:ps-8 data-[variant=destructive]:text-destructive-foreground data-highlighted:text-accent-foreground data-disabled:opacity-64 sm:min-h-7 sm:text-sm",
+        contextMenuItemIconClass,
         className,
       )}
       closeOnClick={closeOnClick}
@@ -300,7 +306,8 @@ export function ContextMenuSubTrigger({
   return (
     <ContextMenuPrimitive.SubmenuTrigger
       className={cn(
-        "flex min-h-8 items-center gap-2 rounded-sm px-2 py-1 text-base text-foreground outline-none data-disabled:pointer-events-none data-highlighted:bg-accent data-popup-open:bg-accent data-inset:ps-8 data-highlighted:text-accent-foreground data-popup-open:text-accent-foreground data-disabled:opacity-64 sm:min-h-7 sm:text-sm [&>svg:not(:last-child)]:-mx-0.5 [&_svg:not([class*='size-'])]:size-4.5 sm:[&_svg:not([class*='size-'])]:size-4 [&_svg]:pointer-events-none",
+        "flex min-h-8 items-center gap-2 rounded-sm px-2 py-1 text-base text-foreground outline-none data-disabled:pointer-events-none data-highlighted:bg-accent data-popup-open:bg-accent data-inset:ps-8 data-highlighted:text-accent-foreground data-popup-open:text-accent-foreground data-disabled:opacity-64 sm:min-h-7 sm:text-sm",
+        contextMenuItemIconClass,
         className,
       )}
       data-inset={inset}
@@ -308,7 +315,7 @@ export function ContextMenuSubTrigger({
       {...props}
     >
       {children}
-      <ChevronRightIcon className="ms-auto -me-0.5 opacity-80" />
+      <ChevronRightIcon className="ms-auto -me-0.5 size-4 opacity-80" data-slot="icon" />
     </ContextMenuPrimitive.SubmenuTrigger>
   );
 }
