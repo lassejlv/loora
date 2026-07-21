@@ -61,6 +61,9 @@ const shapeSchema = z.object({
   y: z.number(),
   w: z.number(),
   h: z.number(),
+  // Rotation in degrees; permissive range so an out-of-range value never
+  // rejects a whole design save (renderers normalize with mod 360).
+  r: z.number().finite().optional(),
   code: z.string().max(200_000),
   groupId: z.string().max(128).optional(),
 })

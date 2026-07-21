@@ -1,17 +1,21 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { createFileRoute, Link } from '@tanstack/react-router'
 import { createStandardSchemaV1, parseAsString, useQueryStates } from 'nuqs'
 import { authClient } from '@loora/auth/client'
 import { orpc } from '#/lib/orpc-client'
 import { Button } from '#/components/ui/button'
+import { CodeEditorPanel } from '#/components/code-editor-panel'
 import { ElementFrame } from '#/components/element-frame'
 import { pickBlockPageElement } from '#/lib/block-page'
 import { onlyCodeElements, type CanvasElement } from '#/lib/canvas'
-import { hasStoredElements, loadElements } from '#/lib/docs'
+import { hasStoredElements, loadElements, saveElements } from '#/lib/docs'
 
 // Fullscreen preview of a single canvas element ("page"), outside the editor.
 // The element renders interactive at viewport size, so responsive page code
 // reflows like a real site instead of the fixed frame it has on the canvas.
+// The Code toggle opens a Monaco pane: typing live-previews into the frame
+// (last-good rendering keeps broken drafts harmless), Apply persists to
+// localStorage and the server.
 
 const blockPageSearchParams = {
   element: parseAsString,
@@ -55,6 +59,12 @@ function BlockPage() {
   // Responsive preview: constrain the frame to a device width so page code
   // reflows like it would on that screen. 'full' = the browser viewport.
   const [previewWidth, setPreviewWidth] = useState<PreviewWidth>('full')
+  // Code editing: draft live-previews into the frame; Apply persists.
+  const [editing, setEditing] = useState(false)
+  const [draft, setDraft] = useState<string | null>(null)
+  const [saveState, setSaveState] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle')
+  const draftTimer = useRef<number | null>(null)
+  const savedTimer = useRef<number | null>(null)
 
   const userId = session?.user.id ?? null
 
@@ -95,6 +105,57 @@ function BlockPage() {
     const name = state.status === 'ready' ? state.name : null
     document.title = active ? `${active.name || name || 'Page'} — loora` : 'loora'
   }, [active, state])
+
+  // Switching element (or leaving edit mode) drops any unapplied draft.
+  const activeId = active?.id ?? null
+  useEffect(() => {
+    setDraft(null)
+    setRenderError(null)
+    if (draftTimer.current) window.clearTimeout(draftTimer.current)
+  }, [activeId, editing])
+
+  useEffect(
+    () => () => {
+      if (draftTimer.current) window.clearTimeout(draftTimer.current)
+      if (savedTimer.current) window.clearTimeout(savedTimer.current)
+    },
+    [],
+  )
+
+  // Live preview: debounce keystrokes so the frame recompiles at most ~3x/s.
+  const onDraftChange = (code: string) => {
+    if (draftTimer.current) window.clearTimeout(draftTimer.current)
+    draftTimer.current = window.setTimeout(() => setDraft(code), 300)
+  }
+
+  const applyCode = (code: string) => {
+    if (state.status !== 'ready' || !active) return
+    const nextElements = state.elements.map((el) => (el.id === active.id ? { ...el, code } : el))
+    setState({ ...state, elements: nextElements })
+    if (draftTimer.current) window.clearTimeout(draftTimer.current)
+    setDraft(null)
+    // Same cache-ownership rule as the load path: never write another user's cache.
+    const cacheOwner = localStorage.getItem('loora:cache-user')
+    if (!cacheOwner || cacheOwner === userId) saveElements(designId, nextElements)
+    setSaveState('saving')
+    void (async () => {
+      try {
+        // The localStorage load path doesn't know the design name and
+        // design.save requires one; resolve it once from the server.
+        const name = state.name ?? (await orpc.design.get({ id: designId })).name
+        if (state.name === null) {
+          setState((s) => (s.status === 'ready' ? { ...s, name } : s))
+        }
+        await orpc.design.save({ id: designId, name, shapes: nextElements })
+        setSaveState('saved')
+        if (savedTimer.current) window.clearTimeout(savedTimer.current)
+        savedTimer.current = window.setTimeout(() => setSaveState('idle'), 2000)
+      } catch (error) {
+        console.error('[blockpage] Failed to save code:', error)
+        setSaveState('error')
+      }
+    })()
+  }
 
   if (isPending || (userId && state.status === 'loading')) {
     return (
@@ -137,75 +198,113 @@ function BlockPage() {
   const width = PREVIEW_WIDTHS[previewWidth]
 
   return (
-    <main className="fixed inset-0 flex justify-center bg-white">
-      <div
-        className={width ? 'h-full border-x bg-white shadow-sm' : 'h-full w-full'}
-        style={width ? { width, maxWidth: '100%' } : undefined}
-      >
-        <ElementFrame
-          key={active.id}
-          elementId={active.id}
-          code={active.code}
-          interactive
-          onError={setRenderError}
-        />
-      </div>
-      <div className="absolute top-3 right-3 z-10 flex items-center gap-2 rounded-full border bg-card/85 py-1.5 pr-1.5 pl-3 shadow-sm backdrop-blur transition-opacity hover:opacity-100 sm:opacity-60">
-        <div className="flex items-center gap-0.5" role="group" aria-label="Preview width">
-          {(Object.keys(PREVIEW_WIDTHS) as PreviewWidth[]).map((key) => (
-            <button
-              key={key}
-              type="button"
-              aria-pressed={previewWidth === key}
-              title={
-                PREVIEW_WIDTHS[key] ? `${PREVIEW_LABELS[key]} · ${PREVIEW_WIDTHS[key]}px` : PREVIEW_LABELS[key]
-              }
-              className={
-                previewWidth === key
-                  ? 'rounded-full bg-secondary px-2 py-0.5 text-[11px] font-medium'
-                  : 'rounded-full px-2 py-0.5 text-[11px] text-muted-foreground hover:text-foreground'
-              }
-              onClick={() => setPreviewWidth(key)}
-            >
-              {PREVIEW_LABELS[key]}
-            </button>
-          ))}
+    <main className="fixed inset-0 flex flex-col bg-white sm:flex-row">
+      {editing && (
+        <div className="flex h-1/2 w-full min-w-0 flex-col border-b sm:h-full sm:w-[min(560px,45vw)] sm:border-r sm:border-b-0">
+          <CodeEditorPanel
+            key={active.id}
+            element={active}
+            onApply={applyCode}
+            onDraftChange={onDraftChange}
+            onClose={() => setEditing(false)}
+          />
         </div>
-        {elements.length > 1 ? (
-          <select
-            aria-label="Element"
-            className="max-w-40 truncate bg-transparent text-xs font-medium outline-none"
-            value={active.id}
-            onChange={(e) => void setSearch({ element: e.target.value })}
-          >
-            {elements.map((el) => (
-              <option key={el.id} value={el.id}>
-                {el.name || el.id}
-              </option>
-            ))}
-          </select>
-        ) : (
-          <span className="max-w-40 truncate text-xs font-medium">{active.name || 'Page'}</span>
-        )}
-        <Button
-          variant="outline"
-          size="sm"
-          className="h-6 rounded-full px-2.5 text-xs"
-          render={<Link to="/" search={{ d: designId }} />}
+      )}
+      <div className="relative flex min-h-0 min-w-0 flex-1 justify-center overflow-hidden">
+        <div
+          className={width ? 'h-full border-x bg-white shadow-sm' : 'h-full w-full'}
+          style={width ? { width, maxWidth: '100%' } : undefined}
         >
-          Editor
-        </Button>
-      </div>
-      {renderError ? (
-        <div className="absolute inset-x-0 bottom-4 z-10 flex justify-center px-4">
-          <p
-            role="alert"
-            className="max-w-xl truncate rounded-lg border border-destructive/30 bg-card px-3 py-2 text-xs text-destructive-foreground shadow-sm"
-          >
-            {renderError}
-          </p>
+          <ElementFrame
+            key={active.id}
+            elementId={active.id}
+            code={draft ?? active.code}
+            interactive
+            onError={setRenderError}
+          />
         </div>
-      ) : null}
+        <div className="absolute top-3 right-3 z-10 flex items-center gap-2 rounded-full border bg-card/85 py-1.5 pr-1.5 pl-3 shadow-sm backdrop-blur transition-opacity hover:opacity-100 sm:opacity-60">
+          <div className="flex items-center gap-0.5" role="group" aria-label="Preview width">
+            {(Object.keys(PREVIEW_WIDTHS) as PreviewWidth[]).map((key) => (
+              <button
+                key={key}
+                type="button"
+                aria-pressed={previewWidth === key}
+                title={
+                  PREVIEW_WIDTHS[key] ? `${PREVIEW_LABELS[key]} · ${PREVIEW_WIDTHS[key]}px` : PREVIEW_LABELS[key]
+                }
+                className={
+                  previewWidth === key
+                    ? 'rounded-full bg-secondary px-2 py-0.5 text-[11px] font-medium'
+                    : 'rounded-full px-2 py-0.5 text-[11px] text-muted-foreground hover:text-foreground'
+                }
+                onClick={() => setPreviewWidth(key)}
+              >
+                {PREVIEW_LABELS[key]}
+              </button>
+            ))}
+          </div>
+          <button
+            type="button"
+            aria-pressed={editing}
+            title="Edit this element's code"
+            className={
+              editing
+                ? 'rounded-full bg-secondary px-2 py-0.5 text-[11px] font-medium'
+                : 'rounded-full px-2 py-0.5 text-[11px] text-muted-foreground hover:text-foreground'
+            }
+            onClick={() => setEditing((v) => !v)}
+          >
+            Code
+          </button>
+          {saveState !== 'idle' && (
+            <span
+              className={
+                saveState === 'error'
+                  ? 'text-[11px] text-destructive-foreground'
+                  : 'text-[11px] text-muted-foreground'
+              }
+              role="status"
+            >
+              {saveState === 'saving' ? 'Saving…' : saveState === 'saved' ? 'Saved' : 'Save failed'}
+            </span>
+          )}
+          {elements.length > 1 ? (
+            <select
+              aria-label="Element"
+              className="max-w-40 truncate bg-transparent text-xs font-medium outline-none"
+              value={active.id}
+              onChange={(e) => void setSearch({ element: e.target.value })}
+            >
+              {elements.map((el) => (
+                <option key={el.id} value={el.id}>
+                  {el.name || el.id}
+                </option>
+              ))}
+            </select>
+          ) : (
+            <span className="max-w-40 truncate text-xs font-medium">{active.name || 'Page'}</span>
+          )}
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-6 rounded-full px-2.5 text-xs"
+            render={<Link to="/" search={{ d: designId }} />}
+          >
+            Editor
+          </Button>
+        </div>
+        {renderError ? (
+          <div className="absolute inset-x-0 bottom-4 z-10 flex justify-center px-4">
+            <p
+              role="alert"
+              className="max-w-xl truncate rounded-lg border border-destructive/30 bg-card px-3 py-2 text-xs text-destructive-foreground shadow-sm"
+            >
+              {renderError}
+            </p>
+          </div>
+        ) : null}
+      </div>
     </main>
   )
 }

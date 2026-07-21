@@ -1767,15 +1767,32 @@ function Editor({ preview = false, userId }: { preview?: boolean; userId?: strin
               <CopyIcon data-slot="icon" />
             </Button>
             {selectedShapes.length === 1 && (
-              <Button
-                variant="ghost"
-                size="icon-sm"
-                aria-label="Edit code"
-                title="Edit code"
-                onClick={() => toggleCode(true)}
-              >
-                <CodeXmlIcon data-slot="icon" />
-              </Button>
+              <>
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  aria-label="Edit code"
+                  title="Edit code"
+                  onClick={() => toggleCode(true)}
+                >
+                  <CodeXmlIcon data-slot="icon" />
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  aria-label="Open as page"
+                  title="Open as page"
+                  onClick={() =>
+                    window.open(
+                      `/blockpage/${encodeURIComponent(activeId)}?element=${encodeURIComponent(selectedShapes[0].id)}`,
+                      '_blank',
+                      'noopener',
+                    )
+                  }
+                >
+                  <MaximizeIcon data-slot="icon" />
+                </Button>
+              </>
             )}
             <Button
               variant="ghost"

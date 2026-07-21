@@ -65,15 +65,21 @@ const configureEditor: BeforeMount = (monaco) => {
 export function CodeEditorPanel({
   element,
   onApply,
+  onDraftChange,
   onClose,
 }: {
   element: CanvasElement
   onApply: (code: string) => void
+  // Fires on every keystroke with the current draft — callers can debounce it
+  // into a live preview while Apply stays the explicit persist step.
+  onDraftChange?: (code: string) => void
   onClose?: () => void
 }) {
   const [draft, setDraft] = useState(element.code)
   const applyRef = useRef(onApply)
   applyRef.current = onApply
+  const draftChangeRef = useRef(onDraftChange)
+  draftChangeRef.current = onDraftChange
 
   const dirty = draft !== element.code
   const language = useMemo(() => codeEditorLanguage(element.code), [element.code])
@@ -124,7 +130,11 @@ export function CodeEditorPanel({
             value={draft}
             beforeMount={configureEditor}
             onMount={handleMount}
-            onChange={(value) => setDraft(value ?? '')}
+            onChange={(value) => {
+              const next = value ?? ''
+              setDraft(next)
+              draftChangeRef.current?.(next)
+            }}
             options={EDITOR_OPTIONS}
             loading={
               <div className="grid h-full place-items-center font-mono text-xs text-muted-foreground">
