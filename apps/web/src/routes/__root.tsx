@@ -2,8 +2,10 @@ import { HeadContent, Scripts, createRootRoute } from '@tanstack/react-router'
 import { TanStackRouterDevtoolsPanel } from '@tanstack/react-router-devtools'
 import { TanStackDevtools } from '@tanstack/react-devtools'
 import { NuqsAdapter } from 'nuqs/adapters/tanstack-router'
+import { useEffect } from 'react'
 
 import appCss from '../styles.css?url'
+import { THEME_INIT_SCRIPT, watchSystemTheme } from '#/lib/theme'
 
 export const Route = createRootRoute({
   head: () => ({
@@ -63,11 +65,17 @@ export const Route = createRootRoute({
         href: '/manifest.json',
       },
     ],
+    scripts: [
+      {
+        children: THEME_INIT_SCRIPT,
+      },
+    ],
   }),
   shellComponent: RootDocument,
 })
 
 function RootDocument({ children }: { children: React.ReactNode }) {
+  useEffect(() => watchSystemTheme(), [])
   return (
     <html lang="en">
       <head>

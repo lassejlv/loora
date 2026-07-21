@@ -273,7 +273,31 @@ body {
 }
 
 .dark {
+  /* Warm dark mirror of the light tokens — same hue family, inverted value. */
+  --cx-canvas: #1c1b19;
+  --cx-dot: #33312d;
+  --cx-ink: #e8e6e1;
+  --cx-accent: #5b71f5;
+
+  --background: #161514;
+  --foreground: var(--cx-ink);
+  --card: #211f1d;
+  --card-foreground: var(--cx-ink);
+  --popover: #211f1d;
+  --popover-foreground: var(--cx-ink);
+  --primary: var(--cx-ink);
+  --primary-foreground: #161514;
+  --secondary: --alpha(var(--color-white) / 7%);
+  --secondary-foreground: var(--cx-ink);
+  --muted: --alpha(var(--color-white) / 7%);
+  --muted-foreground: #a09c93;
+  --accent: --alpha(var(--color-white) / 7%);
+  --accent-foreground: var(--cx-ink);
+  --destructive: var(--color-red-500);
   --destructive-foreground: var(--color-red-400);
+  --border: --alpha(var(--color-white) / 12%);
+  --input: --alpha(var(--color-white) / 14%);
+  --sidebar-primary-foreground: #161514;
   --info: var(--color-blue-500);
   --info-foreground: var(--color-blue-400);
   --success: var(--color-emerald-500);
