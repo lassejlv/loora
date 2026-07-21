@@ -164,6 +164,49 @@ export function replaceClassValue(
   return result
 }
 
+// Move a dragged node's markup next to a sibling's markup (drag-reorder
+// inside an HTML block). Both snippets are the browser's outerHTML of nodes
+// rendered FROM this code, so for HTML-mode elements they usually appear
+// verbatim; anything ambiguous or unmatched fails loudly and the caller
+// falls back to a notice. The dragged segment keeps its line indentation.
+export function moveNodeMarkup(
+  code: string,
+  nodeHtml: string,
+  anchorHtml: string,
+  position: 'before' | 'after',
+): CodeEditResult {
+  if (!nodeHtml || !anchorHtml || nodeHtml === anchorHtml) {
+    return { ok: false, error: 'Nothing to move' }
+  }
+  const nodeCount = code.split(nodeHtml).length - 1
+  if (nodeCount === 0) return { ok: false, error: 'The dragged markup was not found in the code' }
+  if (nodeCount > 1) return { ok: false, error: 'The dragged markup appears more than once' }
+
+  const at = code.indexOf(nodeHtml)
+  // Swallow the node's line indentation (and its newline) so no blank line
+  // is left behind; reuse that indent at the destination.
+  let ws = at
+  while (ws > 0 && (code[ws - 1] === ' ' || code[ws - 1] === '\t')) ws--
+  const indent = code.slice(ws, at)
+  const onOwnLine = ws === 0 || code[ws - 1] === '\n'
+  const start = onOwnLine ? (ws > 0 ? ws - 1 : 0) : at
+  const without = code.slice(0, start) + code.slice(at + nodeHtml.length)
+
+  const anchorCount = without.split(anchorHtml).length - 1
+  if (anchorCount === 0) return { ok: false, error: 'The drop target was not found in the code' }
+  if (anchorCount > 1) return { ok: false, error: 'The drop target appears more than once' }
+
+  const ai = without.indexOf(anchorHtml)
+  const insertAt = position === 'before' ? ai : ai + anchorHtml.length
+  const insertion =
+    position === 'before' ? `${nodeHtml}\n${indent}` : `\n${indent}${nodeHtml}`
+  return {
+    ok: true,
+    code: without.slice(0, insertAt) + insertion + without.slice(insertAt),
+    contexts: [],
+  }
+}
+
 // Rebuild z-order in one pass. Unknown and duplicate ids are ignored, while
 // elements omitted by the caller keep their existing relative order at the end.
 export function reorderElements(elements: CanvasElement[], orderedIds: string[]): CanvasElement[] {

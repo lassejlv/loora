@@ -3,6 +3,7 @@ import type { CanvasElement, ElementPatch } from '#/lib/canvas'
 import { applyTextEdits, elementId } from '#/lib/canvas'
 import { TEMPLATE_DEFAULTS, type InsertTool } from '#/lib/element-templates'
 import {
+  classifyCode,
   ElementFrame,
   getRenderResult,
   readElementLogs,
@@ -10,7 +11,7 @@ import {
 } from '#/components/element-frame'
 import { ImagePickerDialog } from '#/components/image-picker-dialog'
 import { StyleEditorPanel } from '#/components/style-editor-panel'
-import { replaceClassValue, replaceImageSource } from '#/lib/canvas'
+import { moveNodeMarkup, replaceClassValue, replaceImageSource } from '#/lib/canvas'
 import { collectSnapLines, elementAABB, snapBox, snapPoint, type SnapLines } from '#/lib/snap'
 
 export type Tool = 'select' | 'hand' | 'interact' | 'comment' | InsertTool
@@ -320,6 +321,24 @@ export function Canvas({
   const handleImagePick = useCallback((id: string, src: string) => {
     setImagePick({ id, src })
   }, [])
+
+  const handleNodeMove = useCallback(
+    (id: string, move: { node: string; anchor: string; position: 'before' | 'after' }) => {
+      const el = elementsRef.current.find((c) => c.id === id)
+      if (!el) return
+      if (classifyCode(el.code) !== 'html') {
+        showNotice('Drag-reorder works in HTML blocks — this block is React code; ask the agent to move it.')
+        return
+      }
+      const result = moveNodeMarkup(el.code, move.node, move.anchor, move.position)
+      if (!result.ok) {
+        showNotice('Could not map that move onto the code. Use Edit code or ask the agent instead.')
+        return
+      }
+      onUpdateMany(new Map([[id, { code: result.code }]]))
+    },
+    [onUpdateMany, showNotice],
+  )
 
   const handleStylePick = useCallback(
     (id: string, pick: { tag: string; className: string }) => {
@@ -1021,6 +1040,7 @@ export function Canvas({
               onTextEdit={handleTextEdit}
               onImagePick={handleImagePick}
               onStylePick={handleStylePick}
+              onNodeMove={handleNodeMove}
             />
           )
         })}
@@ -1280,6 +1300,7 @@ const ElementView = memo(function ElementView({
   onTextEdit,
   onImagePick,
   onStylePick,
+  onNodeMove,
 }: {
   element: CanvasElement
   interactive?: boolean
@@ -1291,6 +1312,7 @@ const ElementView = memo(function ElementView({
   onTextEdit?: (id: string, edits: FrameTextEdit[]) => void
   onImagePick?: (id: string, src: string) => void
   onStylePick?: (id: string, pick: { tag: string; className: string }) => void
+  onNodeMove?: (id: string, move: { node: string; anchor: string; position: 'before' | 'after' }) => void
 }) {
   const [error, setError] = useState<string | null>(null)
   const errorTimer = useRef<number | null>(null)
@@ -1381,6 +1403,7 @@ const ElementView = memo(function ElementView({
           onTextEdit={(edits) => onTextEdit?.(el.id, edits)}
           onImagePick={(src) => onImagePick?.(el.id, src)}
           onStylePick={(pick) => onStylePick?.(el.id, pick)}
+          onNodeMove={(move) => onNodeMove?.(el.id, move)}
         />
       </div>
       {/* transparent hit layer so select/move/resize work; removed in interact mode */}

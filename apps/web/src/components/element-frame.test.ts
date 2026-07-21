@@ -301,6 +301,19 @@ describe('buildElementDoc', () => {
     expect(doc).toContain("t.getAttribute('class')")
   })
 
+  it('reports drag-reorder drops with node and anchor markup', () => {
+    expect(doc).toContain("'loora:node-move'")
+    expect(doc).toContain('outerHTML')
+    // Restored inline styles must not leave style="" behind, or the
+    // outerHTML would stop matching the source.
+    expect(doc).toContain('__dropEmptyStyle')
+  })
+
+  it('answers measure requests with the natural content size', () => {
+    expect(doc).toContain("'loora:measure'")
+    expect(doc).toContain('scrollHeight')
+  })
+
   it('exposes the cross-element message bus', () => {
     expect(doc).toContain('window.loora')
     expect(doc).toContain("'loora:bus'")

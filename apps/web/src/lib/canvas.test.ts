@@ -3,6 +3,7 @@ import {
   applyCodeEdits,
   applyElementPatches,
   applyTextEdits,
+  moveNodeMarkup,
   replaceClassValue,
   replaceImageSource,
   reorderElements,
@@ -156,6 +157,32 @@ describe('replaceImageSource', () => {
 
   it('fails when the src is not in the code', () => {
     expect(replaceImageSource('<img src="x.png">', '/api/asset/a1', '/api/asset/b2').ok).toBe(false)
+  })
+})
+
+describe('moveNodeMarkup', () => {
+  const code = '<div>\n  <p id="a">A</p>\n  <p id="b">B</p>\n  <p id="c">C</p>\n</div>'
+
+  it('moves a node after a later sibling, keeping indentation', () => {
+    const result = moveNodeMarkup(code, '<p id="a">A</p>', '<p id="c">C</p>', 'after')
+    if (!result.ok) throw new Error('expected ok')
+    expect(result.code).toBe('<div>\n  <p id="b">B</p>\n  <p id="c">C</p>\n  <p id="a">A</p>\n</div>')
+  })
+
+  it('moves a node before an earlier sibling', () => {
+    const result = moveNodeMarkup(code, '<p id="c">C</p>', '<p id="a">A</p>', 'before')
+    if (!result.ok) throw new Error('expected ok')
+    expect(result.code).toBe('<div>\n  <p id="c">C</p>\n  <p id="a">A</p>\n  <p id="b">B</p>\n</div>')
+  })
+
+  it('fails when the dragged markup is missing or ambiguous', () => {
+    expect(moveNodeMarkup(code, '<p>missing</p>', '<p id="a">A</p>', 'before').ok).toBe(false)
+    const dup = '<p>X</p><p>X</p><p id="a">A</p>'
+    expect(moveNodeMarkup(dup, '<p>X</p>', '<p id="a">A</p>', 'after').ok).toBe(false)
+  })
+
+  it('fails when the drop target is missing', () => {
+    expect(moveNodeMarkup(code, '<p id="a">A</p>', '<p>missing</p>', 'after').ok).toBe(false)
   })
 })
 

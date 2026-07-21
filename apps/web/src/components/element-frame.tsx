@@ -526,9 +526,16 @@ function __findTextHost(start) {
   return null
 }
 
+// An emptied style attribute must go away entirely: a leftover style="" would
+// make the node's outerHTML stop matching the source code.
+function __dropEmptyStyle(el) {
+  if (el.getAttribute && el.getAttribute('style') === '') el.removeAttribute('style')
+}
+
 function __clearEditHover() {
   if (!__editHover) return
   __editHover.el.style.outline = __editHover.prev
+  __dropEmptyStyle(__editHover.el)
   __editHover = null
 }
 
@@ -550,6 +557,7 @@ function __endEditSession(apply) {
   __editSession = null
   s.host.removeAttribute('contenteditable')
   s.host.style.outline = s.prevOutline
+  __dropEmptyStyle(s.host)
   if (!apply) {
     // Cancel: restore every text node we snapshotted.
     s.texts.forEach(function (pair) {
@@ -584,6 +592,7 @@ function __setEditMode(on) {
   if (!on) {
     __endEditSession(true)
     __clearEditHover()
+    __dragCleanup()
   }
 }
 
@@ -608,6 +617,12 @@ document.addEventListener('mouseover', function (e) {
 // Capture phase so edit-mode clicks never reach buttons/links in the page.
 document.addEventListener('click', function (e) {
   if (!__editMode) return
+  if (__justDragged) {
+    __justDragged = false
+    e.preventDefault()
+    e.stopPropagation()
+    return
+  }
   if (__editSession && __editSession.host.contains(e.target)) return
   e.preventDefault()
   e.stopPropagation()
@@ -621,6 +636,120 @@ document.addEventListener('click', function (e) {
   if (host) __startEditSession(host)
   else __endEditSession(true)
 }, true)
+
+// Drag-reorder in edit mode: press and move >6px on a node to drag it among
+// its siblings; a drop posts the dragged node's and target sibling's
+// outerHTML so the parent can move the markup in the source. Plain clicks
+// (no movement) still start a text-edit session.
+var __nodeDrag = null
+var __justDragged = false
+
+function __findDraggable(start) {
+  var n = start && start.nodeType === 1 ? start : start && start.parentElement
+  while (n && n !== document.body && n !== document.documentElement) {
+    var p = n.parentElement
+    if (p && p !== document.documentElement && p.children.length > 1) return n
+    n = n.parentElement
+  }
+  return null
+}
+
+function __dragCleanup() {
+  var d = __nodeDrag
+  if (!d) return
+  __nodeDrag = null
+  if (d.active) {
+    d.node.style.opacity = d.prevOpacity
+    __dropEmptyStyle(d.node)
+    document.body.style.userSelect = d.prevSelect
+    if (d.marker.parentNode) d.marker.parentNode.removeChild(d.marker)
+  }
+}
+
+function __dragTarget(d, x, y) {
+  // Nearest sibling gap: horizontal for flex rows, vertical otherwise.
+  var parent = d.node.parentElement
+  if (!parent) return null
+  var style = getComputedStyle(parent)
+  var horizontal = style.display.indexOf('flex') !== -1 && style.flexDirection.indexOf('row') === 0
+  var best = null
+  for (var i = 0; i < parent.children.length; i++) {
+    var sib = parent.children[i]
+    if (sib === d.node || sib === d.marker) continue
+    var rect = sib.getBoundingClientRect()
+    var center = horizontal ? rect.left + rect.width / 2 : rect.top + rect.height / 2
+    var pointer = horizontal ? x : y
+    var dist = Math.abs(pointer - center)
+    if (!best || dist < best.dist) {
+      best = { sib: sib, dist: dist, position: pointer < center ? 'before' : 'after', rect: rect, horizontal: horizontal }
+    }
+  }
+  return best
+}
+
+function __dragMark(target) {
+  var d = __nodeDrag
+  if (!d || !target) return
+  var m = d.marker
+  var r = target.rect
+  if (target.horizontal) {
+    m.style.left = (target.position === 'before' ? r.left - 3 : r.right + 1) + 'px'
+    m.style.top = r.top + 'px'
+    m.style.width = '2px'
+    m.style.height = r.height + 'px'
+  } else {
+    m.style.left = r.left + 'px'
+    m.style.top = (target.position === 'before' ? r.top - 3 : r.bottom + 1) + 'px'
+    m.style.width = r.width + 'px'
+    m.style.height = '2px'
+  }
+  if (!m.parentNode) document.body.appendChild(m)
+}
+
+document.addEventListener('pointerdown', function (e) {
+  if (!__editMode || e.button !== 0) return
+  if (__editSession && __editSession.host.contains(e.target)) return
+  var node = __findDraggable(e.target)
+  if (!node) return
+  var marker = document.createElement('div')
+  marker.style.cssText = 'position:fixed;z-index:2147483647;background:#2440e6;border-radius:2px;pointer-events:none'
+  __nodeDrag = { node: node, startX: e.clientX, startY: e.clientY, active: false, marker: marker, prevOpacity: '', prevSelect: '', target: null }
+}, true)
+
+document.addEventListener('pointermove', function (e) {
+  var d = __nodeDrag
+  if (!d) return
+  if (!d.active) {
+    if (Math.abs(e.clientX - d.startX) < 6 && Math.abs(e.clientY - d.startY) < 6) return
+    d.active = true
+    d.prevOpacity = d.node.style.opacity
+    d.prevSelect = document.body.style.userSelect
+    d.node.style.opacity = '0.4'
+    document.body.style.userSelect = 'none'
+  }
+  d.target = __dragTarget(d, e.clientX, e.clientY)
+  __dragMark(d.target)
+}, true)
+
+document.addEventListener('pointerup', function () {
+  var d = __nodeDrag
+  if (!d) return
+  var drop = d.active && d.target ? d.target : null
+  var wasActive = d.active
+  __dragCleanup()
+  if (wasActive) __justDragged = true
+  if (drop) {
+    parent.postMessage({
+      type: 'loora:node-move',
+      node: d.node.outerHTML,
+      anchor: drop.sib.outerHTML,
+      position: drop.position,
+    }, '*')
+  }
+}, true)
+
+document.addEventListener('pointercancel', function () { __dragCleanup() }, true)
+document.addEventListener('dragstart', function (e) { if (__editMode) e.preventDefault() }, true)
 
 // Right-click in edit mode: report the node's tag + class value so the
 // parent can open the style editor (the class string is what appears in the
@@ -753,6 +882,8 @@ function __teardown() {
   // A new payload replaces the DOM the session pointed at; drop it silently.
   __editSession = null
   __clearEditHover()
+  __dragCleanup()
+  __justDragged = false
   if (__currentRoot) {
     try { __currentRoot.unmount() } catch (e) {}
     __currentRoot = null
@@ -828,6 +959,18 @@ window.addEventListener('message', function (e) {
   }
   if (msg.type === 'loora:read-logs') {
     parent.postMessage({ type: 'loora:logs-result', token: msg.token, logs: __logs.slice() }, '*')
+    return
+  }
+  if (msg.type === 'loora:measure') {
+    // Natural content size. html/body are pinned to 100% height, so
+    // scrollHeight only ever EXCEEDS the frame when content overflows —
+    // content shorter than the frame is not detectable from here.
+    parent.postMessage({
+      type: 'loora:measure-result',
+      token: msg.token,
+      w: Math.max(document.body.scrollWidth, document.documentElement.scrollWidth),
+      h: Math.max(document.body.scrollHeight, document.documentElement.scrollHeight),
+    }, '*')
     return
   }
   if (msg.type !== 'loora:code' || typeof msg.code !== 'string') return
@@ -933,6 +1076,7 @@ export function ElementFrame({
   onTextEdit,
   onImagePick,
   onStylePick,
+  onNodeMove,
 }: {
   elementId: string
   code: string
@@ -951,6 +1095,9 @@ export function ElementFrame({
   onImagePick?: (src: string) => void
   // Right-click on a node in edit mode: its tag and class attribute value.
   onStylePick?: (pick: { tag: string; className: string }) => void
+  // Drag-reorder drop in edit mode: dragged node's and target sibling's
+  // outerHTML plus which side to insert on.
+  onNodeMove?: (move: { node: string; anchor: string; position: 'before' | 'after' }) => void
 }) {
   const iframeRef = useRef<HTMLIFrameElement>(null)
   const readyRef = useRef(false)
@@ -969,6 +1116,8 @@ export function ElementFrame({
   onImagePickRef.current = onImagePick
   const onStylePickRef = useRef(onStylePick)
   onStylePickRef.current = onStylePick
+  const onNodeMoveRef = useRef(onNodeMove)
+  onNodeMoveRef.current = onNodeMove
 
   const send = (source: string) => {
     if (!iframeRef.current?.contentWindow || !readyRef.current) return
@@ -1042,6 +1191,17 @@ export function ElementFrame({
         const pick = msg as { tag?: unknown; className?: unknown }
         if (typeof pick.tag === 'string' && typeof pick.className === 'string') {
           onStylePickRef.current?.({ tag: pick.tag, className: pick.className })
+        }
+        return
+      }
+      if (msg?.type === 'loora:node-move') {
+        const move = msg as { node?: unknown; anchor?: unknown; position?: unknown }
+        if (
+          typeof move.node === 'string' &&
+          typeof move.anchor === 'string' &&
+          (move.position === 'before' || move.position === 'after')
+        ) {
+          onNodeMoveRef.current?.({ node: move.node, anchor: move.anchor, position: move.position })
         }
         return
       }
@@ -1139,6 +1299,40 @@ export function readElementLogs(elementId: string, timeoutMs = 1000): Promise<st
     }
     window.addEventListener('message', onMessage)
     iframe.contentWindow!.postMessage({ type: 'loora:read-logs', token }, '*')
+  })
+}
+
+// Ask a mounted frame for its natural content size (scroll dimensions).
+// Null when the frame is missing or unresponsive. Because the frame document
+// fills the element box, a height LARGER than the element means the content
+// overflows and is being clipped on the canvas.
+export function measureElement(
+  elementId: string,
+  timeoutMs = 1000,
+): Promise<{ w: number; h: number } | null> {
+  const iframe = document.querySelector<HTMLIFrameElement>(
+    `iframe[data-element-frame="${CSS.escape(elementId)}"]`,
+  )
+  if (!iframe?.contentWindow) return Promise.resolve(null)
+  const token = `${elementId}:${Date.now().toString(36)}:${Math.floor(Math.random() * 1e6)}`
+  return new Promise((resolve) => {
+    const timer = window.setTimeout(() => {
+      window.removeEventListener('message', onMessage)
+      resolve(null)
+    }, timeoutMs)
+    const onMessage = (e: MessageEvent) => {
+      const msg = e.data as { type?: string; token?: string; w?: unknown; h?: unknown }
+      if (e.source !== iframe.contentWindow || msg?.type !== 'loora:measure-result' || msg.token !== token) return
+      window.clearTimeout(timer)
+      window.removeEventListener('message', onMessage)
+      resolve(
+        typeof msg.w === 'number' && typeof msg.h === 'number'
+          ? { w: Math.round(msg.w), h: Math.round(msg.h) }
+          : null,
+      )
+    }
+    window.addEventListener('message', onMessage)
+    iframe.contentWindow!.postMessage({ type: 'loora:measure', token }, '*')
   })
 }
 

@@ -44,7 +44,7 @@ import {
   PromptInputTextarea,
 } from '#/components/ai-elements/prompt-input'
 import { applyCodeEdits, type CanvasElement, type CodeEdit, type ElementActions } from '#/lib/canvas'
-import { awaitRenderResult, captureElement, readElementLogs } from '#/components/element-frame'
+import { awaitRenderResult, captureElement, measureElement, readElementLogs } from '#/components/element-frame'
 import { snapshotCanvas } from '#/lib/snapshot'
 import { commitIfChanged } from '@loora/rpc/history'
 import { sanitizeChatMessagesForStorage } from '@loora/rpc/chat-storage'
@@ -297,6 +297,19 @@ export const AgentPanel = memo(function AgentPanel({
             const crash = logs?.find((line) => line.startsWith('uncaught: '))
             if (crash) render = { ok: false, error: crash.slice('uncaught: '.length) }
           }
+          // Content overflow is the most common silent failure (a page taller
+          // than its element box gets clipped); measure and put it in the
+          // render string so the model cannot miss it.
+          let renderText = render ? (render.ok ? 'ok' : `error: ${render.error}`) : 'unknown'
+          if (render?.ok) {
+            const size = await measureElement(el.id)
+            if (size && (size.h > el.h + 8 || size.w > el.w + 8)) {
+              const axes: string[] = []
+              if (size.h > el.h + 8) axes.push(`${size.h}px tall vs element h=${el.h}`)
+              if (size.w > el.w + 8) axes.push(`${size.w}px wide vs element w=${el.w}`)
+              renderText = `ok, but the content overflows and is clipped (${axes.join(', ')}) — resize the element with arrangeElements to fit`
+            }
+          }
           return {
             id: el.id,
             name: el.name,
@@ -304,7 +317,7 @@ export const AgentPanel = memo(function AgentPanel({
             y: el.y,
             w: el.w,
             h: el.h,
-            render: render ? (render.ok ? 'ok' : `error: ${render.error}`) : 'unknown',
+            render: renderText,
           }
         }
 

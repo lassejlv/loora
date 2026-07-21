@@ -5,12 +5,13 @@ import { authClient } from '@loora/auth/client'
 import { orpc } from '#/lib/orpc-client'
 import { Button } from '#/components/ui/button'
 import { CodeEditorPanel } from '#/components/code-editor-panel'
-import { ElementFrame, type FrameTextEdit } from '#/components/element-frame'
+import { classifyCode, ElementFrame, type FrameTextEdit } from '#/components/element-frame'
 import { ImagePickerDialog } from '#/components/image-picker-dialog'
 import { pickBlockPageElement } from '#/lib/block-page'
 import { StyleEditorPanel } from '#/components/style-editor-panel'
 import {
   applyTextEdits,
+  moveNodeMarkup,
   onlyCodeElements,
   replaceClassValue,
   replaceImageSource,
@@ -216,6 +217,20 @@ function BlockPage() {
     setStylePick({ ...stylePick, className: next })
   }
 
+  const onNodeMove = (move: { node: string; anchor: string; position: 'before' | 'after' }) => {
+    if (state.status !== 'ready' || !active) return
+    if (classifyCode(active.code) !== 'html') {
+      showEditNotice('Drag-reorder works in HTML blocks — this block is React code; ask the agent to move it.')
+      return
+    }
+    const result = moveNodeMarkup(active.code, move.node, move.anchor, move.position)
+    if (!result.ok) {
+      showEditNotice('Could not map that move onto the code. Use the Code editor or ask the agent instead.')
+      return
+    }
+    applyCode(result.code)
+  }
+
   const replaceImage = (assetId: string) => {
     const src = imagePickSrc
     setImagePickSrc(null)
@@ -296,6 +311,7 @@ function BlockPage() {
             onTextEdit={onTextEdit}
             onImagePick={setImagePickSrc}
             onStylePick={onStylePick}
+            onNodeMove={onNodeMove}
           />
         </div>
         <div className="absolute top-3 right-3 z-10 flex items-center gap-2 rounded-full border bg-card/85 py-1.5 pr-1.5 pl-3 shadow-sm backdrop-blur transition-opacity hover:opacity-100 sm:opacity-60">
