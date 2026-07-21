@@ -1,8 +1,13 @@
-import { memo, useEffect, useMemo, useRef, useState } from 'react'
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { CanvasElement, ElementPatch } from '#/lib/canvas'
-import { elementId } from '#/lib/canvas'
+import { applyTextEdits, elementId } from '#/lib/canvas'
 import { TEMPLATE_DEFAULTS, type InsertTool } from '#/lib/element-templates'
-import { ElementFrame, getRenderResult, readElementLogs } from '#/components/element-frame'
+import {
+  ElementFrame,
+  getRenderResult,
+  readElementLogs,
+  type FrameTextEdit,
+} from '#/components/element-frame'
 import { collectSnapLines, elementAABB, snapBox, snapPoint, type SnapLines } from '#/lib/snap'
 
 export type Tool = 'select' | 'hand' | 'interact' | 'comment' | InsertTool
@@ -190,6 +195,15 @@ export function Canvas({
   const commentInputRef = useRef<HTMLTextAreaElement>(null)
   // Element whose runtime console is open (opened from its error badge).
   const [consoleFor, setConsoleFor] = useState<string | null>(null)
+  // Inline text editing inside an interactive element: which element is in
+  // edit mode, a notice for unmappable edits, and per-element remount nonces
+  // to revert a frame whose DOM diverged from the code.
+  const [textEditFor, setTextEditFor] = useState<string | null>(null)
+  const [editNotice, setEditNotice] = useState<string | null>(null)
+  const editNoticeTimer = useRef<number | null>(null)
+  const [frameNonces, setFrameNonces] = useState<Record<string, number>>({})
+  const elementsRef = useRef(elements)
+  elementsRef.current = elements
   const dragRef = useRef<Drag | null>(null)
   dragRef.current = drag
   // Touch pinch-zoom: active touch pointers and the current pinch gesture.
@@ -265,6 +279,39 @@ export function Canvas({
     const rect = rootRef.current!.getBoundingClientRect()
     return { x: e.clientX - rect.left, y: e.clientY - rect.top }
   }
+
+  // Inline text edits from an interactive frame: map onto the source, apply
+  // through the normal mutation path (undo, persistence). Unmappable edits
+  // remount the frame so its DOM snaps back to the code.
+  const handleTextEdit = useCallback(
+    (id: string, edits: FrameTextEdit[]) => {
+      const el = elementsRef.current.find((c) => c.id === id)
+      if (!el) return
+      const result = applyTextEdits(el.code, edits)
+      if (!result.ok) {
+        setFrameNonces((n) => ({ ...n, [id]: (n[id] ?? 0) + 1 }))
+        setEditNotice(
+          'Could not map that edit onto the code (the text may repeat or be generated). Use Edit code instead.',
+        )
+        if (editNoticeTimer.current) window.clearTimeout(editNoticeTimer.current)
+        editNoticeTimer.current = window.setTimeout(() => setEditNotice(null), 6000)
+        return
+      }
+      onUpdateMany(new Map([[id, { code: result.code }]]))
+    },
+    [onUpdateMany],
+  )
+
+  const toggleTextEdit = useCallback((id: string) => {
+    setTextEditFor((current) => (current === id ? null : id))
+  }, [])
+
+  useEffect(
+    () => () => {
+      if (editNoticeTimer.current) window.clearTimeout(editNoticeTimer.current)
+    },
+    [],
+  )
 
   const onPointerDown = (e: React.PointerEvent) => {
     if (e.button !== 0 && e.button !== 1) return
@@ -699,6 +746,14 @@ export function Canvas({
     }
   }, [])
 
+  // Leaving interactivity drops text-edit mode so it doesn't silently resume
+  // the next time the element becomes interactive.
+  useEffect(() => {
+    if (textEditFor && activeTool !== 'interact' && interactiveId !== textEditFor) {
+      setTextEditFor(null)
+    }
+  }, [activeTool, interactiveId, textEditFor])
+
   // Escape leaves per-element interact mode (clicking outside also works).
   useEffect(() => {
     if (!interactiveId) return
@@ -893,13 +948,18 @@ export function Canvas({
             b.left > scene.right + cullMargin ||
             b.bottom < scene.top - cullMargin ||
             b.top > scene.bottom + cullMargin
+          const interactive = el.id === interactiveId || activeTool === 'interact'
           return (
             <ElementView
               key={el.id}
               element={el}
-              interactive={el.id === interactiveId || activeTool === 'interact'}
+              interactive={interactive}
               suspended={offscreen}
+              textEditing={interactive && textEditFor === el.id}
+              frameNonce={frameNonces[el.id] ?? 0}
               onOpenConsole={setConsoleFor}
+              onToggleTextEdit={toggleTextEdit}
+              onTextEdit={handleTextEdit}
             />
           )
         })}
@@ -1045,6 +1105,18 @@ export function Canvas({
         />
       )}
 
+      {/* Inline-edit notice (unmappable text edits). */}
+      {editNotice && (
+        <div className="pointer-events-none absolute inset-x-0 bottom-4 z-10 flex justify-center px-4">
+          <p
+            role="status"
+            className="max-w-xl rounded-lg border bg-card px-3 py-2 text-xs text-muted-foreground shadow-sm"
+          >
+            {editNotice}
+          </p>
+        </div>
+      )}
+
       {/* Runtime console for an element, opened from its error badge. */}
       {consoleFor &&
         (() => {
@@ -1121,12 +1193,20 @@ const ElementView = memo(function ElementView({
   element: el,
   interactive,
   suspended,
+  textEditing,
+  frameNonce = 0,
   onOpenConsole,
+  onToggleTextEdit,
+  onTextEdit,
 }: {
   element: CanvasElement
   interactive?: boolean
   suspended?: boolean
+  textEditing?: boolean
+  frameNonce?: number
   onOpenConsole?: (id: string) => void
+  onToggleTextEdit?: (id: string) => void
+  onTextEdit?: (id: string, edits: FrameTextEdit[]) => void
 }) {
   const [error, setError] = useState<string | null>(null)
   const errorTimer = useRef<number | null>(null)
@@ -1172,6 +1252,24 @@ const ElementView = memo(function ElementView({
       >
         {el.name}
         {interactive ? ' · interacting' : ''}
+        {interactive && (
+          <button
+            type="button"
+            title="Click text in the element to edit it — Enter commits, Escape cancels"
+            className={
+              textEditing
+                ? 'pointer-events-auto cursor-pointer rounded-full bg-cx-accent px-1.5 text-[10px] font-medium text-white'
+                : 'pointer-events-auto cursor-pointer rounded-full border px-1.5 text-[10px] text-muted-foreground hover:text-foreground'
+            }
+            onPointerDown={(e) => e.stopPropagation()}
+            onClick={(e) => {
+              e.stopPropagation()
+              onToggleTextEdit?.(el.id)
+            }}
+          >
+            {textEditing ? 'done' : 'edit text'}
+          </button>
+        )}
         {error && (
           <button
             type="button"
@@ -1189,11 +1287,14 @@ const ElementView = memo(function ElementView({
       </div>
       <div className="h-full w-full overflow-hidden">
         <ElementFrame
+          key={`${el.id}:${frameNonce}`}
           elementId={el.id}
           code={el.code}
           interactive={!!interactive}
           suspended={!!suspended && !interactive}
+          textEditable={!!textEditing}
           onError={onFrameError}
+          onTextEdit={(edits) => onTextEdit?.(el.id, edits)}
         />
       </div>
       {/* transparent hit layer so select/move/resize work; removed in interact mode */}

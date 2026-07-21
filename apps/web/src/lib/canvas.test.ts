@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'bun:test'
-import { applyCodeEdits, applyElementPatches, reorderElements, type CanvasElement } from './canvas'
+import {
+  applyCodeEdits,
+  applyElementPatches,
+  applyTextEdits,
+  reorderElements,
+  type CanvasElement,
+} from './canvas'
 
 const element = (id: string, x = 0): CanvasElement => ({
   id,
@@ -100,6 +106,37 @@ describe('applyCodeEdits', () => {
 
   it('rejects an empty oldCode', () => {
     expect(applyCodeEdits('abc', [{ oldCode: '', newCode: 'x' }]).ok).toBe(false)
+  })
+})
+
+describe('applyTextEdits', () => {
+  it('maps a DOM text change onto the source exactly', () => {
+    const result = applyTextEdits('<h1>Hello world</h1>', [
+      { before: 'Hello world', after: 'Hi there' },
+    ])
+    if (!result.ok) throw new Error('expected ok')
+    expect(result.code).toBe('<h1>Hi there</h1>')
+  })
+
+  it('retries with trimmed text when the exact DOM text is not in the source', () => {
+    // JSX collapses the whitespace around text children out of the DOM.
+    const result = applyTextEdits('<h1>\n  Hello world\n</h1>', [
+      { before: 'Hello world ', after: 'Hi there ' },
+    ])
+    if (!result.ok) throw new Error('expected ok')
+    expect(result.code).toBe('<h1>\n  Hi there\n</h1>')
+  })
+
+  it('fails when the text repeats in the source', () => {
+    const result = applyTextEdits('<p>Same</p><p>Same</p>', [{ before: 'Same', after: 'Other' }])
+    expect(result.ok).toBe(false)
+  })
+
+  it('fails when the text is not in the source (generated at runtime)', () => {
+    const result = applyTextEdits('<script>document.write("x")</script>', [
+      { before: 'generated text', after: 'edited' },
+    ])
+    expect(result.ok).toBe(false)
   })
 })
 

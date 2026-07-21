@@ -110,6 +110,28 @@ export function applyCodeEdits(code: string, edits: readonly CodeEdit[]): CodeEd
   return { ok: true, code: next, contexts }
 }
 
+// An inline text edit from a live frame: the text node's content before and
+// after the user typed. Mapped onto source code with exact search/replace;
+// the trimmed retry covers JSX collapsing edge whitespace out of the DOM.
+export interface TextEdit {
+  before: string
+  after: string
+}
+
+export function applyTextEdits(code: string, edits: readonly TextEdit[]): CodeEditResult {
+  let result = applyCodeEdits(
+    code,
+    edits.map((e) => ({ oldCode: e.before, newCode: e.after })),
+  )
+  if (!result.ok) {
+    const trimmed = edits
+      .filter((e) => e.before.trim().length > 0)
+      .map((e) => ({ oldCode: e.before.trim(), newCode: e.after.trim() }))
+    if (trimmed.length > 0) result = applyCodeEdits(code, trimmed)
+  }
+  return result
+}
+
 // Rebuild z-order in one pass. Unknown and duplicate ids are ignored, while
 // elements omitted by the caller keep their existing relative order at the end.
 export function reorderElements(elements: CanvasElement[], orderedIds: string[]): CanvasElement[] {

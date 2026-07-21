@@ -7,7 +7,7 @@ import { Button } from '#/components/ui/button'
 import { CodeEditorPanel } from '#/components/code-editor-panel'
 import { ElementFrame, type FrameTextEdit } from '#/components/element-frame'
 import { pickBlockPageElement } from '#/lib/block-page'
-import { applyCodeEdits, onlyCodeElements, type CanvasElement } from '#/lib/canvas'
+import { applyTextEdits, onlyCodeElements, type CanvasElement } from '#/lib/canvas'
 import { hasStoredElements, loadElements, saveElements } from '#/lib/docs'
 
 // Fullscreen preview of a single canvas element ("page"), outside the editor.
@@ -171,22 +171,11 @@ function BlockPage() {
     })()
   }
 
-  // Inline edits arrive as before/after text pairs; map them onto the source
-  // with exact search/replace. A retry with trimmed pairs covers JSX edge
-  // whitespace; anything still unmappable reverts the frame and points at
-  // the code editor.
+  // Inline edits arrive as before/after text pairs; anything unmappable
+  // reverts the frame and points at the code editor.
   const onTextEdit = (edits: FrameTextEdit[]) => {
     if (state.status !== 'ready' || !active) return
-    let result = applyCodeEdits(
-      active.code,
-      edits.map((e) => ({ oldCode: e.before, newCode: e.after })),
-    )
-    if (!result.ok) {
-      const trimmed = edits
-        .filter((e) => e.before.trim().length > 0)
-        .map((e) => ({ oldCode: e.before.trim(), newCode: e.after.trim() }))
-      if (trimmed.length > 0) result = applyCodeEdits(active.code, trimmed)
-    }
+    const result = applyTextEdits(active.code, edits)
     if (!result.ok) {
       setFrameNonce((n) => n + 1)
       showEditNotice('Could not map that edit onto the code (the text may repeat or be generated). Use the Code editor instead.')
