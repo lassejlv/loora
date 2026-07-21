@@ -29,8 +29,8 @@ export const PROVIDERS = {
   loora: {
     kind: 'neon',
     label: 'Loora',
-    baseUrlEnv: 'AI_GATEWAY_URL',
-    apiKeyEnv: 'AI_KEY',
+    baseUrlEnv: 'NEON_AI_GATEWAY_BASE_URL',
+    apiKeyEnv: 'NEON_AI_GATEWAY_TOKEN',
   },
   chatgpt: {
     kind: 'chatgpt',
