@@ -15,11 +15,11 @@ export type ProviderDefinition =
 // Add any OpenAI-compatible provider here. API keys are read from the named
 // environment variable on the server and are never included in this config.
 export const PROVIDERS = {
-  wafer: {
+  loora: {
     kind: 'openai-compatible',
-    label: 'Wafer',
-    baseURL: 'https://pass.wafer.ai/v1',
-    apiKeyEnv: 'WAFER_API_KEY',
+    label: 'Loora',
+    baseURL: 'AI_GATEWAY_URL',
+    apiKeyEnv: 'AI_KEY',
   },
   chatgpt: {
     kind: 'chatgpt',
@@ -62,28 +62,12 @@ export interface ModelDefinition {
 // Prices are USD per 1M tokens and power the existing usage limits.
 export const MODELS = [
   {
-    id: 'mini',
-    label: 'Mini',
-    provider: 'wafer',
-    modelId: 'MiniMax-M3',
+    id: 'loora-mini',
+    label: 'Loora Mini',
+    provider: 'loora',
+    modelId: 'gemini-3-5-flash',
     supportsImageInput: true,
     price: { input: 1.2, output: 4.9 },
-  },
-  {
-    id: 'max',
-    label: 'Max',
-    provider: 'wafer',
-    modelId: 'GLM-5.2',
-    supportsImageInput: false,
-    price: { input: 1.5, output: 4.2 },
-  },
-  {
-    id: 'max-fast',
-    label: 'Max Fast',
-    provider: 'wafer',
-    modelId: 'glm5.2-fast',
-    supportsImageInput: false,
-    price: { input: 4, output: 12 },
   },
   {
     id: 'gpt-5.6-sol',

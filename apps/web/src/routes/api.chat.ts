@@ -313,6 +313,7 @@ export const Route = createFileRoute('/api/chat')({
           model = provider(modelConfig.modelId)
         } else {
           const apiKey = process.env[providerConfig.apiKeyEnv]
+          const baseUrl = process.env[providerConfig.baseURL]
           if (!apiKey) {
             return Response.json(
               {
@@ -323,7 +324,7 @@ export const Route = createFileRoute('/api/chat')({
           }
           const provider = createOpenAICompatible({
             name: modelConfig.provider,
-            baseURL: providerConfig.baseURL,
+            baseURL: baseUrl ?? 'https://api.openai.com/v1',
             apiKey,
             headers: providerConfig.headers,
             includeUsage: providerConfig.includeUsage,
