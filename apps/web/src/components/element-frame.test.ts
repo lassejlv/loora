@@ -289,6 +289,12 @@ describe('buildElementDoc', () => {
     expect(doc).toContain('__endEditSession')
   })
 
+  it('reports image clicks in edit mode for the parent asset picker', () => {
+    expect(doc).toContain("'loora:image-pick'")
+    // The raw attribute, not the resolved .src — it must match the code text.
+    expect(doc).toContain("img.getAttribute('src')")
+  })
+
   it('exposes the cross-element message bus', () => {
     expect(doc).toContain('window.loora')
     expect(doc).toContain("'loora:bus'")

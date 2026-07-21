@@ -587,9 +587,16 @@ function __setEditMode(on) {
   }
 }
 
+function __findEditTarget(start) {
+  // Images swap via the parent's asset picker; anything else edits its text.
+  var img = start && start.closest ? start.closest('img') : null
+  if (img) return img
+  return __findTextHost(start)
+}
+
 document.addEventListener('mouseover', function (e) {
   if (!__editMode || __editSession) return
-  var host = __findTextHost(e.target)
+  var host = __findEditTarget(e.target)
   if (__editHover && __editHover.el === host) return
   __clearEditHover()
   if (host) {
@@ -604,6 +611,12 @@ document.addEventListener('click', function (e) {
   if (__editSession && __editSession.host.contains(e.target)) return
   e.preventDefault()
   e.stopPropagation()
+  var img = e.target && e.target.closest ? e.target.closest('img') : null
+  if (img) {
+    __endEditSession(true)
+    parent.postMessage({ type: 'loora:image-pick', src: img.getAttribute('src') || '' }, '*')
+    return
+  }
   var host = __findTextHost(e.target)
   if (host) __startEditSession(host)
   else __endEditSession(true)
@@ -843,6 +856,14 @@ const ELEMENT_DOC = buildElementDoc()
 // authenticated, so it fetches each asset once and inlines it as a data URL
 // before the code enters the iframe. Cached per asset URL for the session.
 const assetDataUrls = new Map<string, Promise<string | null>>()
+// Reverse map: inlined data URL → the /api/asset/… url that appears in the
+// SOURCE code, so a src reported from inside a frame (e.g. an image click in
+// edit mode) can be located in the code again.
+const inlinedSrcToSourceUrl = new Map<string, string>()
+
+export function sourceUrlForInlinedSrc(src: string): string {
+  return inlinedSrcToSourceUrl.get(src) ?? src
+}
 
 function assetToDataUrl(url: string): Promise<string | null> {
   let pending = assetDataUrls.get(url)
@@ -852,12 +873,14 @@ function assetToDataUrl(url: string): Promise<string | null> {
         const res = await fetch(url)
         if (!res.ok) return null
         const blob = await res.blob()
-        return await new Promise<string | null>((resolve) => {
+        const data = await new Promise<string | null>((resolve) => {
           const reader = new FileReader()
           reader.onload = () => resolve(String(reader.result))
           reader.onerror = () => resolve(null)
           reader.readAsDataURL(blob)
         })
+        if (data) inlinedSrcToSourceUrl.set(data, url)
+        return data
       } catch {
         return null
       }
@@ -891,6 +914,7 @@ export function ElementFrame({
   textEditable = false,
   onError,
   onTextEdit,
+  onImagePick,
 }: {
   elementId: string
   code: string
@@ -899,11 +923,14 @@ export function ElementFrame({
   suspended?: boolean
   // Inline text editing: clicks select text-bearing nodes instead of
   // interacting; commits arrive via onTextEdit as before/after text pairs
-  // for the caller to map onto the source code.
+  // for the caller to map onto the source code. Clicking an <img> reports
+  // its source-code src via onImagePick instead (inlined data URLs are
+  // mapped back to their /api/asset/… form).
   textEditable?: boolean
   // Called with a message when the latest payload failed, null when it rendered.
   onError?: (message: string | null) => void
   onTextEdit?: (edits: FrameTextEdit[]) => void
+  onImagePick?: (src: string) => void
 }) {
   const iframeRef = useRef<HTMLIFrameElement>(null)
   const readyRef = useRef(false)
@@ -918,6 +945,8 @@ export function ElementFrame({
   textEditableRef.current = textEditable
   const onTextEditRef = useRef(onTextEdit)
   onTextEditRef.current = onTextEdit
+  const onImagePickRef = useRef(onImagePick)
+  onImagePickRef.current = onImagePick
 
   const send = (source: string) => {
     if (!iframeRef.current?.contentWindow || !readyRef.current) return
@@ -980,6 +1009,11 @@ export function ElementFrame({
             )
           : []
         if (edits.length) onTextEditRef.current?.(edits)
+        return
+      }
+      if (msg?.type === 'loora:image-pick') {
+        const src = (msg as { src?: unknown }).src
+        if (typeof src === 'string') onImagePickRef.current?.(sourceUrlForInlinedSrc(src))
         return
       }
       if (msg?.type === 'loora:dirty') {

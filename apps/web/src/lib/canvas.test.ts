@@ -3,6 +3,7 @@ import {
   applyCodeEdits,
   applyElementPatches,
   applyTextEdits,
+  replaceImageSource,
   reorderElements,
   type CanvasElement,
 } from './canvas'
@@ -137,6 +138,23 @@ describe('applyTextEdits', () => {
       { before: 'generated text', after: 'edited' },
     ])
     expect(result.ok).toBe(false)
+  })
+})
+
+describe('replaceImageSource', () => {
+  it('swaps a src everywhere it appears', () => {
+    const code = '<img src="/api/asset/a1"><img src="/api/asset/a1">'
+    const result = replaceImageSource(code, '/api/asset/a1', '/api/asset/b2')
+    if (!result.ok) throw new Error('expected ok')
+    expect(result.code).toBe('<img src="/api/asset/b2"><img src="/api/asset/b2">')
+  })
+
+  it('fails on an empty src', () => {
+    expect(replaceImageSource('<img>', '', '/api/asset/b2').ok).toBe(false)
+  })
+
+  it('fails when the src is not in the code', () => {
+    expect(replaceImageSource('<img src="x.png">', '/api/asset/a1', '/api/asset/b2').ok).toBe(false)
   })
 })
 

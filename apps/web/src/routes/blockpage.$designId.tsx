@@ -6,8 +6,14 @@ import { orpc } from '#/lib/orpc-client'
 import { Button } from '#/components/ui/button'
 import { CodeEditorPanel } from '#/components/code-editor-panel'
 import { ElementFrame, type FrameTextEdit } from '#/components/element-frame'
+import { ImagePickerDialog } from '#/components/image-picker-dialog'
 import { pickBlockPageElement } from '#/lib/block-page'
-import { applyTextEdits, onlyCodeElements, type CanvasElement } from '#/lib/canvas'
+import {
+  applyTextEdits,
+  onlyCodeElements,
+  replaceImageSource,
+  type CanvasElement,
+} from '#/lib/canvas'
 import { hasStoredElements, loadElements, saveElements } from '#/lib/docs'
 
 // Fullscreen preview of a single canvas element ("page"), outside the editor.
@@ -67,6 +73,8 @@ function BlockPage() {
   const savedTimer = useRef<number | null>(null)
   // Inline text editing: click text in the page, type, commit with Enter/blur.
   const [textEditing, setTextEditing] = useState(false)
+  // An image clicked in edit mode, waiting for a replacement asset.
+  const [imagePickSrc, setImagePickSrc] = useState<string | null>(null)
   const [editNotice, setEditNotice] = useState<string | null>(null)
   const noticeTimer = useRef<number | null>(null)
   // Bumped to remount the frame when an inline edit could not be mapped onto
@@ -184,6 +192,18 @@ function BlockPage() {
     applyCode(result.code)
   }
 
+  const replaceImage = (assetId: string) => {
+    const src = imagePickSrc
+    setImagePickSrc(null)
+    if (!src || state.status !== 'ready' || !active) return
+    const result = replaceImageSource(active.code, src, `/api/asset/${assetId}`)
+    if (!result.ok) {
+      showEditNotice('Could not find that image in the code — it may be generated. Use the Code editor instead.')
+      return
+    }
+    applyCode(result.code)
+  }
+
   if (isPending || (userId && state.status === 'loading')) {
     return (
       <main className="grid min-h-screen place-items-center bg-cx-canvas">
@@ -250,6 +270,7 @@ function BlockPage() {
             textEditable={textEditing}
             onError={setRenderError}
             onTextEdit={onTextEdit}
+            onImagePick={setImagePickSrc}
           />
         </div>
         <div className="absolute top-3 right-3 z-10 flex items-center gap-2 rounded-full border bg-card/85 py-1.5 pr-1.5 pl-3 shadow-sm backdrop-blur transition-opacity hover:opacity-100 sm:opacity-60">
@@ -336,6 +357,12 @@ function BlockPage() {
             Editor
           </Button>
         </div>
+        {imagePickSrc ? (
+          <ImagePickerDialog
+            onPick={(asset) => replaceImage(asset.id)}
+            onClose={() => setImagePickSrc(null)}
+          />
+        ) : null}
         {renderError || editNotice ? (
           <div className="absolute inset-x-0 bottom-4 z-10 flex flex-col items-center gap-2 px-4">
             {renderError ? (

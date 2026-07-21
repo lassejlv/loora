@@ -8,6 +8,8 @@ import {
   readElementLogs,
   type FrameTextEdit,
 } from '#/components/element-frame'
+import { ImagePickerDialog } from '#/components/image-picker-dialog'
+import { replaceImageSource } from '#/lib/canvas'
 import { collectSnapLines, elementAABB, snapBox, snapPoint, type SnapLines } from '#/lib/snap'
 
 export type Tool = 'select' | 'hand' | 'interact' | 'comment' | InsertTool
@@ -202,6 +204,8 @@ export function Canvas({
   const [editNotice, setEditNotice] = useState<string | null>(null)
   const editNoticeTimer = useRef<number | null>(null)
   const [frameNonces, setFrameNonces] = useState<Record<string, number>>({})
+  // An image clicked in an edit-mode frame, waiting for a replacement asset.
+  const [imagePick, setImagePick] = useState<{ id: string; src: string } | null>(null)
   const elementsRef = useRef(elements)
   elementsRef.current = elements
   const dragRef = useRef<Drag | null>(null)
@@ -280,6 +284,12 @@ export function Canvas({
     return { x: e.clientX - rect.left, y: e.clientY - rect.top }
   }
 
+  const showNotice = useCallback((message: string) => {
+    setEditNotice(message)
+    if (editNoticeTimer.current) window.clearTimeout(editNoticeTimer.current)
+    editNoticeTimer.current = window.setTimeout(() => setEditNotice(null), 6000)
+  }, [])
+
   // Inline text edits from an interactive frame: map onto the source, apply
   // through the normal mutation path (undo, persistence). Unmappable edits
   // remount the frame so its DOM snaps back to the code.
@@ -290,21 +300,37 @@ export function Canvas({
       const result = applyTextEdits(el.code, edits)
       if (!result.ok) {
         setFrameNonces((n) => ({ ...n, [id]: (n[id] ?? 0) + 1 }))
-        setEditNotice(
+        showNotice(
           'Could not map that edit onto the code (the text may repeat or be generated). Use Edit code instead.',
         )
-        if (editNoticeTimer.current) window.clearTimeout(editNoticeTimer.current)
-        editNoticeTimer.current = window.setTimeout(() => setEditNotice(null), 6000)
         return
       }
       onUpdateMany(new Map([[id, { code: result.code }]]))
     },
-    [onUpdateMany],
+    [onUpdateMany, showNotice],
   )
 
   const toggleTextEdit = useCallback((id: string) => {
     setTextEditFor((current) => (current === id ? null : id))
   }, [])
+
+  const handleImagePick = useCallback((id: string, src: string) => {
+    setImagePick({ id, src })
+  }, [])
+
+  const replaceImage = (assetId: string) => {
+    const pick = imagePick
+    setImagePick(null)
+    if (!pick) return
+    const el = elementsRef.current.find((c) => c.id === pick.id)
+    if (!el) return
+    const result = replaceImageSource(el.code, pick.src, `/api/asset/${assetId}`)
+    if (!result.ok) {
+      showNotice('Could not find that image in the code — it may be generated. Use Edit code instead.')
+      return
+    }
+    onUpdateMany(new Map([[pick.id, { code: result.code }]]))
+  }
 
   useEffect(
     () => () => {
@@ -928,7 +954,11 @@ export function Canvas({
         const id = target?.getAttribute('data-element-id')
         const el = elements.find((c) => c.id === id)
         if (el) {
+          // Double-click means "edit the content": enter interact mode with
+          // text/image editing on. The interact tool (i) stays pure play mode,
+          // and the label chip toggles editing off for this element.
           setInteractiveId(el.id)
+          setTextEditFor(el.id)
           onSelect([])
         }
       }}
@@ -960,6 +990,7 @@ export function Canvas({
               onOpenConsole={setConsoleFor}
               onToggleTextEdit={toggleTextEdit}
               onTextEdit={handleTextEdit}
+              onImagePick={handleImagePick}
             />
           )
         })}
@@ -1105,6 +1136,14 @@ export function Canvas({
         />
       )}
 
+      {/* Image replacement picker (opened by clicking an image in edit mode). */}
+      {imagePick && (
+        <ImagePickerDialog
+          onPick={(asset) => replaceImage(asset.id)}
+          onClose={() => setImagePick(null)}
+        />
+      )}
+
       {/* Inline-edit notice (unmappable text edits). */}
       {editNotice && (
         <div className="pointer-events-none absolute inset-x-0 bottom-4 z-10 flex justify-center px-4">
@@ -1198,6 +1237,7 @@ const ElementView = memo(function ElementView({
   onOpenConsole,
   onToggleTextEdit,
   onTextEdit,
+  onImagePick,
 }: {
   element: CanvasElement
   interactive?: boolean
@@ -1207,6 +1247,7 @@ const ElementView = memo(function ElementView({
   onOpenConsole?: (id: string) => void
   onToggleTextEdit?: (id: string) => void
   onTextEdit?: (id: string, edits: FrameTextEdit[]) => void
+  onImagePick?: (id: string, src: string) => void
 }) {
   const [error, setError] = useState<string | null>(null)
   const errorTimer = useRef<number | null>(null)
@@ -1295,6 +1336,7 @@ const ElementView = memo(function ElementView({
           textEditable={!!textEditing}
           onError={onFrameError}
           onTextEdit={(edits) => onTextEdit?.(el.id, edits)}
+          onImagePick={(src) => onImagePick?.(el.id, src)}
         />
       </div>
       {/* transparent hit layer so select/move/resize work; removed in interact mode */}

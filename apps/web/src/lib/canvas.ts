@@ -132,6 +132,18 @@ export function applyTextEdits(code: string, edits: readonly TextEdit[]): CodeEd
   return result
 }
 
+// Swap an image source everywhere it appears in the code. replaceAll on
+// purpose: the same src string in several places is the same image (a logo,
+// a repeated card art) and clicking one instance cannot disambiguate anyway.
+export function replaceImageSource(
+  code: string,
+  oldSrc: string,
+  newSrc: string,
+): CodeEditResult {
+  if (!oldSrc) return { ok: false, error: 'The image has no src to replace' }
+  return applyCodeEdits(code, [{ oldCode: oldSrc, newCode: newSrc, replaceAll: true }])
+}
+
 // Rebuild z-order in one pass. Unknown and duplicate ids are ignored, while
 // elements omitted by the caller keep their existing relative order at the end.
 export function reorderElements(elements: CanvasElement[], orderedIds: string[]): CanvasElement[] {
