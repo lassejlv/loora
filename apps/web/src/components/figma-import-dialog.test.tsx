@@ -9,6 +9,13 @@ mock.module('#/lib/orpc-client', () => ({
 }))
 
 const { FigmaImportDialog } = await import('./figma-import-dialog')
+const currentDocument = {
+  id: 'd-current',
+  name: 'Current draft',
+  shapes: [
+    { id: 'e-existing', name: 'Existing', x: 20, y: 30, w: 100, h: 80, code: '<div />' },
+  ],
+}
 
 describe('FigmaImportDialog', () => {
   beforeEach(() => {
@@ -25,7 +32,12 @@ describe('FigmaImportDialog', () => {
   test('imports a pasted link and reports the result', async () => {
     const onImported = mock()
     render(
-      <FigmaImportDialog open onOpenChange={() => undefined} onImported={onImported} />,
+      <FigmaImportDialog
+        open
+        currentDocument={currentDocument}
+        onOpenChange={() => undefined}
+        onImported={onImported}
+      />,
     )
     await waitFor(() => expect(status).toHaveBeenCalled())
     fireEvent.change(screen.getByLabelText('Figma link'), {
@@ -41,5 +53,42 @@ describe('FigmaImportDialog', () => {
     expect(onImported).toHaveBeenCalled()
     expect(await screen.findByText('Imported “Landing”')).toBeTruthy()
     expect(screen.getByText(/2 frames across 1 page/)).toBeTruthy()
+  })
+
+  test('can add imported frames to the current document', async () => {
+    const onImported = mock()
+    const imported = {
+      design: {
+        id: currentDocument.id,
+        name: currentDocument.name,
+        shapes: currentDocument.shapes,
+        updatedAt: Date.now(),
+      },
+      summary: { pages: 1, frames: 1, fallbacks: 0, missingFonts: [] },
+    }
+    importFile.mockResolvedValue(imported)
+    render(
+      <FigmaImportDialog
+        open
+        currentDocument={currentDocument}
+        onOpenChange={() => undefined}
+        onImported={onImported}
+      />,
+    )
+    await waitFor(() => expect(status).toHaveBeenCalled())
+    fireEvent.change(screen.getByLabelText('Figma link'), {
+      target: { value: 'https://www.figma.com/design/abcdef123/Landing' },
+    })
+    fireEvent.click(screen.getByLabelText(/Current document/))
+    fireEvent.click(screen.getByRole('button', { name: 'Import file' }))
+
+    await waitFor(() =>
+      expect(importFile).toHaveBeenCalledWith({
+        url: 'https://www.figma.com/design/abcdef123/Landing',
+        target: currentDocument,
+      }),
+    )
+    expect(onImported).toHaveBeenCalledWith(imported, 'current')
+    expect(await screen.findByText('Added to “Current draft”')).toBeTruthy()
   })
 })

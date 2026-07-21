@@ -27,7 +27,11 @@ import {
   BringToFrontIcon,
   ClipboardPasteIcon,
   CodeXmlIcon,
+  CommandIcon,
   EllipsisIcon,
+  FileIcon,
+  FilePlus2Icon,
+  HistoryIcon,
   MousePointer2Icon,
   MousePointerClickIcon,
   ImageIcon,
@@ -82,7 +86,14 @@ import { deleteHistory } from '@loora/rpc/history'
 import { snapshotCanvas } from '#/lib/snapshot'
 import { AgentPanel } from '#/components/agent-panel'
 import { ExportDialog } from '#/components/export-dialog'
-import { FigmaImportDialog } from '#/components/figma-import-dialog'
+import {
+  FigmaImportDialog,
+  type FigmaImportDestination,
+} from '#/components/figma-import-dialog'
+import {
+  EditorCommandMenu,
+  type EditorCommandGroup,
+} from '#/components/editor-command-menu'
 import {
   WelcomeDialog,
   hasSeenWelcome,
@@ -395,6 +406,13 @@ function Editor({ preview = false, userId }: { preview?: boolean; userId?: strin
   const [figmaImportOpen, setFigmaImportOpen] = useState(() =>
     !preview && new URLSearchParams(window.location.search).get('figmaImport') === 'true',
   )
+  const [figmaImportDestination, setFigmaImportDestination] =
+    useState<FigmaImportDestination>('new')
+  const [commandMenuOpen, setCommandMenuOpen] = useState(false)
+  const openFigmaImport = (destination: FigmaImportDestination) => {
+    setFigmaImportDestination(destination)
+    setFigmaImportOpen(true)
+  }
   const [agentWidth, setAgentWidth] = useState(() => {
     if (preview || typeof window === 'undefined') return 340
     const raw = Number(window.localStorage.getItem('loora:agent-width'))
@@ -669,10 +687,25 @@ function Editor({ preview = false, userId }: { preview?: boolean; userId?: strin
 
   const activateFigmaImport = (
     result: Awaited<ReturnType<typeof orpc.figma.import>>,
+    destination: FigmaImportDestination,
   ) => {
+    const imported = result.design
+    if (destination === 'current') {
+      const previousIds = new Set(shapesRef.current.map((shape) => shape.id))
+      mutate(() => imported.shapes)
+      setSelectedIds(
+        imported.shapes
+          .filter((shape) => !previousIds.has(shape.id))
+          .map((shape) => shape.id),
+      )
+      window.requestAnimationFrame(() => {
+        window.requestAnimationFrame(() => canvasControls.current?.zoomToFit())
+      })
+      return
+    }
+
     flushActiveDoc()
     documentRequest.current += 1
-    const imported = result.design
     const doc: DocMeta = { id: imported.id, name: imported.name }
     const next = [...docs.filter((candidate) => candidate.id !== doc.id), doc]
     saveElements(doc.id, imported.shapes)
@@ -1037,8 +1070,13 @@ function Editor({ preview = false, userId }: { preview?: boolean; userId?: strin
   useEffect(() => {
     if (preview) return
     const onKeyDown = (e: KeyboardEvent) => {
-      if (isEditableTarget(e.target)) return
       const hit = matchShortcut(e, shortcutConfig)
+      if (hit?.kind === 'builtIn' && hit.id === 'openCommandMenu') {
+        e.preventDefault()
+        setCommandMenuOpen((open) => !open)
+        return
+      }
+      if (isEditableTarget(e.target)) return
       if (!hit) return
 
       if (hit.kind === 'custom') {
@@ -1174,6 +1212,8 @@ function Editor({ preview = false, userId }: { preview?: boolean; userId?: strin
         case 'openSettings':
           setSettingsOpen(true)
           break
+        case 'openCommandMenu':
+          break
       }
     }
     window.addEventListener('keydown', onKeyDown)
@@ -1205,6 +1245,172 @@ function Editor({ preview = false, userId }: { preview?: boolean; userId?: strin
   const reduceMotion = useReducedMotion()
   const barMotion = fadeUp(reduceMotion)
   const barTransition = uiTransition(reduceMotion)
+  const commandGroups: EditorCommandGroup[] = [
+    {
+      label: 'Figma',
+      commands: [
+        {
+          id: 'figma-current',
+          label: 'Import Figma into current document',
+          keywords: 'paste append frame design',
+          icon: FigmaIcon,
+          run: () => openFigmaImport('current'),
+        },
+        {
+          id: 'figma-new',
+          label: 'Import Figma as new document',
+          keywords: 'paste file design create',
+          icon: FigmaIcon,
+          run: () => openFigmaImport('new'),
+        },
+      ],
+    },
+    {
+      label: 'Documents',
+      commands: [
+        {
+          id: 'document-new',
+          label: 'New document',
+          keywords: 'create file',
+          icon: FilePlus2Icon,
+          run: newDoc,
+        },
+        ...docs.map((doc) => ({
+          id: `document-${doc.id}`,
+          label: `Open ${doc.name}`,
+          keywords: 'switch document file',
+          icon: FileIcon,
+          active: doc.id === activeId,
+          run: () => switchDoc(doc.id),
+        })),
+        {
+          id: 'document-export',
+          label: 'Export and hand off',
+          keywords: 'download share',
+          icon: DownloadIcon,
+          disabled: shapes.length === 0,
+          run: () => setExportOpen(true),
+        },
+      ],
+    },
+    {
+      label: 'Edit',
+      commands: [
+        {
+          id: 'edit-undo',
+          label: 'Undo',
+          icon: Undo2Icon,
+          shortcut: shortcutLabel('undo'),
+          disabled: past.current.length === 0,
+          run: undo,
+        },
+        {
+          id: 'edit-redo',
+          label: 'Redo',
+          icon: Redo2Icon,
+          shortcut: shortcutLabel('redo'),
+          disabled: future.current.length === 0,
+          run: redo,
+        },
+        {
+          id: 'edit-select-all',
+          label: 'Select all',
+          icon: MousePointer2Icon,
+          shortcut: shortcutLabel('selectAll'),
+          disabled: shapes.length === 0,
+          run: () => setSelectedIds(shapes.map((shape) => shape.id)),
+        },
+        {
+          id: 'edit-duplicate',
+          label: 'Duplicate selection',
+          icon: CopyIcon,
+          shortcut: shortcutLabel('duplicate'),
+          disabled: selectedIds.length === 0,
+          run: duplicateSelected,
+        },
+        {
+          id: 'edit-delete',
+          label: 'Delete selection',
+          icon: Trash2Icon,
+          shortcut: shortcutLabel('delete'),
+          disabled: selectedIds.length === 0,
+          run: deleteSelected,
+        },
+      ],
+    },
+    {
+      label: 'View',
+      commands: [
+        {
+          id: 'view-agent',
+          label: 'Toggle agent panel',
+          icon: SparklesIcon,
+          shortcut: shortcutLabel('toggleAgent'),
+          active: agentOpen,
+          run: () => toggleAgent(!agentOpen),
+        },
+        {
+          id: 'view-layers',
+          label: 'Toggle layers',
+          icon: LayersIcon,
+          shortcut: shortcutLabel('toggleLayers'),
+          active: layersOpen,
+          run: () => toggleLayers(!layersOpen),
+        },
+        {
+          id: 'view-assets',
+          label: 'Toggle assets',
+          icon: ImageIcon,
+          shortcut: shortcutLabel('toggleAssets'),
+          active: assetsOpen,
+          run: () => toggleAssets(!assetsOpen),
+        },
+        {
+          id: 'view-history',
+          label: 'Toggle history',
+          icon: HistoryIcon,
+          shortcut: shortcutLabel('toggleHistory'),
+          active: historyOpen,
+          run: () => toggleHistory(!historyOpen),
+        },
+        {
+          id: 'view-code',
+          label: 'Edit selected element code',
+          keywords: 'html css source',
+          icon: CodeXmlIcon,
+          shortcut: shortcutLabel('toggleCode'),
+          disabled: selectedIds.length !== 1,
+          active: codeOpen,
+          run: () => toggleCode(true),
+        },
+        {
+          id: 'view-zoom-fit',
+          label: 'Zoom to fit',
+          icon: MaximizeIcon,
+          shortcut: shortcutLabel('zoomToFit'),
+          run: () => canvasControls.current?.zoomToFit(),
+        },
+        {
+          id: 'view-settings',
+          label: 'Open settings',
+          icon: SettingsIcon,
+          shortcut: shortcutLabel('openSettings'),
+          run: () => setSettingsOpen(true),
+        },
+      ],
+    },
+    {
+      label: 'Tools',
+      commands: TOOLS.map(({ tool: nextTool, icon, label }) => ({
+        id: `tool-${nextTool}`,
+        label: `${label} tool`,
+        icon,
+        shortcut: shortcutLabel(`tool.${nextTool}` as BuiltInShortcutId),
+        active: tool === nextTool,
+        run: () => setTool(nextTool),
+      })),
+    },
+  ]
 
   return (
     <SidebarProvider
@@ -1516,6 +1722,18 @@ function Editor({ preview = false, userId }: { preview?: boolean; userId?: strin
         </Drawer>
 
         <div className="absolute top-4 right-4 flex items-center gap-1">
+          {!preview ? (
+            <Button
+              variant={commandMenuOpen ? 'secondary' : 'ghost'}
+              size="icon"
+              aria-label={`Commands (${shortcutLabel('openCommandMenu')})`}
+              title={`Commands (${shortcutLabel('openCommandMenu')})`}
+              aria-pressed={commandMenuOpen}
+              onClick={() => setCommandMenuOpen(true)}
+            >
+              <CommandIcon data-slot="icon" />
+            </Button>
+          ) : null}
           <Button
             variant={layersOpen ? 'secondary' : 'ghost'}
             size="icon"
@@ -1581,7 +1799,7 @@ function Editor({ preview = false, userId }: { preview?: boolean; userId?: strin
             activeId={activeId}
             onSwitch={switchDoc}
             onNew={newDoc}
-            onImport={() => setFigmaImportOpen(true)}
+            onImport={() => openFigmaImport('new')}
             onRename={renameDoc}
             onDelete={deleteDoc}
           />
@@ -1876,7 +2094,21 @@ function Editor({ preview = false, userId }: { preview?: boolean; userId?: strin
           open={figmaImportOpen}
           onOpenChange={setFigmaImportOpen}
           onImported={activateFigmaImport}
+          initialDestination={figmaImportDestination}
+          currentDocument={{
+            id: activeId,
+            name: docs.find((doc) => doc.id === activeId)?.name ?? 'Untitled',
+            shapes,
+          }}
         />
+
+        {!preview ? (
+          <EditorCommandMenu
+            open={commandMenuOpen}
+            onOpenChange={setCommandMenuOpen}
+            groups={commandGroups}
+          />
+        ) : null}
 
       </main>
 

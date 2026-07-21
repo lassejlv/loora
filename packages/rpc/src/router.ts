@@ -649,10 +649,21 @@ const getFigmaConnection = protectedProcedure.handler(async ({ context }) => {
 })
 
 const importFigma = protectedProcedure
-  .input(z.object({ url: z.string().trim().min(1).max(2_000) }))
+  .input(
+    z.object({
+      url: z.string().trim().min(1).max(2_000),
+      target: z
+        .object({
+          id: z.string().min(1).max(128),
+          name: z.string().trim().min(1).max(200),
+          shapes: z.array(shapeSchema).max(10_000),
+        })
+        .optional(),
+    }),
+  )
   .handler(async ({ context, input }) => {
     try {
-      return await importFigmaDesign(context.user.id, input.url)
+      return await importFigmaDesign(context.user.id, input.url, input.target)
     } catch (error) {
       return figmaProcedureError(error)
     }

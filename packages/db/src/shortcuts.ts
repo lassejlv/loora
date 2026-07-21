@@ -47,6 +47,7 @@ export type BuiltInShortcutId =
   | 'toggleAssets'
   | 'toggleHistory'
   | 'toggleCode'
+  | 'openCommandMenu'
   | 'openSettings'
 
 export type CustomShortcut = {

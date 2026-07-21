@@ -34,6 +34,12 @@ export interface FigmaFileReference {
   nodeId: string | null
 }
 
+export interface FigmaImportTarget {
+  id: string
+  name: string
+  shapes: CanvasElement[]
+}
+
 interface FigmaBounds {
   x: number
   y: number
@@ -525,6 +531,24 @@ export function convertFigmaFile(
   return { drafts, pages: pageNames.length, fonts: [...fonts].sort() }
 }
 
+export function placeImportedShapes(
+  existing: CanvasElement[],
+  imported: CanvasElement[],
+): CanvasElement[] {
+  if (existing.length === 0 || imported.length === 0) return imported
+  const existingRight = Math.max(...existing.map((shape) => shape.x + shape.w))
+  const existingTop = Math.min(...existing.map((shape) => shape.y))
+  const importedLeft = Math.min(...imported.map((shape) => shape.x))
+  const importedTop = Math.min(...imported.map((shape) => shape.y))
+  const offsetX = existingRight + PAGE_GAP - importedLeft
+  const offsetY = existingTop - importedTop
+  return imported.map((shape) => ({
+    ...shape,
+    x: shape.x + offsetX,
+    y: shape.y + offsetY,
+  }))
+}
+
 async function figmaApi<T>(path: string, token: string): Promise<T> {
   const response = await fetch(`https://api.figma.com${path}`, {
     headers: { Authorization: `Bearer ${token}` },
@@ -651,7 +675,11 @@ async function renderFallbacks(
   return assets
 }
 
-export async function importFigmaDesign(userId: string, sourceUrl: string) {
+export async function importFigmaDesign(
+  userId: string,
+  sourceUrl: string,
+  target?: FigmaImportTarget,
+) {
   const reference = parseFigmaFileUrl(sourceUrl)
   const token = await getFigmaAccessToken(userId)
   const params = new URLSearchParams()
@@ -677,7 +705,7 @@ export async function importFigmaDesign(userId: string, sourceUrl: string) {
     ? await renderFallbacks(reference.key, converted.drafts, token)
     : []
   const assetByNode = new Map(rendered.map((item) => [item.nodeId, item.id]))
-  const shapes = converted.drafts.map(
+  const importedShapes = converted.drafts.map(
     ({ fallbackNodeIds: _, rootNodeId: __, rootFallbackCode: ___, ...draft }) => ({
       ...draft,
       code: [...assetByNode].reduce(
@@ -686,16 +714,29 @@ export async function importFigmaDesign(userId: string, sourceUrl: string) {
       ),
     }),
   )
-  if (shapes.some((shape) => Buffer.byteLength(shape.code) > MAX_CODE_BYTES)) {
+  if (importedShapes.some((shape) => Buffer.byteLength(shape.code) > MAX_CODE_BYTES)) {
     throw new FigmaIntegrationError('The converted Figma markup is too large.', 'TOO_LARGE')
   }
 
-  const designId = `d${crypto.randomUUID().replaceAll('-', '')}`
+  const placedShapes = target
+    ? placeImportedShapes(target.shapes, importedShapes)
+    : importedShapes
+  const shapes = target ? [...target.shapes, ...placedShapes] : placedShapes
+  if (shapes.length > MAX_NODES) {
+    throw new FigmaIntegrationError(
+      `The document would contain more than ${MAX_NODES.toLocaleString()} elements. Import into a new document instead.`,
+      'TOO_LARGE',
+    )
+  }
+
+  const designId = target?.id ?? `d${crypto.randomUUID().replaceAll('-', '')}`
   const versionId = `v${crypto.randomUUID().replaceAll('-', '')}`
   const fileName = payload.name.trim() || 'Figma import'
-  const designName = reference.nodeId && shapes.length === 1
-    ? `${fileName} — ${shapes[0].name}`.slice(0, 200)
-    : fileName.slice(0, 200)
+  const designName = target?.name ?? (
+    reference.nodeId && importedShapes.length === 1
+      ? `${fileName} — ${importedShapes[0].name}`.slice(0, 200)
+      : fileName.slice(0, 200)
+  )
   const writtenKeys: string[] = []
   const storage = s3
 
@@ -727,21 +768,27 @@ export async function importFigmaDesign(userId: string, sourceUrl: string) {
     }
 
     const now = new Date()
-    const insertDesign = db.insert(design).values({
-      id: designId,
-      userId,
-      name: designName,
-      shapes,
-      createdAt: now,
-      updatedAt: now,
-    })
+    const insertDesign = db
+      .insert(design)
+      .values({
+        id: designId,
+        userId,
+        name: designName,
+        shapes,
+        createdAt: now,
+        updatedAt: now,
+      })
+      .onConflictDoUpdate({
+        target: [design.id, design.userId],
+        set: { name: designName, shapes, updatedAt: now },
+      })
     const insertVersion = db.insert(designVersion).values({
       id: versionId,
       designId,
       userId,
       message: 'Imported from Figma',
       shapes,
-      added: shapes.length,
+      added: importedShapes.length,
       removed: 0,
       changed: 0,
       createdAt: now,
@@ -763,7 +810,7 @@ export async function importFigmaDesign(userId: string, sourceUrl: string) {
       design: { id: designId, name: designName, shapes, updatedAt: now.getTime() },
       summary: {
         pages: converted.pages,
-        frames: shapes.length,
+        frames: importedShapes.length,
         fallbacks: rendered.length,
         missingFonts: converted.fonts.filter((font) => !AVAILABLE_FONTS.has(font.toLowerCase())),
       } satisfies FigmaImportSummary,

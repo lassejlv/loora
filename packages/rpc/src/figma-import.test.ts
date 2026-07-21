@@ -3,6 +3,7 @@ import { FigmaIntegrationError } from '@loora/auth/figma'
 import {
   convertFigmaFile,
   parseFigmaFileUrl,
+  placeImportedShapes,
   type FigmaNode,
 } from './figma-import'
 
@@ -131,5 +132,22 @@ describe('Figma conversion', () => {
 
     expect(converted.drafts[0].fallbackNodeIds).toEqual(['3:1'])
     expect(converted.drafts[0].code).toContain('__FIGMA_ASSET_3:1__')
+  })
+})
+
+describe('Figma placement', () => {
+  it('places imported frames beside existing document content', () => {
+    const existing = [
+      { id: 'e1', name: 'Existing', x: 20, y: 30, w: 100, h: 80, code: '<div />' },
+    ]
+    const imported = [
+      { id: 'e2', name: 'First', x: 40, y: 100, w: 200, h: 120, code: '<div />' },
+      { id: 'e3', name: 'Second', x: 280, y: 140, w: 100, h: 80, code: '<div />' },
+    ]
+
+    expect(placeImportedShapes(existing, imported)).toEqual([
+      { ...imported[0], x: 280, y: 30 },
+      { ...imported[1], x: 520, y: 70 },
+    ])
   })
 })

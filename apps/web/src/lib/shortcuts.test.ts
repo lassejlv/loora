@@ -62,6 +62,9 @@ describe('resolveBuiltIn / matchShortcut', () => {
     expect(resolveBuiltIn('undo', config)).toEqual([{ key: 'z', meta: true }])
     const hit = matchShortcut(keyEvent({ key: 'z', metaKey: true }), config)
     expect(hit).toEqual({ kind: 'builtIn', id: 'undo' })
+    expect(
+      matchShortcut(keyEvent({ key: 'k', metaKey: true }), config),
+    ).toEqual({ kind: 'builtIn', id: 'openCommandMenu' })
   })
 
   test('honors null unbind and remaps', () => {

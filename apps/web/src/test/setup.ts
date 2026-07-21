@@ -18,6 +18,7 @@ const browserGlobals = [
   'HTMLTextAreaElement',
   'Element',
   'Node',
+  'NodeFilter',
   'ShadowRoot',
   'Event',
   'MouseEvent',
