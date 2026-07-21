@@ -102,12 +102,22 @@ function TokenRow({
 export function StyleEditorPanel({
   tag,
   className,
+  canStructure = false,
   onApply,
+  onAddSection,
+  onDuplicate,
+  onDelete,
   onClose,
 }: {
   tag: string
   className: string
+  // Structural actions need the node's outerHTML to appear verbatim in the
+  // source — true for HTML-mode elements only.
+  canStructure?: boolean
   onApply: (prev: string, next: string) => void
+  onAddSection?: (position: 'before' | 'after') => void
+  onDuplicate?: () => void
+  onDelete?: () => void
   onClose: () => void
 }) {
   const [current, setCurrent] = useState(className)
@@ -209,6 +219,38 @@ export function StyleEditorPanel({
           Apply
         </button>
       </div>
+      {canStructure && (
+        <div className="flex items-center gap-1 border-t pt-2">
+          <button
+            type="button"
+            className="rounded px-1.5 py-0.5 text-[10px] text-muted-foreground hover:bg-secondary hover:text-foreground"
+            onClick={() => onAddSection?.('before')}
+          >
+            + Section above
+          </button>
+          <button
+            type="button"
+            className="rounded px-1.5 py-0.5 text-[10px] text-muted-foreground hover:bg-secondary hover:text-foreground"
+            onClick={() => onAddSection?.('after')}
+          >
+            + Section below
+          </button>
+          <button
+            type="button"
+            className="rounded px-1.5 py-0.5 text-[10px] text-muted-foreground hover:bg-secondary hover:text-foreground"
+            onClick={() => onDuplicate?.()}
+          >
+            Duplicate
+          </button>
+          <button
+            type="button"
+            className="ml-auto rounded px-1.5 py-0.5 text-[10px] text-[#e8442e] hover:bg-[#e8442e]/10"
+            onClick={() => onDelete?.()}
+          >
+            Delete
+          </button>
+        </div>
+      )}
     </div>
   )
 }

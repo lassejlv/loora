@@ -761,10 +761,14 @@ document.addEventListener('contextmenu', function (e) {
   var t = e.target && e.target.nodeType === 1 ? e.target : e.target && e.target.parentElement
   if (!t || t === document.documentElement || t === document.body) return
   __endEditSession(true)
+  // Clear the hover outline BEFORE serializing — its inline style would make
+  // the outerHTML stop matching the source.
+  __clearEditHover()
   parent.postMessage({
     type: 'loora:style-pick',
     tag: t.tagName.toLowerCase(),
     className: t.getAttribute('class') || '',
+    node: t.outerHTML,
   }, '*')
 }, true)
 
@@ -1093,8 +1097,9 @@ export function ElementFrame({
   onError?: (message: string | null) => void
   onTextEdit?: (edits: FrameTextEdit[]) => void
   onImagePick?: (src: string) => void
-  // Right-click on a node in edit mode: its tag and class attribute value.
-  onStylePick?: (pick: { tag: string; className: string }) => void
+  // Right-click on a node in edit mode: its tag, class attribute value, and
+  // outerHTML (for structural actions — delete, duplicate, add section).
+  onStylePick?: (pick: { tag: string; className: string; node: string }) => void
   // Drag-reorder drop in edit mode: dragged node's and target sibling's
   // outerHTML plus which side to insert on.
   onNodeMove?: (move: { node: string; anchor: string; position: 'before' | 'after' }) => void
@@ -1188,9 +1193,13 @@ export function ElementFrame({
         return
       }
       if (msg?.type === 'loora:style-pick') {
-        const pick = msg as { tag?: unknown; className?: unknown }
+        const pick = msg as { tag?: unknown; className?: unknown; node?: unknown }
         if (typeof pick.tag === 'string' && typeof pick.className === 'string') {
-          onStylePickRef.current?.({ tag: pick.tag, className: pick.className })
+          onStylePickRef.current?.({
+            tag: pick.tag,
+            className: pick.className,
+            node: typeof pick.node === 'string' ? pick.node : '',
+          })
         }
         return
       }

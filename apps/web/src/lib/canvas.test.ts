@@ -3,7 +3,9 @@ import {
   applyCodeEdits,
   applyElementPatches,
   applyTextEdits,
+  insertNodeMarkup,
   moveNodeMarkup,
+  removeNodeMarkup,
   replaceClassValue,
   replaceImageSource,
   reorderElements,
@@ -157,6 +159,42 @@ describe('replaceImageSource', () => {
 
   it('fails when the src is not in the code', () => {
     expect(replaceImageSource('<img src="x.png">', '/api/asset/a1', '/api/asset/b2').ok).toBe(false)
+  })
+})
+
+describe('removeNodeMarkup', () => {
+  it('removes a node with its line, leaving no blank line', () => {
+    const code = '<div>\n  <p id="a">A</p>\n  <p id="b">B</p>\n</div>'
+    const result = removeNodeMarkup(code, '<p id="a">A</p>')
+    if (!result.ok) throw new Error('expected ok')
+    expect(result.code).toBe('<div>\n  <p id="b">B</p>\n</div>')
+  })
+
+  it('fails on ambiguous markup', () => {
+    expect(removeNodeMarkup('<p>X</p><p>X</p>', '<p>X</p>').ok).toBe(false)
+  })
+})
+
+describe('insertNodeMarkup', () => {
+  it('inserts after the anchor with the anchor\'s indentation', () => {
+    const code = '<div>\n  <p id="a">A</p>\n</div>'
+    const result = insertNodeMarkup(code, '<p id="a">A</p>', '<p id="n">N</p>', 'after')
+    if (!result.ok) throw new Error('expected ok')
+    expect(result.code).toBe('<div>\n  <p id="a">A</p>\n  <p id="n">N</p>\n</div>')
+  })
+
+  it('inserts before the anchor', () => {
+    const code = '<div>\n  <p id="a">A</p>\n</div>'
+    const result = insertNodeMarkup(code, '<p id="a">A</p>', '<p id="n">N</p>', 'before')
+    if (!result.ok) throw new Error('expected ok')
+    expect(result.code).toBe('<div>\n  <p id="n">N</p>\n  <p id="a">A</p>\n</div>')
+  })
+
+  it('duplicates a node when markup equals the anchor', () => {
+    const code = '<div>\n  <p id="a">A</p>\n</div>'
+    const result = insertNodeMarkup(code, '<p id="a">A</p>', '<p id="a">A</p>', 'after')
+    if (!result.ok) throw new Error('expected ok')
+    expect(result.code).toBe('<div>\n  <p id="a">A</p>\n  <p id="a">A</p>\n</div>')
   })
 })
 

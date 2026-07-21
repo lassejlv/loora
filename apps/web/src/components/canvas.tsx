@@ -11,7 +11,14 @@ import {
 } from '#/components/element-frame'
 import { ImagePickerDialog } from '#/components/image-picker-dialog'
 import { StyleEditorPanel } from '#/components/style-editor-panel'
-import { moveNodeMarkup, replaceClassValue, replaceImageSource } from '#/lib/canvas'
+import {
+  insertNodeMarkup,
+  moveNodeMarkup,
+  NEW_SECTION_MARKUP,
+  removeNodeMarkup,
+  replaceClassValue,
+  replaceImageSource,
+} from '#/lib/canvas'
 import { collectSnapLines, elementAABB, snapBox, snapPoint, type SnapLines } from '#/lib/snap'
 
 export type Tool = 'select' | 'hand' | 'interact' | 'comment' | InsertTool
@@ -209,7 +216,12 @@ export function Canvas({
   // An image clicked in an edit-mode frame, waiting for a replacement asset.
   const [imagePick, setImagePick] = useState<{ id: string; src: string } | null>(null)
   // A node right-clicked in an edit-mode frame, being styled.
-  const [stylePick, setStylePick] = useState<{ id: string; tag: string; className: string } | null>(null)
+  const [stylePick, setStylePick] = useState<{
+    id: string
+    tag: string
+    className: string
+    node: string
+  } | null>(null)
   const elementsRef = useRef(elements)
   elementsRef.current = elements
   const dragRef = useRef<Drag | null>(null)
@@ -341,8 +353,10 @@ export function Canvas({
   )
 
   const handleStylePick = useCallback(
-    (id: string, pick: { tag: string; className: string }) => {
-      if (!pick.className) {
+    (id: string, pick: { tag: string; className: string; node: string }) => {
+      const el = elementsRef.current.find((c) => c.id === id)
+      const structural = el ? classifyCode(el.code) === 'html' : false
+      if (!pick.className && !structural) {
         showNotice('That part has no classes to edit — style it via Edit code or the agent.')
         return
       }
@@ -363,7 +377,25 @@ export function Canvas({
       return
     }
     onUpdateMany(new Map([[pick.id, { code: result.code }]]))
-    setStylePick({ ...pick, className: next })
+    // Keep the node markup in sync so structural actions still match.
+    const nodeNext = replaceClassValue(pick.node, prev, next)
+    setStylePick({ ...pick, className: next, node: nodeNext.ok ? nodeNext.code : pick.node })
+  }
+
+  // Structural actions from the style panel: delete/duplicate/add-section.
+  // Each closes the panel — the node markup it captured is stale afterwards.
+  const applyStructure = (mutate: (code: string, node: string) => ReturnType<typeof removeNodeMarkup>) => {
+    const pick = stylePick
+    setStylePick(null)
+    if (!pick) return
+    const el = elementsRef.current.find((c) => c.id === pick.id)
+    if (!el) return
+    const result = mutate(el.code, pick.node)
+    if (!result.ok) {
+      showNotice('Could not map that change onto the code. Use Edit code or ask the agent instead.')
+      return
+    }
+    onUpdateMany(new Map([[pick.id, { code: result.code }]]))
   }
 
   const replaceImage = (assetId: string) => {
@@ -1200,7 +1232,16 @@ export function Canvas({
           key={`${stylePick.id}:${stylePick.tag}`}
           tag={stylePick.tag}
           className={stylePick.className}
+          canStructure={
+            !!stylePick.node &&
+            classifyCode(elementsRef.current.find((c) => c.id === stylePick.id)?.code ?? '') === 'html'
+          }
           onApply={applyStyle}
+          onAddSection={(position) =>
+            applyStructure((code, node) => insertNodeMarkup(code, node, NEW_SECTION_MARKUP, position))
+          }
+          onDuplicate={() => applyStructure((code, node) => insertNodeMarkup(code, node, node, 'after'))}
+          onDelete={() => applyStructure((code, node) => removeNodeMarkup(code, node))}
           onClose={() => setStylePick(null)}
         />
       )}
@@ -1311,7 +1352,7 @@ const ElementView = memo(function ElementView({
   onToggleTextEdit?: (id: string) => void
   onTextEdit?: (id: string, edits: FrameTextEdit[]) => void
   onImagePick?: (id: string, src: string) => void
-  onStylePick?: (id: string, pick: { tag: string; className: string }) => void
+  onStylePick?: (id: string, pick: { tag: string; className: string; node: string }) => void
   onNodeMove?: (id: string, move: { node: string; anchor: string; position: 'before' | 'after' }) => void
 }) {
   const [error, setError] = useState<string | null>(null)

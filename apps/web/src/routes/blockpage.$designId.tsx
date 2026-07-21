@@ -11,8 +11,11 @@ import { pickBlockPageElement } from '#/lib/block-page'
 import { StyleEditorPanel } from '#/components/style-editor-panel'
 import {
   applyTextEdits,
+  insertNodeMarkup,
   moveNodeMarkup,
+  NEW_SECTION_MARKUP,
   onlyCodeElements,
+  removeNodeMarkup,
   replaceClassValue,
   replaceImageSource,
   type CanvasElement,
@@ -79,7 +82,7 @@ function BlockPage() {
   // An image clicked in edit mode, waiting for a replacement asset.
   const [imagePickSrc, setImagePickSrc] = useState<string | null>(null)
   // A node right-clicked in edit mode, being styled.
-  const [stylePick, setStylePick] = useState<{ tag: string; className: string } | null>(null)
+  const [stylePick, setStylePick] = useState<{ tag: string; className: string; node: string } | null>(null)
   const [editNotice, setEditNotice] = useState<string | null>(null)
   const noticeTimer = useRef<number | null>(null)
   // Bumped to remount the frame when an inline edit could not be mapped onto
@@ -197,8 +200,10 @@ function BlockPage() {
     applyCode(result.code)
   }
 
-  const onStylePick = (pick: { tag: string; className: string }) => {
-    if (!pick.className) {
+  const structural = active ? classifyCode(active.code) === 'html' : false
+
+  const onStylePick = (pick: { tag: string; className: string; node: string }) => {
+    if (!pick.className && !structural) {
       showEditNotice('That part has no classes to edit — style it via the Code editor or the agent.')
       return
     }
@@ -214,7 +219,23 @@ function BlockPage() {
       return
     }
     applyCode(result.code)
-    setStylePick({ ...stylePick, className: next })
+    const nodeNext = replaceClassValue(stylePick.node, prev, next)
+    setStylePick({ ...stylePick, className: next, node: nodeNext.ok ? nodeNext.code : stylePick.node })
+  }
+
+  // Structural actions close the panel — the captured markup is stale after.
+  const applyStructure = (
+    mutate: (code: string, node: string) => ReturnType<typeof removeNodeMarkup>,
+  ) => {
+    const pick = stylePick
+    setStylePick(null)
+    if (!pick || state.status !== 'ready' || !active) return
+    const result = mutate(active.code, pick.node)
+    if (!result.ok) {
+      showEditNotice('Could not map that change onto the code. Use the Code editor or ask the agent instead.')
+      return
+    }
+    applyCode(result.code)
   }
 
   const onNodeMove = (move: { node: string; anchor: string; position: 'before' | 'after' }) => {
@@ -409,7 +430,13 @@ function BlockPage() {
             key={stylePick.tag}
             tag={stylePick.tag}
             className={stylePick.className}
+            canStructure={!!stylePick.node && structural}
             onApply={applyStyle}
+            onAddSection={(position) =>
+              applyStructure((code, node) => insertNodeMarkup(code, node, NEW_SECTION_MARKUP, position))
+            }
+            onDuplicate={() => applyStructure((code, node) => insertNodeMarkup(code, node, node, 'after'))}
+            onDelete={() => applyStructure((code, node) => removeNodeMarkup(code, node))}
             onClose={() => setStylePick(null)}
           />
         ) : null}

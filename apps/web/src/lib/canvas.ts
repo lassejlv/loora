@@ -164,11 +164,64 @@ export function replaceClassValue(
   return result
 }
 
-// Move a dragged node's markup next to a sibling's markup (drag-reorder
-// inside an HTML block). Both snippets are the browser's outerHTML of nodes
-// rendered FROM this code, so for HTML-mode elements they usually appear
-// verbatim; anything ambiguous or unmatched fails loudly and the caller
-// falls back to a notice. The dragged segment keeps its line indentation.
+// Node-markup surgery for structural edits inside an HTML block (drag-
+// reorder, delete, duplicate, add section). Snippets are the browser's
+// outerHTML of nodes rendered FROM this code, so for HTML-mode elements they
+// usually appear verbatim; anything ambiguous or unmatched fails loudly and
+// the caller falls back to a notice.
+
+// Locate a unique markup segment; the removal swallows the segment's line
+// indentation (and its newline) so no blank line is left behind.
+function findSegment(
+  code: string,
+  markup: string,
+  what: string,
+): { error: string } | { error?: never; at: number; indent: string; lineStart: number } {
+  const count = code.split(markup).length - 1
+  if (count === 0) return { error: `The ${what} was not found in the code` }
+  if (count > 1) return { error: `The ${what} appears more than once` }
+  const at = code.indexOf(markup)
+  let ws = at
+  while (ws > 0 && (code[ws - 1] === ' ' || code[ws - 1] === '\t')) ws--
+  const indent = code.slice(ws, at)
+  const onOwnLine = ws === 0 || code[ws - 1] === '\n'
+  return {
+    at,
+    indent,
+    lineStart: onOwnLine ? (ws > 0 ? ws - 1 : 0) : at,
+  }
+}
+
+export function removeNodeMarkup(code: string, nodeHtml: string): CodeEditResult {
+  if (!nodeHtml) return { ok: false, error: 'Nothing to remove' }
+  const seg = findSegment(code, nodeHtml, 'node')
+  if (seg.error !== undefined) return { ok: false, error: seg.error }
+  return {
+    ok: true,
+    code: code.slice(0, seg.lineStart) + code.slice(seg.at + nodeHtml.length),
+    contexts: [],
+  }
+}
+
+export function insertNodeMarkup(
+  code: string,
+  anchorHtml: string,
+  markup: string,
+  position: 'before' | 'after',
+): CodeEditResult {
+  if (!anchorHtml || !markup) return { ok: false, error: 'Nothing to insert' }
+  const seg = findSegment(code, anchorHtml, 'target')
+  if (seg.error !== undefined) return { ok: false, error: seg.error }
+  const insertAt = position === 'before' ? seg.at : seg.at + anchorHtml.length
+  const insertion =
+    position === 'before' ? `${markup}\n${seg.indent}` : `\n${seg.indent}${markup}`
+  return {
+    ok: true,
+    code: code.slice(0, insertAt) + insertion + code.slice(insertAt),
+    contexts: [],
+  }
+}
+
 export function moveNodeMarkup(
   code: string,
   nodeHtml: string,
@@ -178,34 +231,19 @@ export function moveNodeMarkup(
   if (!nodeHtml || !anchorHtml || nodeHtml === anchorHtml) {
     return { ok: false, error: 'Nothing to move' }
   }
-  const nodeCount = code.split(nodeHtml).length - 1
-  if (nodeCount === 0) return { ok: false, error: 'The dragged markup was not found in the code' }
-  if (nodeCount > 1) return { ok: false, error: 'The dragged markup appears more than once' }
-
-  const at = code.indexOf(nodeHtml)
-  // Swallow the node's line indentation (and its newline) so no blank line
-  // is left behind; reuse that indent at the destination.
-  let ws = at
-  while (ws > 0 && (code[ws - 1] === ' ' || code[ws - 1] === '\t')) ws--
-  const indent = code.slice(ws, at)
-  const onOwnLine = ws === 0 || code[ws - 1] === '\n'
-  const start = onOwnLine ? (ws > 0 ? ws - 1 : 0) : at
-  const without = code.slice(0, start) + code.slice(at + nodeHtml.length)
-
-  const anchorCount = without.split(anchorHtml).length - 1
-  if (anchorCount === 0) return { ok: false, error: 'The drop target was not found in the code' }
-  if (anchorCount > 1) return { ok: false, error: 'The drop target appears more than once' }
-
-  const ai = without.indexOf(anchorHtml)
-  const insertAt = position === 'before' ? ai : ai + anchorHtml.length
-  const insertion =
-    position === 'before' ? `${nodeHtml}\n${indent}` : `\n${indent}${nodeHtml}`
-  return {
-    ok: true,
-    code: without.slice(0, insertAt) + insertion + without.slice(insertAt),
-    contexts: [],
-  }
+  const removed = removeNodeMarkup(code, nodeHtml)
+  if (!removed.ok) return removed
+  return insertNodeMarkup(removed.code, anchorHtml, nodeHtml, position)
 }
+
+// Placeholder block inserted by the "add section" action; the user edits it
+// inline or asks the agent to fill it in.
+export const NEW_SECTION_MARKUP = [
+  '<section class="bg-white px-8 py-16">',
+  '  <h2 class="text-3xl font-bold text-[#1a1917]">New section</h2>',
+  '  <p class="mt-3 max-w-xl text-[#75726b]">Click this text to edit it, or ask the agent to fill this section in.</p>',
+  '</section>',
+].join('\n')
 
 // Rebuild z-order in one pass. Unknown and duplicate ids are ignored, while
 // elements omitted by the caller keep their existing relative order at the end.
