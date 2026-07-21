@@ -1,6 +1,7 @@
 import '@tanstack/react-start'
 import { createFileRoute } from '@tanstack/react-router'
 import { createOpenAICompatible } from '@ai-sdk/openai-compatible'
+import { createNeon } from '@neondatabase/ai-sdk-provider'
 import { createChatGPTProxyProvider } from '@opencoredev/loginwithchatgpt-ai'
 import { convertToModelMessages, stepCountIs, streamText, type UIMessage } from 'ai'
 import { z } from 'zod'
@@ -311,9 +312,26 @@ export const Route = createFileRoute('/api/chat')({
             defaultModel: modelConfig.modelId,
           })
           model = provider(modelConfig.modelId)
+        } else if (providerConfig.kind === 'neon') {
+          const apiKey = process.env[providerConfig.apiKeyEnv]
+          const rawBaseUrl = process.env[providerConfig.baseUrlEnv]
+          if (!apiKey || !rawBaseUrl) {
+            return Response.json(
+              {
+                error: `${providerConfig.label} is not configured. Set ${providerConfig.apiKeyEnv} and ${providerConfig.baseUrlEnv} on the server.`,
+              },
+              { status: 503 },
+            )
+          }
+          // The provider wants the bare branch gateway host and appends the
+          // dialect paths itself; tolerate an env var holding a full route.
+          const provider = createNeon({
+            apiKey,
+            baseURL: rawBaseUrl.replace(/\/ai-gateway.*$/, ''),
+          })
+          model = provider(modelConfig.modelId)
         } else {
           const apiKey = process.env[providerConfig.apiKeyEnv]
-          const baseUrl = process.env[providerConfig.baseURL]
           if (!apiKey) {
             return Response.json(
               {
@@ -324,7 +342,7 @@ export const Route = createFileRoute('/api/chat')({
           }
           const provider = createOpenAICompatible({
             name: modelConfig.provider,
-            baseURL: baseUrl ?? 'https://api.openai.com/v1',
+            baseURL: providerConfig.baseURL,
             apiKey,
             headers: providerConfig.headers,
             includeUsage: providerConfig.includeUsage,

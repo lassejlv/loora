@@ -8,6 +8,17 @@ export type ProviderDefinition =
       headers?: Record<string, string>
     }
   | {
+      // Neon AI Gateway via @neondatabase/ai-sdk-provider: routes each model
+      // to the right gateway dialect (Anthropic → Messages, OpenAI →
+      // Responses, Gemini/others → chat completions) with the schema
+      // conversions each native API needs — a plain openai-compatible client
+      // 400s on Gemini because Google rejects JSON-Schema meta keys.
+      kind: 'neon'
+      label: string
+      baseUrlEnv: string
+      apiKeyEnv: string
+    }
+  | {
       kind: 'chatgpt'
       label: string
     }
@@ -16,9 +27,9 @@ export type ProviderDefinition =
 // environment variable on the server and are never included in this config.
 export const PROVIDERS = {
   loora: {
-    kind: 'openai-compatible',
+    kind: 'neon',
     label: 'Loora',
-    baseURL: 'AI_GATEWAY_URL',
+    baseUrlEnv: 'AI_GATEWAY_URL',
     apiKeyEnv: 'AI_KEY',
   },
   chatgpt: {

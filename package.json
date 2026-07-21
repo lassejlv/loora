@@ -34,7 +34,6 @@
     "vite": "^8.1.5"
   },
   "dependencies": {
-    "@neondatabase/ai-sdk-provider": "^0.7.1",
     "@opencode-ai/cli": "^0.0.0-next-15919"
   }
 }

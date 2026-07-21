@@ -22,6 +22,7 @@
     "@loora/db": "workspace:*",
     "@loora/rpc": "workspace:*",
     "@monaco-editor/react": "^4.7.0",
+    "@neondatabase/ai-sdk-provider": "^0.7.1",
     "@opencoredev/loginwithchatgpt-ai": "^0.2.0",
     "@opencoredev/loginwithchatgpt-react": "^0.2.0",
     "@opencoredev/loginwithchatgpt-server": "^0.2.0",

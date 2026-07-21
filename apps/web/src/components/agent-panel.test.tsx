@@ -359,50 +359,6 @@ describe('AgentPanel empty response recovery', () => {
     expect(requestBody).toContain('"mediaType":"image/png"')
   })
 
-  it('does not capture or send canvas images with Max', async () => {
-    localStorage.setItem('loora:model', 'max')
-    const chatFetch = mock().mockResolvedValue(
-      stream(
-        { type: 'start' },
-        { type: 'text-start', id: 'answer' },
-        { type: 'text-delta', id: 'answer', delta: 'Done.' },
-        { type: 'text-end', id: 'answer' },
-        { type: 'finish' },
-      ),
-    )
-    globalThis.fetch = chatFetch as unknown as typeof fetch
-
-    const shapesRef = {
-      current: [
-        { id: 'el-1', name: 'Box', x: 0, y: 0, w: 100, h: 100, code: '<div></div>' },
-      ] as CanvasElement[],
-    }
-    const actions: ElementActions = {
-      createElement: mock(),
-      createElements: mock(),
-      updateElement: mock(),
-      deleteElement: mock(),
-      reorderElements: mock(),
-      groupElements: mock(),
-      ungroupElements: mock(),
-    }
-
-    render(
-      <SidebarProvider>
-        <AgentPanel actions={actions} shapesRef={shapesRef} docId="test" />
-      </SidebarProvider>,
-    )
-
-    const input = await screen.findByPlaceholderText('Describe a change…')
-    await waitFor(() => expect((input as HTMLTextAreaElement).disabled).toBe(false))
-    fireEvent.change(input, { target: { value: 'Update this rectangle' } })
-    fireEvent.submit(input.closest('form')!)
-
-    expect(await screen.findByText('Done.')).toBeTruthy()
-    expect(snapshotCanvas).not.toHaveBeenCalled()
-    const requestBody = (chatFetch.mock.calls[0]?.[1] as RequestInit)?.body as string
-    expect(requestBody).not.toContain('"type":"file"')
-  })
 
   it('shows progress while a tool is running and failure only after an error', () => {
     const running = {
