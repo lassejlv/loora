@@ -88,7 +88,7 @@ export function SubscriptionScreen({ children, preview, redirect }: Subscription
         {preview}
       </div>
       <Dialog open onOpenChange={() => {}}>
-        <DialogPopup className="max-w-xl" showCloseButton={false} bottomStickOnMobile={false}>
+        <DialogPopup className="sm:max-w-xl" showCloseButton={false}>
           <DialogHeader>
             <p className="mb-4 text-lg font-semibold tracking-tight">
               loora<span className="text-cx-accent">.</span>
@@ -101,19 +101,19 @@ export function SubscriptionScreen({ children, preview, redirect }: Subscription
           <DialogPanel className="flex flex-col gap-4 pt-1">
             <div className="grid gap-3 sm:grid-cols-2">
               {plans.map((plan) => (
-                <div key={plan.id} className="flex flex-col rounded-lg border border-border p-4">
-                  <div className="flex items-start justify-between gap-3">
-                    <div>
+                <div key={plan.id} className="flex min-w-0 flex-col rounded-lg border border-border p-4">
+                  <div className="flex flex-wrap items-start justify-between gap-x-3 gap-y-1">
+                    <div className="min-w-0">
                       <h2 className="text-sm font-semibold">{plan.name}</h2>
                       <p className="mt-1 text-xs text-muted-foreground">{plan.credits}</p>
                     </div>
                     {plan.note ? (
-                      <span className="rounded-full bg-secondary px-2 py-1 text-[10px] font-medium">
+                      <span className="shrink-0 whitespace-nowrap rounded-full bg-secondary px-2 py-1 text-[10px] font-medium">
                         {plan.note}
                       </span>
                     ) : null}
                   </div>
-                  <p className="mt-5 text-2xl font-semibold tracking-tight">
+                  <p className="mt-3 text-2xl font-semibold tracking-tight sm:mt-5">
                     {plan.price}<span className="text-xs font-normal text-muted-foreground">/month</span>
                   </p>
                   {plan.id === 'pro' ? (
@@ -122,16 +122,17 @@ export function SubscriptionScreen({ children, preview, redirect }: Subscription
                       managed AI and credit top-ups unlock afterward.
                     </p>
                   ) : null}
-                  <Button
-                    className="mt-4"
-                    variant={plan.id === 'studio' ? 'default' : 'outline'}
-                    disabled={pending}
-                    onClick={() => void startCheckout(plan.id)}
-                  >
-                    {pending && selectedPlan === plan.id
-                      ? 'Opening checkout…'
-                      : plan.id === 'pro' ? 'Start free trial' : `Choose ${plan.name}`}
-                  </Button>
+                  <div className="mt-4 flex flex-1 flex-col justify-end">
+                    <Button
+                      variant={plan.id === 'studio' ? 'default' : 'outline'}
+                      disabled={pending}
+                      onClick={() => void startCheckout(plan.id)}
+                    >
+                      {pending && selectedPlan === plan.id
+                        ? 'Opening checkout…'
+                        : plan.id === 'pro' ? 'Start free trial' : `Choose ${plan.name}`}
+                    </Button>
+                  </div>
                 </div>
               ))}
             </div>
