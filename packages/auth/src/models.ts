@@ -72,26 +72,13 @@ export interface ModelDefinition {
 // `id` is Loora's stable key. `modelId` is the exact id sent to the provider.
 // Prices are USD per 1M tokens and power the existing usage limits.
 export const MODELS = [
-  // Claude models ride the gateway's NATIVE Anthropic Messages route.
-  // Gemini has to go through the OpenAI-compatible translation (the native
-  // Gemini endpoint rejects streaming), which currently loses Gemini 3
-  // thought signatures and tool-result images on multi-turn replay — every
-  // follow-up 400s. Revisit Gemini when the gateway fixes that translation.
   {
     id: 'loora-mini',
     label: 'Loora Mini',
     provider: 'loora',
-    modelId: 'claude-haiku-4-5',
+    modelId: 'gemini-3-5-flash',
     supportsImageInput: true,
-    price: { input: 1, output: 5 },
-  },
-  {
-    id: 'loora-max',
-    label: 'Loora Max',
-    provider: 'loora',
-    modelId: 'claude-sonnet-4-6',
-    supportsImageInput: true,
-    price: { input: 3, output: 15 },
+    price: { input: 1.2, output: 4.9 },
   },
   {
     id: 'gpt-5.6-sol',
