@@ -8,6 +8,8 @@ const repositoryTools = new Set([
   'viewRepositoryImage',
 ])
 
+const MAX_STORED_SUBAGENT_RESULT_CHARS = 24_000
+
 function record(value: unknown): Record<string, unknown> | null {
   return value && typeof value === 'object' && !Array.isArray(value)
     ? value as Record<string, unknown>
@@ -71,12 +73,57 @@ function compactRepositoryOutput(value: unknown) {
   }
 }
 
+function compactDelegationTasks(value: unknown) {
+  const input = record(value)
+  const tasks = Array.isArray(input?.tasks) ? input.tasks : []
+  return {
+    tasks: tasks.slice(0, 3).flatMap((value) => {
+      const task = record(value)
+      if (!task) return []
+      return [{
+        name: String(task.name ?? '').slice(0, 80),
+        task: String(task.task ?? '').slice(0, 2_000),
+      }]
+    }),
+  }
+}
+
+function compactDelegationOutput(value: unknown) {
+  const output = record(value)
+  const workers = Array.isArray(output?.workers) ? output.workers : []
+  return {
+    workers: workers.slice(0, 3).flatMap((value) => {
+      const worker = record(value)
+      if (!worker) return []
+      return [{
+        id: String(worker.id ?? '').slice(0, 80),
+        name: String(worker.name ?? '').slice(0, 80),
+        task: String(worker.task ?? '').slice(0, 2_000),
+        status: worker.status,
+        result: typeof worker.result === 'string'
+          ? worker.result.slice(0, MAX_STORED_SUBAGENT_RESULT_CHARS)
+          : undefined,
+        error: typeof worker.error === 'string' ? worker.error.slice(0, 500) : undefined,
+      }]
+    }),
+  }
+}
+
 function sanitizePart(value: unknown): UIMessage['parts'][number] | null {
   const part = record(value)
   if (!part || typeof part.type !== 'string') return null
   if (part.type === 'file' || part.type === 'tool-loadSkill') return null
 
   const name = toolName(part)
+  if (name === 'delegateTasks') {
+    const next: Record<string, unknown> = {
+      ...part,
+      input: compactDelegationTasks(part.input),
+    }
+    if ('output' in part) next.output = compactDelegationOutput(part.output)
+    return next as unknown as UIMessage['parts'][number]
+  }
+
   if (name && repositoryTools.has(name)) {
     const next: Record<string, unknown> = {
       ...part,

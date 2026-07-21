@@ -17,7 +17,6 @@ const EDITOR_OPTIONS: NonNullable<EditorProps['options']> = {
   bracketPairColorization: { enabled: true },
   contextmenu: true,
   cursorBlinking: 'smooth',
-  fixedOverflowWidgets: true,
   folding: true,
   fontFamily: "'Spline Sans Mono', ui-monospace, monospace",
   fontSize: 13,
