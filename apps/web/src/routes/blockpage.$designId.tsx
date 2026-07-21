@@ -28,6 +28,22 @@ type LoadState =
   | { status: 'error'; message: string }
   | { status: 'ready'; name: string | null; elements: CanvasElement[] }
 
+type PreviewWidth = 'full' | 'desktop' | 'tablet' | 'phone'
+
+const PREVIEW_WIDTHS: Record<PreviewWidth, number | null> = {
+  full: null,
+  desktop: 1280,
+  tablet: 768,
+  phone: 390,
+}
+
+const PREVIEW_LABELS: Record<PreviewWidth, string> = {
+  full: 'Full',
+  desktop: 'Desktop',
+  tablet: 'Tablet',
+  phone: 'Phone',
+}
+
 function BlockPage() {
   const { designId } = Route.useParams()
   const { data: session, isPending } = authClient.useSession()
@@ -36,6 +52,9 @@ function BlockPage() {
   })
   const [state, setState] = useState<LoadState>({ status: 'loading' })
   const [renderError, setRenderError] = useState<string | null>(null)
+  // Responsive preview: constrain the frame to a device width so page code
+  // reflows like it would on that screen. 'full' = the browser viewport.
+  const [previewWidth, setPreviewWidth] = useState<PreviewWidth>('full')
 
   const userId = session?.user.id ?? null
 
@@ -115,16 +134,43 @@ function BlockPage() {
     )
   }
 
+  const width = PREVIEW_WIDTHS[previewWidth]
+
   return (
-    <main className="fixed inset-0 bg-white">
-      <ElementFrame
-        key={active.id}
-        elementId={active.id}
-        code={active.code}
-        interactive
-        onError={setRenderError}
-      />
+    <main className="fixed inset-0 flex justify-center bg-white">
+      <div
+        className={width ? 'h-full border-x bg-white shadow-sm' : 'h-full w-full'}
+        style={width ? { width, maxWidth: '100%' } : undefined}
+      >
+        <ElementFrame
+          key={active.id}
+          elementId={active.id}
+          code={active.code}
+          interactive
+          onError={setRenderError}
+        />
+      </div>
       <div className="absolute top-3 right-3 z-10 flex items-center gap-2 rounded-full border bg-card/85 py-1.5 pr-1.5 pl-3 shadow-sm backdrop-blur transition-opacity hover:opacity-100 sm:opacity-60">
+        <div className="flex items-center gap-0.5" role="group" aria-label="Preview width">
+          {(Object.keys(PREVIEW_WIDTHS) as PreviewWidth[]).map((key) => (
+            <button
+              key={key}
+              type="button"
+              aria-pressed={previewWidth === key}
+              title={
+                PREVIEW_WIDTHS[key] ? `${PREVIEW_LABELS[key]} · ${PREVIEW_WIDTHS[key]}px` : PREVIEW_LABELS[key]
+              }
+              className={
+                previewWidth === key
+                  ? 'rounded-full bg-secondary px-2 py-0.5 text-[11px] font-medium'
+                  : 'rounded-full px-2 py-0.5 text-[11px] text-muted-foreground hover:text-foreground'
+              }
+              onClick={() => setPreviewWidth(key)}
+            >
+              {PREVIEW_LABELS[key]}
+            </button>
+          ))}
+        </div>
         {elements.length > 1 ? (
           <select
             aria-label="Element"

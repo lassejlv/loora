@@ -113,30 +113,30 @@ describe('compileForFrame', () => {
     },
   }
 
-  it('passes html through without a compiler', () => {
-    const result = compileForFrame('<p class="text-xl">Hello</p>', null)
+  it('passes html through without a compiler', async () => {
+    const result = await compileForFrame('<p class="text-xl">Hello</p>', null)
     expect(result).toEqual({
       ok: true,
       payload: { mode: 'html', code: '<p class="text-xl">Hello</p>', needsEntry: false },
     })
   })
 
-  it('compiles App definitions to executable js', () => {
-    const result = compileForFrame('function App() { return <div /> }', fakeBabel)
+  it('compiles App definitions to executable js', async () => {
+    const result = await compileForFrame('function App() { return <div /> }', fakeBabel)
     if (!result.ok) throw new Error('expected ok')
     expect(result.payload.mode).toBe('js')
     expect(result.payload.needsEntry).toBe(true)
     expect(result.payload.code).toContain('/*compiled*/')
   })
 
-  it('respects an explicit entry call', () => {
+  it('respects an explicit entry call', async () => {
     const source = `function App() { return <div /> }\nReactDOM.createRoot(document.getElementById('root')).render(<App />)`
-    const result = compileForFrame(source, fakeBabel)
+    const result = await compileForFrame(source, fakeBabel)
     if (!result.ok) throw new Error('expected ok')
     expect(result.payload.needsEntry).toBe(false)
   })
 
-  it('wraps jsx snippets in an App function', () => {
+  it('wraps jsx snippets in an App function', async () => {
     const calls: string[] = []
     const spyBabel: BabelLike = {
       transform: (code) => {
@@ -144,12 +144,12 @@ describe('compileForFrame', () => {
         return { code }
       },
     }
-    const result = compileForFrame('<p className="text-xl">Hi</p>', spyBabel)
+    const result = await compileForFrame('<p className="text-xl">Hi</p>', spyBabel)
     if (!result.ok) throw new Error('expected ok')
     expect(calls[0]).toContain('function App() { return <>')
   })
 
-  it('strips module syntax before compiling', () => {
+  it('strips module syntax before compiling', async () => {
     const calls: string[] = []
     const spyBabel: BabelLike = {
       transform: (code) => {
@@ -157,12 +157,12 @@ describe('compileForFrame', () => {
         return { code }
       },
     }
-    compileForFrame(`import { useState } from 'react'\nexport default function App() { return null }`, spyBabel)
+    await compileForFrame(`import { useState } from 'react'\nexport default function App() { return null }`, spyBabel)
     expect(calls[0]).not.toContain('import')
     expect(calls[0]).not.toContain('export')
   })
 
-  it('tries the typescript preset for TSX support', () => {
+  it('tries the typescript preset for TSX support', async () => {
     const presetsUsed: unknown[] = []
     const spyBabel: BabelLike = {
       transform: (code, options) => {
@@ -170,26 +170,35 @@ describe('compileForFrame', () => {
         return { code }
       },
     }
-    compileForFrame('function App() { const [n] = useState<number>(0); return <div>{n}</div> }', spyBabel)
+    await compileForFrame('function App() { const [n] = useState<number>(0); return <div>{n}</div> }', spyBabel)
     expect(JSON.stringify(presetsUsed[0])).toContain('typescript')
   })
 
-  it('falls back to html when a markup snippet fails to compile', () => {
-    const result = compileForFrame('<div style={{}}><style>.a{color:red}</style></div>', failingBabel)
+  it('supports an async transform (compile worker)', async () => {
+    const asyncBabel: BabelLike = {
+      transform: async (code) => ({ code: `/*worker*/\n${code}` }),
+    }
+    const result = await compileForFrame('function App() { return <div /> }', asyncBabel)
+    if (!result.ok) throw new Error('expected ok')
+    expect(result.payload.code).toContain('/*worker*/')
+  })
+
+  it('falls back to html when a markup snippet fails to compile', async () => {
+    const result = await compileForFrame('<div style={{}}><style>.a{color:red}</style></div>', failingBabel)
     if (!result.ok) throw new Error('expected html fallback')
     expect(result.payload.mode).toBe('html')
   })
 
-  it('reports a readable compile error for broken App code', () => {
-    const result = compileForFrame('function App() { return <div } ', failingBabel)
+  it('reports a readable compile error for broken App code', async () => {
+    const result = await compileForFrame('function App() { return <div } ', failingBabel)
     if (result.ok) throw new Error('expected error')
     expect(result.error).toContain('Unexpected token (2:14)')
     expect(result.error).not.toContain('unknown:')
   })
 
-  it('echoes the offending source line alongside the compile error position', () => {
+  it('echoes the offending source line alongside the compile error position', async () => {
     const source = 'function App() {\n  return <div }\n}'
-    const result = compileForFrame(source, failingBabel)
+    const result = await compileForFrame(source, failingBabel)
     if (result.ok) throw new Error('expected error')
     expect(result.error).toContain('Unexpected token (2:14)')
     expect(result.error).toContain('return <div }')
@@ -263,6 +272,25 @@ describe('buildElementDoc', () => {
 
   it('has a transparent background so text and unstyled elements sit on the canvas', () => {
     expect(doc).toContain('background:transparent')
+  })
+
+  it('supports suspend/resume so offscreen frames stop animating', () => {
+    expect(doc).toContain("'loora:suspend'")
+    expect(doc).toContain("'loora:resume'")
+    expect(doc).toContain('__applySuspend')
+    expect(doc).toContain('__rafQueue')
+  })
+
+  it('exposes the cross-element message bus', () => {
+    expect(doc).toContain('window.loora')
+    expect(doc).toContain("'loora:bus'")
+    expect(doc).toContain("'loora:bus-deliver'")
+  })
+
+  it('captures at device pixel ratio and flags skipped fonts', () => {
+    expect(doc).toContain('pixelRatio')
+    expect(doc).toContain('fontsSkipped')
+    expect(doc).toContain('skipFonts: true')
   })
 })
 

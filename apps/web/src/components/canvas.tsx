@@ -2,7 +2,8 @@ import { memo, useEffect, useMemo, useRef, useState } from 'react'
 import type { CanvasElement, ElementPatch } from '#/lib/canvas'
 import { elementId } from '#/lib/canvas'
 import { TEMPLATE_DEFAULTS, type InsertTool } from '#/lib/element-templates'
-import { ElementFrame } from '#/components/element-frame'
+import { ElementFrame, getRenderResult, readElementLogs } from '#/components/element-frame'
+import { collectSnapLines, elementAABB, snapBox, snapPoint, type SnapLines } from '#/lib/snap'
 
 export type Tool = 'select' | 'hand' | 'interact' | 'comment' | InsertTool
 
@@ -72,23 +73,72 @@ type Drag =
       origins: { id: string; ox: number; oy: number; w: number; h: number }[]
       movingIds: Set<string>
       bounds: { left: number; top: number; right: number; bottom: number }
+      lines: SnapLines
     }
-  | { mode: 'draw'; type: InsertTool; startX: number; startY: number; x: number; y: number; w: number; h: number }
+  | {
+      mode: 'draw'
+      type: InsertTool
+      startX: number
+      startY: number
+      x: number
+      y: number
+      w: number
+      h: number
+      lines: SnapLines
+    }
   | { mode: 'marquee'; additive: boolean; startX: number; startY: number; x: number; y: number; w: number; h: number }
   | {
       mode: 'resize'
-      corner: number
+      handle: number
       // Selection bounding box at drag start; every origin scales with it.
       start: { x: number; y: number; w: number; h: number }
       origins: { id: string; x: number; y: number; w: number; h: number }[]
+      lines: SnapLines
+      // Single-element selection keeps its rotation; pointer math runs in the
+      // element's local (unrotated) space. 0 for multi-selections.
+      rotation: number
+    }
+  | {
+      mode: 'rotate'
+      id: string
+      center: { x: number; y: number }
+      startAngle: number
+      startR: number
     }
 
-const HANDLE_CORNERS = [
+// [cx, cy] handle positions on the selection box: 4 corners then 4 edge
+// midpoints (0.5 = that axis does not resize).
+const RESIZE_HANDLES = [
   [0, 0],
   [1, 0],
   [1, 1],
   [0, 1],
+  [0.5, 0],
+  [1, 0.5],
+  [0.5, 1],
+  [0, 0.5],
 ] as const
+
+const HANDLE_CURSORS = [
+  'nwse-resize',
+  'nesw-resize',
+  'nwse-resize',
+  'nesw-resize',
+  'ns-resize',
+  'ew-resize',
+  'ns-resize',
+  'ew-resize',
+] as const
+
+// Rotate a point around a center by deg degrees.
+function rotatePoint(pt: { x: number; y: number }, center: { x: number; y: number }, deg: number) {
+  const rad = (deg * Math.PI) / 180
+  const cos = Math.cos(rad)
+  const sin = Math.sin(rad)
+  const dx = pt.x - center.x
+  const dy = pt.y - center.y
+  return { x: center.x + dx * cos - dy * sin, y: center.y + dx * sin + dy * cos }
+}
 
 const MIN_SCALE = 0.1
 const MAX_SCALE = 16
@@ -138,8 +188,16 @@ export function Canvas({
   const [commentHover, setCommentHover] = useState<{ x: number; y: number; w: number; h: number } | null>(null)
   const [commentDraft, setCommentDraft] = useState<{ x: number; y: number; target: CommentTarget } | null>(null)
   const commentInputRef = useRef<HTMLTextAreaElement>(null)
+  // Element whose runtime console is open (opened from its error badge).
+  const [consoleFor, setConsoleFor] = useState<string | null>(null)
   const dragRef = useRef<Drag | null>(null)
   dragRef.current = drag
+  // Touch pinch-zoom: active touch pointers and the current pinch gesture.
+  const touchPoints = useRef(new Map<number, { x: number; y: number }>())
+  const pinchRef = useRef<{ dist: number; center: { x: number; y: number } } | null>(null)
+  // Set when a doc switch just loaded a persisted view, so the debounced save
+  // does not persist the previous doc's pan/zoom under the new doc id.
+  const skipViewSave = useRef(false)
   const activeTool: Tool = spaceHeld ? 'hand' : tool
   const selectedIdSet = useMemo(() => new Set(selectedIds), [selectedIds])
 
@@ -203,11 +261,35 @@ export function Canvas({
     onCanvasContextMenu?.({ x: pt.x, y: pt.y, nextSelectedIds })
   }
 
+  const rootPoint = (e: React.PointerEvent) => {
+    const rect = rootRef.current!.getBoundingClientRect()
+    return { x: e.clientX - rect.left, y: e.clientY - rect.top }
+  }
+
   const onPointerDown = (e: React.PointerEvent) => {
     if (e.button !== 0 && e.button !== 1) return
     // Clicks inside an interactive iframe never reach the canvas, so any
     // pointer down that lands here means the user clicked outside it.
     if (interactiveId) setInteractiveId(null)
+    if (consoleFor) setConsoleFor(null)
+
+    // Two touch pointers = pinch zoom; whatever drag the first finger started
+    // is cancelled.
+    if (e.pointerType === 'touch') {
+      touchPoints.current.set(e.pointerId, rootPoint(e))
+      if (touchPoints.current.size === 2) {
+        const [a, b] = [...touchPoints.current.values()]
+        pinchRef.current = {
+          dist: Math.hypot(b.x - a.x, b.y - a.y),
+          center: { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 },
+        }
+        setDragBoth(null)
+        setGuides({ v: [], h: [] })
+        ;(e.currentTarget as Element).setPointerCapture(e.pointerId)
+        return
+      }
+      if (touchPoints.current.size > 2) return
+    }
 
     // Comment tool: click an element to pin a comment for the agent.
     // Empty canvas pans.
@@ -266,19 +348,29 @@ export function Canvas({
         const ids = selectedIdSet.has(id) ? selectedIds : member
         if (ids !== selectedIds) onSelect(ids)
         const idSet = new Set(ids)
-        const origins = elements
-          .filter((el) => idSet.has(el.id))
-          .map((el) => ({ id: el.id, ox: el.x, oy: el.y, w: el.w, h: el.h }))
-        const bounds = origins.reduce(
-          (box, origin) => ({
-            left: Math.min(box.left, origin.ox),
-            top: Math.min(box.top, origin.oy),
-            right: Math.max(box.right, origin.ox + origin.w),
-            bottom: Math.max(box.bottom, origin.oy + origin.h),
-          }),
+        const targets = elements.filter((el) => idSet.has(el.id))
+        const origins = targets.map((el) => ({ id: el.id, ox: el.x, oy: el.y, w: el.w, h: el.h }))
+        const bounds = targets.reduce(
+          (box, el) => {
+            const b = elementAABB(el)
+            return {
+              left: Math.min(box.left, b.left),
+              top: Math.min(box.top, b.top),
+              right: Math.max(box.right, b.right),
+              bottom: Math.max(box.bottom, b.bottom),
+            }
+          },
           { left: Infinity, top: Infinity, right: -Infinity, bottom: -Infinity },
         )
-        setDragBoth({ mode: 'move', startX: pt.x, startY: pt.y, origins, movingIds: idSet, bounds })
+        setDragBoth({
+          mode: 'move',
+          startX: pt.x,
+          startY: pt.y,
+          origins,
+          movingIds: idSet,
+          bounds,
+          lines: collectSnapLines(elements, idSet),
+        })
       } else {
         setDragBoth({
           mode: 'marquee',
@@ -295,29 +387,91 @@ export function Canvas({
     }
 
     // insert tools: drag out a new element
-    setDragBoth({ mode: 'draw', type: activeTool, startX: pt.x, startY: pt.y, x: pt.x, y: pt.y, w: 0, h: 0 })
+    setDragBoth({
+      mode: 'draw',
+      type: activeTool,
+      startX: pt.x,
+      startY: pt.y,
+      x: pt.x,
+      y: pt.y,
+      w: 0,
+      h: 0,
+      lines: collectSnapLines(elements, new Set()),
+    })
   }
 
-  const startResize = (e: React.PointerEvent, corner: number) => {
+  const startResize = (e: React.PointerEvent, handle: number) => {
     e.stopPropagation()
     const targets = elements.filter((c) => selectedIdSet.has(c.id))
     if (targets.length === 0) return
-    const start = {
-      x: Math.min(...targets.map((el) => el.x)),
-      y: Math.min(...targets.map((el) => el.y)),
-      w: Math.max(...targets.map((el) => el.x + el.w)) - Math.min(...targets.map((el) => el.x)),
-      h: Math.max(...targets.map((el) => el.y + el.h)) - Math.min(...targets.map((el) => el.y)),
-    }
+    // A single element resizes in its own (possibly rotated) local space;
+    // multi-selections scale their axis-aligned bounding box.
+    const single = targets.length === 1 ? targets[0] : null
+    const start = single
+      ? { x: single.x, y: single.y, w: single.w, h: single.h }
+      : {
+          x: Math.min(...targets.map((el) => elementAABB(el).left)),
+          y: Math.min(...targets.map((el) => elementAABB(el).top)),
+          w:
+            Math.max(...targets.map((el) => elementAABB(el).right)) -
+            Math.min(...targets.map((el) => elementAABB(el).left)),
+          h:
+            Math.max(...targets.map((el) => elementAABB(el).bottom)) -
+            Math.min(...targets.map((el) => elementAABB(el).top)),
+        }
     rootRef.current!.setPointerCapture(e.pointerId)
     setDragBoth({
       mode: 'resize',
-      corner,
+      handle,
       start,
       origins: targets.map((el) => ({ id: el.id, x: el.x, y: el.y, w: el.w, h: el.h })),
+      lines: collectSnapLines(elements, selectedIdSet),
+      rotation: single ? (single.r ?? 0) : 0,
+    })
+  }
+
+  const startRotate = (e: React.PointerEvent) => {
+    e.stopPropagation()
+    const targets = elements.filter((c) => selectedIdSet.has(c.id))
+    if (targets.length !== 1) return
+    const el = targets[0]
+    const center = { x: el.x + el.w / 2, y: el.y + el.h / 2 }
+    const pt = toScene(e.clientX, e.clientY)
+    rootRef.current!.setPointerCapture(e.pointerId)
+    setDragBoth({
+      mode: 'rotate',
+      id: el.id,
+      center,
+      startAngle: Math.atan2(pt.y - center.y, pt.x - center.x),
+      startR: el.r ?? 0,
     })
   }
 
   const onPointerMove = (e: React.PointerEvent) => {
+    // Pinch zoom: scale around the moving midpoint, pan with it.
+    if (e.pointerType === 'touch' && touchPoints.current.has(e.pointerId)) {
+      touchPoints.current.set(e.pointerId, rootPoint(e))
+      const pinch = pinchRef.current
+      if (pinch && touchPoints.current.size >= 2) {
+        const [a, b] = [...touchPoints.current.values()]
+        const dist = Math.hypot(b.x - a.x, b.y - a.y)
+        const center = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }
+        if (pinch.dist > 0 && dist > 0) {
+          const factor = dist / pinch.dist
+          setView((v) => {
+            const scale = Math.min(MAX_SCALE, Math.max(MIN_SCALE, v.scale * factor))
+            const k = scale / v.scale
+            return {
+              scale,
+              x: center.x - (pinch.center.x - v.x) * k,
+              y: center.y - (pinch.center.y - v.y) * k,
+            }
+          })
+        }
+        pinchRef.current = { dist, center }
+        return
+      }
+    }
     // Comment tool: outline the element under the pointer.
     if (activeTool === 'comment' && !dragRef.current && !commentDraft) {
       const hit = commentHit(e)
@@ -341,74 +495,93 @@ export function Canvas({
       return
     }
     const pt = toScene(e.clientX, e.clientY)
+    const threshold = 6 / view.scale
     if (d.mode === 'move') {
       let dx = pt.x - d.startX
       let dy = pt.y - d.startY
 
       // Snap the selection bounding box to edges/centers of other elements.
-      const left = d.bounds.left + dx
-      const top = d.bounds.top + dy
-      const right = d.bounds.right + dx
-      const bottom = d.bounds.bottom + dy
-      const threshold = 6 / view.scale
-      const others = elements.filter((el) => !d.movingIds.has(el.id))
-
-      let bestX: { corr: number; line: number } | null = null
-      let bestY: { corr: number; line: number } | null = null
-      for (const el of others) {
-        for (const c of [el.x, el.x + el.w / 2, el.x + el.w]) {
-          for (const t of [left, (left + right) / 2, right]) {
-            const corr = c - t
-            if (Math.abs(corr) <= threshold && (!bestX || Math.abs(corr) < Math.abs(bestX.corr))) {
-              bestX = { corr, line: c }
-            }
-          }
-        }
-        for (const c of [el.y, el.y + el.h / 2, el.y + el.h]) {
-          for (const t of [top, (top + bottom) / 2, bottom]) {
-            const corr = c - t
-            if (Math.abs(corr) <= threshold && (!bestY || Math.abs(corr) < Math.abs(bestY.corr))) {
-              bestY = { corr, line: c }
-            }
-          }
-        }
-      }
-      if (bestX) dx += bestX.corr
-      if (bestY) dy += bestY.corr
-      setGuides({ v: bestX ? [bestX.line] : [], h: bestY ? [bestY.line] : [] })
+      const snapped = snapBox(
+        {
+          left: d.bounds.left + dx,
+          top: d.bounds.top + dy,
+          right: d.bounds.right + dx,
+          bottom: d.bounds.bottom + dy,
+        },
+        d.lines,
+        threshold,
+      )
+      dx += snapped.dx
+      dy += snapped.dy
+      setGuides({
+        v: snapped.vLine !== null ? [snapped.vLine] : [],
+        h: snapped.hLine !== null ? [snapped.hLine] : [],
+      })
 
       const patches = new Map<string, ElementPatch>()
       for (const o of d.origins) {
         patches.set(o.id, { x: Math.round(o.ox + dx), y: Math.round(o.oy + dy) })
       }
       onUpdateMany(patches)
-    } else if (d.mode === 'draw' || d.mode === 'marquee') {
-      const next = {
+    } else if (d.mode === 'draw') {
+      const snapped = snapPoint(pt, d.lines, threshold)
+      setGuides({
+        v: snapped.vLine !== null ? [snapped.vLine] : [],
+        h: snapped.hLine !== null ? [snapped.hLine] : [],
+      })
+      setDragBoth({
+        ...d,
+        x: Math.min(d.startX, snapped.x),
+        y: Math.min(d.startY, snapped.y),
+        w: Math.abs(snapped.x - d.startX),
+        h: Math.abs(snapped.y - d.startY),
+      })
+    } else if (d.mode === 'marquee') {
+      setDragBoth({
         ...d,
         x: Math.min(d.startX, pt.x),
         y: Math.min(d.startY, pt.y),
         w: Math.abs(pt.x - d.startX),
         h: Math.abs(pt.y - d.startY),
-      }
-      setDragBoth(next)
+      })
     } else if (d.mode === 'resize') {
-      const [cx, cy] = HANDLE_CORNERS[d.corner]
+      const [cx, cy] = RESIZE_HANDLES[d.handle]
+      const moveX = cx !== 0.5
+      const moveY = cy !== 0.5
       const { start } = d
-      // Anchor: opposite corner, or the selection center when alt is held.
-      const ax = e.altKey ? start.x + start.w / 2 : start.x + (1 - cx) * start.w
-      const ay = e.altKey ? start.y + start.h / 2 : start.y + (1 - cy) * start.h
+      const center = { x: start.x + start.w / 2, y: start.y + start.h / 2 }
+      // Rotated single element: work in its local (unrotated) space. Snapping
+      // is skipped there — scene-space guide lines don't map onto a rotated box.
+      const local = d.rotation % 360 !== 0 ? rotatePoint(pt, center, -d.rotation) : pt
+      let px = local.x
+      let py = local.y
+      if (d.rotation % 360 === 0) {
+        const snapped = snapPoint({ x: px, y: py }, d.lines, threshold, {
+          snapX: moveX,
+          snapY: moveY,
+        })
+        px = snapped.x
+        py = snapped.y
+        setGuides({
+          v: snapped.vLine !== null ? [snapped.vLine] : [],
+          h: snapped.hLine !== null ? [snapped.hLine] : [],
+        })
+      }
+      // Anchor: opposite corner/edge, or the selection center when alt is held.
+      const ax = e.altKey ? center.x : start.x + (1 - cx) * start.w
+      const ay = e.altKey ? center.y : start.y + (1 - cy) * start.h
       const grow = e.altKey ? 2 : 1
-      let w = Math.abs(pt.x - ax) * grow
-      let h = Math.abs(pt.y - ay) * grow
-      if (e.shiftKey && start.w > 0 && start.h > 0) {
+      let w = moveX ? Math.abs(px - ax) * grow : start.w
+      let h = moveY ? Math.abs(py - ay) * grow : start.h
+      if (e.shiftKey && moveX && moveY && start.w > 0 && start.h > 0) {
         const ratio = start.w / start.h
         if (w / Math.max(h, 1e-6) > ratio) h = w / ratio
         else w = h * ratio
       }
       w = Math.max(1, w)
       h = Math.max(1, h)
-      const x = e.altKey ? ax - w / 2 : pt.x < ax ? ax - w : ax
-      const y = e.altKey ? ay - h / 2 : pt.y < ay ? ay - h : ay
+      const x = !moveX ? start.x : e.altKey ? ax - w / 2 : px < ax ? ax - w : ax
+      const y = !moveY ? start.y : e.altKey ? ay - h / 2 : py < ay ? ay - h : ay
       // Scale every selected element with the box (Figma group resize).
       const kx = w / Math.max(start.w, 1e-6)
       const ky = h / Math.max(start.h, 1e-6)
@@ -422,10 +595,22 @@ export function Canvas({
         })
       }
       onUpdateMany(patches)
+    } else if (d.mode === 'rotate') {
+      const angle = Math.atan2(pt.y - d.center.y, pt.x - d.center.x)
+      let deg = d.startR + ((angle - d.startAngle) * 180) / Math.PI
+      if (e.shiftKey) deg = Math.round(deg / 15) * 15
+      deg = Math.round(((deg % 360) + 360) % 360)
+      const patches = new Map<string, ElementPatch>()
+      patches.set(d.id, { r: deg === 0 ? undefined : deg })
+      onUpdateMany(patches)
     }
   }
 
-  const onPointerUp = () => {
+  const onPointerUp = (e: React.PointerEvent) => {
+    if (e.pointerType === 'touch') {
+      touchPoints.current.delete(e.pointerId)
+      if (touchPoints.current.size < 2) pinchRef.current = null
+    }
     const d = dragRef.current
     if (d?.mode === 'draw') {
       const dragged = d.w > 4 || d.h > 4
@@ -445,7 +630,10 @@ export function Canvas({
     }
     if (d?.mode === 'marquee') {
       const hits = elements
-        .filter((el) => el.x < d.x + d.w && el.x + el.w > d.x && el.y < d.y + d.h && el.y + el.h > d.y)
+        .filter((el) => {
+          const b = elementAABB(el)
+          return b.left < d.x + d.w && b.right > d.x && b.top < d.y + d.h && b.bottom > d.y
+        })
         .map((el) => el.id)
       // A marquee touching any group member catches the whole group.
       const hitSet = new Set(hits)
@@ -525,6 +713,7 @@ export function Canvas({
   useEffect(() => {
     const stored = loadView(docId)
     needsInitialFit.current = stored === null
+    skipViewSave.current = true
     setView(stored ?? DEFAULT_VIEW)
   }, [docId])
 
@@ -536,6 +725,12 @@ export function Canvas({
   }, [elements])
   useEffect(() => {
     if (!docId) return
+    // A doc switch re-runs this effect once with the previous doc's view but
+    // the new docId; persisting that pair would clobber the new doc's view.
+    if (skipViewSave.current) {
+      skipViewSave.current = false
+      return
+    }
     const t = window.setTimeout(
       () => localStorage.setItem(`loora:view:${docId}`, JSON.stringify(view)),
       300,
@@ -563,10 +758,11 @@ export function Canvas({
 
   const zoomToBounds = (targets: CanvasElement[], maxScale = MAX_SCALE) => {
     if (targets.length === 0) return
-    const left = Math.min(...targets.map((el) => el.x))
-    const top = Math.min(...targets.map((el) => el.y))
-    const right = Math.max(...targets.map((el) => el.x + el.w))
-    const bottom = Math.max(...targets.map((el) => el.y + el.h))
+    const boxes = targets.map(elementAABB)
+    const left = Math.min(...boxes.map((b) => b.left))
+    const top = Math.min(...boxes.map((b) => b.top))
+    const right = Math.max(...boxes.map((b) => b.right))
+    const bottom = Math.max(...boxes.map((b) => b.bottom))
     const { w, h } = viewportSize()
     const pad = 64
     const scale = Math.min(
@@ -619,19 +815,32 @@ export function Canvas({
     bottom: ((rootRect?.height ?? 2000) - view.y) / view.scale,
   }
   const selectedElements = elements.filter((el) => selectedIdSet.has(el.id))
-  const selBounds =
-    selectedElements.length > 0
+  // A single selection keeps its own (possibly rotated) box so the handles
+  // rotate with it; multi-selections use the axis-aligned union.
+  const singleSelected = selectedElements.length === 1 ? selectedElements[0] : null
+  const selRotation = singleSelected ? (singleSelected.r ?? 0) : 0
+  const selBoxes = selectedElements.map(elementAABB)
+  const selBounds = singleSelected
+    ? { x: singleSelected.x, y: singleSelected.y, w: singleSelected.w, h: singleSelected.h }
+    : selectedElements.length > 0
       ? {
-          x: Math.min(...selectedElements.map((el) => el.x)),
-          y: Math.min(...selectedElements.map((el) => el.y)),
-          w:
-            Math.max(...selectedElements.map((el) => el.x + el.w)) -
-            Math.min(...selectedElements.map((el) => el.x)),
-          h:
-            Math.max(...selectedElements.map((el) => el.y + el.h)) -
-            Math.min(...selectedElements.map((el) => el.y)),
+          x: Math.min(...selBoxes.map((b) => b.left)),
+          y: Math.min(...selBoxes.map((b) => b.top)),
+          w: Math.max(...selBoxes.map((b) => b.right)) - Math.min(...selBoxes.map((b) => b.left)),
+          h: Math.max(...selBoxes.map((b) => b.bottom)) - Math.min(...selBoxes.map((b) => b.top)),
         }
       : undefined
+  // Label position uses the axis-aligned box so it never renders rotated.
+  const selLabelBox =
+    selectedElements.length > 0
+      ? {
+          left: Math.min(...selBoxes.map((b) => b.left)),
+          bottom: Math.max(...selBoxes.map((b) => b.bottom)),
+        }
+      : undefined
+  // Frames well outside the viewport get suspended: animations pause and rAF
+  // work queues, so a big canvas doesn't burn CPU on invisible elements.
+  const cullMargin = 300 / view.scale
   const dot = 24 * view.scale
   const cursor =
     activeTool === 'hand'
@@ -655,6 +864,7 @@ export function Canvas({
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}
       onPointerUp={onPointerUp}
+      onPointerCancel={onPointerUp}
       onWheel={onWheel}
       onContextMenu={onContextMenu}
       onDoubleClick={(e) => {
@@ -676,13 +886,23 @@ export function Canvas({
           transformOrigin: '0 0',
         }}
       >
-        {elements.map((el) => (
-          <ElementView
-            key={el.id}
-            element={el}
-            interactive={el.id === interactiveId || activeTool === 'interact'}
-          />
-        ))}
+        {elements.map((el) => {
+          const b = elementAABB(el)
+          const offscreen =
+            b.right < scene.left - cullMargin ||
+            b.left > scene.right + cullMargin ||
+            b.bottom < scene.top - cullMargin ||
+            b.top > scene.bottom + cullMargin
+          return (
+            <ElementView
+              key={el.id}
+              element={el}
+              interactive={el.id === interactiveId || activeTool === 'interact'}
+              suspended={offscreen}
+              onOpenConsole={setConsoleFor}
+            />
+          )
+        })}
       </div>
 
       {/* Overlay chrome: selection, guides, marquee, handles. */}
@@ -711,6 +931,11 @@ export function Canvas({
               fill="none"
               stroke="var(--cx-accent)"
               strokeWidth={1.5 / view.scale}
+              transform={
+                (el.r ?? 0) % 360 !== 0
+                  ? `rotate(${el.r} ${el.x + el.w / 2} ${el.y + el.h / 2})`
+                  : undefined
+              }
             />
           ))}
 
@@ -739,44 +964,68 @@ export function Canvas({
 
           {selBounds && (
             <g>
-              {selectedElements.length > 1 && (
-                <rect
-                  x={selBounds.x}
-                  y={selBounds.y}
-                  width={selBounds.w}
-                  height={selBounds.h}
-                  fill="none"
-                  stroke="var(--cx-accent)"
-                  strokeWidth={1 / view.scale}
-                  strokeDasharray={`${4 / view.scale} ${3 / view.scale}`}
-                />
-              )}
-              {HANDLE_CORNERS.map(([cx, cy], i) => (
-                <rect
-                  key={i}
-                  x={selBounds.x + cx * selBounds.w - 4 / view.scale}
-                  y={selBounds.y + cy * selBounds.h - 4 / view.scale}
-                  width={8 / view.scale}
-                  height={8 / view.scale}
-                  fill="#ffffff"
-                  stroke="var(--cx-accent)"
-                  strokeWidth={1.5 / view.scale}
-                  style={{
-                    cursor: i % 2 === 0 ? 'nwse-resize' : 'nesw-resize',
-                    pointerEvents: 'auto',
-                  }}
-                  onPointerDown={(e) => startResize(e, i)}
-                />
-              ))}
-              <text
-                x={selBounds.x}
-                y={selBounds.y + selBounds.h + 16 / view.scale}
-                fontSize={11 / view.scale}
-                fontFamily="var(--font-mono)"
-                fill="var(--cx-accent)"
+              <g
+                transform={
+                  selRotation % 360 !== 0
+                    ? `rotate(${selRotation} ${selBounds.x + selBounds.w / 2} ${selBounds.y + selBounds.h / 2})`
+                    : undefined
+                }
               >
-                {`${Math.round(selBounds.x)}, ${Math.round(selBounds.y)} · ${Math.round(selBounds.w)} × ${Math.round(selBounds.h)}`}
-              </text>
+                {selectedElements.length > 1 && (
+                  <rect
+                    x={selBounds.x}
+                    y={selBounds.y}
+                    width={selBounds.w}
+                    height={selBounds.h}
+                    fill="none"
+                    stroke="var(--cx-accent)"
+                    strokeWidth={1 / view.scale}
+                    strokeDasharray={`${4 / view.scale} ${3 / view.scale}`}
+                  />
+                )}
+                {/* Rotate zones: invisible circles just outside each corner
+                    (drawn first so the resize handles win where they overlap). */}
+                {singleSelected &&
+                  RESIZE_HANDLES.slice(0, 4).map(([cx, cy], i) => (
+                    <circle
+                      key={`rot${i}`}
+                      cx={selBounds.x + cx * selBounds.w + (cx === 0 ? -1 : 1) * (12 / view.scale)}
+                      cy={selBounds.y + cy * selBounds.h + (cy === 0 ? -1 : 1) * (12 / view.scale)}
+                      r={9 / view.scale}
+                      fill="transparent"
+                      style={{ cursor: 'grab', pointerEvents: 'auto' }}
+                      onPointerDown={startRotate}
+                    />
+                  ))}
+                {RESIZE_HANDLES.map(([cx, cy], i) => (
+                  <rect
+                    key={i}
+                    x={selBounds.x + cx * selBounds.w - 4 / view.scale}
+                    y={selBounds.y + cy * selBounds.h - 4 / view.scale}
+                    width={8 / view.scale}
+                    height={8 / view.scale}
+                    fill="#ffffff"
+                    stroke="var(--cx-accent)"
+                    strokeWidth={1.5 / view.scale}
+                    style={{
+                      cursor: HANDLE_CURSORS[i],
+                      pointerEvents: 'auto',
+                    }}
+                    onPointerDown={(e) => startResize(e, i)}
+                  />
+                ))}
+              </g>
+              {selLabelBox && (
+                <text
+                  x={selLabelBox.left}
+                  y={selLabelBox.bottom + 16 / view.scale}
+                  fontSize={11 / view.scale}
+                  fontFamily="var(--font-mono)"
+                  fill="var(--cx-accent)"
+                >
+                  {`${Math.round(selBounds.x)}, ${Math.round(selBounds.y)} · ${Math.round(selBounds.w)} × ${Math.round(selBounds.h)}${selRotation % 360 !== 0 ? ` · ${Math.round(selRotation)}°` : ''}`}
+                </text>
+              )}
             </g>
           )}
         </g>
@@ -795,6 +1044,26 @@ export function Canvas({
           }}
         />
       )}
+
+      {/* Runtime console for an element, opened from its error badge. */}
+      {consoleFor &&
+        (() => {
+          const el = elements.find((c) => c.id === consoleFor)
+          if (!el) return null
+          const b = elementAABB(el)
+          const left = Math.max(8, Math.min(view.x + b.left * view.scale, (rootRect?.width ?? 800) - 356))
+          const top = Math.max(8, Math.min(view.y + b.bottom * view.scale + 8, (rootRect?.height ?? 600) - 240))
+          return (
+            <ElementConsolePanel
+              key={el.id}
+              elementId={el.id}
+              name={el.name}
+              left={left}
+              top={top}
+              onClose={() => setConsoleFor(null)}
+            />
+          )
+        })()}
 
       {/* Comment draft popover, anchored at the click point. */}
       {commentDraft && (
@@ -851,9 +1120,13 @@ export function Canvas({
 const ElementView = memo(function ElementView({
   element: el,
   interactive,
+  suspended,
+  onOpenConsole,
 }: {
   element: CanvasElement
   interactive?: boolean
+  suspended?: boolean
+  onOpenConsole?: (id: string) => void
 }) {
   const [error, setError] = useState<string | null>(null)
   const errorTimer = useRef<number | null>(null)
@@ -877,7 +1150,16 @@ const ElementView = memo(function ElementView({
   )
 
   return (
-    <div style={{ position: 'absolute', left: el.x, top: el.y, width: el.w, height: el.h }}>
+    <div
+      style={{
+        position: 'absolute',
+        left: el.x,
+        top: el.y,
+        width: el.w,
+        height: el.h,
+        transform: (el.r ?? 0) % 360 !== 0 ? `rotate(${el.r}deg)` : undefined,
+      }}
+    >
       <div
         className="pointer-events-none absolute flex items-center gap-1.5 font-mono"
         style={{
@@ -891,9 +1173,18 @@ const ElementView = memo(function ElementView({
         {el.name}
         {interactive ? ' · interacting' : ''}
         {error && (
-          <span title={error} className="max-w-72 truncate text-[#e8442e]">
+          <button
+            type="button"
+            title={`${error} — click for the console`}
+            className="pointer-events-auto max-w-72 cursor-pointer truncate text-[#e8442e]"
+            onPointerDown={(e) => e.stopPropagation()}
+            onClick={(e) => {
+              e.stopPropagation()
+              onOpenConsole?.(el.id)
+            }}
+          >
             ● {error}
-          </span>
+          </button>
         )}
       </div>
       <div className="h-full w-full overflow-hidden">
@@ -901,6 +1192,7 @@ const ElementView = memo(function ElementView({
           elementId={el.id}
           code={el.code}
           interactive={!!interactive}
+          suspended={!!suspended && !interactive}
           onError={onFrameError}
         />
       </div>
@@ -909,3 +1201,101 @@ const ElementView = memo(function ElementView({
     </div>
   )
 })
+
+// Small floating console showing an element's latest render error and its
+// runtime log buffer — the same data the agent reads via readElementLogs, so
+// users can see why an element crashed without asking the agent.
+function ElementConsolePanel({
+  elementId,
+  name,
+  left,
+  top,
+  onClose,
+}: {
+  elementId: string
+  name: string
+  left: number
+  top: number
+  onClose: () => void
+}) {
+  const [logs, setLogs] = useState<string[] | null>(null)
+  const [loading, setLoading] = useState(true)
+  const renderResult = getRenderResult(elementId)
+  const onCloseRef = useRef(onClose)
+  onCloseRef.current = onClose
+
+  const refresh = () => {
+    setLoading(true)
+    void readElementLogs(elementId).then((next) => {
+      setLogs(next)
+      setLoading(false)
+    })
+  }
+
+  useEffect(() => {
+    refresh()
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onCloseRef.current()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [elementId])
+
+  return (
+    <div
+      className="absolute z-10 flex w-[348px] flex-col gap-1.5 rounded-xl border bg-card p-2 shadow-md"
+      style={{ left, top }}
+      onPointerDown={(e) => e.stopPropagation()}
+      onDoubleClick={(e) => e.stopPropagation()}
+      onWheel={(e) => e.stopPropagation()}
+    >
+      <div className="flex items-center gap-2 px-1">
+        <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-muted-foreground">
+          {name} · console
+        </span>
+        <button
+          type="button"
+          className="rounded px-1.5 text-[11px] text-muted-foreground hover:bg-secondary hover:text-foreground"
+          onClick={refresh}
+        >
+          Refresh
+        </button>
+        <button
+          type="button"
+          aria-label="Close console"
+          className="rounded px-1.5 text-[11px] text-muted-foreground hover:bg-secondary hover:text-foreground"
+          onClick={onClose}
+        >
+          ✕
+        </button>
+      </div>
+      {renderResult?.error && (
+        <p className="rounded-md bg-[#e8442e]/10 px-2 py-1.5 font-mono text-[11px] break-words text-[#e8442e]">
+          {renderResult.error}
+        </p>
+      )}
+      <div className="max-h-40 overflow-y-auto rounded-md bg-background px-2 py-1.5 font-mono text-[11px]">
+        {loading && !logs ? (
+          <p className="text-muted-foreground">Loading logs…</p>
+        ) : logs === null ? (
+          <p className="text-muted-foreground">The element frame did not respond.</p>
+        ) : logs.length === 0 ? (
+          <p className="text-muted-foreground">No console output since the code last mounted.</p>
+        ) : (
+          logs.map((line, i) => (
+            <p key={i} className={cnLogLine(line)}>
+              {line}
+            </p>
+          ))
+        )}
+      </div>
+    </div>
+  )
+}
+
+function cnLogLine(line: string) {
+  if (line.startsWith('uncaught:') || line.startsWith('error:')) return 'break-words text-[#e8442e]'
+  if (line.startsWith('warn:')) return 'break-words text-[#a16207]'
+  return 'break-words text-muted-foreground'
+}

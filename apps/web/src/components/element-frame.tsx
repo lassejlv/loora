@@ -4,8 +4,9 @@ import { useEffect, useRef } from 'react'
 // HTML/CSS/JS or JSX/TSX defining App — running in an iframe with React and
 // Tailwind (vendored, same-origin).
 //
-// JSX compiles in the PARENT document with a single shared Babel instance
-// (lazy-loaded once), so each iframe only boots React + Tailwind instead of
+// JSX compiles in the PARENT context with a single shared Babel instance
+// (lazy-loaded once; in a worker when available so streamed re-compiles don't
+// jank the canvas), so each iframe only boots React + Tailwind instead of
 // re-parsing a 3MB compiler. Compile errors are known before anything is sent
 // and are reported both to the UI and to the agent via the render registry.
 //
@@ -97,7 +98,11 @@ export function classifyCode(source: string): CodeMode {
 // Parent-side compiler
 
 export interface BabelLike {
-  transform: (code: string, options: Record<string, unknown>) => { code?: string | null }
+  // May be sync (main-thread Babel, tests) or async (compile worker).
+  transform: (
+    code: string,
+    options: Record<string, unknown>,
+  ) => { code?: string | null } | Promise<{ code?: string | null }>
 }
 
 export interface FramePayload {
@@ -134,6 +139,105 @@ export function ensureBabel(): Promise<BabelLike> {
   return babelPromise
 }
 
+// ---------------------------------------------------------------------------
+// Compile worker: Babel transforms are CPU-heavy (a streamed element re-compiles
+// its full source every ~250ms), so run them off the main thread. The worker
+// loads the same vendored Babel via importScripts; when workers are unavailable
+// or the vendor script fails to load there, compilation falls back to the
+// main-thread Babel so behavior is identical, just slower.
+
+interface PendingTransform {
+  resolve: (out: { code?: string | null }) => void
+  reject: (error: Error) => void
+}
+
+let compilerPromise: Promise<BabelLike> | null = null
+
+function babelWorkerSource(): string {
+  const babelUrl = new URL('/vendor/babel.js', location.origin).href
+  return [
+    'var ok = true',
+    `try { importScripts(${JSON.stringify(babelUrl)}) } catch (e) { ok = false }`,
+    "postMessage({ ready: ok && typeof Babel !== 'undefined' })",
+    'onmessage = function (e) {',
+    '  var m = e.data',
+    '  try {',
+    '    var out = Babel.transform(m.code, m.options)',
+    '    postMessage({ id: m.id, code: out && out.code })',
+    '  } catch (err) {',
+    '    postMessage({ id: m.id, error: String((err && err.message) || err) })',
+    '  }',
+    '}',
+  ].join('\n')
+}
+
+function createWorkerBabel(): Promise<BabelLike> {
+  return new Promise((resolve, reject) => {
+    let worker: Worker
+    try {
+      worker = new Worker(URL.createObjectURL(new Blob([babelWorkerSource()], { type: 'text/javascript' })))
+    } catch (error) {
+      reject(error instanceof Error ? error : new Error('Worker creation failed'))
+      return
+    }
+    const pending = new Map<number, PendingTransform>()
+    let nextId = 1
+    const failAll = (message: string) => {
+      for (const p of pending.values()) p.reject(new Error(message))
+      pending.clear()
+    }
+    const readyTimer = setTimeout(() => {
+      worker.terminate()
+      reject(new Error('The compile worker did not start'))
+    }, 10_000)
+    worker.onerror = () => {
+      clearTimeout(readyTimer)
+      failAll('The compile worker crashed')
+      reject(new Error('The compile worker crashed'))
+    }
+    worker.onmessage = (e: MessageEvent) => {
+      const msg = e.data as { ready?: boolean; id?: number; code?: string | null; error?: string }
+      if (typeof msg?.ready === 'boolean') {
+        clearTimeout(readyTimer)
+        if (!msg.ready) {
+          worker.terminate()
+          reject(new Error('The compile worker failed to load Babel'))
+          return
+        }
+        resolve({
+          transform: (code, options) =>
+            new Promise((res, rej) => {
+              const id = nextId++
+              pending.set(id, { resolve: res, reject: rej })
+              worker.postMessage({ id, code, options })
+            }),
+        })
+        return
+      }
+      if (typeof msg?.id !== 'number') return
+      const p = pending.get(msg.id)
+      if (!p) return
+      pending.delete(msg.id)
+      if (typeof msg.error === 'string') p.reject(new Error(msg.error))
+      else p.resolve({ code: msg.code })
+    }
+  })
+}
+
+/** Babel off the main thread when possible, main-thread Babel otherwise. */
+export function ensureCompiler(): Promise<BabelLike> {
+  if (!compilerPromise) {
+    compilerPromise =
+      typeof Worker === 'undefined'
+        ? ensureBabel()
+        : createWorkerBabel().catch(() => ensureBabel())
+    compilerPromise.catch(() => {
+      compilerPromise = null
+    })
+  }
+  return compilerPromise
+}
+
 function firstErrorLine(error: unknown): string {
   const raw = error instanceof Error ? error.message : String(error)
   // Babel prefixes messages with the pseudo-filename and appends a code frame.
@@ -158,11 +262,11 @@ export function describeCompileError(error: unknown, source: string): string {
   return line
 }
 
-function transform(babel: BabelLike, source: string, withTypescript: boolean): string {
+async function transform(babel: BabelLike, source: string, withTypescript: boolean): Promise<string> {
   const presets: unknown[] = withTypescript
     ? [['react', {}], ['typescript', { isTSX: true, allExtensions: true }]]
     : [['react', {}]]
-  const out = babel.transform(source, { presets })
+  const out = await babel.transform(source, { presets })
   if (typeof out?.code !== 'string') throw new Error('Compilation produced no output')
   return out.code
 }
@@ -173,7 +277,7 @@ function transform(babel: BabelLike, source: string, withTypescript: boolean): s
  * TSX is tried first (agents write TypeScript constantly); plain-React is the
  * fallback in case the TypeScript preset chokes on valid JSX.
  */
-export function compileForFrame(source: string, babel: BabelLike | null): CompileResult {
+export async function compileForFrame(source: string, babel: BabelLike | null): Promise<CompileResult> {
   const stripped = stripModuleSyntax(source)
   const mode = classifyCode(source)
   if (mode === 'html') {
@@ -185,10 +289,10 @@ export function compileForFrame(source: string, babel: BabelLike | null): Compil
   try {
     let compiled: string
     try {
-      compiled = transform(babel, jsxSource, true)
+      compiled = await transform(babel, jsxSource, true)
     } catch (tsError) {
       try {
-        compiled = transform(babel, jsxSource, false)
+        compiled = await transform(babel, jsxSource, false)
       } catch {
         throw tsError
       }
@@ -233,6 +337,12 @@ function noteFrameRevision(elementId: string, revision?: number) {
 
 export function getElementCaptureRevision(elementId: string) {
   return frameRevisions.get(elementId) ?? 0
+}
+
+// Latest compile/runtime outcome for an element — powers the user-facing
+// element console (the agent gets the same data through awaitRenderResult).
+export function getRenderResult(elementId: string): { error: string | null; at: number } | null {
+  return renderResults.get(elementId) ?? null
 }
 
 function reportRender(elementId: string, error: string | null) {
@@ -320,6 +430,42 @@ var __currentRoot = null
 var __seq = 0
 var __revision = 0
 var __dirty = false
+var __suspended = false
+var __rafQueue = []
+var __rafSeq = 0
+var __pausedAnimations = []
+
+// Elements are isolated documents; window.loora is the cross-element message
+// bus (relayed through the parent, see loora:bus below).
+var __busHandlers = []
+window.loora = {
+  send: function (data) { parent.postMessage({ type: 'loora:bus', data: data }, '*') },
+  onMessage: function (fn) {
+    if (typeof fn === 'function') __busHandlers.push(fn)
+    return function () { __busHandlers = __busHandlers.filter(function (h) { return h !== fn }) }
+  },
+}
+
+// Offscreen suspension: CSS/WAAPI animations pause and payload rAF callbacks
+// queue instead of scheduling, so an animated element scrolled out of view
+// stops burning CPU. DOM state is left intact so captures still work.
+function __pauseAnimations() {
+  try {
+    document.getAnimations().forEach(function (a) {
+      if (a.playState === 'running') { a.pause(); __pausedAnimations.push(a) }
+    })
+  } catch (e) {}
+}
+function __applySuspend(next) {
+  if (next === __suspended) return
+  __suspended = next
+  if (next) {
+    __pauseAnimations()
+  } else {
+    __pausedAnimations.splice(0).forEach(function (a) { try { a.play() } catch (e) {} })
+    __rafQueue.splice(0).forEach(function (item) { window.requestAnimationFrame(item.fn) })
+  }
+}
 
 function __postDirty() {
   parent.postMessage({ type: 'loora:dirty', revision: __revision }, '*')
@@ -418,7 +564,13 @@ function __installPayloadTracking() {
     var id = si.apply(null, [wrapped].concat(args)); __intervals.push(id); return id
   }
   window.requestAnimationFrame = function (fn) {
+    if (__suspended) { var sid = -(++__rafSeq); __rafQueue.push({ id: sid, fn: fn }); return sid }
     var id = rf(function (at) { __markDirty(); return fn(at) }); __rafs.push(id); return id
+  }
+  var caf = window.cancelAnimationFrame.bind(window)
+  window.cancelAnimationFrame = function (id) {
+    if (id < 0) { __rafQueue = __rafQueue.filter(function (item) { return item.id !== id }); return }
+    return caf(id)
   }
   ;[window, document, document.documentElement, document.body].forEach(function (target) {
     var add = target.addEventListener.bind(target)
@@ -436,6 +588,8 @@ function __clearPayloadGlobals() {
   __timers.splice(0).forEach(function (id) { clearTimeout(id) })
   __intervals.splice(0).forEach(function (id) { clearInterval(id) })
   __rafs.splice(0).forEach(function (id) { cancelAnimationFrame(id) })
+  __rafQueue.length = 0
+  __pausedAnimations.length = 0
   __listeners.splice(0).forEach(function (l) {
     try { l[0].removeEventListener(l[1], l[2], l[3]) } catch (e) {}
   })
@@ -449,6 +603,7 @@ function __teardown() {
   __clearPayloadGlobals()
   // Logs from the torn-down payload would mislead the agent about current code.
   __logs.length = 0
+  __busHandlers = []
   __root.replaceChildren()
 }
 
@@ -478,23 +633,39 @@ window.addEventListener('message', function (e) {
     var volatile = !!(document.getAnimations && document.getAnimations().some(function (animation) {
       return animation.playState === 'running' || animation.playState === 'pending'
     }))
-    var reply = function (png) {
+    var reply = function (png, fontsSkipped) {
       parent.postMessage({
         type: 'loora:capture-result',
         token: msg.token,
         png: png,
         revision: captureRevision,
         volatile: volatile,
+        fontsSkipped: !!fontsSkipped,
       }, '*')
       if (__revision === captureRevision) __dirty = false
       else __postDirty()
     }
     if (!window.htmlToImage) return reply(null)
-    // Cross-origin stylesheets (fonts) can make font embedding throw; retry
-    // without fonts before giving up.
-    htmlToImage.toPng(document.body).catch(function () {
-      return htmlToImage.toPng(document.body, { skipFonts: true })
-    }).then(reply, function () { reply(null) })
+    // Capture at device resolution (capped at 2x) so the agent judges text
+    // and detail from a sharp image. Cross-origin stylesheets (fonts) can
+    // make font embedding throw; retry without fonts before giving up, and
+    // flag the reply so the degraded fidelity is visible downstream.
+    var pixelRatio = Math.min(window.devicePixelRatio || 1, 2)
+    htmlToImage.toPng(document.body, { pixelRatio: pixelRatio }).then(
+      function (png) { reply(png, false) },
+      function () {
+        htmlToImage.toPng(document.body, { pixelRatio: pixelRatio, skipFonts: true }).then(
+          function (png) { reply(png, true) },
+          function () { reply(null, false) }
+        )
+      }
+    )
+    return
+  }
+  if (msg.type === 'loora:suspend') { __applySuspend(true); return }
+  if (msg.type === 'loora:resume') { __applySuspend(false); return }
+  if (msg.type === 'loora:bus-deliver') {
+    __busHandlers.forEach(function (fn) { try { fn(msg.data, msg.from) } catch (e) {} })
     return
   }
   if (msg.type === 'loora:read-logs') {
@@ -519,6 +690,9 @@ window.addEventListener('message', function (e) {
       }
     }
     __markDirty()
+    // Code that mounted while suspended starts its CSS animations running;
+    // re-pause once styles have applied.
+    if (__suspended) window.setTimeout(__pauseAnimations, 50)
     parent.postMessage({ type: 'loora:ok', seq: __seq }, '*')
   } catch (err) {
     parent.postMessage(
@@ -580,11 +754,14 @@ export function ElementFrame({
   elementId,
   code,
   interactive,
+  suspended = false,
   onError,
 }: {
   elementId: string
   code: string
   interactive: boolean
+  // Offscreen: the frame pauses animations and queues rAF work (state kept).
+  suspended?: boolean
   // Called with a message when the latest payload failed, null when it rendered.
   onError?: (message: string | null) => void
 }) {
@@ -595,6 +772,8 @@ export function ElementFrame({
   const seqRef = useRef(0)
   const onErrorRef = useRef(onError)
   onErrorRef.current = onError
+  const suspendedRef = useRef(suspended)
+  suspendedRef.current = suspended
 
   const send = (source: string) => {
     if (!iframeRef.current?.contentWindow || !readyRef.current) return
@@ -603,9 +782,10 @@ export function ElementFrame({
     void (async () => {
       let payload: FramePayload
       try {
-        const babel = classifyCode(source) === 'html' ? null : await ensureBabel()
+        const babel = classifyCode(source) === 'html' ? null : await ensureCompiler()
         if (seq !== seqRef.current) return
-        const result = compileForFrame(source, babel)
+        const result = await compileForFrame(source, babel)
+        if (seq !== seqRef.current) return
         if (!result.ok) {
           reportRender(elementId, result.error)
           onErrorRef.current?.(result.error)
@@ -639,10 +819,22 @@ export function ElementFrame({
       if (msg?.type === 'loora:element-ready') {
         readyRef.current = true
         send(codeRef.current)
+        if (suspendedRef.current) {
+          iframeRef.current?.contentWindow?.postMessage({ type: 'loora:suspend' }, '*')
+        }
         return
       }
       if (msg?.type === 'loora:dirty') {
         noteFrameRevision(elementId, msg.revision)
+        return
+      }
+      // Cross-element bus: fan a frame's loora.send out to every other frame.
+      if (msg?.type === 'loora:bus') {
+        const data = (msg as { data?: unknown }).data
+        for (const frame of document.querySelectorAll<HTMLIFrameElement>('iframe[data-element-frame]')) {
+          if (frame === iframeRef.current) continue
+          frame.contentWindow?.postMessage({ type: 'loora:bus-deliver', data, from: elementId }, '*')
+        }
         return
       }
       // Stale replies (an old payload settling after a newer send) are ignored.
@@ -667,6 +859,14 @@ export function ElementFrame({
     send(code)
   }, [code])
 
+  useEffect(() => {
+    if (!readyRef.current) return
+    iframeRef.current?.contentWindow?.postMessage(
+      { type: suspended ? 'loora:suspend' : 'loora:resume' },
+      '*',
+    )
+  }, [suspended])
+
   return (
     <iframe
       ref={iframeRef}
@@ -686,6 +886,8 @@ export interface ElementCapture {
   png: string
   revision: number
   volatile: boolean
+  // True when font embedding failed and the capture rendered without webfonts.
+  fontsSkipped: boolean
 }
 
 // Ask a mounted element iframe for its runtime log buffer (console.error/warn
@@ -732,6 +934,7 @@ export function captureElement(elementId: string, timeoutMs = 1500): Promise<Ele
         png?: string | null
         revision?: number
         volatile?: boolean
+        fontsSkipped?: boolean
       }
       if (e.source !== iframe.contentWindow || msg?.type !== 'loora:capture-result' || msg.token !== token) return
       window.clearTimeout(timer)
@@ -739,7 +942,12 @@ export function captureElement(elementId: string, timeoutMs = 1500): Promise<Ele
       if (typeof msg.png !== 'string') return resolve(null)
       const revision = typeof msg.revision === 'number' ? msg.revision : getElementCaptureRevision(elementId)
       noteFrameRevision(elementId, revision)
-      resolve({ png: msg.png, revision, volatile: msg.volatile === true })
+      resolve({
+        png: msg.png,
+        revision,
+        volatile: msg.volatile === true,
+        fontsSkipped: msg.fontsSkipped === true,
+      })
     }
     window.addEventListener('message', onMessage)
     iframe.contentWindow!.postMessage({ type: 'loora:capture', token }, '*')

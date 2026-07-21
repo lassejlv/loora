@@ -536,8 +536,14 @@ function Editor({ preview = false, userId }: { preview?: boolean; userId?: strin
 
   // Undo history: mutations within 800ms coalesce into one step
   // (a drag, a typed number, an agent burst each become a single undo).
-  const past = useRef<CanvasElement[][]>([])
-  const future = useRef<CanvasElement[][]>([])
+  // Each step also snapshots the selection so undoing a delete or move
+  // restores what was selected at the time.
+  interface HistoryEntry {
+    shapes: CanvasElement[]
+    selection: string[]
+  }
+  const past = useRef<HistoryEntry[]>([])
+  const future = useRef<HistoryEntry[]>([])
   const lastMutation = useRef(0)
   const [, bumpHistory] = useState(0)
 
@@ -713,7 +719,7 @@ function Editor({ preview = false, userId }: { preview?: boolean; userId?: strin
       if (mutationsBlockedRef.current) return prev
       const now = Date.now()
       if (now - lastMutation.current > 800) {
-        past.current.push(prev)
+        past.current.push({ shapes: prev, selection: selectedIdsRef.current })
         if (past.current.length > 100) past.current.shift()
         future.current = []
       }
@@ -734,9 +740,11 @@ function Editor({ preview = false, userId }: { preview?: boolean; userId?: strin
     if (mutationsBlockedRef.current) return
     const prev = past.current.pop()
     if (!prev) return
-    future.current.push(shapesRef.current)
+    future.current.push({ shapes: shapesRef.current, selection: selectedIdsRef.current })
     lastMutation.current = 0
-    setShapes(prev)
+    setShapes(prev.shapes)
+    const ids = new Set(prev.shapes.map((s) => s.id))
+    setSelectedIds(prev.selection.filter((id) => ids.has(id)))
     bumpHistory((n) => n + 1)
   }, [])
 
@@ -744,9 +752,11 @@ function Editor({ preview = false, userId }: { preview?: boolean; userId?: strin
     if (mutationsBlockedRef.current) return
     const next = future.current.pop()
     if (!next) return
-    past.current.push(shapesRef.current)
+    past.current.push({ shapes: shapesRef.current, selection: selectedIdsRef.current })
     lastMutation.current = 0
-    setShapes(next)
+    setShapes(next.shapes)
+    const ids = new Set(next.shapes.map((s) => s.id))
+    setSelectedIds(next.selection.filter((id) => ids.has(id)))
     bumpHistory((n) => n + 1)
   }, [])
 

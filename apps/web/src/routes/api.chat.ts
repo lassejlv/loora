@@ -72,6 +72,11 @@ const elementFields = {
   y: z.number().describe('top edge in canvas units'),
   w: z.number().min(1).describe('width'),
   h: z.number().min(1).describe('height'),
+  r: z
+    .number()
+    .min(0)
+    .max(359)
+    .describe('rotation in degrees, clockwise about the element center; omit or 0 for none'),
   // Keep code as the LAST field so it streams last and the client can place
   // the element (from the already-parsed geometry) while code is generating.
   code: z
@@ -88,6 +93,7 @@ const newElementSchema = z.object({
   y: elementFields.y,
   w: elementFields.w,
   h: elementFields.h,
+  r: elementFields.r.optional(),
   code: elementFields.code,
 })
 
@@ -217,6 +223,7 @@ function canvasForPrompt(shapes: CanvasElement[]) {
     y: el.y,
     w: el.w,
     h: el.h,
+    ...(el.r ? { r: el.r } : {}),
     code:
       el.code.length <= 1200
         ? el.code
@@ -465,6 +472,7 @@ export const Route = createFileRoute('/api/chat')({
                 y: elementFields.y.optional(),
                 w: elementFields.w.optional(),
                 h: elementFields.h.optional(),
+                r: elementFields.r.optional(),
                 code: elementFields.code.optional(),
               }),
             },
@@ -561,6 +569,7 @@ export const Route = createFileRoute('/api/chat')({
                       y: elementFields.y.optional(),
                       w: elementFields.w.optional(),
                       h: elementFields.h.optional(),
+                      r: elementFields.r.optional(),
                     }),
                   )
                   .min(1)
@@ -711,7 +720,8 @@ export const Route = createFileRoute('/api/chat')({
               : 'Image input is temporarily disabled. Rely on the current canvas elements JSON and do not call viewCanvas.',
             'Layout-only changes (moving or resizing existing elements) go through arrangeElements — all the moves in one call, never a series of updateElement calls. When an interactive element misbehaves at runtime, call readElementLogs to see its console output and uncaught errors before guessing at a fix.',
             'The canvas listing is ordered bottom-to-top: later elements render on top of earlier ones. reorderElements changes that stacking. groupElements/ungroupElements control which elements select and move as one (shared groupId in the listing). searchCanvas finds which element and line contains a given text, class, or snippet — use it instead of reading every element.',
-            'Coordinates: x/y is the top-left corner, y grows downward. The visible canvas is roughly 1200x800 around the origin. Leave 40-80px gaps between separate elements; align edges deliberately.',
+            'Coordinates: x/y is the top-left corner, y grows downward. The visible canvas is roughly 1200x800 around the origin. Leave 40-80px gaps between separate elements; align edges deliberately. An element may carry r — rotation in degrees, clockwise about its center; set or clear it via updateElement or arrangeElements.',
+            'Elements are isolated documents, but they can talk to each other over a message bus: call loora.send(data) in one element and loora.onMessage(function (data, fromId) { … }) in another. Use it when the user asks for elements that drive each other (a nav that switches a panel, shared counters).',
             'Palette to prefer: #1a1917 ink, #ffffff white, #2440e6 ultramarine, #e8442e vermilion, #f5c518 yellow, #23a25d green. Other CSS colors are allowed when asked.',
             'Images: use only asset URLs from the Assets list below, as <img src="/api/asset/...">. Never invent asset URLs; if no fitting asset exists, say so or design with styled markup instead.',
             githubConnected

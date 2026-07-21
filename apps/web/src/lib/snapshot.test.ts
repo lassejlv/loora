@@ -10,9 +10,19 @@ describe('snapshot capture reuse', () => {
     expect(shouldReuseCapture(clean, clean.key, 5, 'reuse-clean')).toBe(false)
   })
 
-  it('never reuses volatile captures or fresh requests', () => {
+  it('never reuses undated volatile captures or fresh requests', () => {
     expect(shouldReuseCapture({ ...clean, volatile: true }, clean.key, 4, 'reuse-clean')).toBe(false)
     expect(shouldReuseCapture(clean, clean.key, 4, 'fresh')).toBe(false)
+  })
+
+  it('reuses a recent volatile capture even when the revision moved on', () => {
+    // Animated elements bump their revision every tick; a fresh-enough frame
+    // of the same code is still representative.
+    const animated = { ...clean, volatile: true, at: 10_000 }
+    expect(shouldReuseCapture(animated, clean.key, 99, 'reuse-clean', 15_000)).toBe(true)
+    expect(shouldReuseCapture(animated, clean.key, 99, 'reuse-clean', 25_000)).toBe(false)
+    expect(shouldReuseCapture(animated, 'other:100:100', 99, 'reuse-clean', 15_000)).toBe(false)
+    expect(shouldReuseCapture(animated, clean.key, 99, 'fresh', 15_000)).toBe(false)
   })
 
   it('evicts the least recently used capture at the configured bound', () => {

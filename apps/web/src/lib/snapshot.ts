@@ -5,6 +5,7 @@ import {
   type ElementCapture,
 } from '#/components/element-frame'
 import { CaptureCache, shouldReuseCapture } from './snapshot-cache'
+import { elementAABB } from './snap'
 
 // Cache the latest successful capture per element, keyed by its code and
 // size, so snapshots reuse PNGs for unchanged elements and have a fallback
@@ -12,6 +13,7 @@ import { CaptureCache, shouldReuseCapture } from './snapshot-cache'
 interface CaptureCacheEntry extends ElementCapture {
   key: string
   image: HTMLImageElement
+  at: number
 }
 
 const MAX_CAPTURE_CACHE = 256
@@ -38,7 +40,7 @@ async function elementShot(
   if (capture) {
     const image = await loadImage(capture.png)
     if (image) {
-      captureCache.set(el.id, { key, image, ...capture })
+      captureCache.set(el.id, { key, image, at: Date.now(), ...capture })
       return image
     }
   }
@@ -69,10 +71,11 @@ export async function snapshotCanvas(
   if (elements.length === 0) return null
 
   const pad = 40
-  const minX = Math.min(...elements.map((el) => el.x)) - pad
-  const minY = Math.min(...elements.map((el) => el.y)) - pad
-  const maxX = Math.max(...elements.map((el) => el.x + el.w)) + pad
-  const maxY = Math.max(...elements.map((el) => el.y + el.h)) + pad
+  const boxes = elements.map(elementAABB)
+  const minX = Math.min(...boxes.map((b) => b.left)) - pad
+  const minY = Math.min(...boxes.map((b) => b.top)) - pad
+  const maxX = Math.max(...boxes.map((b) => b.right)) + pad
+  const maxY = Math.max(...boxes.map((b) => b.bottom)) + pad
   const w = maxX - minX
   const h = maxY - minY
   const scale = Math.min(1, 1600 / Math.max(w, h)) * pixelRatio
@@ -98,6 +101,13 @@ export async function snapshotCanvas(
       const y = (el.y - minY) * scale
       const ew = el.w * scale
       const eh = el.h * scale
+      const rotated = (el.r ?? 0) % 360 !== 0
+      if (rotated) {
+        ctx.save()
+        ctx.translate(x + ew / 2, y + eh / 2)
+        ctx.rotate(((el.r ?? 0) * Math.PI) / 180)
+        ctx.translate(-(x + ew / 2), -(y + eh / 2))
+      }
       if (img) {
         ctx.drawImage(img, x, y, ew, eh)
       } else {
@@ -108,6 +118,7 @@ export async function snapshotCanvas(
         ctx.font = `${Math.max(10, 12 * scale)}px monospace`
         ctx.fillText(el.name || 'Element', x + 8, y + 18, Math.max(20, ew - 16))
       }
+      if (rotated) ctx.restore()
     }
     return canvas.toDataURL('image/png')
   } catch {

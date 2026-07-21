@@ -287,7 +287,16 @@ export const AgentPanel = memo(function AgentPanel({
         // broken code comes back as actionable feedback instead of a silent
         // stale frame.
         const ackWithRender = async (el: CanvasElement) => {
-          const render = await awaitRenderResult(el.id)
+          let render = await awaitRenderResult(el.id)
+          // The ok ack races async crashes (effects, timers) that land after
+          // the grace period. The frame's log buffer was cleared when this
+          // payload mounted, so any uncaught entry in it belongs to the code
+          // being acked — report it instead of a false "ok".
+          if (render?.ok) {
+            const logs = await readElementLogs(el.id, 500)
+            const crash = logs?.find((line) => line.startsWith('uncaught: '))
+            if (crash) render = { ok: false, error: crash.slice('uncaught: '.length) }
+          }
           return {
             id: el.id,
             name: el.name,
@@ -460,7 +469,16 @@ export const AgentPanel = memo(function AgentPanel({
               }
               void captureElement(id, 4000)
                 .then((capture) =>
-                  respond(capture ? { image: capture.png } : { error: 'Could not capture the element.' }),
+                  respond(
+                    capture
+                      ? capture.fontsSkipped
+                        ? {
+                            image: capture.png,
+                            note: 'Webfonts could not be embedded in this capture — typography on the live canvas may differ.',
+                          }
+                        : { image: capture.png }
+                      : { error: 'Could not capture the element.' },
+                  ),
                 )
                 .catch(() => fail('Could not capture the element.'))
               break

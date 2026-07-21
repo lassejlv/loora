@@ -11,5 +11,6 @@ export interface CanvasElement {
   w: number
   h: number
   code: string
+  r?: number // rotation in degrees, clockwise about the element center; absent = 0
   groupId?: string // elements sharing a groupId select and move as one
 }
