@@ -295,6 +295,12 @@ describe('buildElementDoc', () => {
     expect(doc).toContain("img.getAttribute('src')")
   })
 
+  it('reports right-clicked nodes in edit mode for the style editor', () => {
+    expect(doc).toContain("'loora:style-pick'")
+    // The raw class attribute — it must match the code text for replacement.
+    expect(doc).toContain("t.getAttribute('class')")
+  })
+
   it('exposes the cross-element message bus', () => {
     expect(doc).toContain('window.loora')
     expect(doc).toContain("'loora:bus'")

@@ -9,7 +9,8 @@ import {
   type FrameTextEdit,
 } from '#/components/element-frame'
 import { ImagePickerDialog } from '#/components/image-picker-dialog'
-import { replaceImageSource } from '#/lib/canvas'
+import { StyleEditorPanel } from '#/components/style-editor-panel'
+import { replaceClassValue, replaceImageSource } from '#/lib/canvas'
 import { collectSnapLines, elementAABB, snapBox, snapPoint, type SnapLines } from '#/lib/snap'
 
 export type Tool = 'select' | 'hand' | 'interact' | 'comment' | InsertTool
@@ -206,6 +207,8 @@ export function Canvas({
   const [frameNonces, setFrameNonces] = useState<Record<string, number>>({})
   // An image clicked in an edit-mode frame, waiting for a replacement asset.
   const [imagePick, setImagePick] = useState<{ id: string; src: string } | null>(null)
+  // A node right-clicked in an edit-mode frame, being styled.
+  const [stylePick, setStylePick] = useState<{ id: string; tag: string; className: string } | null>(null)
   const elementsRef = useRef(elements)
   elementsRef.current = elements
   const dragRef = useRef<Drag | null>(null)
@@ -317,6 +320,32 @@ export function Canvas({
   const handleImagePick = useCallback((id: string, src: string) => {
     setImagePick({ id, src })
   }, [])
+
+  const handleStylePick = useCallback(
+    (id: string, pick: { tag: string; className: string }) => {
+      if (!pick.className) {
+        showNotice('That part has no classes to edit — style it via Edit code or the agent.')
+        return
+      }
+      setStylePick({ id, ...pick })
+    },
+    [showNotice],
+  )
+
+  const applyStyle = (prev: string, next: string) => {
+    const pick = stylePick
+    if (!pick) return
+    const el = elementsRef.current.find((c) => c.id === pick.id)
+    if (!el) return
+    const result = replaceClassValue(el.code, prev, next)
+    if (!result.ok) {
+      setStylePick(null)
+      showNotice('Could not find those classes in the code (they may be generated). Use Edit code instead.')
+      return
+    }
+    onUpdateMany(new Map([[pick.id, { code: result.code }]]))
+    setStylePick({ ...pick, className: next })
+  }
 
   const replaceImage = (assetId: string) => {
     const pick = imagePick
@@ -991,6 +1020,7 @@ export function Canvas({
               onToggleTextEdit={toggleTextEdit}
               onTextEdit={handleTextEdit}
               onImagePick={handleImagePick}
+              onStylePick={handleStylePick}
             />
           )
         })}
@@ -1144,6 +1174,17 @@ export function Canvas({
         />
       )}
 
+      {/* Style editor (opened by right-clicking a node in edit mode). */}
+      {stylePick && (
+        <StyleEditorPanel
+          key={`${stylePick.id}:${stylePick.tag}`}
+          tag={stylePick.tag}
+          className={stylePick.className}
+          onApply={applyStyle}
+          onClose={() => setStylePick(null)}
+        />
+      )}
+
       {/* Inline-edit notice (unmappable text edits). */}
       {editNotice && (
         <div className="pointer-events-none absolute inset-x-0 bottom-4 z-10 flex justify-center px-4">
@@ -1238,6 +1279,7 @@ const ElementView = memo(function ElementView({
   onToggleTextEdit,
   onTextEdit,
   onImagePick,
+  onStylePick,
 }: {
   element: CanvasElement
   interactive?: boolean
@@ -1248,6 +1290,7 @@ const ElementView = memo(function ElementView({
   onToggleTextEdit?: (id: string) => void
   onTextEdit?: (id: string, edits: FrameTextEdit[]) => void
   onImagePick?: (id: string, src: string) => void
+  onStylePick?: (id: string, pick: { tag: string; className: string }) => void
 }) {
   const [error, setError] = useState<string | null>(null)
   const errorTimer = useRef<number | null>(null)
@@ -1296,7 +1339,7 @@ const ElementView = memo(function ElementView({
         {interactive && (
           <button
             type="button"
-            title="Click text in the element to edit it — Enter commits, Escape cancels"
+            title="Click text to edit it, click an image to swap it, right-click anything for styles"
             className={
               textEditing
                 ? 'pointer-events-auto cursor-pointer rounded-full bg-cx-accent px-1.5 text-[10px] font-medium text-white'
@@ -1337,6 +1380,7 @@ const ElementView = memo(function ElementView({
           onError={onFrameError}
           onTextEdit={(edits) => onTextEdit?.(el.id, edits)}
           onImagePick={(src) => onImagePick?.(el.id, src)}
+          onStylePick={(pick) => onStylePick?.(el.id, pick)}
         />
       </div>
       {/* transparent hit layer so select/move/resize work; removed in interact mode */}

@@ -622,6 +622,23 @@ document.addEventListener('click', function (e) {
   else __endEditSession(true)
 }, true)
 
+// Right-click in edit mode: report the node's tag + class value so the
+// parent can open the style editor (the class string is what appears in the
+// source code, so token swaps map back with exact replace).
+document.addEventListener('contextmenu', function (e) {
+  if (!__editMode) return
+  e.preventDefault()
+  e.stopPropagation()
+  var t = e.target && e.target.nodeType === 1 ? e.target : e.target && e.target.parentElement
+  if (!t || t === document.documentElement || t === document.body) return
+  __endEditSession(true)
+  parent.postMessage({
+    type: 'loora:style-pick',
+    tag: t.tagName.toLowerCase(),
+    className: t.getAttribute('class') || '',
+  }, '*')
+}, true)
+
 document.addEventListener('focusout', function (e) {
   if (__editSession && e.target === __editSession.host) {
     // Let a click inside the session settle first.
@@ -915,6 +932,7 @@ export function ElementFrame({
   onError,
   onTextEdit,
   onImagePick,
+  onStylePick,
 }: {
   elementId: string
   code: string
@@ -931,6 +949,8 @@ export function ElementFrame({
   onError?: (message: string | null) => void
   onTextEdit?: (edits: FrameTextEdit[]) => void
   onImagePick?: (src: string) => void
+  // Right-click on a node in edit mode: its tag and class attribute value.
+  onStylePick?: (pick: { tag: string; className: string }) => void
 }) {
   const iframeRef = useRef<HTMLIFrameElement>(null)
   const readyRef = useRef(false)
@@ -947,6 +967,8 @@ export function ElementFrame({
   onTextEditRef.current = onTextEdit
   const onImagePickRef = useRef(onImagePick)
   onImagePickRef.current = onImagePick
+  const onStylePickRef = useRef(onStylePick)
+  onStylePickRef.current = onStylePick
 
   const send = (source: string) => {
     if (!iframeRef.current?.contentWindow || !readyRef.current) return
@@ -1014,6 +1036,13 @@ export function ElementFrame({
       if (msg?.type === 'loora:image-pick') {
         const src = (msg as { src?: unknown }).src
         if (typeof src === 'string') onImagePickRef.current?.(sourceUrlForInlinedSrc(src))
+        return
+      }
+      if (msg?.type === 'loora:style-pick') {
+        const pick = msg as { tag?: unknown; className?: unknown }
+        if (typeof pick.tag === 'string' && typeof pick.className === 'string') {
+          onStylePickRef.current?.({ tag: pick.tag, className: pick.className })
+        }
         return
       }
       if (msg?.type === 'loora:dirty') {

@@ -144,6 +144,26 @@ export function replaceImageSource(
   return applyCodeEdits(code, [{ oldCode: oldSrc, newCode: newSrc, replaceAll: true }])
 }
 
+// Swap a class attribute VALUE in the code. Anchored with the surrounding
+// quote (double, single, then backtick) — replacing the bare value would
+// corrupt code when it is a substring of other tokens ("flex" in "flex-col").
+// replaceAll: nodes sharing the exact class string share a style role.
+export function replaceClassValue(
+  code: string,
+  prev: string,
+  next: string,
+): CodeEditResult {
+  if (!prev) return { ok: false, error: 'The node has no class attribute to edit' }
+  let result: CodeEditResult = { ok: false, error: 'not attempted' }
+  for (const q of ['"', "'", '`']) {
+    result = applyCodeEdits(code, [
+      { oldCode: `${q}${prev}${q}`, newCode: `${q}${next}${q}`, replaceAll: true },
+    ])
+    if (result.ok) return result
+  }
+  return result
+}
+
 // Rebuild z-order in one pass. Unknown and duplicate ids are ignored, while
 // elements omitted by the caller keep their existing relative order at the end.
 export function reorderElements(elements: CanvasElement[], orderedIds: string[]): CanvasElement[] {

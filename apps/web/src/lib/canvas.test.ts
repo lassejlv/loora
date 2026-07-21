@@ -3,6 +3,7 @@ import {
   applyCodeEdits,
   applyElementPatches,
   applyTextEdits,
+  replaceClassValue,
   replaceImageSource,
   reorderElements,
   type CanvasElement,
@@ -155,6 +156,26 @@ describe('replaceImageSource', () => {
 
   it('fails when the src is not in the code', () => {
     expect(replaceImageSource('<img src="x.png">', '/api/asset/a1', '/api/asset/b2').ok).toBe(false)
+  })
+})
+
+describe('replaceClassValue', () => {
+  it('replaces a quoted class value without touching substrings elsewhere', () => {
+    const code = '<div class="flex"><div class="flex-col flex">x</div></div>'
+    const result = replaceClassValue(code, 'flex', 'flex bg-[#fff]')
+    if (!result.ok) throw new Error('expected ok')
+    // Only the exact "flex" values change; the "flex-col flex" value stays.
+    expect(result.code).toBe('<div class="flex bg-[#fff]"><div class="flex-col flex">x</div></div>')
+  })
+
+  it('handles single quotes and backticks', () => {
+    expect(replaceClassValue("<div class='p-4'>x</div>", 'p-4', 'p-8')).toMatchObject({ ok: true })
+    expect(replaceClassValue('className={`p-4`}', 'p-4', 'p-8')).toMatchObject({ ok: true })
+  })
+
+  it('fails on empty or missing values', () => {
+    expect(replaceClassValue('<div>x</div>', '', 'p-4').ok).toBe(false)
+    expect(replaceClassValue('<div class="a">x</div>', 'missing', 'p-4').ok).toBe(false)
   })
 })
 

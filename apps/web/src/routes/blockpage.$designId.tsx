@@ -8,9 +8,11 @@ import { CodeEditorPanel } from '#/components/code-editor-panel'
 import { ElementFrame, type FrameTextEdit } from '#/components/element-frame'
 import { ImagePickerDialog } from '#/components/image-picker-dialog'
 import { pickBlockPageElement } from '#/lib/block-page'
+import { StyleEditorPanel } from '#/components/style-editor-panel'
 import {
   applyTextEdits,
   onlyCodeElements,
+  replaceClassValue,
   replaceImageSource,
   type CanvasElement,
 } from '#/lib/canvas'
@@ -75,6 +77,8 @@ function BlockPage() {
   const [textEditing, setTextEditing] = useState(false)
   // An image clicked in edit mode, waiting for a replacement asset.
   const [imagePickSrc, setImagePickSrc] = useState<string | null>(null)
+  // A node right-clicked in edit mode, being styled.
+  const [stylePick, setStylePick] = useState<{ tag: string; className: string } | null>(null)
   const [editNotice, setEditNotice] = useState<string | null>(null)
   const noticeTimer = useRef<number | null>(null)
   // Bumped to remount the frame when an inline edit could not be mapped onto
@@ -192,6 +196,26 @@ function BlockPage() {
     applyCode(result.code)
   }
 
+  const onStylePick = (pick: { tag: string; className: string }) => {
+    if (!pick.className) {
+      showEditNotice('That part has no classes to edit — style it via the Code editor or the agent.')
+      return
+    }
+    setStylePick(pick)
+  }
+
+  const applyStyle = (prev: string, next: string) => {
+    if (state.status !== 'ready' || !active || !stylePick) return
+    const result = replaceClassValue(active.code, prev, next)
+    if (!result.ok) {
+      setStylePick(null)
+      showEditNotice('Could not find those classes in the code (they may be generated). Use the Code editor instead.')
+      return
+    }
+    applyCode(result.code)
+    setStylePick({ ...stylePick, className: next })
+  }
+
   const replaceImage = (assetId: string) => {
     const src = imagePickSrc
     setImagePickSrc(null)
@@ -271,6 +295,7 @@ function BlockPage() {
             onError={setRenderError}
             onTextEdit={onTextEdit}
             onImagePick={setImagePickSrc}
+            onStylePick={onStylePick}
           />
         </div>
         <div className="absolute top-3 right-3 z-10 flex items-center gap-2 rounded-full border bg-card/85 py-1.5 pr-1.5 pl-3 shadow-sm backdrop-blur transition-opacity hover:opacity-100 sm:opacity-60">
@@ -297,7 +322,7 @@ function BlockPage() {
           <button
             type="button"
             aria-pressed={textEditing}
-            title="Click text on the page to edit it — Enter commits, Escape cancels"
+            title="Click text to edit it, click an image to swap it, right-click anything for styles"
             className={
               textEditing
                 ? 'rounded-full bg-secondary px-2 py-0.5 text-[11px] font-medium'
@@ -361,6 +386,15 @@ function BlockPage() {
           <ImagePickerDialog
             onPick={(asset) => replaceImage(asset.id)}
             onClose={() => setImagePickSrc(null)}
+          />
+        ) : null}
+        {stylePick ? (
+          <StyleEditorPanel
+            key={stylePick.tag}
+            tag={stylePick.tag}
+            className={stylePick.className}
+            onApply={applyStyle}
+            onClose={() => setStylePick(null)}
           />
         ) : null}
         {renderError || editNotice ? (
