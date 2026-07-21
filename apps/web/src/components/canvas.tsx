@@ -3,9 +3,11 @@ import type { CanvasElement, ElementPatch } from '#/lib/canvas'
 import { applyTextEdits, elementId } from '#/lib/canvas'
 import { TEMPLATE_DEFAULTS, type InsertTool } from '#/lib/element-templates'
 import {
+  awaitRenderResult,
   classifyCode,
   ElementFrame,
   getRenderResult,
+  measureElement,
   readElementLogs,
   type FrameTextEdit,
 } from '#/components/element-frame'
@@ -396,6 +398,16 @@ export function Canvas({
       return
     }
     onUpdateMany(new Map([[pick.id, { code: result.code }]]))
+    // Added/duplicated content usually grows the page past the element box,
+    // where it would clip; grow the element to fit once the frame settles.
+    void awaitRenderResult(pick.id, 3000).then(async (render) => {
+      if (!render?.ok) return
+      const size = await measureElement(pick.id)
+      const current = elementsRef.current.find((c) => c.id === pick.id)
+      if (size && current && size.h > current.h + 8) {
+        onUpdateMany(new Map([[pick.id, { h: size.h }]]))
+      }
+    })
   }
 
   const replaceImage = (assetId: string) => {
