@@ -5,9 +5,9 @@ import { authClient } from '@loora/auth/client'
 import { orpc } from '#/lib/orpc-client'
 import { Button } from '#/components/ui/button'
 import { CodeEditorPanel } from '#/components/code-editor-panel'
-import { ElementFrame } from '#/components/element-frame'
+import { ElementFrame, type FrameTextEdit } from '#/components/element-frame'
 import { pickBlockPageElement } from '#/lib/block-page'
-import { onlyCodeElements, type CanvasElement } from '#/lib/canvas'
+import { applyCodeEdits, onlyCodeElements, type CanvasElement } from '#/lib/canvas'
 import { hasStoredElements, loadElements, saveElements } from '#/lib/docs'
 
 // Fullscreen preview of a single canvas element ("page"), outside the editor.
@@ -65,6 +65,13 @@ function BlockPage() {
   const [saveState, setSaveState] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle')
   const draftTimer = useRef<number | null>(null)
   const savedTimer = useRef<number | null>(null)
+  // Inline text editing: click text in the page, type, commit with Enter/blur.
+  const [textEditing, setTextEditing] = useState(false)
+  const [editNotice, setEditNotice] = useState<string | null>(null)
+  const noticeTimer = useRef<number | null>(null)
+  // Bumped to remount the frame when an inline edit could not be mapped onto
+  // the code — the frame DOM has the typed text, the code does not.
+  const [frameNonce, setFrameNonce] = useState(0)
 
   const userId = session?.user.id ?? null
 
@@ -118,9 +125,16 @@ function BlockPage() {
     () => () => {
       if (draftTimer.current) window.clearTimeout(draftTimer.current)
       if (savedTimer.current) window.clearTimeout(savedTimer.current)
+      if (noticeTimer.current) window.clearTimeout(noticeTimer.current)
     },
     [],
   )
+
+  const showEditNotice = (message: string) => {
+    setEditNotice(message)
+    if (noticeTimer.current) window.clearTimeout(noticeTimer.current)
+    noticeTimer.current = window.setTimeout(() => setEditNotice(null), 6000)
+  }
 
   // Live preview: debounce keystrokes so the frame recompiles at most ~3x/s.
   const onDraftChange = (code: string) => {
@@ -155,6 +169,30 @@ function BlockPage() {
         setSaveState('error')
       }
     })()
+  }
+
+  // Inline edits arrive as before/after text pairs; map them onto the source
+  // with exact search/replace. A retry with trimmed pairs covers JSX edge
+  // whitespace; anything still unmappable reverts the frame and points at
+  // the code editor.
+  const onTextEdit = (edits: FrameTextEdit[]) => {
+    if (state.status !== 'ready' || !active) return
+    let result = applyCodeEdits(
+      active.code,
+      edits.map((e) => ({ oldCode: e.before, newCode: e.after })),
+    )
+    if (!result.ok) {
+      const trimmed = edits
+        .filter((e) => e.before.trim().length > 0)
+        .map((e) => ({ oldCode: e.before.trim(), newCode: e.after.trim() }))
+      if (trimmed.length > 0) result = applyCodeEdits(active.code, trimmed)
+    }
+    if (!result.ok) {
+      setFrameNonce((n) => n + 1)
+      showEditNotice('Could not map that edit onto the code (the text may repeat or be generated). Use the Code editor instead.')
+      return
+    }
+    applyCode(result.code)
   }
 
   if (isPending || (userId && state.status === 'loading')) {
@@ -216,11 +254,13 @@ function BlockPage() {
           style={width ? { width, maxWidth: '100%' } : undefined}
         >
           <ElementFrame
-            key={active.id}
+            key={`${active.id}:${frameNonce}`}
             elementId={active.id}
             code={draft ?? active.code}
             interactive
+            textEditable={textEditing}
             onError={setRenderError}
+            onTextEdit={onTextEdit}
           />
         </div>
         <div className="absolute top-3 right-3 z-10 flex items-center gap-2 rounded-full border bg-card/85 py-1.5 pr-1.5 pl-3 shadow-sm backdrop-blur transition-opacity hover:opacity-100 sm:opacity-60">
@@ -244,6 +284,19 @@ function BlockPage() {
               </button>
             ))}
           </div>
+          <button
+            type="button"
+            aria-pressed={textEditing}
+            title="Click text on the page to edit it — Enter commits, Escape cancels"
+            className={
+              textEditing
+                ? 'rounded-full bg-secondary px-2 py-0.5 text-[11px] font-medium'
+                : 'rounded-full px-2 py-0.5 text-[11px] text-muted-foreground hover:text-foreground'
+            }
+            onClick={() => setTextEditing((v) => !v)}
+          >
+            Edit text
+          </button>
           <button
             type="button"
             aria-pressed={editing}
@@ -294,14 +347,24 @@ function BlockPage() {
             Editor
           </Button>
         </div>
-        {renderError ? (
-          <div className="absolute inset-x-0 bottom-4 z-10 flex justify-center px-4">
-            <p
-              role="alert"
-              className="max-w-xl truncate rounded-lg border border-destructive/30 bg-card px-3 py-2 text-xs text-destructive-foreground shadow-sm"
-            >
-              {renderError}
-            </p>
+        {renderError || editNotice ? (
+          <div className="absolute inset-x-0 bottom-4 z-10 flex flex-col items-center gap-2 px-4">
+            {renderError ? (
+              <p
+                role="alert"
+                className="max-w-xl truncate rounded-lg border border-destructive/30 bg-card px-3 py-2 text-xs text-destructive-foreground shadow-sm"
+              >
+                {renderError}
+              </p>
+            ) : null}
+            {editNotice ? (
+              <p
+                role="status"
+                className="max-w-xl rounded-lg border bg-card px-3 py-2 text-xs text-muted-foreground shadow-sm"
+              >
+                {editNotice}
+              </p>
+            ) : null}
           </div>
         ) : null}
       </div>

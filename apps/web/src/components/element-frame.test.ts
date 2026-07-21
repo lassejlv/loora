@@ -281,6 +281,14 @@ describe('buildElementDoc', () => {
     expect(doc).toContain('__rafQueue')
   })
 
+  it('supports inline text editing that reports before/after pairs', () => {
+    expect(doc).toContain("'loora:edit-mode'")
+    expect(doc).toContain("'loora:text-edit'")
+    expect(doc).toContain('contenteditable')
+    // The frame never rewrites code itself — the parent maps text pairs.
+    expect(doc).toContain('__endEditSession')
+  })
+
   it('exposes the cross-element message bus', () => {
     expect(doc).toContain('window.loora')
     expect(doc).toContain("'loora:bus'")

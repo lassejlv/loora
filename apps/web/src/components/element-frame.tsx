@@ -506,6 +506,130 @@ document.addEventListener('click', function (e) {
   if (href.charAt(0) !== '#') e.preventDefault()
 })
 
+// Inline text editing: in edit mode a click makes the nearest text-bearing
+// node contenteditable; committing diffs its text nodes against their
+// original content and posts before/after pairs. The PARENT maps them onto
+// the source code with exact search/replace — the frame never rewrites code.
+var __editMode = false
+var __editSession = null
+var __editHover = null
+
+function __findTextHost(start) {
+  var host = start && start.nodeType === 1 ? start : null
+  while (host && host !== document.body) {
+    var nodes = host.childNodes
+    for (var i = 0; i < nodes.length; i++) {
+      if (nodes[i].nodeType === 3 && nodes[i].textContent.trim()) return host
+    }
+    host = host.parentElement
+  }
+  return null
+}
+
+function __clearEditHover() {
+  if (!__editHover) return
+  __editHover.el.style.outline = __editHover.prev
+  __editHover = null
+}
+
+function __collectTexts(host) {
+  var texts = []
+  ;(function walk(n) {
+    for (var i = 0; i < n.childNodes.length; i++) {
+      var c = n.childNodes[i]
+      if (c.nodeType === 3) texts.push([c, c.textContent])
+      else if (c.nodeType === 1) walk(c)
+    }
+  })(host)
+  return texts
+}
+
+function __endEditSession(apply) {
+  var s = __editSession
+  if (!s) return
+  __editSession = null
+  s.host.removeAttribute('contenteditable')
+  s.host.style.outline = s.prevOutline
+  if (!apply) {
+    // Cancel: restore every text node we snapshotted.
+    s.texts.forEach(function (pair) {
+      if (pair[0].isConnected) pair[0].textContent = pair[1]
+    })
+    return
+  }
+  var edits = []
+  s.texts.forEach(function (pair) {
+    if (pair[0].isConnected && pair[0].textContent !== pair[1]) {
+      edits.push({ before: pair[1], after: pair[0].textContent })
+    }
+  })
+  if (edits.length) parent.postMessage({ type: 'loora:text-edit', edits: edits }, '*')
+}
+
+function __startEditSession(host) {
+  __endEditSession(true)
+  __clearEditHover()
+  __editSession = { host: host, texts: __collectTexts(host), prevOutline: host.style.outline }
+  host.setAttribute('contenteditable', 'plaintext-only')
+  // Firefox does not support plaintext-only; fall back to true.
+  if (!host.isContentEditable) host.setAttribute('contenteditable', 'true')
+  host.style.outline = '2px solid #2440e6'
+  host.focus()
+}
+
+function __setEditMode(on) {
+  if (on === __editMode) return
+  __editMode = on
+  document.body.style.cursor = on ? 'text' : ''
+  if (!on) {
+    __endEditSession(true)
+    __clearEditHover()
+  }
+}
+
+document.addEventListener('mouseover', function (e) {
+  if (!__editMode || __editSession) return
+  var host = __findTextHost(e.target)
+  if (__editHover && __editHover.el === host) return
+  __clearEditHover()
+  if (host) {
+    __editHover = { el: host, prev: host.style.outline }
+    host.style.outline = '1.5px dashed #2440e6'
+  }
+}, true)
+
+// Capture phase so edit-mode clicks never reach buttons/links in the page.
+document.addEventListener('click', function (e) {
+  if (!__editMode) return
+  if (__editSession && __editSession.host.contains(e.target)) return
+  e.preventDefault()
+  e.stopPropagation()
+  var host = __findTextHost(e.target)
+  if (host) __startEditSession(host)
+  else __endEditSession(true)
+}, true)
+
+document.addEventListener('focusout', function (e) {
+  if (__editSession && e.target === __editSession.host) {
+    // Let a click inside the session settle first.
+    var s = __editSession
+    setTimeout(function () { if (__editSession === s) __endEditSession(true) }, 0)
+  }
+}, true)
+
+document.addEventListener('keydown', function (e) {
+  if (!__editSession) return
+  if (e.key === 'Enter' && !e.shiftKey) {
+    e.preventDefault()
+    e.stopPropagation()
+    __endEditSession(true)
+  } else if (e.key === 'Escape') {
+    e.preventDefault()
+    e.stopPropagation()
+    __endEditSession(false)
+  }
+}, true)
+
 // Runtime log buffer: console.error/warn plus uncaught errors, readable by
 // the agent via loora:read-logs. Catches what the render handshake misses —
 // errors thrown after the ok grace period, from timers, or from user
@@ -596,6 +720,9 @@ function __clearPayloadGlobals() {
 }
 
 function __teardown() {
+  // A new payload replaces the DOM the session pointed at; drop it silently.
+  __editSession = null
+  __clearEditHover()
   if (__currentRoot) {
     try { __currentRoot.unmount() } catch (e) {}
     __currentRoot = null
@@ -664,6 +791,7 @@ window.addEventListener('message', function (e) {
   }
   if (msg.type === 'loora:suspend') { __applySuspend(true); return }
   if (msg.type === 'loora:resume') { __applySuspend(false); return }
+  if (msg.type === 'loora:edit-mode') { __setEditMode(!!msg.on); return }
   if (msg.type === 'loora:bus-deliver') {
     __busHandlers.forEach(function (fn) { try { fn(msg.data, msg.from) } catch (e) {} })
     return
@@ -750,20 +878,32 @@ export async function inlineAssetUrls(code: string): Promise<string> {
   return out
 }
 
+export interface FrameTextEdit {
+  before: string
+  after: string
+}
+
 export function ElementFrame({
   elementId,
   code,
   interactive,
   suspended = false,
+  textEditable = false,
   onError,
+  onTextEdit,
 }: {
   elementId: string
   code: string
   interactive: boolean
   // Offscreen: the frame pauses animations and queues rAF work (state kept).
   suspended?: boolean
+  // Inline text editing: clicks select text-bearing nodes instead of
+  // interacting; commits arrive via onTextEdit as before/after text pairs
+  // for the caller to map onto the source code.
+  textEditable?: boolean
   // Called with a message when the latest payload failed, null when it rendered.
   onError?: (message: string | null) => void
+  onTextEdit?: (edits: FrameTextEdit[]) => void
 }) {
   const iframeRef = useRef<HTMLIFrameElement>(null)
   const readyRef = useRef(false)
@@ -774,6 +914,10 @@ export function ElementFrame({
   onErrorRef.current = onError
   const suspendedRef = useRef(suspended)
   suspendedRef.current = suspended
+  const textEditableRef = useRef(textEditable)
+  textEditableRef.current = textEditable
+  const onTextEditRef = useRef(onTextEdit)
+  onTextEditRef.current = onTextEdit
 
   const send = (source: string) => {
     if (!iframeRef.current?.contentWindow || !readyRef.current) return
@@ -822,6 +966,20 @@ export function ElementFrame({
         if (suspendedRef.current) {
           iframeRef.current?.contentWindow?.postMessage({ type: 'loora:suspend' }, '*')
         }
+        if (textEditableRef.current) {
+          iframeRef.current?.contentWindow?.postMessage({ type: 'loora:edit-mode', on: true }, '*')
+        }
+        return
+      }
+      if (msg?.type === 'loora:text-edit') {
+        const raw = (msg as { edits?: unknown }).edits
+        const edits = Array.isArray(raw)
+          ? raw.filter(
+              (e): e is FrameTextEdit =>
+                !!e && typeof (e as FrameTextEdit).before === 'string' && typeof (e as FrameTextEdit).after === 'string',
+            )
+          : []
+        if (edits.length) onTextEditRef.current?.(edits)
         return
       }
       if (msg?.type === 'loora:dirty') {
@@ -866,6 +1024,11 @@ export function ElementFrame({
       '*',
     )
   }, [suspended])
+
+  useEffect(() => {
+    if (!readyRef.current) return
+    iframeRef.current?.contentWindow?.postMessage({ type: 'loora:edit-mode', on: textEditable }, '*')
+  }, [textEditable])
 
   return (
     <iframe
