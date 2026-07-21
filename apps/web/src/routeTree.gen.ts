@@ -13,6 +13,7 @@ import { Route as IndexRouteImport } from './routes/index'
 import { Route as McpConsentRouteImport } from './routes/mcp-consent'
 import { Route as DotwellKnownOauthAuthorizationServerRouteImport } from './routes/[.]well-known.oauth-authorization-server'
 import { Route as ApiChatRouteImport } from './routes/api.chat'
+import { Route as BlockpageDesignIdRouteImport } from './routes/blockpage.$designId'
 import { Route as ApiAssetIdRouteImport } from './routes/api.asset.$id'
 import { Route as ApiAuthSplatRouteImport } from './routes/api.auth.$'
 import { Route as ApiChatgptSplatRouteImport } from './routes/api.chatgpt.$'
@@ -44,6 +45,11 @@ const DotwellKnownOauthAuthorizationServerRoute =
 const ApiChatRoute = ApiChatRouteImport.update({
   id: '/api/chat',
   path: '/api/chat',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const BlockpageDesignIdRoute = BlockpageDesignIdRouteImport.update({
+  id: '/blockpage/$designId',
+  path: '/blockpage/$designId',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ApiAssetIdRoute = ApiAssetIdRouteImport.update({
@@ -107,6 +113,7 @@ export interface FileRoutesByFullPath {
   '/mcp-consent': typeof McpConsentRoute
   '/.well-known/oauth-authorization-server': typeof DotwellKnownOauthAuthorizationServerRoute
   '/api/chat': typeof ApiChatRoute
+  '/blockpage/$designId': typeof BlockpageDesignIdRoute
   '/api/asset/$id': typeof ApiAssetIdRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
   '/api/chatgpt/$': typeof ApiChatgptSplatRoute
@@ -124,6 +131,7 @@ export interface FileRoutesByTo {
   '/mcp-consent': typeof McpConsentRoute
   '/.well-known/oauth-authorization-server': typeof DotwellKnownOauthAuthorizationServerRoute
   '/api/chat': typeof ApiChatRoute
+  '/blockpage/$designId': typeof BlockpageDesignIdRoute
   '/api/asset/$id': typeof ApiAssetIdRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
   '/api/chatgpt/$': typeof ApiChatgptSplatRoute
@@ -142,6 +150,7 @@ export interface FileRoutesById {
   '/mcp-consent': typeof McpConsentRoute
   '/.well-known/oauth-authorization-server': typeof DotwellKnownOauthAuthorizationServerRoute
   '/api/chat': typeof ApiChatRoute
+  '/blockpage/$designId': typeof BlockpageDesignIdRoute
   '/api/asset/$id': typeof ApiAssetIdRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
   '/api/chatgpt/$': typeof ApiChatgptSplatRoute
@@ -161,6 +170,7 @@ export interface FileRouteTypes {
     | '/mcp-consent'
     | '/.well-known/oauth-authorization-server'
     | '/api/chat'
+    | '/blockpage/$designId'
     | '/api/asset/$id'
     | '/api/auth/$'
     | '/api/chatgpt/$'
@@ -178,6 +188,7 @@ export interface FileRouteTypes {
     | '/mcp-consent'
     | '/.well-known/oauth-authorization-server'
     | '/api/chat'
+    | '/blockpage/$designId'
     | '/api/asset/$id'
     | '/api/auth/$'
     | '/api/chatgpt/$'
@@ -195,6 +206,7 @@ export interface FileRouteTypes {
     | '/mcp-consent'
     | '/.well-known/oauth-authorization-server'
     | '/api/chat'
+    | '/blockpage/$designId'
     | '/api/asset/$id'
     | '/api/auth/$'
     | '/api/chatgpt/$'
@@ -213,6 +225,7 @@ export interface RootRouteChildren {
   McpConsentRoute: typeof McpConsentRoute
   DotwellKnownOauthAuthorizationServerRoute: typeof DotwellKnownOauthAuthorizationServerRoute
   ApiChatRoute: typeof ApiChatRoute
+  BlockpageDesignIdRoute: typeof BlockpageDesignIdRoute
   ApiAssetIdRoute: typeof ApiAssetIdRoute
   ApiAuthSplatRoute: typeof ApiAuthSplatRoute
   ApiChatgptSplatRoute: typeof ApiChatgptSplatRoute
@@ -253,6 +266,13 @@ declare module '@tanstack/react-router' {
       path: '/api/chat'
       fullPath: '/api/chat'
       preLoaderRoute: typeof ApiChatRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/blockpage/$designId': {
+      id: '/blockpage/$designId'
+      path: '/blockpage/$designId'
+      fullPath: '/blockpage/$designId'
+      preLoaderRoute: typeof BlockpageDesignIdRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/api/asset/$id': {
@@ -353,6 +373,7 @@ const rootRouteChildren: RootRouteChildren = {
   DotwellKnownOauthAuthorizationServerRoute:
     DotwellKnownOauthAuthorizationServerRoute,
   ApiChatRoute: ApiChatRoute,
+  BlockpageDesignIdRoute: BlockpageDesignIdRoute,
   ApiAssetIdRoute: ApiAssetIdRoute,
   ApiAuthSplatRoute: ApiAuthSplatRoute,
   ApiChatgptSplatRoute: ApiChatgptSplatRoute,

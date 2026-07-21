@@ -1351,10 +1351,24 @@ function Editor({ preview = false, userId }: { preview?: boolean; userId?: strin
                   </ContextMenuSub>
                 ) : null}
                 {contextMenuIds.length === 1 ? (
-                  <ContextMenuItem onClick={() => toggleCode(true)}>
-                    <CodeXmlIcon data-slot="icon" />
-                    Edit code
-                  </ContextMenuItem>
+                  <>
+                    <ContextMenuItem onClick={() => toggleCode(true)}>
+                      <CodeXmlIcon data-slot="icon" />
+                      Edit code
+                    </ContextMenuItem>
+                    <ContextMenuItem
+                      onClick={() =>
+                        window.open(
+                          `/blockpage/${encodeURIComponent(activeId)}?element=${encodeURIComponent(contextMenuIds[0])}`,
+                          '_blank',
+                          'noopener',
+                        )
+                      }
+                    >
+                      <MaximizeIcon data-slot="icon" />
+                      Preview fullscreen
+                    </ContextMenuItem>
+                  </>
                 ) : null}
                 <ContextMenuSeparator />
                 <ContextMenuItem variant="destructive" onClick={deleteSelected}>
