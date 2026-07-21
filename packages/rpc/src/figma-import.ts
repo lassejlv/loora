@@ -566,11 +566,11 @@ async function figmaApi<T>(path: string, token: string): Promise<T> {
   return payload
 }
 
-async function renderFallbacks(
+async function resolveFallbackUrls(
   fileKey: string,
   nodeIds: string[],
   token: string,
-): Promise<RenderedAsset[]> {
+): Promise<Map<string, string>> {
   const uniqueIds = [...new Set(nodeIds)]
   const urls = new Map<string, string>()
   for (let index = 0; index < uniqueIds.length; index += FALLBACK_BATCH_SIZE) {
@@ -582,19 +582,48 @@ async function renderFallbacks(
     )
     for (const id of batch) {
       const url = payload.images?.[id]
-      if (!url) {
-        throw new FigmaIntegrationError(
-          `Figma could not render the layer ${id}.`,
-          'FIGMA_ERROR',
-        )
-      }
-      urls.set(id, url)
+      if (url) urls.set(id, url)
     }
+  }
+  return urls
+}
+
+async function renderFallbacks(
+  fileKey: string,
+  drafts: DraftShape[],
+  token: string,
+): Promise<RenderedAsset[]> {
+  const requestedIds = [...new Set(drafts.flatMap((draft) => draft.fallbackNodeIds))]
+  const urls = await resolveFallbackUrls(fileKey, requestedIds, token)
+  const missingIds = new Set(requestedIds.filter((id) => !urls.has(id)))
+
+  if (missingIds.size) {
+    for (const draft of drafts) {
+      if (!draft.fallbackNodeIds.some((id) => missingIds.has(id))) continue
+      draft.code = draft.rootFallbackCode
+      draft.fallbackNodeIds = [draft.rootNodeId]
+    }
+
+    const replacementIds = [...new Set(drafts.flatMap((draft) => draft.fallbackNodeIds))]
+      .filter((id) => !urls.has(id))
+    const replacements = await resolveFallbackUrls(fileKey, replacementIds, token)
+    for (const [id, url] of replacements) urls.set(id, url)
+  }
+
+  const finalIds = [...new Set(drafts.flatMap((draft) => draft.fallbackNodeIds))]
+  const unrenderableId = finalIds.find((id) => !urls.has(id))
+  if (unrenderableId) {
+    const draft = drafts.find((item) => item.fallbackNodeIds.includes(unrenderableId))
+    throw new FigmaIntegrationError(
+      `Figma could not render “${draft?.name ?? 'this frame'}”. Try importing a different frame or the whole file.`,
+      'INVALID_FILE',
+    )
   }
 
   let totalBytes = 0
   const assets: RenderedAsset[] = []
-  for (const [nodeId, url] of urls) {
+  for (const nodeId of finalIds) {
+    const url = urls.get(nodeId)!
     const response = await fetch(url)
     const declaredSize = Number(response.headers.get('content-length')) || 0
     if (!response.ok || (declaredSize && declaredSize > MAX_ASSET_BYTES)) {
@@ -640,9 +669,12 @@ export async function importFigmaDesign(userId: string, sourceUrl: string) {
   }
 
   const converted = convertFigmaFile(payload, reference.nodeId)
-  const fallbackIds = converted.drafts.flatMap((draft) => draft.fallbackNodeIds)
-  const rendered = fallbackIds.length
-    ? await renderFallbacks(reference.key, fallbackIds, token)
+  const fallbackCount = converted.drafts.reduce(
+    (count, draft) => count + draft.fallbackNodeIds.length,
+    0,
+  )
+  const rendered = fallbackCount
+    ? await renderFallbacks(reference.key, converted.drafts, token)
     : []
   const assetByNode = new Map(rendered.map((item) => [item.nodeId, item.id]))
   const shapes = converted.drafts.map(
@@ -695,28 +727,37 @@ export async function importFigmaDesign(userId: string, sourceUrl: string) {
     }
 
     const now = new Date()
-    await db.transaction(async (tx) => {
-      if (storedAssets.length) await tx.insert(asset).values(storedAssets)
-      await tx.insert(design).values({
-        id: designId,
-        userId,
-        name: designName,
-        shapes,
-        createdAt: now,
-        updatedAt: now,
-      })
-      await tx.insert(designVersion).values({
-        id: versionId,
-        designId,
-        userId,
-        message: 'Imported from Figma',
-        shapes,
-        added: shapes.length,
-        removed: 0,
-        changed: 0,
-        createdAt: now,
-      })
+    const insertDesign = db.insert(design).values({
+      id: designId,
+      userId,
+      name: designName,
+      shapes,
+      createdAt: now,
+      updatedAt: now,
     })
+    const insertVersion = db.insert(designVersion).values({
+      id: versionId,
+      designId,
+      userId,
+      message: 'Imported from Figma',
+      shapes,
+      added: shapes.length,
+      removed: 0,
+      changed: 0,
+      createdAt: now,
+    })
+    if (storedAssets.length) {
+      await db.batch([
+        db.insert(asset).values(storedAssets),
+        insertDesign,
+        insertVersion,
+      ])
+    } else {
+      await db.batch([
+        insertDesign,
+        insertVersion,
+      ])
+    }
 
     return {
       design: { id: designId, name: designName, shapes, updatedAt: now.getTime() },
