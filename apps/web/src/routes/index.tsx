@@ -1376,7 +1376,7 @@ function Editor({ preview = false, userId }: { preview?: boolean; userId?: strin
                       }
                     >
                       <MaximizeIcon data-slot="icon" />
-                      Preview fullscreen
+                      Open as page
                     </ContextMenuItem>
                   </>
                 ) : null}
