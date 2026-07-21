@@ -35,4 +35,46 @@ describe('EditorCommandMenu', () => {
     expect(onOpenChange).toHaveBeenCalledWith(false)
     expect(run).toHaveBeenCalledTimes(1)
   })
+
+  test('filters commands from the search input', async () => {
+    render(
+      <EditorCommandMenu
+        open
+        onOpenChange={() => {}}
+        groups={[
+          {
+            label: 'Figma',
+            commands: [
+              {
+                id: 'figma-current',
+                label: 'Import Figma into current document',
+                keywords: 'paste append frame design',
+                icon: FigmaIcon,
+                run: () => {},
+              },
+            ],
+          },
+          {
+            label: 'View',
+            commands: [
+              {
+                id: 'settings',
+                label: 'Open settings',
+                icon: FigmaIcon,
+                run: () => {},
+              },
+            ],
+          },
+        ]}
+      />,
+    )
+    await act(async () => {})
+
+    fireEvent.change(screen.getByPlaceholderText('Search commands…'), {
+      target: { value: 'append' },
+    })
+
+    expect(screen.getByText('Import Figma into current document')).toBeTruthy()
+    expect(screen.queryByText('Open settings')).toBeNull()
+  })
 })
