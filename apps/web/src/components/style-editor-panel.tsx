@@ -1,6 +1,14 @@
 import { useEffect, useState } from 'react'
 import { FONTS_URL } from '#/components/element-frame'
-import { getStyleToken, setStyleToken, type StyleTokenKind } from '#/lib/style-edit'
+import {
+  getSpacing,
+  getStyleToken,
+  setSpacing,
+  setStyleToken,
+  stepSpacing,
+  type SpacingKind,
+  type StyleTokenKind,
+} from '#/lib/style-edit'
 
 // Floating style editor for a node right-clicked in an edit-mode frame.
 // Every control swaps Tailwind class tokens and applies immediately —
@@ -121,6 +129,39 @@ function TokenRow({
   )
 }
 
+function SpacingStepper({
+  label,
+  value,
+  onStep,
+}: {
+  label: string
+  value: number | null
+  onStep: (direction: 1 | -1) => void
+}) {
+  return (
+    <div className="flex items-center gap-0.5">
+      <span className="text-[10px] text-muted-foreground">{label}</span>
+      <button
+        type="button"
+        aria-label={`Decrease ${label}`}
+        className="rounded px-1 text-[11px] text-muted-foreground hover:bg-secondary hover:text-foreground"
+        onClick={() => onStep(-1)}
+      >
+        −
+      </button>
+      <span className="min-w-5 text-center font-mono text-[10px]">{value ?? '—'}</span>
+      <button
+        type="button"
+        aria-label={`Increase ${label}`}
+        className="rounded px-1 text-[11px] text-muted-foreground hover:bg-secondary hover:text-foreground"
+        onClick={() => onStep(1)}
+      >
+        +
+      </button>
+    </div>
+  )
+}
+
 export function StyleEditorPanel({
   tag,
   className,
@@ -169,6 +210,9 @@ export function StyleEditorPanel({
 
   const setToken = (kind: StyleTokenKind, token: string | null) =>
     apply(setStyleToken(current, kind, token))
+
+  const stepPad = (kind: SpacingKind, direction: 1 | -1) =>
+    apply(setSpacing(current, kind, stepSpacing(getSpacing(current, kind), direction)))
 
   return (
     <div
@@ -246,6 +290,24 @@ export function StyleEditorPanel({
         short={(t) => (t === 'rounded-none' ? 'none' : t.slice(8))}
         onPick={(t) => setToken('radius', t)}
       />
+      <div className="flex items-center gap-3">
+        <span className="w-9 shrink-0 text-[10px] text-muted-foreground">Space</span>
+        <SpacingStepper
+          label="X"
+          value={getSpacing(current, 'px')}
+          onStep={(d) => stepPad('px', d)}
+        />
+        <SpacingStepper
+          label="Y"
+          value={getSpacing(current, 'py')}
+          onStep={(d) => stepPad('py', d)}
+        />
+        <SpacingStepper
+          label="Gap"
+          value={getSpacing(current, 'gap')}
+          onStep={(d) => stepPad('gap', d)}
+        />
+      </div>
       <div className="flex items-center gap-1.5">
         <input
           value={raw}

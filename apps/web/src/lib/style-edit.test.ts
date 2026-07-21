@@ -5,8 +5,11 @@ import {
   FONT_SIZE_RE,
   FONT_WEIGHT_RE,
   TEXT_COLOR_RE,
+  getSpacing,
   getStyleToken,
+  setSpacing,
   setStyleToken,
+  stepSpacing,
 } from './style-edit'
 
 describe('style token classifiers', () => {
@@ -43,6 +46,36 @@ describe('style token classifiers', () => {
     expect(BG_COLOR_RE.test('bg-blue-600')).toBe(true)
     expect(BG_COLOR_RE.test('bg-gradient-to-r')).toBe(false)
     expect(BG_COLOR_RE.test('bg-cover')).toBe(false)
+  })
+})
+
+describe('spacing', () => {
+  it('reads px/py with p-N as the both-axes fallback', () => {
+    expect(getSpacing('p-8 text-xl', 'px')).toBe(8)
+    expect(getSpacing('p-8 px-4', 'px')).toBe(4)
+    expect(getSpacing('px-8 py-16', 'py')).toBe(16)
+    expect(getSpacing('text-xl', 'px')).toBeNull()
+    expect(getSpacing('gap-3 flex', 'gap')).toBe(3)
+  })
+
+  it('decomposes p-N when one axis changes, re-merges when they agree', () => {
+    expect(setSpacing('p-8 bg-white', 'px', 4)).toBe('px-4 py-8 bg-white')
+    expect(setSpacing('px-4 py-8 bg-white', 'px', 8)).toBe('p-8 bg-white')
+    expect(setSpacing('bg-white', 'py', 16)).toBe('bg-white py-16')
+  })
+
+  it('sets and clears gap without touching padding', () => {
+    expect(setSpacing('p-4 gap-2 flex', 'gap', 6)).toBe('p-4 gap-6 flex')
+    expect(setSpacing('p-4 gap-2 flex', 'gap', null)).toBe('p-4 flex')
+  })
+
+  it('steps along the scale', () => {
+    expect(stepSpacing(8, 1)).toBe(10)
+    expect(stepSpacing(8, -1)).toBe(6)
+    expect(stepSpacing(null, 1)).toBe(4)
+    expect(stepSpacing(0, -1)).toBe(0)
+    expect(stepSpacing(32, 1)).toBe(32)
+    expect(stepSpacing(1.5, -1)).toBe(1)
   })
 })
 
