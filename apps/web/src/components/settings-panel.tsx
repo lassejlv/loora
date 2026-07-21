@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { LogOutIcon } from '#/components/icons'
 import { Button } from '#/components/ui/button'
 import { Input } from '#/components/ui/input'
@@ -16,6 +16,39 @@ import { ChatGPTAccount } from '#/components/chatgpt-account'
 import { CreditTopUp } from '#/components/credit-top-up'
 import { GitHubAccount } from '#/components/github-account'
 import { McpSessions } from '#/components/mcp-sessions'
+import { cn } from '#/lib/utils'
+
+const INTEGRATION_DEEP_LINKS = new Set(['integrations', 'github', 'chatgpt', 'mcp'])
+
+function IntegrationAnchor({
+  id,
+  highlighted,
+  children,
+}: {
+  id: string
+  highlighted: boolean
+  children: ReactNode
+}) {
+  const ref = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (!highlighted || !ref.current) return
+    ref.current.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
+  }, [highlighted])
+
+  return (
+    <div
+      ref={ref}
+      id={id}
+      className={cn(
+        'rounded-xl transition-[box-shadow,background-color] duration-500',
+        highlighted && 'bg-cx-accent/5 ring-2 ring-cx-accent/40',
+      )}
+    >
+      {children}
+    </div>
+  )
+}
 
 interface UsageStatus {
   dailyUsd: number
@@ -416,18 +449,28 @@ function AdminTab() {
 export function SettingsPanel() {
   const { data: session } = authClient.useSession()
   const isAdmin = session?.user.isAdmin === true
-  const integrationSettings = typeof window !== 'undefined'
+  const settingsParam = typeof window !== 'undefined'
     ? new URLSearchParams(window.location.search).get('settings')
     : null
-  const defaultTab = integrationSettings === 'github' ||
-    integrationSettings === 'chatgpt' ||
-    integrationSettings === 'mcp' ||
-    integrationSettings === 'integrations'
+  const defaultTab = settingsParam && INTEGRATION_DEEP_LINKS.has(settingsParam)
     ? 'integrations'
     : typeof window !== 'undefined' &&
         new URLSearchParams(window.location.search).get('topup') === 'success'
       ? 'billing'
       : 'account'
+  const focusIntegration =
+    settingsParam === 'github' || settingsParam === 'chatgpt' || settingsParam === 'mcp'
+      ? settingsParam
+      : null
+  const [highlightedIntegration, setHighlightedIntegration] = useState<string | null>(
+    focusIntegration,
+  )
+
+  useEffect(() => {
+    if (!highlightedIntegration) return
+    const timer = window.setTimeout(() => setHighlightedIntegration(null), 1800)
+    return () => window.clearTimeout(timer)
+  }, [highlightedIntegration])
 
   async function signOut() {
     // Do not leave one Loora account's ChatGPT cookie available after switching users.
@@ -437,7 +480,7 @@ export function SettingsPanel() {
 
   return (
     <div className="flex h-full min-h-0 flex-col overflow-y-auto p-6">
-      <Tabs defaultValue={defaultTab} className="flex max-w-md flex-col gap-6">
+      <Tabs defaultValue={defaultTab} className="flex max-w-lg flex-col gap-6">
         <TabsList className={`grid w-full ${isAdmin ? 'grid-cols-4' : 'grid-cols-3'}`}>
           <TabsTab value="account">Account</TabsTab>
           <TabsTab value="integrations">Integrations</TabsTab>
@@ -467,36 +510,33 @@ export function SettingsPanel() {
           </div>
         </TabsPanel>
 
-        <TabsPanel value="integrations" className="flex flex-col gap-8">
-          <section className="flex flex-col gap-5">
-            <div>
-              <h2 className="text-sm font-semibold">ChatGPT</h2>
-              <p className="mt-1 text-xs text-muted-foreground">
-                Connect your own account for ChatGPT-backed AI models.
-              </p>
-            </div>
-            <ChatGPTAccount />
-          </section>
-
-          <section className="flex flex-col gap-5 border-t border-border pt-8">
-            <div>
-              <h2 className="text-sm font-semibold">GitHub</h2>
-              <p className="mt-1 text-xs text-muted-foreground">
-                Attach read-only repository context to individual Loora designs.
-              </p>
-            </div>
-            <GitHubAccount />
-          </section>
-
-          <section className="flex flex-col gap-5 border-t border-border pt-8">
-            <div>
-              <h2 className="text-sm font-semibold">MCP</h2>
-              <p className="mt-1 text-xs text-muted-foreground">
-                Review and revoke clients connected through the Loora MCP server.
-              </p>
-            </div>
-            <McpSessions />
-          </section>
+        <TabsPanel value="integrations" className="flex flex-col gap-5">
+          <div>
+            <h2 className="text-sm font-semibold">Integrations</h2>
+            <p className="mt-1 text-xs text-muted-foreground">
+              Connect external accounts and agents to Loora.
+            </p>
+          </div>
+          <div className="flex flex-col gap-3">
+            <IntegrationAnchor
+              id="integration-chatgpt"
+              highlighted={highlightedIntegration === 'chatgpt'}
+            >
+              <ChatGPTAccount />
+            </IntegrationAnchor>
+            <IntegrationAnchor
+              id="integration-github"
+              highlighted={highlightedIntegration === 'github'}
+            >
+              <GitHubAccount />
+            </IntegrationAnchor>
+            <IntegrationAnchor
+              id="integration-mcp"
+              highlighted={highlightedIntegration === 'mcp'}
+            >
+              <McpSessions />
+            </IntegrationAnchor>
+          </div>
         </TabsPanel>
 
         <TabsPanel value="billing">

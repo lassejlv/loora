@@ -270,13 +270,18 @@ function Editor({ preview = false, userId }: { preview?: boolean; userId?: strin
     localStorage.setItem('loora:agent', open ? '1' : '0')
   }
   const [assetsOpen, setAssetsOpen] = useState(false)
-  const [settingsOpen, setSettingsOpen] = useState(() =>
-    !preview && typeof window !== 'undefined' &&
-    (
-      new URLSearchParams(window.location.search).get('topup') === 'success' ||
-      new URLSearchParams(window.location.search).get('settings') === 'github'
+  const [settingsOpen, setSettingsOpen] = useState(() => {
+    if (preview || typeof window === 'undefined') return false
+    const params = new URLSearchParams(window.location.search)
+    const settings = params.get('settings')
+    return (
+      params.get('topup') === 'success' ||
+      settings === 'integrations' ||
+      settings === 'github' ||
+      settings === 'chatgpt' ||
+      settings === 'mcp'
     )
-  )
+  })
   const [exportOpen, setExportOpen] = useState(false)
   const [codeOpen, setCodeOpen] = useState(false)
 
