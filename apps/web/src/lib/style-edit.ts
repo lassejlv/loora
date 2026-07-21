@@ -18,15 +18,25 @@ export const BG_COLOR_RE = new RegExp(
 )
 export const FONT_SIZE_RE = /^text-(xs|sm|base|lg|xl|[2-9]xl)$/
 export const FONT_WEIGHT_RE = /^font-(thin|extralight|light|normal|medium|semibold|bold|extrabold|black)$/
+// font-sans/serif/mono plus arbitrary families (font-[Playfair_Display]);
+// a leading digit means an arbitrary font-WEIGHT (font-[600]), not a family.
+export const FONT_FAMILY_RE = /^font-(sans|serif|mono|\[(?!\d)[^\]]+\])$/
 export const RADIUS_RE = /^rounded(-(none|xs|sm|md|lg|xl|2xl|3xl|4xl|full))?$/
 
-export type StyleTokenKind = 'textColor' | 'bgColor' | 'fontSize' | 'fontWeight' | 'radius'
+export type StyleTokenKind =
+  | 'textColor'
+  | 'bgColor'
+  | 'fontSize'
+  | 'fontWeight'
+  | 'fontFamily'
+  | 'radius'
 
 const KIND_RES: Record<StyleTokenKind, RegExp> = {
   textColor: TEXT_COLOR_RE,
   bgColor: BG_COLOR_RE,
   fontSize: FONT_SIZE_RE,
   fontWeight: FONT_WEIGHT_RE,
+  fontFamily: FONT_FAMILY_RE,
   radius: RADIUS_RE,
 }
 

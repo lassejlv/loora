@@ -1,5 +1,13 @@
 import { describe, expect, it } from 'bun:test'
-import { BG_COLOR_RE, FONT_SIZE_RE, TEXT_COLOR_RE, getStyleToken, setStyleToken } from './style-edit'
+import {
+  BG_COLOR_RE,
+  FONT_FAMILY_RE,
+  FONT_SIZE_RE,
+  FONT_WEIGHT_RE,
+  TEXT_COLOR_RE,
+  getStyleToken,
+  setStyleToken,
+} from './style-edit'
 
 describe('style token classifiers', () => {
   it('separates text colors from text sizes', () => {
@@ -12,6 +20,22 @@ describe('style token classifiers', () => {
     expect(TEXT_COLOR_RE.test('text-center')).toBe(false)
     expect(FONT_SIZE_RE.test('text-xl')).toBe(true)
     expect(FONT_SIZE_RE.test('text-red-500')).toBe(false)
+  })
+
+  it('separates font families from font weights', () => {
+    expect(FONT_FAMILY_RE.test('font-[Playfair_Display]')).toBe(true)
+    expect(FONT_FAMILY_RE.test('font-sans')).toBe(true)
+    expect(FONT_FAMILY_RE.test('font-mono')).toBe(true)
+    expect(FONT_FAMILY_RE.test('font-bold')).toBe(false)
+    expect(FONT_FAMILY_RE.test('font-[600]')).toBe(false)
+    expect(FONT_WEIGHT_RE.test('font-bold')).toBe(true)
+    expect(FONT_WEIGHT_RE.test('font-[Playfair_Display]')).toBe(false)
+  })
+
+  it('swaps a font family independently of the weight', () => {
+    expect(setStyleToken('font-bold font-sans p-2', 'fontFamily', 'font-[Lora]')).toBe(
+      'font-bold font-[Lora] p-2',
+    )
   })
 
   it('keeps gradients out of background colors', () => {

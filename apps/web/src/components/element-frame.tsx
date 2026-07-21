@@ -25,8 +25,11 @@ const VENDOR_SCRIPTS = [
   '/vendor/html-to-image.js',
 ] as const
 
-const FONTS_URL =
-  'https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&family=Spline+Sans+Mono:wght@400;500&display=swap'
+// Families available inside every frame (and offered by the style editor's
+// font row). The css2 endpoint is one stylesheet; actual font FILES only
+// download when a family is used, so listing several here is near-free.
+export const FONTS_URL =
+  'https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&family=Spline+Sans+Mono:wght@400;500&family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@400;500;600;700&family=Playfair+Display:wght@400;600;700&family=Lora:wght@400;500;600&display=swap'
 
 /**
  * Strip ES module import/export so Babel's classic preset can run.

@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { FONTS_URL } from '#/components/element-frame'
 import { getStyleToken, setStyleToken, type StyleTokenKind } from '#/lib/style-edit'
 
 // Floating style editor for a node right-clicked in an edit-mode frame.
@@ -22,6 +23,27 @@ const COLORS = [
 const FONT_SIZES = ['text-xs', 'text-sm', 'text-base', 'text-lg', 'text-xl', 'text-2xl', 'text-3xl', 'text-4xl', 'text-5xl'] as const
 const FONT_WEIGHTS = ['font-normal', 'font-medium', 'font-semibold', 'font-bold'] as const
 const RADII = ['rounded-none', 'rounded-md', 'rounded-lg', 'rounded-xl', 'rounded-2xl', 'rounded-full'] as const
+
+// Families the frames load (see FONTS_URL); buttons preview in the real font.
+const FONT_FAMILIES = [
+  ['font-[Archivo]', 'Archivo', 'Archivo, sans-serif'],
+  ['font-[Inter]', 'Inter', 'Inter, sans-serif'],
+  ['font-[Space_Grotesk]', 'Grotesk', "'Space Grotesk', sans-serif"],
+  ['font-[Playfair_Display]', 'Playfair', "'Playfair Display', serif"],
+  ['font-[Lora]', 'Lora', 'Lora, serif'],
+  ['font-[Spline_Sans_Mono]', 'Mono', "'Spline Sans Mono', monospace"],
+] as const
+
+// Load the frame font families in the editor document too, once, so the
+// font buttons preview with the actual typefaces.
+function ensurePreviewFonts() {
+  if (document.querySelector('link[data-loora-preview-fonts]')) return
+  const link = document.createElement('link')
+  link.rel = 'stylesheet'
+  link.href = FONTS_URL
+  link.setAttribute('data-loora-preview-fonts', '')
+  document.head.appendChild(link)
+}
 
 function ColorRow({
   label,
@@ -129,6 +151,7 @@ export function StyleEditorPanel({
   }, [className])
 
   useEffect(() => {
+    ensurePreviewFonts()
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') onClose()
     }
@@ -191,6 +214,31 @@ export function StyleEditorPanel({
         short={(t) => t.slice(5)}
         onPick={(t) => setToken('fontWeight', t)}
       />
+      <div className="flex items-center gap-1">
+        <span className="w-9 shrink-0 text-[10px] text-muted-foreground">Font</span>
+        <div className="flex flex-wrap gap-0.5">
+          {FONT_FAMILIES.map(([token, label, css]) => {
+            const active = getStyleToken(current, 'fontFamily') === token
+            return (
+              <button
+                key={token}
+                type="button"
+                aria-pressed={active}
+                style={{ fontFamily: css }}
+                className={
+                  'rounded px-1.5 py-0.5 text-[11px] ' +
+                  (active
+                    ? 'bg-cx-accent font-medium text-white'
+                    : 'text-muted-foreground hover:bg-secondary hover:text-foreground')
+                }
+                onClick={() => setToken('fontFamily', active ? null : token)}
+              >
+                {label}
+              </button>
+            )
+          })}
+        </div>
+      </div>
       <TokenRow
         label="Corner"
         options={RADII}
