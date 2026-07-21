@@ -31,6 +31,7 @@ import {
   MousePointer2Icon,
   MousePointerClickIcon,
   ImageIcon,
+  FigmaIcon,
   Redo2Icon,
   ScissorsIcon,
   SendToBackIcon,
@@ -81,6 +82,7 @@ import { deleteHistory } from '@loora/rpc/history'
 import { snapshotCanvas } from '#/lib/snapshot'
 import { AgentPanel } from '#/components/agent-panel'
 import { ExportDialog } from '#/components/export-dialog'
+import { FigmaImportDialog } from '#/components/figma-import-dialog'
 import {
   WelcomeDialog,
   hasSeenWelcome,
@@ -190,6 +192,7 @@ function DocSwitcher({
   activeId,
   onSwitch,
   onNew,
+  onImport,
   onRename,
   onDelete,
 }: {
@@ -197,6 +200,7 @@ function DocSwitcher({
   activeId: string
   onSwitch: (id: string) => void
   onNew: () => void
+  onImport: () => void
   onRename: (name: string) => void
   onDelete: () => void
 }) {
@@ -244,6 +248,10 @@ function DocSwitcher({
           ))}
           <DropdownMenuSeparator />
           <DropdownMenuItem onClick={onNew}>New document</DropdownMenuItem>
+          <DropdownMenuItem onClick={onImport}>
+            <FigmaIcon data-slot="icon" />
+            Import from Figma
+          </DropdownMenuItem>
           <DropdownMenuItem onClick={() => setRenaming(true)}>Rename</DropdownMenuItem>
           <DropdownMenuItem variant="destructive" onClick={() => setConfirmDelete(true)}>
             Delete document
@@ -384,6 +392,9 @@ function Editor({ preview = false, userId }: { preview?: boolean; userId?: strin
     else void setUrlState({ settings: null, integration: null })
   }
   const [exportOpen, setExportOpen] = useState(false)
+  const [figmaImportOpen, setFigmaImportOpen] = useState(() =>
+    !preview && new URLSearchParams(window.location.search).get('figmaImport') === 'true',
+  )
   const [agentWidth, setAgentWidth] = useState(() => {
     if (preview || typeof window === 'undefined') return 340
     const raw = Number(window.localStorage.getItem('loora:agent-width'))
@@ -654,6 +665,31 @@ function Editor({ preview = false, userId }: { preview?: boolean; userId?: strin
     setDocLoadError(null)
     setSelectedIds([])
     resetHistory()
+  }
+
+  const activateFigmaImport = (
+    result: Awaited<ReturnType<typeof orpc.figma.import>>,
+  ) => {
+    flushActiveDoc()
+    documentRequest.current += 1
+    const imported = result.design
+    const doc: DocMeta = { id: imported.id, name: imported.name }
+    const next = [...docs.filter((candidate) => candidate.id !== doc.id), doc]
+    saveElements(doc.id, imported.shapes)
+    saveDocs(next, doc.id)
+    localDesignRef.current = doc.id
+    void setUrlState({ d: doc.id })
+    activeIdRef.current = doc.id
+    setDocState({ docs: next, activeId: doc.id })
+    setShapes(imported.shapes)
+    setLoadedDocId(doc.id)
+    setDocLoading(false)
+    setDocLoadError(null)
+    setSelectedIds([])
+    resetHistory()
+    window.requestAnimationFrame(() => {
+      window.requestAnimationFrame(() => canvasControls.current?.zoomToFit())
+    })
   }
 
   const insertAsset = (a: AssetMeta) => {
@@ -1545,6 +1581,7 @@ function Editor({ preview = false, userId }: { preview?: boolean; userId?: strin
             activeId={activeId}
             onSwitch={switchDoc}
             onNew={newDoc}
+            onImport={() => setFigmaImportOpen(true)}
             onRename={renameDoc}
             onDelete={deleteDoc}
           />
@@ -1833,6 +1870,12 @@ function Editor({ preview = false, userId }: { preview?: boolean; userId?: strin
           shapes={shapes}
           selectedIds={selectedIds}
           databaseReady={databaseReady}
+        />
+
+        <FigmaImportDialog
+          open={figmaImportOpen}
+          onOpenChange={setFigmaImportOpen}
+          onImported={activateFigmaImport}
         />
 
       </main>

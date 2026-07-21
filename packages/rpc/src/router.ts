@@ -47,6 +47,12 @@ import {
 } from '@loora/auth/github'
 import { sanitizeChatMessagesForStorage } from './chat-storage'
 import { summarizeMcpSessions } from './mcp-sessions'
+import {
+  disconnectFigma,
+  FigmaIntegrationError,
+  getFigmaStatus,
+} from '@loora/auth/figma'
+import { importFigmaDesign } from './figma-import'
 
 type Session = Awaited<ReturnType<typeof getSession>>
 
@@ -612,6 +618,54 @@ function githubProcedureError(error: unknown): never {
   throw error
 }
 
+function figmaProcedureError(error: unknown): never {
+  if (error instanceof FigmaIntegrationError) {
+    if (error.code === 'RECONNECT_REQUIRED') {
+      throw new ORPCError('UNAUTHORIZED', { message: error.message })
+    }
+    if (error.code === 'ACCESS_DENIED') {
+      throw new ORPCError('FORBIDDEN', { message: error.message })
+    }
+    if (error.code === 'RATE_LIMITED') {
+      throw new ORPCError('TOO_MANY_REQUESTS', { message: error.message })
+    }
+    if (error.code === 'TOO_LARGE') {
+      throw new ORPCError('PAYLOAD_TOO_LARGE', { message: error.message })
+    }
+    if (error.code === 'INVALID_FILE' || error.code === 'NOT_CONFIGURED') {
+      throw new ORPCError('BAD_REQUEST', { message: error.message })
+    }
+    throw new ORPCError('INTERNAL_SERVER_ERROR', { message: error.message })
+  }
+  throw error
+}
+
+const getFigmaConnection = protectedProcedure.handler(async ({ context }) => {
+  try {
+    return await getFigmaStatus(context.user.id)
+  } catch (error) {
+    return figmaProcedureError(error)
+  }
+})
+
+const importFigma = protectedProcedure
+  .input(z.object({ url: z.string().trim().min(1).max(2_000) }))
+  .handler(async ({ context, input }) => {
+    try {
+      return await importFigmaDesign(context.user.id, input.url)
+    } catch (error) {
+      return figmaProcedureError(error)
+    }
+  })
+
+const disconnectFigmaAccount = protectedProcedure.handler(async ({ context }) => {
+  try {
+    return await disconnectFigma(context.user.id)
+  } catch (error) {
+    return figmaProcedureError(error)
+  }
+})
+
 const getGithubStatus = protectedProcedure.handler(async ({ context }) => {
   try {
     return await getGitHubStatus(context.user.id)
@@ -1030,6 +1084,11 @@ export const appRouter = {
     bind: bindDesignGithubRepository,
     clear: clearDesignGithubRepository,
     disconnect: disconnectGithub,
+  },
+  figma: {
+    status: getFigmaConnection,
+    import: importFigma,
+    disconnect: disconnectFigmaAccount,
   },
   mcp: {
     sessions: listMcpSessions,

@@ -17,6 +17,8 @@ import { Route as BlockpageDesignIdRouteImport } from './routes/blockpage.$desig
 import { Route as ApiAssetIdRouteImport } from './routes/api.asset.$id'
 import { Route as ApiAuthSplatRouteImport } from './routes/api.auth.$'
 import { Route as ApiChatgptSplatRouteImport } from './routes/api.chatgpt.$'
+import { Route as ApiFigmaCallbackRouteImport } from './routes/api.figma.callback'
+import { Route as ApiFigmaConnectRouteImport } from './routes/api.figma.connect'
 import { Route as ApiGithubCallbackRouteImport } from './routes/api.github.callback'
 import { Route as ApiGithubConnectRouteImport } from './routes/api.github.connect'
 import { Route as ApiGithubInstallRouteImport } from './routes/api.github.install'
@@ -65,6 +67,16 @@ const ApiAuthSplatRoute = ApiAuthSplatRouteImport.update({
 const ApiChatgptSplatRoute = ApiChatgptSplatRouteImport.update({
   id: '/api/chatgpt/$',
   path: '/api/chatgpt/$',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiFigmaCallbackRoute = ApiFigmaCallbackRouteImport.update({
+  id: '/api/figma/callback',
+  path: '/api/figma/callback',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiFigmaConnectRoute = ApiFigmaConnectRouteImport.update({
+  id: '/api/figma/connect',
+  path: '/api/figma/connect',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ApiGithubCallbackRoute = ApiGithubCallbackRouteImport.update({
@@ -117,6 +129,8 @@ export interface FileRoutesByFullPath {
   '/api/asset/$id': typeof ApiAssetIdRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
   '/api/chatgpt/$': typeof ApiChatgptSplatRoute
+  '/api/figma/callback': typeof ApiFigmaCallbackRoute
+  '/api/figma/connect': typeof ApiFigmaConnectRoute
   '/api/github/callback': typeof ApiGithubCallbackRoute
   '/api/github/connect': typeof ApiGithubConnectRoute
   '/api/github/install': typeof ApiGithubInstallRoute
@@ -135,6 +149,8 @@ export interface FileRoutesByTo {
   '/api/asset/$id': typeof ApiAssetIdRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
   '/api/chatgpt/$': typeof ApiChatgptSplatRoute
+  '/api/figma/callback': typeof ApiFigmaCallbackRoute
+  '/api/figma/connect': typeof ApiFigmaConnectRoute
   '/api/github/callback': typeof ApiGithubCallbackRoute
   '/api/github/connect': typeof ApiGithubConnectRoute
   '/api/github/install': typeof ApiGithubInstallRoute
@@ -154,6 +170,8 @@ export interface FileRoutesById {
   '/api/asset/$id': typeof ApiAssetIdRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
   '/api/chatgpt/$': typeof ApiChatgptSplatRoute
+  '/api/figma/callback': typeof ApiFigmaCallbackRoute
+  '/api/figma/connect': typeof ApiFigmaConnectRoute
   '/api/github/callback': typeof ApiGithubCallbackRoute
   '/api/github/connect': typeof ApiGithubConnectRoute
   '/api/github/install': typeof ApiGithubInstallRoute
@@ -174,6 +192,8 @@ export interface FileRouteTypes {
     | '/api/asset/$id'
     | '/api/auth/$'
     | '/api/chatgpt/$'
+    | '/api/figma/callback'
+    | '/api/figma/connect'
     | '/api/github/callback'
     | '/api/github/connect'
     | '/api/github/install'
@@ -192,6 +212,8 @@ export interface FileRouteTypes {
     | '/api/asset/$id'
     | '/api/auth/$'
     | '/api/chatgpt/$'
+    | '/api/figma/callback'
+    | '/api/figma/connect'
     | '/api/github/callback'
     | '/api/github/connect'
     | '/api/github/install'
@@ -210,6 +232,8 @@ export interface FileRouteTypes {
     | '/api/asset/$id'
     | '/api/auth/$'
     | '/api/chatgpt/$'
+    | '/api/figma/callback'
+    | '/api/figma/connect'
     | '/api/github/callback'
     | '/api/github/connect'
     | '/api/github/install'
@@ -229,6 +253,8 @@ export interface RootRouteChildren {
   ApiAssetIdRoute: typeof ApiAssetIdRoute
   ApiAuthSplatRoute: typeof ApiAuthSplatRoute
   ApiChatgptSplatRoute: typeof ApiChatgptSplatRoute
+  ApiFigmaCallbackRoute: typeof ApiFigmaCallbackRoute
+  ApiFigmaConnectRoute: typeof ApiFigmaConnectRoute
   ApiGithubCallbackRoute: typeof ApiGithubCallbackRoute
   ApiGithubConnectRoute: typeof ApiGithubConnectRoute
   ApiGithubInstallRoute: typeof ApiGithubInstallRoute
@@ -294,6 +320,20 @@ declare module '@tanstack/react-router' {
       path: '/api/chatgpt/$'
       fullPath: '/api/chatgpt/$'
       preLoaderRoute: typeof ApiChatgptSplatRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/figma/callback': {
+      id: '/api/figma/callback'
+      path: '/api/figma/callback'
+      fullPath: '/api/figma/callback'
+      preLoaderRoute: typeof ApiFigmaCallbackRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/figma/connect': {
+      id: '/api/figma/connect'
+      path: '/api/figma/connect'
+      fullPath: '/api/figma/connect'
+      preLoaderRoute: typeof ApiFigmaConnectRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/api/github/callback': {
@@ -377,6 +417,8 @@ const rootRouteChildren: RootRouteChildren = {
   ApiAssetIdRoute: ApiAssetIdRoute,
   ApiAuthSplatRoute: ApiAuthSplatRoute,
   ApiChatgptSplatRoute: ApiChatgptSplatRoute,
+  ApiFigmaCallbackRoute: ApiFigmaCallbackRoute,
+  ApiFigmaConnectRoute: ApiFigmaConnectRoute,
   ApiGithubCallbackRoute: ApiGithubCallbackRoute,
   ApiGithubConnectRoute: ApiGithubConnectRoute,
   ApiGithubInstallRoute: ApiGithubInstallRoute,

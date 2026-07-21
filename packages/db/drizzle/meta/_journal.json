@@ -148,6 +148,13 @@
       "when": 1784595776024,
       "tag": "0020_ordinary_loners",
       "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1784671606998,
+      "tag": "0021_military_pretty_boy",
+      "breakpoints": true
     }
   ]
 }

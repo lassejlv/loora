@@ -8,17 +8,6 @@ export type ProviderDefinition =
       headers?: Record<string, string>
     }
   | {
-      // Neon AI Gateway via @neondatabase/ai-sdk-provider: routes each model
-      // to the right gateway dialect (Anthropic → Messages, OpenAI →
-      // Responses, Gemini/others → chat completions) with the schema
-      // conversions each native API needs — a plain openai-compatible client
-      // 400s on Gemini because Google rejects JSON-Schema meta keys.
-      kind: 'neon'
-      label: string
-      baseUrlEnv: string
-      apiKeyEnv: string
-    }
-  | {
       kind: 'chatgpt'
       label: string
     }
@@ -26,11 +15,11 @@ export type ProviderDefinition =
 // Add any OpenAI-compatible provider here. API keys are read from the named
 // environment variable on the server and are never included in this config.
 export const PROVIDERS = {
-  loora: {
-    kind: 'neon',
-    label: 'Loora',
-    baseUrlEnv: 'NEON_AI_GATEWAY_BASE_URL',
-    apiKeyEnv: 'NEON_AI_GATEWAY_TOKEN',
+  wafer: {
+    kind: 'openai-compatible',
+    label: 'Wafer',
+    baseURL: 'https://pass.wafer.ai/v1',
+    apiKeyEnv: 'WAFER_API_KEY',
   },
   chatgpt: {
     kind: 'chatgpt',
@@ -73,12 +62,28 @@ export interface ModelDefinition {
 // Prices are USD per 1M tokens and power the existing usage limits.
 export const MODELS = [
   {
-    id: 'loora-mini',
-    label: 'Loora Mini',
-    provider: 'loora',
-    modelId: 'gemini-3-5-flash',
+    id: 'mini',
+    label: 'Mini',
+    provider: 'wafer',
+    modelId: 'MiniMax-M3',
     supportsImageInput: true,
     price: { input: 1.2, output: 4.9 },
+  },
+  {
+    id: 'max',
+    label: 'Max',
+    provider: 'wafer',
+    modelId: 'GLM-5.2',
+    supportsImageInput: false,
+    price: { input: 1.5, output: 4.2 },
+  },
+  {
+    id: 'max-fast',
+    label: 'Max Fast',
+    provider: 'wafer',
+    modelId: 'glm5.2-fast',
+    supportsImageInput: false,
+    price: { input: 4, output: 12 },
   },
   {
     id: 'gpt-5.6-sol',

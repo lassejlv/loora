@@ -26,6 +26,7 @@ import { orpc } from '#/lib/orpc-client'
 import { ChatGPTAccount } from '#/components/chatgpt-account'
 import { CreditTopUp } from '#/components/credit-top-up'
 import { GitHubAccount } from '#/components/github-account'
+import { FigmaAccount } from '#/components/figma-account'
 import { McpSessions } from '#/components/mcp-sessions'
 import { PanelLoading, PanelShell } from '#/components/panel-shell'
 import { ShortcutsSettings } from '#/components/shortcuts-settings'
@@ -611,9 +612,10 @@ export function SettingsPanel({
             }}
             className="flex flex-col gap-4"
           >
-            <TabsList className="grid w-full grid-cols-3">
+            <TabsList className="grid w-full grid-cols-4">
               <TabsTab value="chatgpt">ChatGPT</TabsTab>
               <TabsTab value="github">GitHub</TabsTab>
+              <TabsTab value="figma">Figma</TabsTab>
               <TabsTab value="mcp">MCP</TabsTab>
             </TabsList>
             <TabsPanel value="chatgpt" id="integration-chatgpt">
@@ -621,6 +623,9 @@ export function SettingsPanel({
             </TabsPanel>
             <TabsPanel value="github" id="integration-github">
               <GitHubAccount />
+            </TabsPanel>
+            <TabsPanel value="figma" id="integration-figma">
+              <FigmaAccount />
             </TabsPanel>
             <TabsPanel value="mcp" id="integration-mcp">
               <McpSessions />

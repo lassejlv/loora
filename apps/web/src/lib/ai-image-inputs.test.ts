@@ -4,9 +4,9 @@ import { modelSupportsImageInput, withoutImageParts } from './ai-image-inputs'
 
 describe('AI image input capabilities', () => {
   it('reads image support from the model catalog', () => {
-    // Every current catalog model supports image input; unknown ids default
-    // to true so a stale localStorage model never silently drops snapshots.
-    expect(modelSupportsImageInput('loora-mini')).toBe(true)
+    expect(modelSupportsImageInput('mini')).toBe(true)
+    expect(modelSupportsImageInput('max')).toBe(false)
+    expect(modelSupportsImageInput('max-fast')).toBe(false)
     expect(modelSupportsImageInput('gpt-5.6-sol')).toBe(true)
     expect(modelSupportsImageInput('unknown')).toBe(true)
   })
