@@ -10,6 +10,7 @@ COPY apps/web/package.json apps/web/
 COPY apps/mcp/package.json apps/mcp/
 COPY packages/db/package.json packages/db/
 COPY packages/auth/package.json packages/auth/
+COPY packages/agent/package.json packages/agent/
 COPY packages/rpc/package.json packages/rpc/
 RUN bun install --frozen-lockfile
 
