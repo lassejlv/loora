@@ -56,6 +56,9 @@ import {
   type GitHubRepositoryContext,
 } from '@loora/auth/github'
 import {
+  currentTurnSubagentImageParts,
+  MAX_SUBAGENT_STEPS,
+  prepareSubagentStep,
   runParallelSubagents,
   runSubagentStream,
   subagentFailureMessage,
@@ -830,6 +833,7 @@ export const Route = createFileRoute('/api/chat')({
             src: `/api/asset/${item.id}`,
           }))),
         ].join('\n')
+        const workerImageParts = currentTurnSubagentImageParts(messages, imageInputsEnabled)
         let delegationUsed = delegationUsedInCurrentTurn(messages)
 
         const delegateTasks = {
@@ -876,20 +880,28 @@ export const Route = createFileRoute('/api/chat')({
                   agentSystemPrompt,
                 ),
                 tools: workerTools,
-                stopWhen: stepCountIs(8),
+                stopWhen: stepCountIs(MAX_SUBAGENT_STEPS),
+                prepareStep: prepareSubagentStep,
                 maxOutputTokens: 8_000,
                 providerOptions,
               })
 
               try {
+                const workerPrompt = [
+                  `Your task: ${task.task}`,
+                  '',
+                  workerSharedContext,
+                ].join('\n')
                 const result = await runSubagentStream(
                   worker,
                   {
-                    prompt: [
-                      `Your task: ${task.task}`,
-                      '',
-                      workerSharedContext,
-                    ].join('\n'),
+                    messages: await convertToModelMessages([{
+                      role: 'user',
+                      parts: [
+                        { type: 'text', text: workerPrompt },
+                        ...workerImageParts,
+                      ],
+                    }]),
                     abortSignal,
                     timeout: 90_000,
                   },
@@ -897,6 +909,15 @@ export const Route = createFileRoute('/api/chat')({
                 subagentInputTokens += result.totalUsage.inputTokens ?? 0
                 subagentOutputTokens += result.totalUsage.outputTokens ?? 0
                 const text = result.text.trim()
+                if (!text) {
+                  const finalStep = result.steps.at(-1)
+                  console.warn('[chat] Sub-agent returned no deliverable:', {
+                    task: task.name,
+                    stepCount: result.steps.length,
+                    finishReason: finalStep?.finishReason,
+                    toolCallCount: finalStep?.toolCalls.length ?? 0,
+                  })
+                }
                 return text
                   ? { result: text }
                   : { error: 'Sub-agent returned no deliverable.' }

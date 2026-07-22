@@ -1,4 +1,7 @@
+import type { UIMessage } from 'ai'
+
 export const MAX_SUBAGENT_RESULT_CHARS = 24_000
+export const MAX_SUBAGENT_STEPS = 8
 
 export type DelegatedTask = {
   name: string
@@ -26,6 +29,36 @@ type SubagentStreamResult = {
     inputTokens?: number
     outputTokens?: number
   }>
+  steps: PromiseLike<Array<{
+    text: string
+    finishReason: string
+    toolCalls: unknown[]
+  }>>
+}
+
+export function prepareSubagentStep({ stepNumber }: { stepNumber: number }) {
+  return stepNumber >= MAX_SUBAGENT_STEPS - 1
+    ? { toolChoice: 'none' as const }
+    : {}
+}
+
+export function currentTurnSubagentImageParts(
+  messages: UIMessage[],
+  imageInputsEnabled: boolean,
+) {
+  if (!imageInputsEnabled) return []
+
+  let latestUserMessage: UIMessage | undefined
+  for (let index = messages.length - 1; index >= 0; index--) {
+    if (messages[index].role !== 'user') continue
+    latestUserMessage = messages[index]
+    break
+  }
+  if (!latestUserMessage) return []
+
+  return latestUserMessage.parts
+    .filter((part) => part.type === 'file' && part.mediaType.startsWith('image/'))
+    .slice(-1)
 }
 
 export async function runSubagentStream<TOptions>(
@@ -33,8 +66,12 @@ export async function runSubagentStream<TOptions>(
   options: TOptions,
 ) {
   const stream = await agent.stream(options)
-  const [text, totalUsage] = await Promise.all([stream.text, stream.totalUsage])
-  return { text, totalUsage }
+  const [text, totalUsage, steps] = await Promise.all([
+    stream.text,
+    stream.totalUsage,
+    stream.steps,
+  ])
+  return { text, totalUsage, steps }
 }
 
 export function subagentFailureMessage(

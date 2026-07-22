@@ -2,6 +2,9 @@ import { describe, expect, it } from 'bun:test'
 import { ToolLoopAgent } from 'ai'
 import { MockLanguageModelV4, simulateReadableStream } from 'ai/test'
 import {
+  currentTurnSubagentImageParts,
+  MAX_SUBAGENT_STEPS,
+  prepareSubagentStep,
   runParallelSubagents,
   runSubagentStream,
   subagentFailureMessage,
@@ -123,6 +126,7 @@ describe('runSubagentStream', () => {
       text: 'Streamed result',
       totalUsage: { inputTokens: 12, outputTokens: 34 },
     })
+    expect(result.steps).toHaveLength(1)
   })
 
   it('propagates stream failures for worker-level handling', async () => {
@@ -134,6 +138,44 @@ describe('runSubagentStream', () => {
     }
 
     await expect(runSubagentStream(agent, {})).rejects.toBe(failure)
+  })
+})
+
+describe('sub-agent context and loop bounds', () => {
+  it('reserves the eighth and final worker step for a prose deliverable', () => {
+    expect(prepareSubagentStep({ stepNumber: MAX_SUBAGENT_STEPS - 2 })).toEqual({})
+    expect(prepareSubagentStep({ stepNumber: MAX_SUBAGENT_STEPS - 1 })).toEqual({
+      toolChoice: 'none',
+    })
+  })
+
+  it('forwards only the latest image from the current user turn', () => {
+    const messages = [
+      {
+        id: 'old-user',
+        role: 'user' as const,
+        parts: [{ type: 'file' as const, mediaType: 'image/png', url: 'old-image' }],
+      },
+      {
+        id: 'assistant',
+        role: 'assistant' as const,
+        parts: [{ type: 'text' as const, text: 'Ready' }],
+      },
+      {
+        id: 'current-user',
+        role: 'user' as const,
+        parts: [
+          { type: 'file' as const, mediaType: 'image/jpeg', url: 'first-current-image' },
+          { type: 'text' as const, text: 'Review this' },
+          { type: 'file' as const, mediaType: 'image/png', url: 'latest-current-image' },
+        ],
+      },
+    ]
+
+    expect(currentTurnSubagentImageParts(messages, true)).toEqual([
+      { type: 'file', mediaType: 'image/png', url: 'latest-current-image' },
+    ])
+    expect(currentTurnSubagentImageParts(messages, false)).toEqual([])
   })
 })
 
