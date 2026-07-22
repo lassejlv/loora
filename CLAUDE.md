@@ -53,7 +53,7 @@ The trickiest file in the repo. Read its header comment before touching it.
 
 ### Agent loop
 
-Server `apps/web/src/routes/api.chat.ts` declares tools with **no execute** — `createElement`, `createElements` (≤40), `updateElement`, `editElement` (atomic search/replace edits via `applyCodeEdits`, result echoes ±2 lines per edit), `arrangeElements` (batch geometry, no render wait), `reorderElements`/`groupElements`/`ungroupElements` (z-order + grouping via `ElementActions`), `searchCanvas` (line grep over element code, ≤50 matches), `readElement`, `readElementLogs` (frame console/error buffer), `deleteElement`, `viewCanvas`, `viewElement` (single-element PNG closeup), `askQuestion`. Every one runs **client-side** in `agent-panel.tsx`'s `useChat({ onToolCall })` against live canvas state via refs, then reports back. `sendAutomaticallyWhen: lastAssistantMessageIsCompleteWithToolCalls` continues the loop; `stopWhen: stepCountIs(40)` caps it server-side.
+Server `packages/agent/src/tools.ts` declares tools with **no execute** — `createElement`, `createElements` (≤40), `updateElement`, `editElement` (atomic search/replace edits via `applyCodeEdits`, result echoes ±2 lines per edit), `arrangeElements` (batch geometry, no render wait), `reorderElements`/`groupElements`/`ungroupElements` (z-order + grouping via `ElementActions`), `searchCanvas` (line grep over element code, ≤50 matches), `readElement`, `readElementLogs` (frame console/error buffer), `deleteElement`, `viewCanvas`, `viewElement` (single-element PNG closeup), `askQuestion`. Every one runs **client-side** in `agent-panel.tsx`'s `useChat({ onToolCall })` against live canvas state via refs, then reports back. `sendAutomaticallyWhen: lastAssistantMessageIsCompleteWithToolCalls` continues the loop; `stopWhen: stepCountIs(40)` caps it server-side.
 
 What shapes this code:
 
@@ -64,7 +64,7 @@ What shapes this code:
 - **Approval tools.** `deleteElement` and `askQuestion` park in an approval-requested state and are resolved by inline UI cards, so the user can decline a deletion.
 - **Misc.** `sanitizeModelNames` scrubs upstream model ids out of error text; `allowLongRunningChatRequest` disables Bun's 10s inactivity timeout per chat request (reasoning models stall before the first chunk); the client aborts after 120s of no progress; `onFinish` records token usage.
 
-The system prompt is assembled in `api.chat.ts` from the behavior rules, `DESIGN_SKILL_PROMPT` (`apps/web/src/skills/design-skills.ts` — frontend-design / apple-design / no-vibe-code guidance, plus the loora palette), the user's asset list (top 100), the current canvas JSON, and the selection.
+The system prompt is assembled in `packages/agent/src/prompts.ts` from the behavior rules, `DESIGN_SKILL_PROMPT` (`packages/agent/src/design-skill.ts` — frontend-design / apple-design / no-vibe-code guidance, plus the loora palette), the user's asset list (top 100), the current canvas JSON, and the selection.
 
 ### Editor state — `apps/web/src/routes/index.tsx`
 
@@ -83,7 +83,7 @@ Supporting libs: `align.ts` (align/distribute within the selection's bounding bo
 
 ### Models
 
-One typed catalog: `packages/auth/src/models.ts`. Providers are either `openai-compatible` (label, `baseURL`, `apiKeyEnv`) or `chatgpt`. Server-managed models run on the app's key (currently Wafer). ChatGPT-backed models proxy through the user's **own** connected ChatGPT account (`@opencoredev/loginwithchatgpt-*`, `packages/auth/src/chatgpt-auth.ts`, `/api/chatgpt/*`) and are listed only when that account reports them available — they bypass the app's spend limits because the user pays. Provider credentials never reach the browser. `supportsImageInput` per model gates snapshots and `viewCanvas` (`ai-image-inputs.ts` strips image parts for models without it). Adding a provider/model: see README.
+One typed catalog: `packages/agent/src/models.ts`. Providers are either `openai-compatible` (label, `baseURL`, `apiKeyEnv`) or `chatgpt`. Server-managed models run on the app's key (currently Wafer). ChatGPT-backed models proxy through the user's **own** connected ChatGPT account (`@opencoredev/loginwithchatgpt-*`, `packages/agent/src/internal/chatgpt-auth.ts`, `/api/chatgpt/*`) and are listed only when that account reports them available — they bypass the app's spend limits because the user pays. Provider credentials never reach the browser. `supportsImageInput` per model gates snapshots and `viewCanvas`; `packages/agent/src/messages.ts` strips image parts for models without it. Adding a provider/model: see README.
 
 ### Persistence & access
 
@@ -95,11 +95,11 @@ Everything user-scoped goes through `packages/rpc/src/router.ts`. Three tiers: `
 - **Assets**: ≤5MB images, written to Bun's S3 client at `assets/{userId}/{assetId}` when `S3_*` is configured, else base64 in the `asset.data` column. Served by `/api/asset/:id` behind auth with immutable cache headers.
 - **Handoff**: `handoff-token.ts` mints `payload.HMAC-SHA256` tokens (7-day TTL, nonce, no DB record — expiry is checked on read) for read-only shared designs; `/api/handoff/:token` returns the design JSON and `/api/handoff/:token/asset/:id` serves only assets actually referenced by its shapes.
 - **Gating**: `canUseApp` (`packages/auth/src/preview-access.ts`) — admins and preview-approved users only, unless `REQUIRE_PREVIEW_ACCESS=false`. Enforced in the oRPC middleware and in `api.chat`, `api.asset`, `api.chatgpt`.
-- **Spend caps** (`packages/auth/src/ai-limits.ts`): rolling 24h/7d windows summed from `aiUsage`, $0.50/day and $2/week, each times the user's `usageMultiplier`. Costs are stored as integer micro-USD (`costMicroUsd = inputTokens*price.input + outputTokens*price.output`, prices are per 1M tokens). Over-limit chat requests return 429.
+- **Spend caps** (`packages/agent/src/usage.ts`): rolling 24h/7d windows summed from `aiUsage`, $0.50/day and $2/week, each times the user's `usageMultiplier`. Costs are stored as integer micro-USD (`costMicroUsd = inputTokens*price.input + outputTokens*price.output`, prices are per 1M tokens). Over-limit chat requests return 429.
 
 ## Conventions
 
 - No default exports for components; named exports, `memo` on the heavy panels (`agent-panel`, `layers-panel`, …).
-- Comments explain *why* (the non-obvious constraint), not *what*. Match that density — the existing header comments in `element-frame.tsx`, `api.chat.ts`, and `storage.ts` are the model.
+- Comments explain *why* (the non-obvious constraint), not *what*. Match that density — the existing header comments in `element-frame.tsx`, `packages/agent/src/server.ts`, and `storage.ts` are the model.
 - Agent-facing strings (tool descriptions, system prompt, design skills) are product behavior — editing them changes output quality. Treat them like code, not copy.
 - Panels are siblings driven by `Editor` state: `layers-panel`, `history-panel`, `agent-panel`, `code-editor-panel`, `assets-panel`, `settings-panel`, `export-dialog`.

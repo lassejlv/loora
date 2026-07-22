@@ -62,8 +62,8 @@ import {
   MODELS,
   PROVIDERS,
   type ChatGPTReasoningEffort,
-} from '@loora/auth/models'
-import { modelSupportsImageInput } from '#/lib/ai-image-inputs'
+} from '@loora/agent/models'
+import { modelSupportsImageInput } from '@loora/agent/messages'
 import {
   DropdownMenu,
   DropdownMenuContent,

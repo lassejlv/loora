@@ -1,11 +1,11 @@
-import { and, asc, eq, gt, gte, isNull, sql } from 'drizzle-orm'
+import { and, asc, eq, gt, gte, sql } from 'drizzle-orm'
 import { db } from '@loora/db'
 import { aiUsage, user } from '@loora/db/schema'
 import { getModel, type ModelKey } from './models'
-import { creditUnitsForCost, polarIngestAcknowledged } from './billing-policy'
-import { getPolarClient } from './polar'
-import { getTopUpCreditStatus } from './credit-top-ups'
-import { allocateTopUpCredits } from './top-up-policy'
+import { creditUnitsForCost } from '@loora/auth/billing-policy'
+import { getTopUpCreditStatus } from '@loora/auth/credit-top-ups'
+import { allocateTopUpCredits } from '@loora/auth/top-up-policy'
+import { reportPolarUsage } from '@loora/auth/billing-usage'
 
 export const DAILY_LIMIT_USD = 0.5
 export const WEEKLY_LIMIT_USD = 2
@@ -123,58 +123,6 @@ export async function recordUsage(
     costMicroUsd: costMicroUsd(model, inputTokens, outputTokens),
   }).returning()
   return saved
-}
-
-type UsageRow = typeof aiUsage.$inferSelect
-
-export async function reportPolarUsage(row: UsageRow) {
-  if (row.creditUnits <= 0 || row.polarReportedAt) return true
-  try {
-    const response = await getPolarClient().events.ingest({
-      events: [{
-        name: 'loora.ai_usage.v1',
-        externalId: row.id,
-        externalCustomerId: row.userId,
-        timestamp: row.createdAt,
-        metadata: {
-          credits: row.creditUnits,
-          model: row.model,
-          inputTokens: row.inputTokens,
-          outputTokens: row.outputTokens,
-          costMicroUsd: row.costMicroUsd,
-        },
-      }],
-    })
-    if (!polarIngestAcknowledged(response)) throw new Error('Polar did not acknowledge usage')
-    await db
-      .update(aiUsage)
-      .set({ polarReportedAt: new Date() })
-      .where(and(eq(aiUsage.id, row.id), isNull(aiUsage.polarReportedAt)))
-    return true
-  } catch {
-    await db
-      .update(aiUsage)
-      .set({ polarReportAttempts: sql`${aiUsage.polarReportAttempts} + 1` })
-      .where(eq(aiUsage.id, row.id))
-    return false
-  }
-}
-
-export async function flushPendingPolarUsage(userId: string) {
-  const pending = await db
-    .select()
-    .from(aiUsage)
-    .where(and(
-      eq(aiUsage.userId, userId),
-      gt(aiUsage.creditUnits, 0),
-      isNull(aiUsage.polarReportedAt),
-    ))
-    .orderBy(asc(aiUsage.createdAt))
-    .limit(100)
-  for (const row of pending) {
-    if (!await reportPolarUsage(row)) return false
-  }
-  return true
 }
 
 export async function recordSubscriberUsage(

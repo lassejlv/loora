@@ -37,7 +37,7 @@ import {
   getUsageStatus,
   listUserUsage,
   resetUsage,
-} from '@loora/auth/ai-limits'
+} from '@loora/agent/usage'
 import {
   disconnectGitHub,
   getGitHubStatus,

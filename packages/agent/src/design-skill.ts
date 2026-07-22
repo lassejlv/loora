@@ -1,3 +1,4 @@
+// Kept separate so browser consumers of prompt policy do not pull the full design prompt.
 export const DESIGN_SKILL_PROMPT = `
 You have three preloaded design skills. Apply them silently before substantial design work; do not call a tool to load them and do not announce that you used them.
 

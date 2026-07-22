@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { Button } from '#/components/ui/button'
 import { Textarea } from '#/components/ui/textarea'
-import { MAX_AGENT_SYSTEM_PROMPT_LENGTH } from '#/lib/agent-system-prompt'
+import { MAX_AGENT_SYSTEM_PROMPT_LENGTH } from '@loora/agent/prompts'
 
 export function AgentInstructionsSettings({
   savedPrompt,

@@ -1,5 +1,7 @@
 import type { UIMessage } from 'ai'
 
+// Server-only harness helpers. They are intentionally not package subpath exports.
+
 export const MAX_SUBAGENT_RESULT_CHARS = 24_000
 export const MAX_SUBAGENT_STEPS = 8
 

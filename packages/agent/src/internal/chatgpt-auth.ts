@@ -7,7 +7,7 @@ import {
 import { eq } from 'drizzle-orm'
 import { db } from '@loora/db'
 import { chatgptSession } from '@loora/db/schema'
-import { MODELS } from './models'
+import { MODELS } from '../models'
 
 // Every ChatGPT-backed model in the catalog must pass the proxy's allowlist.
 const CHATGPT_MODELS = MODELS.filter((m) => m.provider === 'chatgpt').map((m) => m.modelId)

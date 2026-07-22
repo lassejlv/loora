@@ -12,7 +12,7 @@ export type ProviderDefinition =
       label: string
     }
 
-// Add any OpenAI-compatible provider here. API keys are read from the named
+// OpenAI-compatible providers declare only the environment variable name. Keys are read from the named
 // environment variable on the server and are never included in this config.
 export const PROVIDERS = {
   wafer: {

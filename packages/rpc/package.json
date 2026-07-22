@@ -7,6 +7,7 @@
     "./*": "./src/*.ts"
   },
   "dependencies": {
+    "@loora/agent": "workspace:*",
     "@loora/auth": "workspace:*",
     "@loora/db": "workspace:*",
     "@orpc/server": "^1.14.8",

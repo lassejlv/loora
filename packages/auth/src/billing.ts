@@ -10,7 +10,7 @@ import {
   type BillingPlan,
 } from './billing-policy'
 import { getPolarClient, getPolarRuntime } from './polar'
-import { flushPendingPolarUsage } from './ai-limits'
+import { flushPendingPolarUsage } from './billing-usage'
 import { getTopUpCreditStatus } from './credit-top-ups'
 
 const CACHE_MAX_AGE_MS = 5 * 60 * 1000
