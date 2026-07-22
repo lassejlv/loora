@@ -25,7 +25,7 @@ New shadcn components: `bunx shadcn@latest add <name>` from `apps/web/` (config 
 
 TanStack Start (file routes; `/` has `ssr: false`) + React 19 + Vite 8 on the Bun runtime; Tailwind v4; Drizzle ORM over Neon's fetch-based serverless driver; Better Auth (email + Google when `GOOGLE_CLIENT_ID`/`SECRET` are set); oRPC at `/api/rpc`; Vercel AI SDK v7. Bun workspaces monorepo (`apps/web`, `packages/db|auth|rpc` as `@loora/*`, isolated linker + `run.bun` in `bunfig.toml`, shared versions in the root catalog; packages export TS source, no build step). Import alias `#/*` → `apps/web/src/*` (web app only; packages use relative or `@loora/*` imports). Routes generate into `apps/web/src/routeTree.gen.ts`. Deploys on Railway (`railway.json`, `Dockerfile`).
 
-Env (see README): `DATABASE_URL`, `BETTER_AUTH_SECRET`, `BETTER_AUTH_URL`, `REQUIRE_PREVIEW_ACCESS`, `WAFER_API_KEY`, `LWC_SECRET`, `CODEX_CLIENT_VERSION`, optional `S3_*`, optional Google OAuth pair.
+Env (see README): `DATABASE_URL`, `BETTER_AUTH_SECRET`, `BETTER_AUTH_URL`, `REQUIRE_PREVIEW_ACCESS`, `OPENROUTER_API_KEY`, `LWC_SECRET`, `CODEX_CLIENT_VERSION`, optional `S3_*`, optional Google OAuth pair.
 
 ## Core architecture
 
@@ -83,7 +83,7 @@ Supporting libs: `align.ts` (align/distribute within the selection's bounding bo
 
 ### Models
 
-One typed catalog: `packages/agent/src/models.ts`. Providers are either `openai-compatible` (label, `baseURL`, `apiKeyEnv`) or `chatgpt`. Server-managed models run on the app's key (currently Wafer). ChatGPT-backed models proxy through the user's **own** connected ChatGPT account (`@opencoredev/loginwithchatgpt-*`, `packages/agent/src/internal/chatgpt-auth.ts`, `/api/chatgpt/*`) and are listed only when that account reports them available — they bypass the app's spend limits because the user pays. Provider credentials never reach the browser. `supportsImageInput` per model gates snapshots and `viewCanvas`; `packages/agent/src/messages.ts` strips image parts for models without it. Adding a provider/model: see README.
+One typed catalog: `packages/agent/src/models.ts`. Providers are either `openrouter` (label, `apiKeyEnv`) or `chatgpt`; managed models carry an OpenRouter model slug and endpoint routing slug. GLM uses `wafer/fp4` or `wafer/fast`, while MiniMax M3 uses `minimax` because OpenRouter has no Wafer endpoint for that model. ChatGPT-backed models proxy through the user's **own** connected ChatGPT account (`@opencoredev/loginwithchatgpt-*`, `packages/agent/src/internal/chatgpt-auth.ts`, `/api/chatgpt/*`) and are listed only when that account reports them available — they bypass the app's spend limits because the user pays. Provider credentials never reach the browser. `supportsImageInput` per model gates snapshots and `viewCanvas`; `packages/agent/src/messages.ts` strips image parts for models without it. Adding a provider/model: see README.
 
 ### Persistence & access
 

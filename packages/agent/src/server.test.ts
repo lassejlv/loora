@@ -12,7 +12,7 @@ let topUpRemaining = 0
 let chatgptModels: string[] | null = ['gpt-5.6-sol']
 let releaseCalls: Array<[string, string]> = []
 
-const originalWaferApiKey = process.env.WAFER_API_KEY
+const originalOpenRouterApiKey = process.env.OPENROUTER_API_KEY
 
 mock.module('@loora/db', () => ({
   db: {
@@ -109,8 +109,8 @@ function chatRequest(model = 'mini') {
 }
 
 afterAll(() => {
-  if (originalWaferApiKey === undefined) delete process.env.WAFER_API_KEY
-  else process.env.WAFER_API_KEY = originalWaferApiKey
+  if (originalOpenRouterApiKey === undefined) delete process.env.OPENROUTER_API_KEY
+  else process.env.OPENROUTER_API_KEY = originalOpenRouterApiKey
   mock.restore()
 })
 
@@ -127,7 +127,7 @@ describe('agent server HTTP contract', () => {
     topUpRemaining = 0
     chatgptModels = ['gpt-5.6-sol']
     releaseCalls = []
-    process.env.WAFER_API_KEY = 'test-wafer-key'
+    process.env.OPENROUTER_API_KEY = 'test-openrouter-key'
   })
 
   it('keeps unauthenticated chat requests at 401', async () => {
@@ -172,11 +172,11 @@ describe('agent server HTTP contract', () => {
 
   it('preserves provider configuration and ChatGPT availability errors', async () => {
     signedIn = true
-    delete process.env.WAFER_API_KEY
+    delete process.env.OPENROUTER_API_KEY
     const missingKey = await handleAgentChatRequest(chatRequest())
     expect(missingKey.status).toBe(503)
     expect(await missingKey.json()).toEqual({
-      error: 'Wafer is not configured. Set WAFER_API_KEY on the server.',
+      error: 'OpenRouter is not configured. Set OPENROUTER_API_KEY on the server.',
     })
 
     chatgptModels = null

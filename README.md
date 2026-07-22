@@ -17,7 +17,7 @@ Set these values in `.env`:
 - `BETTER_AUTH_SECRET`: at least 32 random characters
 - `BETTER_AUTH_URL`: the public app origin, usually `http://localhost:3000` locally
 - `REQUIRE_PREVIEW_ACCESS`: defaults to required; set to `false` to let every signed-in user in
-- `WAFER_API_KEY`: the server-managed Wafer key used by the default models
+- `OPENROUTER_API_KEY`: the server-managed OpenRouter key used by the default models
 - `LWC_SECRET`: a stable random secret used to encrypt Login with ChatGPT sessions (`openssl rand -hex 32`)
 - `CODEX_CLIENT_VERSION`: Codex protocol version used for ChatGPT model discovery (defaults to `0.145.0`)
 
@@ -92,23 +92,17 @@ Canvas documents, shapes, version history, and multiple agent chats per design a
 ## AI providers and models
 
 Providers and models live in one typed catalog: [`packages/agent/src/models.ts`](packages/agent/src/models.ts).
-Server-managed providers use an OpenAI-compatible API. ChatGPT-backed models use each
+Server-managed models use OpenRouter. GLM is pinned to Wafer's standard or fast endpoint, while
+MiniMax M3 uses MiniMax's endpoint because OpenRouter does not currently offer it through Wafer. ChatGPT-backed models use each
 user's connected ChatGPT account and are only shown when that account reports the model as available.
 
-To add a provider, add its label, base URL, and API-key environment variable:
+The managed provider uses one server-side OpenRouter key:
 
 ```ts
 export const PROVIDERS = {
-  wafer: {
-    kind: 'openai-compatible',
-    label: 'Wafer',
-    baseURL: 'https://pass.wafer.ai/v1',
-    apiKeyEnv: 'WAFER_API_KEY',
-  },
   openrouter: {
-    kind: 'openai-compatible',
+    kind: 'openrouter',
     label: 'OpenRouter',
-    baseURL: 'https://openrouter.ai/api/v1',
     apiKeyEnv: 'OPENROUTER_API_KEY',
   },
 } as const satisfies Record<string, ProviderDefinition>
@@ -118,13 +112,15 @@ Then add models with any Loora label and upstream model ID:
 
 ```ts
 {
-  id: 'sonnet',
-  label: 'Claude Sonnet',
+  id: 'mini',
+  label: 'Mini',
   provider: 'openrouter',
-  modelId: 'anthropic/claude-sonnet-4',
+  modelId: 'minimax/minimax-m3',
+  routingProvider: 'minimax',
   supportsImageInput: true,
-  price: { input: 3, output: 15 },
+  price: { input: 1.2, output: 4.9 },
 }
 ```
 
-Finally, set the provider's API-key environment variable. The provider name is shown beside each model in the picker.
+Use `routingProvider: 'wafer/fp4'` for standard Wafer or `'wafer/fast'` for its fast endpoint.
+Finally, set `OPENROUTER_API_KEY`. The provider name is shown beside each model in the picker.

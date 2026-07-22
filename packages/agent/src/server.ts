@@ -1,5 +1,5 @@
-import { createOpenAICompatible } from '@ai-sdk/openai-compatible'
 import { createChatGPTProxyProvider } from '@opencoredev/loginwithchatgpt-ai'
+import { createOpenRouter } from '@openrouter/ai-sdk-provider'
 import {
   convertToModelMessages,
   stepCountIs,
@@ -119,7 +119,7 @@ export async function handleAgentChatRequest(request: Request): Promise<Response
   const modelConfig = getModel(modelKey ?? '')
   const providerConfig = getProvider(modelConfig.provider)
   const key = modelConfig.id
-  const usingChatGPT = providerConfig.kind === 'chatgpt'
+  const usingChatGPT = modelConfig.provider === 'chatgpt'
   const reasoningEffort = getChatGPTReasoningEffort(requestedReasoningEffort)
   if (!usingChatGPT && !billing.managedAiAccess) {
     return Response.json(
@@ -152,6 +152,9 @@ export async function handleAgentChatRequest(request: Request): Promise<Response
     })
     model = provider(modelConfig.modelId)
   } else {
+    if (providerConfig.kind !== 'openrouter') {
+      throw new Error(`Unsupported managed AI provider: ${modelConfig.provider}`)
+    }
     const apiKey = process.env[providerConfig.apiKeyEnv]
     if (!apiKey) {
       return Response.json(
@@ -161,14 +164,12 @@ export async function handleAgentChatRequest(request: Request): Promise<Response
         { status: 503 },
       )
     }
-    const provider = createOpenAICompatible({
-      name: modelConfig.provider,
-      baseURL: providerConfig.baseURL,
+    const provider = createOpenRouter({
       apiKey,
-      headers: providerConfig.headers,
-      includeUsage: providerConfig.includeUsage,
     })
-    model = provider(modelConfig.modelId)
+    model = provider(modelConfig.modelId, {
+      provider: { only: [modelConfig.routingProvider] },
+    })
   }
   const imageInputsEnabled = modelSupportsImageInput(key)
   const providerOptions = usingChatGPT
