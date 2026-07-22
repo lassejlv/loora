@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, gt, isNotNull, lt, or } from 'drizzle-orm'
+import { and, asc, desc, eq, gt, isNotNull, lt, or, sql } from 'drizzle-orm'
 import { ORPCError, os } from '@orpc/server'
 import { z } from 'zod'
 import { db } from '@loora/db'
@@ -277,6 +277,31 @@ const listPublishLinks = protectedProcedure
       )
     return rows.map((row) => ({ ...row, expiresAt: row.expiresAt.getTime() }))
   })
+
+// All of a user's live links across designs (settings panel). The element
+// name is extracted in SQL so the full shapes JSONB never leaves the database.
+const listAllPublishLinks = protectedProcedure.handler(async ({ context }) => {
+  const rows = await db
+    .select({
+      id: publishLink.id,
+      designId: publishLink.designId,
+      elementId: publishLink.elementId,
+      expiresAt: publishLink.expiresAt,
+      designName: design.name,
+      elementName: sql<string | null>`(
+        select elem->>'name' from jsonb_array_elements(${design.shapes}) elem
+        where elem->>'id' = ${publishLink.elementId} limit 1
+      )`,
+    })
+    .from(publishLink)
+    .innerJoin(
+      design,
+      and(eq(design.id, publishLink.designId), eq(design.userId, publishLink.userId)),
+    )
+    .where(and(eq(publishLink.userId, context.user.id), gt(publishLink.expiresAt, new Date())))
+    .orderBy(desc(publishLink.createdAt))
+  return rows.map((row) => ({ ...row, expiresAt: row.expiresAt.getTime() }))
+})
 
 const listVersions = protectedProcedure
   .input(
@@ -1166,6 +1191,7 @@ export const appRouter = {
     create: createPublishLink,
     delete: deletePublishLink,
     list: listPublishLinks,
+    listAll: listAllPublishLinks,
   },
   history: {
     list: listVersions,

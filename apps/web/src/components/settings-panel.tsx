@@ -438,6 +438,116 @@ const THEME_OPTIONS: { value: ThemePreference; label: string }[] = [
   { value: 'dark', label: 'Dark' },
 ]
 
+interface PublishedLink {
+  id: string
+  designId: string
+  elementId: string
+  expiresAt: number
+  designName: string
+  elementName: string | null
+}
+
+function PublishedLinksSection() {
+  const [links, setLinks] = useState<PublishedLink[] | null>(null)
+  const [error, setError] = useState(false)
+  const [copiedId, setCopiedId] = useState<string | null>(null)
+  const [busyId, setBusyId] = useState<string | null>(null)
+
+  useEffect(() => {
+    let cancelled = false
+    orpc.publish
+      .listAll()
+      .then((rows) => {
+        if (!cancelled) setLinks(rows)
+      })
+      .catch(() => {
+        if (!cancelled) setError(true)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  async function copyLink(id: string) {
+    try {
+      await navigator.clipboard.writeText(`${window.location.origin}/p/${id}`)
+      setCopiedId(id)
+      window.setTimeout(() => setCopiedId((current) => (current === id ? null : current)), 2000)
+    } catch {
+      // Row link stays visible for a manual copy.
+    }
+  }
+
+  async function deleteLink(id: string) {
+    setBusyId(id)
+    try {
+      await orpc.publish.delete({ id })
+      setLinks((current) => current?.filter((link) => link.id !== id) ?? current)
+    } catch {
+      setError(true)
+    } finally {
+      setBusyId(null)
+    }
+  }
+
+  return (
+    <div className="flex flex-col gap-3 border-t pt-6">
+      <div>
+        <h2 className="text-sm font-semibold">Published links</h2>
+        <p className="mt-1 text-xs text-muted-foreground">
+          Live public links to your pages. Each expires 12 hours after publishing; delete one to
+          take it offline immediately.
+        </p>
+      </div>
+      {error ? (
+        <p className="text-xs text-destructive">Could not load published links.</p>
+      ) : links === null ? (
+        <p className="cx-shimmer text-xs">Loading links…</p>
+      ) : links.length === 0 ? (
+        <p className="text-xs text-muted-foreground">No active links.</p>
+      ) : (
+        <ul className="flex flex-col divide-y rounded-lg border">
+          {links.map((link) => (
+            <li key={link.id} className="flex items-center gap-3 px-3 py-2">
+              <div className="min-w-0 flex-1">
+                <a
+                  href={`/p/${link.id}`}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="block truncate text-xs font-medium hover:underline"
+                >
+                  {link.elementName || link.designName}
+                </a>
+                <p className="truncate text-[11px] text-muted-foreground">
+                  {link.designName} · expires in{' '}
+                  {Math.max(1, Math.round((link.expiresAt - Date.now()) / 3_600_000))}h
+                </p>
+              </div>
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-7 px-2.5 text-xs"
+                onClick={() => void copyLink(link.id)}
+              >
+                {copiedId === link.id ? 'Copied' : 'Copy'}
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-7 px-2.5 text-xs text-destructive-foreground"
+                disabled={busyId === link.id}
+                onClick={() => void deleteLink(link.id)}
+              >
+                Delete
+              </Button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  )
+}
+
 function AppearanceSection() {
   const [preference, setPreference] = useState<ThemePreference>(() => getThemePreference())
 
@@ -597,6 +707,7 @@ export function SettingsPanel({
               Sign out
             </Button>
           </div>
+          <PublishedLinksSection />
           <AppearanceSection />
           <DeleteAccountSection />
         </TabsPanel>
