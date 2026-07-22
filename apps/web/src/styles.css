@@ -273,31 +273,32 @@ body {
 }
 
 .dark {
-  /* Warm dark mirror of the light tokens — same hue family, inverted value. */
-  --cx-canvas: #1c1b19;
-  --cx-dot: #33312d;
-  --cx-ink: #e8e6e1;
-  --cx-accent: #5b71f5;
+  /* Cool graphite instead of a literal warm inversion — the warm mirror read muddy.
+     Canvas sits a step lighter than the chrome so panels recede and elements pop. */
+  --cx-canvas: #17181c;
+  --cx-dot: #2e3038;
+  --cx-ink: #e9eaee;
+  --cx-accent: #7387ff;
 
-  --background: #161514;
+  --background: #101114;
   --foreground: var(--cx-ink);
-  --card: #211f1d;
+  --card: #1c1e24;
   --card-foreground: var(--cx-ink);
-  --popover: #211f1d;
+  --popover: #1c1e24;
   --popover-foreground: var(--cx-ink);
   --primary: var(--cx-ink);
-  --primary-foreground: #161514;
-  --secondary: --alpha(var(--color-white) / 7%);
+  --primary-foreground: #101114;
+  --secondary: --alpha(var(--color-white) / 8%);
   --secondary-foreground: var(--cx-ink);
-  --muted: --alpha(var(--color-white) / 7%);
-  --muted-foreground: #a09c93;
-  --accent: --alpha(var(--color-white) / 7%);
+  --muted: --alpha(var(--color-white) / 8%);
+  --muted-foreground: #9a9eab;
+  --accent: --alpha(var(--color-white) / 8%);
   --accent-foreground: var(--cx-ink);
   --destructive: var(--color-red-500);
   --destructive-foreground: var(--color-red-400);
-  --border: --alpha(var(--color-white) / 12%);
+  --border: --alpha(var(--color-white) / 11%);
   --input: --alpha(var(--color-white) / 14%);
-  --sidebar-primary-foreground: #161514;
+  --sidebar-primary-foreground: #101114;
   --info: var(--color-blue-500);
   --info-foreground: var(--color-blue-400);
   --success: var(--color-emerald-500);
