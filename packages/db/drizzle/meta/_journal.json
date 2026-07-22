@@ -169,6 +169,13 @@
       "when": 1784751956003,
       "tag": "0023_luxuriant_red_ghost",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1784753378086,
+      "tag": "0024_melted_brood",
+      "breakpoints": true
     }
   ]
 }

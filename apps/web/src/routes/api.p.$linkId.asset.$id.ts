@@ -4,7 +4,11 @@ import { and, eq } from 'drizzle-orm'
 import { db } from '@loora/db'
 import { asset } from '@loora/db/schema'
 import { referencedAssetIds } from '@loora/rpc/handoff'
-import { getPublishedElement } from '@loora/rpc/publish'
+import {
+  getPublishedElement,
+  publishEgressExceeded,
+  recordPublishEgress,
+} from '@loora/rpc/publish'
 import { s3 } from '@loora/rpc/storage'
 
 export const Route = createFileRoute('/api/p/$linkId/asset/$id')({
@@ -16,6 +20,11 @@ export const Route = createFileRoute('/api/p/$linkId/asset/$id')({
         // the link is not a key to the owner's whole asset library.
         if (!published || !referencedAssetIds([published.element]).has(params.id)) {
           return new Response('Not found', { status: 404 })
+        }
+        // Egress check before touching the asset, so an over-limit page never
+        // costs an S3 read.
+        if (await publishEgressExceeded(published.userId, published.isAdmin)) {
+          return new Response('Bandwidth limit reached', { status: 429 })
         }
 
         const [found] = await db
@@ -38,6 +47,7 @@ export const Route = createFileRoute('/api/p/$linkId/asset/$id')({
           return new Response('Asset unavailable', { status: 404 })
         }
 
+        await recordPublishEgress(published.userId, bytes.byteLength)
         return new Response(new Blob([bytes as Uint8Array<ArrayBuffer>]), {
           headers: {
             // Short private cache: link lives at most 12h and content is

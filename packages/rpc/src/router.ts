@@ -22,7 +22,14 @@ import { googleOAuthEnabled, type getSession } from '@loora/auth'
 import type { CanvasElement } from '@loora/db/canvas'
 import { assetKey, s3 } from './storage'
 import { createHandoffToken } from './handoff-token'
-import { PUBLISH_TTL_MS, publishLinkId } from './publish'
+import {
+  PUBLISH_EGRESS_LIMIT_BYTES,
+  PUBLISH_EGRESS_WINDOW_DAYS,
+  PUBLISH_TTL_MS,
+  publishEgressUsed,
+  publishLinkId,
+  sweepPublishEgress,
+} from './publish'
 import {
   authorizeBilling,
   createPlanCheckout,
@@ -231,10 +238,12 @@ const createPublishLink = protectedProcedure
       throw new ORPCError('NOT_FOUND')
     }
 
-    // Lazy cleanup: publishing sweeps this user's expired links.
+    // Lazy cleanup: publishing sweeps this user's expired links and stale
+    // egress counter rows.
     await db
       .delete(publishLink)
       .where(and(eq(publishLink.userId, context.user.id), lt(publishLink.expiresAt, new Date())))
+    await sweepPublishEgress(context.user.id)
 
     const id = publishLinkId()
     const expiresAt = new Date(Date.now() + PUBLISH_TTL_MS)
@@ -277,6 +286,15 @@ const listPublishLinks = protectedProcedure
       )
     return rows.map((row) => ({ ...row, expiresAt: row.expiresAt.getTime() }))
   })
+
+const getPublishEgress = protectedProcedure.handler(async ({ context }) => {
+  return {
+    usedBytes: await publishEgressUsed(context.user.id),
+    limitBytes: PUBLISH_EGRESS_LIMIT_BYTES,
+    windowDays: PUBLISH_EGRESS_WINDOW_DAYS,
+    unlimited: context.user.isAdmin === true,
+  }
+})
 
 // All of a user's live links across designs (settings panel). The element
 // name is extracted in SQL so the full shapes JSONB never leaves the database.
@@ -1192,6 +1210,7 @@ export const appRouter = {
     delete: deletePublishLink,
     list: listPublishLinks,
     listAll: listAllPublishLinks,
+    egress: getPublishEgress,
   },
   history: {
     list: listVersions,

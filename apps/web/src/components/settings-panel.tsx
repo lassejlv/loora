@@ -447,8 +447,23 @@ interface PublishedLink {
   elementName: string | null
 }
 
+interface PublishEgress {
+  usedBytes: number
+  limitBytes: number
+  windowDays: number
+  unlimited: boolean
+}
+
+function formatGigabytes(bytes: number) {
+  const gb = bytes / 1024 ** 3
+  if (gb >= 10) return gb.toFixed(0)
+  if (gb >= 0.1) return gb.toFixed(1)
+  return gb === 0 ? '0' : '<0.1'
+}
+
 function PublishedLinksSection() {
   const [links, setLinks] = useState<PublishedLink[] | null>(null)
+  const [egress, setEgress] = useState<PublishEgress | null>(null)
   const [error, setError] = useState(false)
   const [copiedId, setCopiedId] = useState<string | null>(null)
   const [busyId, setBusyId] = useState<string | null>(null)
@@ -463,6 +478,12 @@ function PublishedLinksSection() {
       .catch(() => {
         if (!cancelled) setError(true)
       })
+    orpc.publish
+      .egress()
+      .then((status) => {
+        if (!cancelled) setEgress(status)
+      })
+      .catch(() => {})
     return () => {
       cancelled = true
     }
@@ -499,6 +520,41 @@ function PublishedLinksSection() {
           take it offline immediately.
         </p>
       </div>
+      {egress && !egress.unlimited ? (
+        <div className="flex flex-col gap-1.5">
+          <div className="flex items-baseline justify-between text-xs">
+            <span className="text-muted-foreground">
+              Bandwidth (last {egress.windowDays} days)
+            </span>
+            <span
+              className={
+                egress.usedBytes >= egress.limitBytes
+                  ? 'font-medium text-destructive'
+                  : 'font-medium'
+              }
+            >
+              {formatGigabytes(egress.usedBytes)} / {formatGigabytes(egress.limitBytes)} GB
+            </span>
+          </div>
+          <div className="h-1.5 overflow-hidden rounded-full bg-input">
+            <div
+              className={
+                egress.usedBytes >= egress.limitBytes
+                  ? 'h-full rounded-full bg-destructive'
+                  : 'h-full rounded-full bg-cx-accent'
+              }
+              style={{
+                width: `${Math.min(100, (egress.usedBytes / egress.limitBytes) * 100)}%`,
+              }}
+            />
+          </div>
+          {egress.usedBytes >= egress.limitBytes ? (
+            <p className="text-[11px] text-destructive">
+              Limit reached — your published links are paused until usage drops out of the window.
+            </p>
+          ) : null}
+        </div>
+      ) : null}
       {error ? (
         <p className="text-xs text-destructive">Could not load published links.</p>
       ) : links === null ? (

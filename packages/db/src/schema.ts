@@ -1,5 +1,6 @@
 import { relations } from 'drizzle-orm'
 import {
+  bigint,
   boolean,
   foreignKey,
   index,
@@ -186,6 +187,21 @@ export const publishLink = pgTable(
     }).onDelete('cascade'),
     index('publish_link_design_idx').on(table.userId, table.designId),
   ],
+)
+
+// Bytes served through public publish links, one counter row per user per UTC
+// day ('YYYY-MM-DD'). Upsert-incremented per response; limits sum a rolling
+// window over these rows instead of logging one row per request.
+export const publishEgress = pgTable(
+  'publish_egress',
+  {
+    userId: text('user_id')
+      .notNull()
+      .references(() => user.id, { onDelete: 'cascade' }),
+    day: text('day').notNull(),
+    bytes: bigint('bytes', { mode: 'number' }).default(0).notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.userId, table.day] })],
 )
 
 // GitHub App user tokens are encrypted before they reach these columns. A user
