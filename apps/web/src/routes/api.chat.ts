@@ -57,6 +57,8 @@ import {
 } from '@loora/auth/github'
 import {
   runParallelSubagents,
+  runSubagentStream,
+  subagentFailureMessage,
   type DelegatedTask,
   type SubagentOutcome,
 } from '#/lib/subagents'
@@ -880,15 +882,18 @@ export const Route = createFileRoute('/api/chat')({
               })
 
               try {
-                const result = await worker.generate({
-                  prompt: [
-                    `Your task: ${task.task}`,
-                    '',
-                    workerSharedContext,
-                  ].join('\n'),
-                  abortSignal,
-                  timeout: 90_000,
-                })
+                const result = await runSubagentStream(
+                  worker,
+                  {
+                    prompt: [
+                      `Your task: ${task.task}`,
+                      '',
+                      workerSharedContext,
+                    ].join('\n'),
+                    abortSignal,
+                    timeout: 90_000,
+                  },
+                )
                 subagentInputTokens += result.totalUsage.inputTokens ?? 0
                 subagentOutputTokens += result.totalUsage.outputTokens ?? 0
                 const text = result.text.trim()
@@ -896,13 +901,13 @@ export const Route = createFileRoute('/api/chat')({
                   ? { result: text }
                   : { error: 'Sub-agent returned no deliverable.' }
               } catch (error) {
-                if (abortSignal?.aborted) return { error: 'Cancelled by the user.' }
-                const message = error instanceof Error ? error.message : ''
-                if (/time(?:d)?\s*out|timeout/i.test(message)) {
-                  return { error: 'Timed out after 90 seconds.' }
-                }
                 console.error(`[chat] Sub-agent "${task.name}" failed:`, error)
-                return { error: 'Sub-agent failed.' }
+                return {
+                  error: subagentFailureMessage(error, {
+                    aborted: abortSignal?.aborted === true,
+                    usingChatGPT,
+                  }),
+                }
               }
             })
           },

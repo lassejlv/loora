@@ -512,7 +512,7 @@ describe('AgentPanel empty response recovery', () => {
               name: 'Visuals',
               task: 'Draft the visual direction',
               status: 'failed',
-              error: 'Timed out after 90 seconds.',
+              error: 'The model is temporarily rate limited. Try again shortly.',
             },
           ],
         },
@@ -539,7 +539,7 @@ describe('AgentPanel empty response recovery', () => {
     view.rerender(<ChatMessageRow {...props} message={failed} streaming={false} />)
     expect(screen.getByText('1 completed · 1 failed')).toBeTruthy()
     expect(screen.getByLabelText('Sub-agent failed')).toBeTruthy()
-    expect(screen.getByText('Timed out after 90 seconds.')).toBeTruthy()
+    expect(screen.getByText('The model is temporarily rate limited. Try again shortly.')).toBeTruthy()
   })
 
   it('marks an unfinished persisted delegation as cancelled', () => {

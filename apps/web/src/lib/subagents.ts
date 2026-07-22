@@ -20,6 +20,44 @@ export type SubagentOutcome =
   | { result: string }
   | { error: string }
 
+type SubagentStreamResult = {
+  text: PromiseLike<string>
+  totalUsage: PromiseLike<{
+    inputTokens?: number
+    outputTokens?: number
+  }>
+}
+
+export async function runSubagentStream<TOptions>(
+  agent: { stream(options: TOptions): PromiseLike<SubagentStreamResult> },
+  options: TOptions,
+) {
+  const stream = await agent.stream(options)
+  const [text, totalUsage] = await Promise.all([stream.text, stream.totalUsage])
+  return { text, totalUsage }
+}
+
+export function subagentFailureMessage(
+  error: unknown,
+  { aborted, usingChatGPT }: { aborted: boolean; usingChatGPT: boolean },
+) {
+  if (aborted) return 'Cancelled by the user.'
+
+  const message = error instanceof Error ? error.message : ''
+  const statusCode = typeof error === 'object' && error !== null && 'statusCode' in error
+    ? (error as { statusCode?: unknown }).statusCode
+    : undefined
+
+  if (statusCode === 408 || /time(?:d)?\s*out|timeout/i.test(message)) {
+    return 'Timed out after 90 seconds.'
+  }
+  if (statusCode === 429) return 'The model is temporarily rate limited. Try again shortly.'
+  if (usingChatGPT && (statusCode === 401 || statusCode === 403)) {
+    return 'Reconnect ChatGPT in Settings and try again.'
+  }
+  return 'The selected model could not run this sub-agent.'
+}
+
 export function truncateSubagentResult(
   result: string,
   maxChars = MAX_SUBAGENT_RESULT_CHARS,

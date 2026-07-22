@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'bun:test'
+import { ToolLoopAgent } from 'ai'
+import { MockLanguageModelV4, simulateReadableStream } from 'ai/test'
 import {
   runParallelSubagents,
+  runSubagentStream,
+  subagentFailureMessage,
   truncateSubagentResult,
   type DelegatedTask,
   type SubagentBatch,
@@ -73,5 +77,90 @@ describe('runParallelSubagents', () => {
     expect(truncateSubagentResult('abcdef', 4)).toBe(
       'abcd\n…[sub-agent result truncated]',
     )
+  })
+})
+
+describe('runSubagentStream', () => {
+  it('uses model streaming instead of non-streaming generation', async () => {
+    const model = new MockLanguageModelV4({
+      doGenerate: async () => {
+        throw new Error('non-streaming generation is unsupported')
+      },
+      doStream: {
+        stream: simulateReadableStream({
+          chunks: [
+            { type: 'stream-start', warnings: [] },
+            { type: 'text-start', id: 'text-1' },
+            { type: 'text-delta', id: 'text-1', delta: 'Streamed result' },
+            { type: 'text-end', id: 'text-1' },
+            {
+              type: 'finish',
+              finishReason: { unified: 'stop', raw: 'stop' },
+              usage: {
+                inputTokens: { total: 12, noCache: 12, cacheRead: 0, cacheWrite: 0 },
+                outputTokens: { total: 34, text: 34, reasoning: 0 },
+              },
+            },
+          ],
+        }),
+      },
+    })
+    const agent = new ToolLoopAgent({ model })
+    const abortController = new AbortController()
+
+    const result = await runSubagentStream(agent, {
+      prompt: 'Draft a concept',
+      abortSignal: abortController.signal,
+      timeout: 90_000,
+    })
+
+    expect(model.doGenerateCalls).toHaveLength(0)
+    expect(model.doStreamCalls).toHaveLength(1)
+    expect(model.doStreamCalls[0].abortSignal?.aborted).toBe(false)
+    abortController.abort()
+    expect(model.doStreamCalls[0].abortSignal?.aborted).toBe(true)
+    expect(result).toMatchObject({
+      text: 'Streamed result',
+      totalUsage: { inputTokens: 12, outputTokens: 34 },
+    })
+  })
+
+  it('propagates stream failures for worker-level handling', async () => {
+    const failure = Object.assign(new Error('provider failed'), { statusCode: 429 })
+    const agent = {
+      stream: async () => {
+        throw failure
+      },
+    }
+
+    await expect(runSubagentStream(agent, {})).rejects.toBe(failure)
+  })
+})
+
+describe('subagentFailureMessage', () => {
+  it('distinguishes cancellation, timeout, rate limits, and ChatGPT authentication', () => {
+    expect(subagentFailureMessage(new Error('anything'), {
+      aborted: true,
+      usingChatGPT: false,
+    })).toBe('Cancelled by the user.')
+    expect(subagentFailureMessage(new Error('Request timeout'), {
+      aborted: false,
+      usingChatGPT: false,
+    })).toBe('Timed out after 90 seconds.')
+    expect(subagentFailureMessage({ statusCode: 429 }, {
+      aborted: false,
+      usingChatGPT: false,
+    })).toBe('The model is temporarily rate limited. Try again shortly.')
+    expect(subagentFailureMessage({ statusCode: 401 }, {
+      aborted: false,
+      usingChatGPT: true,
+    })).toBe('Reconnect ChatGPT in Settings and try again.')
+  })
+
+  it('keeps unknown provider failures safe', () => {
+    expect(subagentFailureMessage(new Error('secret upstream response'), {
+      aborted: false,
+      usingChatGPT: false,
+    })).toBe('The selected model could not run this sub-agent.')
   })
 })
