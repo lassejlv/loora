@@ -30,6 +30,7 @@ import { FigmaAccount } from '#/components/figma-account'
 import { McpSessions } from '#/components/mcp-sessions'
 import { PanelLoading, PanelShell } from '#/components/panel-shell'
 import { ShortcutsSettings } from '#/components/shortcuts-settings'
+import { AgentInstructionsSettings } from '#/components/agent-instructions-settings'
 import { clearWelcomeSeen } from '#/components/welcome-dialog'
 import { editorSearchParams, type IntegrationTab, type SettingsTab } from '#/lib/url-state'
 import type { ShortcutConfig } from '#/lib/shortcuts'
@@ -532,10 +533,14 @@ export function SettingsPanel({
   onClose,
   shortcutConfig,
   onShortcutConfigChange,
+  agentSystemPrompt,
+  onSaveAgentSystemPrompt,
 }: {
   onClose?: () => void
   shortcutConfig: ShortcutConfig
   onShortcutConfigChange: (next: ShortcutConfig) => void
+  agentSystemPrompt: string | null
+  onSaveAgentSystemPrompt: (prompt: string) => Promise<void>
 }) {
   const { data: session } = authClient.useSession()
   const isAdmin = session?.user.isAdmin === true
@@ -563,8 +568,9 @@ export function SettingsPanel({
         }}
         className="flex flex-col gap-6"
       >
-        <TabsList className={`grid w-full ${isAdmin ? 'grid-cols-5' : 'grid-cols-4'}`}>
+        <TabsList className={`grid w-full grid-cols-3 ${isAdmin ? 'sm:grid-cols-6' : 'sm:grid-cols-5'}`}>
           <TabsTab value="account">Account</TabsTab>
+          <TabsTab value="agent">Agent</TabsTab>
           <TabsTab value="integrations">Integrations</TabsTab>
           <TabsTab value="billing">Billing</TabsTab>
           <TabsTab value="shortcuts">Shortcuts</TabsTab>
@@ -593,6 +599,17 @@ export function SettingsPanel({
           </div>
           <AppearanceSection />
           <DeleteAccountSection />
+        </TabsPanel>
+
+        <TabsPanel value="agent">
+          {agentSystemPrompt === null ? (
+            <PanelLoading label="Loading agent instructions…" />
+          ) : (
+            <AgentInstructionsSettings
+              savedPrompt={agentSystemPrompt}
+              onSave={onSaveAgentSystemPrompt}
+            />
+          )}
         </TabsPanel>
 
         <TabsPanel value="integrations" className="flex flex-col gap-4">

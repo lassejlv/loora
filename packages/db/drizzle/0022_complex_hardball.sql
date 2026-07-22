@@ -1,0 +1,1 @@
+ALTER TABLE "user_preferences" ADD COLUMN "agent_system_prompt" text DEFAULT '' NOT NULL;

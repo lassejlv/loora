@@ -421,6 +421,9 @@ function Editor({ preview = false, userId }: { preview?: boolean; userId?: strin
   const [shortcutConfig, setShortcutConfig] = useState<ShortcutConfig>(() =>
     preview ? { overrides: {}, custom: [] } : loadCachedShortcuts(),
   )
+  const [agentSystemPrompt, setAgentSystemPrompt] = useState<string | null>(() =>
+    preview ? '' : null,
+  )
 
   useEffect(() => {
     if (preview || urlSeeded.current) return
@@ -438,9 +441,13 @@ function Editor({ preview = false, userId }: { preview?: boolean; userId?: strin
         if (cancelled) return
         const next = normalizeConfig(prefs.shortcuts)
         setShortcutConfig(next)
+        setAgentSystemPrompt(prefs.agentSystemPrompt)
         cacheShortcuts(next)
       })
-      .catch((error) => console.error('[preferences] Failed to load shortcuts:', error))
+      .catch((error) => {
+        console.error('[preferences] Failed to load preferences:', error)
+        if (!cancelled) setAgentSystemPrompt('')
+      })
     return () => {
       cancelled = true
     }
@@ -458,6 +465,11 @@ function Editor({ preview = false, userId }: { preview?: boolean; userId?: strin
         },
       })
       .catch((error) => console.error('[preferences] Failed to save shortcuts:', error))
+  }
+
+  const saveAgentSystemPrompt = async (prompt: string) => {
+    const saved = await orpc.preferences.saveAgentPrompt({ prompt })
+    setAgentSystemPrompt(saved.agentSystemPrompt)
   }
 
   const shortcutLabel = (id: BuiltInShortcutId) => formatBuiltInChord(id, shortcutConfig)
@@ -1717,6 +1729,8 @@ function Editor({ preview = false, userId }: { preview?: boolean; userId?: strin
               onClose={() => setSettingsOpen(false)}
               shortcutConfig={shortcutConfig}
               onShortcutConfigChange={updateShortcutConfig}
+              agentSystemPrompt={agentSystemPrompt}
+              onSaveAgentSystemPrompt={saveAgentSystemPrompt}
             />
           </DrawerPopup>
         </Drawer>

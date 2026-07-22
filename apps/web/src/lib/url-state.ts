@@ -5,7 +5,7 @@ import {
   parseAsStringLiteral,
 } from 'nuqs'
 
-export const SETTINGS_TABS = ['account', 'integrations', 'billing', 'shortcuts', 'admin'] as const
+export const SETTINGS_TABS = ['account', 'agent', 'integrations', 'billing', 'shortcuts', 'admin'] as const
 export type SettingsTab = (typeof SETTINGS_TABS)[number]
 
 export const INTEGRATION_TABS = ['chatgpt', 'github', 'figma', 'mcp'] as const

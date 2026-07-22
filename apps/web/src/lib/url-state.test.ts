@@ -29,6 +29,14 @@ describe('bootstrapEditorSearch', () => {
     })
   })
 
+  test('supports the agent settings deep-link', () => {
+    window.history.replaceState({}, '', '/?settings=agent')
+    expect(bootstrapEditorSearch('doc_1')).toEqual({
+      d: 'doc_1',
+      settings: 'agent',
+    })
+  })
+
   test('seeds agent/layers from localStorage when URL omits them', () => {
     window.localStorage.setItem('loora:agent', '0')
     window.localStorage.setItem('loora:layers', '1')

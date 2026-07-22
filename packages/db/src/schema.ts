@@ -311,6 +311,7 @@ export const userPreferences = pgTable('user_preferences', {
     .$type<ShortcutConfig>()
     .default(EMPTY_SHORTCUT_CONFIG)
     .notNull(),
+  agentSystemPrompt: text('agent_system_prompt').default('').notNull(),
   updatedAt: timestamp('updated_at')
     .defaultNow()
     .$onUpdate(() => new Date())

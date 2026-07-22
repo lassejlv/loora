@@ -16,6 +16,7 @@ import {
 } from '@loora/db/schema'
 import { EMPTY_SHORTCUT_CONFIG } from '@loora/db/shortcuts'
 import { parseShortcutConfig, shortcutConfigSchema } from './shortcuts'
+import { agentSystemPromptSchema } from './agent-prompt'
 import { googleOAuthEnabled, type getSession } from '@loora/auth'
 import type { CanvasElement } from '@loora/db/canvas'
 import { assetKey, s3 } from './storage'
@@ -1009,12 +1010,16 @@ const setUserPreviewAccess = adminProcedure
 
 const getPreferences = protectedProcedure.handler(async ({ context }) => {
   const [row] = await db
-    .select({ shortcuts: userPreferences.shortcuts })
+    .select({
+      shortcuts: userPreferences.shortcuts,
+      agentSystemPrompt: userPreferences.agentSystemPrompt,
+    })
     .from(userPreferences)
     .where(eq(userPreferences.userId, context.user.id))
     .limit(1)
   return {
     shortcuts: row ? parseShortcutConfig(row.shortcuts) : { ...EMPTY_SHORTCUT_CONFIG, custom: [] },
+    agentSystemPrompt: row?.agentSystemPrompt ?? '',
   }
 })
 
@@ -1039,6 +1044,27 @@ const savePreferences = protectedProcedure
     return { shortcuts }
   })
 
+const saveAgentPrompt = protectedProcedure
+  .input(z.object({ prompt: agentSystemPromptSchema }))
+  .handler(async ({ context, input }) => {
+    const agentSystemPrompt = input.prompt
+    await db
+      .insert(userPreferences)
+      .values({
+        userId: context.user.id,
+        agentSystemPrompt,
+        updatedAt: new Date(),
+      })
+      .onConflictDoUpdate({
+        target: userPreferences.userId,
+        set: {
+          agentSystemPrompt,
+          updatedAt: new Date(),
+        },
+      })
+    return { agentSystemPrompt }
+  })
+
 export const appRouter = {
   auth: {
     config: getAuthConfig,
@@ -1049,6 +1075,7 @@ export const appRouter = {
   preferences: {
     get: getPreferences,
     save: savePreferences,
+    saveAgentPrompt,
   },
   billing: {
     status: getCurrentBilling,
