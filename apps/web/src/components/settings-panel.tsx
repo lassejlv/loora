@@ -55,6 +55,8 @@ interface AdminUserUsage {
   weeklyUsd: number
   dailyLimitUsd: number
   weeklyLimitUsd: number
+  publishEgressBytes: number
+  publishEgressLimitBytes: number
 }
 
 const MULTIPLIER_PRESETS = [1, 5, 10, 20] as const
@@ -356,6 +358,15 @@ function AdminTab() {
               <p className="truncate text-xs text-muted-foreground">{account.email}</p>
               <p className="mt-1 font-mono text-[11px] text-muted-foreground">
                 {`$${account.dailyUsd.toFixed(4)} / $${account.dailyLimitUsd.toFixed(2)} today · $${account.weeklyUsd.toFixed(4)} / $${account.weeklyLimitUsd.toFixed(2)} this week`}
+              </p>
+              <p
+                className={`font-mono text-[11px] ${
+                  !account.isAdmin && account.publishEgressBytes >= account.publishEgressLimitBytes
+                    ? 'text-destructive'
+                    : 'text-muted-foreground'
+                }`}
+              >
+                {`${formatGigabytes(account.publishEgressBytes)} / ${formatGigabytes(account.publishEgressLimitBytes)} GB publish egress (30d)${account.isAdmin ? ' · uncapped' : ''}`}
               </p>
             </div>
             <div className="flex flex-col gap-2 sm:items-end">

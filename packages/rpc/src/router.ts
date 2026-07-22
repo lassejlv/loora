@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, gt, isNotNull, lt, or, sql } from 'drizzle-orm'
+import { and, asc, desc, eq, gt, gte, isNotNull, lt, or, sql } from 'drizzle-orm'
 import { ORPCError, os } from '@orpc/server'
 import { z } from 'zod'
 import { db } from '@loora/db'
@@ -11,6 +11,7 @@ import {
   oauthAccessToken,
   oauthApplication,
   oauthConsent,
+  publishEgress,
   publishLink,
   user,
   userPreferences,
@@ -23,6 +24,7 @@ import type { CanvasElement } from '@loora/db/canvas'
 import { assetKey, s3 } from './storage'
 import { createHandoffToken } from './handoff-token'
 import {
+  egressWindowCutoff,
   PUBLISH_EGRESS_LIMIT_BYTES,
   PUBLISH_EGRESS_WINDOW_DAYS,
   PUBLISH_TTL_MS,
@@ -1070,7 +1072,27 @@ const completeCreditTopUp = previewProcedure
     }
   })
 
-const listUsersWithUsage = adminProcedure.handler(() => listUserUsage())
+const listUsersWithUsage = adminProcedure.handler(async () => {
+  // Separate grouped query instead of a second join in listUserUsage — joining
+  // aiUsage and publishEgress together would cross-product both sums.
+  const [accounts, egress] = await Promise.all([
+    listUserUsage(),
+    db
+      .select({
+        userId: publishEgress.userId,
+        total: sql<string>`sum(${publishEgress.bytes})`,
+      })
+      .from(publishEgress)
+      .where(gte(publishEgress.day, egressWindowCutoff()))
+      .groupBy(publishEgress.userId),
+  ])
+  const egressByUser = new Map(egress.map((row) => [row.userId, Number(row.total)]))
+  return accounts.map((account) => ({
+    ...account,
+    publishEgressBytes: egressByUser.get(account.id) ?? 0,
+    publishEgressLimitBytes: PUBLISH_EGRESS_LIMIT_BYTES,
+  }))
+})
 
 const resetUserUsage = adminProcedure
   .input(z.object({ userId: z.string().min(1).max(128) }))

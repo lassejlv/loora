@@ -16,7 +16,7 @@ function utcDay(date = new Date()) {
   return date.toISOString().slice(0, 10)
 }
 
-function egressWindowCutoff() {
+export function egressWindowCutoff() {
   return utcDay(new Date(Date.now() - PUBLISH_EGRESS_WINDOW_DAYS * 24 * 60 * 60 * 1000))
 }
 
