@@ -12,7 +12,7 @@ let topUpRemaining = 0
 let chatgptModels: string[] | null = ['gpt-5.6-sol']
 let releaseCalls: Array<[string, string]> = []
 
-const originalOpenRouterApiKey = process.env.OPENROUTER_API_KEY
+const originalWaferApiKey = process.env.WAFER_API_KEY
 
 mock.module('@loora/db', () => ({
   db: {
@@ -109,8 +109,8 @@ function chatRequest(model = 'mini') {
 }
 
 afterAll(() => {
-  if (originalOpenRouterApiKey === undefined) delete process.env.OPENROUTER_API_KEY
-  else process.env.OPENROUTER_API_KEY = originalOpenRouterApiKey
+  if (originalWaferApiKey === undefined) delete process.env.WAFER_API_KEY
+  else process.env.WAFER_API_KEY = originalWaferApiKey
   mock.restore()
 })
 
@@ -127,7 +127,7 @@ describe('agent server HTTP contract', () => {
     topUpRemaining = 0
     chatgptModels = ['gpt-5.6-sol']
     releaseCalls = []
-    process.env.OPENROUTER_API_KEY = 'test-openrouter-key'
+    process.env.WAFER_API_KEY = 'test-wafer-key'
   })
 
   it('keeps unauthenticated chat requests at 401', async () => {
@@ -172,11 +172,11 @@ describe('agent server HTTP contract', () => {
 
   it('preserves provider configuration and ChatGPT availability errors', async () => {
     signedIn = true
-    delete process.env.OPENROUTER_API_KEY
+    delete process.env.WAFER_API_KEY
     const missingKey = await handleAgentChatRequest(chatRequest())
     expect(missingKey.status).toBe(503)
     expect(await missingKey.json()).toEqual({
-      error: 'OpenRouter is not configured. Set OPENROUTER_API_KEY on the server.',
+      error: 'Wafer is not configured. Set WAFER_API_KEY on the server.',
     })
 
     chatgptModels = null
@@ -195,7 +195,7 @@ describe('agent server HTTP contract', () => {
     signedIn = true
     billingSource = 'cache'
 
-    const response = await handleAgentChatRequest(chatRequest('max'))
+    const response = await handleAgentChatRequest(chatRequest())
 
     expect(response.status).toBe(409)
     expect(await response.json()).toMatchObject({ code: 'AI_GENERATION_IN_PROGRESS' })
@@ -208,7 +208,7 @@ describe('agent server HTTP contract', () => {
     generationLease = 'lease-one'
     flushAllowed = false
 
-    const response = await handleAgentChatRequest(chatRequest('max'))
+    const response = await handleAgentChatRequest(chatRequest())
 
     expect(response.status).toBe(503)
     expect(await response.json()).toMatchObject({ code: 'BILLING_TEMPORARILY_UNAVAILABLE' })
@@ -221,20 +221,10 @@ describe('agent server HTTP contract', () => {
     generationLease = 'lease-one'
     meterBalance = 0
 
-    const response = await handleAgentChatRequest(chatRequest('max'))
+    const response = await handleAgentChatRequest(chatRequest())
 
     expect(response.status).toBe(429)
     expect(await response.json()).toMatchObject({ code: 'AI_CREDITS_EXHAUSTED' })
     expect(releaseCalls).toEqual([['user-one', 'lease-one']])
-  })
-
-  it('keeps the free Mini model outside subscriber credit accounting', async () => {
-    signedIn = true
-    billingSource = 'cache'
-
-    const response = await handleAgentChatRequest(chatRequest('mini'))
-
-    expect(response.status).toBe(200)
-    expect(releaseCalls).toEqual([])
   })
 })

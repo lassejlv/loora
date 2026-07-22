@@ -17,7 +17,7 @@ Set these values in `.env`:
 - `BETTER_AUTH_SECRET`: at least 32 random characters
 - `BETTER_AUTH_URL`: the public app origin, usually `http://localhost:3000` locally
 - `REQUIRE_PREVIEW_ACCESS`: defaults to required; set to `false` to let every signed-in user in
-- `OPENROUTER_API_KEY`: the server-managed OpenRouter key used by the default models
+- `WAFER_API_KEY`: the server-managed Wafer key used by the default models
 - `LWC_SECRET`: a stable random secret used to encrypt Login with ChatGPT sessions (`openssl rand -hex 32`)
 - `CODEX_CLIENT_VERSION`: Codex protocol version used for ChatGPT model discovery (defaults to `0.145.0`)
 
@@ -92,18 +92,18 @@ Canvas documents, shapes, version history, and multiple agent chats per design a
 ## AI providers and models
 
 Providers and models live in one typed catalog: [`packages/agent/src/models.ts`](packages/agent/src/models.ts).
-Server-managed models use OpenRouter. Mini uses OpenRouter's free-model router, while Max uses
-GLM through Wafer's standard endpoint. ChatGPT-backed models use each
+Server-managed providers use an OpenAI-compatible API. ChatGPT-backed models use each
 user's connected ChatGPT account and are only shown when that account reports the model as available.
 
-The managed provider uses one server-side OpenRouter key:
+To add a provider, add its label, base URL, and API-key environment variable:
 
 ```ts
 export const PROVIDERS = {
-  openrouter: {
-    kind: 'openrouter',
-    label: 'OpenRouter',
-    apiKeyEnv: 'OPENROUTER_API_KEY',
+  wafer: {
+    kind: 'openai-compatible',
+    label: 'Wafer',
+    baseURL: 'https://pass.wafer.ai/v1',
+    apiKeyEnv: 'WAFER_API_KEY',
   },
 } as const satisfies Record<string, ProviderDefinition>
 ```
@@ -114,17 +114,11 @@ Then add models with any Loora label and upstream model ID:
 {
   id: 'mini',
   label: 'Mini',
-  provider: 'openrouter',
-  modelId: 'openrouter/free',
-  routingProvider: null,
+  provider: 'wafer',
+  modelId: 'MiniMax-M3',
   supportsImageInput: true,
-  price: { input: 0, output: 0 },
+  price: { input: 1.2, output: 4.9 },
 }
 ```
 
-Use `routingProvider: null` for OpenRouter-managed routers or a provider slug such as
-`'wafer/fp4'` to pin a model to a specific endpoint.
-Set `OPENROUTER_API_KEY` to the OpenRouter API key for the same workspace that owns the Wafer BYOK
-key. In OpenRouter's BYOK settings, keep that key prioritized and enable **Always use for this
-provider** so a failed Wafer key cannot fall back to OpenRouter-billed shared capacity. The provider
-name is shown beside each model in the picker.
+Finally, set the provider's API-key environment variable. The provider name is shown beside each model in the picker.

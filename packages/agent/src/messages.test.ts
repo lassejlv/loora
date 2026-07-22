@@ -147,7 +147,6 @@ describe('model message preparation', () => {
     expect(summaries[0].code).toHaveLength(1200)
     expect(summaries[0].code).not.toContain('truncated')
     expect(summaries[1].code).toContain('truncated — 1201 chars total')
-    expect(sanitizeModelNames('openrouter/free failed')).toBe('Mini failed')
-    expect(sanitizeModelNames('z-ai/glm-5.2 failed')).toBe('Max failed')
+    expect(sanitizeModelNames('MiniMax-M3 failed')).toBe('Mini failed')
   })
 })

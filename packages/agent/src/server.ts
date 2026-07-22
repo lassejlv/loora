@@ -1,5 +1,5 @@
+import { createOpenAICompatible } from '@ai-sdk/openai-compatible'
 import { createChatGPTProxyProvider } from '@opencoredev/loginwithchatgpt-ai'
-import { createOpenRouter } from '@openrouter/ai-sdk-provider'
 import {
   convertToModelMessages,
   stepCountIs,
@@ -119,7 +119,7 @@ export async function handleAgentChatRequest(request: Request): Promise<Response
   const modelConfig = getModel(modelKey ?? '')
   const providerConfig = getProvider(modelConfig.provider)
   const key = modelConfig.id
-  const usingChatGPT = modelConfig.provider === 'chatgpt'
+  const usingChatGPT = providerConfig.kind === 'chatgpt'
   const reasoningEffort = getChatGPTReasoningEffort(requestedReasoningEffort)
   if (!usingChatGPT && !billing.managedAiAccess) {
     return Response.json(
@@ -152,9 +152,6 @@ export async function handleAgentChatRequest(request: Request): Promise<Response
     })
     model = provider(modelConfig.modelId)
   } else {
-    if (providerConfig.kind !== 'openrouter') {
-      throw new Error(`Unsupported managed AI provider: ${modelConfig.provider}`)
-    }
     const apiKey = process.env[providerConfig.apiKeyEnv]
     if (!apiKey) {
       return Response.json(
@@ -164,27 +161,22 @@ export async function handleAgentChatRequest(request: Request): Promise<Response
         { status: 503 },
       )
     }
-    const provider = createOpenRouter({
+    const provider = createOpenAICompatible({
+      name: modelConfig.provider,
+      baseURL: providerConfig.baseURL,
       apiKey,
+      headers: providerConfig.headers,
+      includeUsage: providerConfig.includeUsage,
     })
-    model = modelConfig.routingProvider
-      ? provider(modelConfig.modelId, {
-          provider: {
-            order: [modelConfig.routingProvider],
-            only: [modelConfig.routingProvider],
-            allow_fallbacks: false,
-          },
-        })
-      : provider(modelConfig.modelId)
+    model = provider(modelConfig.modelId)
   }
   const imageInputsEnabled = modelSupportsImageInput(key)
-  const usingFreeModel = modelConfig.price.input === 0 && modelConfig.price.output === 0
   const providerOptions = usingChatGPT
     ? { openai: { reasoningEffort } }
     : undefined
   let generationLease: string | null = null
   let includedCreditsAvailable = 0
-  const subscriberFunded = usesPolarCredits(usingChatGPT || usingFreeModel, billing.source)
+  const subscriberFunded = usesPolarCredits(usingChatGPT, billing.source)
 
   if (subscriberFunded) {
     generationLease = await acquireGenerationLease(session.user.id)
@@ -219,7 +211,7 @@ export async function handleAgentChatRequest(request: Request): Promise<Response
         { status: 503 },
       )
     }
-  } else if (!usingChatGPT && !usingFreeModel) {
+  } else if (!usingChatGPT) {
     const limitError = await checkLimits(session.user.id)
     if (limitError) {
       return Response.json({ error: limitError }, { status: 429 })
@@ -227,7 +219,7 @@ export async function handleAgentChatRequest(request: Request): Promise<Response
   }
 
   const usageAccounting = createGenerationUsageAccounting({
-    unmetered: usingChatGPT || usingFreeModel,
+    usingChatGPT,
     subscriberFunded,
     userId: session.user.id,
     model: key,

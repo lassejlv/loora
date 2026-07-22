@@ -33,8 +33,8 @@ export function shouldApplyWebhook(lastEventAt: Date | null, eventAt: Date) {
   return !lastEventAt || eventAt.getTime() >= lastEventAt.getTime()
 }
 
-export function usesPolarCredits(usingExternalCredits: boolean, source: string) {
-  return !usingExternalCredits && source === 'cache'
+export function usesPolarCredits(usingChatGPT: boolean, source: string) {
+  return !usingChatGPT && source === 'cache'
 }
 
 export function polarIngestAcknowledged(response: { inserted: number; duplicates: number }) {

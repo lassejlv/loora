@@ -1,21 +1,25 @@
 export type ProviderDefinition =
   | {
-      kind: 'openrouter'
+      kind: 'openai-compatible'
       label: string
+      baseURL: string
       apiKeyEnv: string
+      includeUsage?: boolean
+      headers?: Record<string, string>
     }
   | {
       kind: 'chatgpt'
       label: string
     }
 
-// Managed providers declare only the environment variable name. Keys are read from the named
+// OpenAI-compatible providers declare only the environment variable name. Keys are read from the named
 // environment variable on the server and are never included in this config.
 export const PROVIDERS = {
-  openrouter: {
-    kind: 'openrouter',
-    label: 'OpenRouter',
-    apiKeyEnv: 'OPENROUTER_API_KEY',
+  wafer: {
+    kind: 'openai-compatible',
+    label: 'Wafer',
+    baseURL: 'https://pass.wafer.ai/v1',
+    apiKeyEnv: 'WAFER_API_KEY',
   },
   chatgpt: {
     kind: 'chatgpt',
@@ -42,9 +46,10 @@ export function getChatGPTReasoningEffort(value: unknown): ChatGPTReasoningEffor
     ?? DEFAULT_CHATGPT_REASONING_EFFORT
 }
 
-interface ModelDefinitionBase {
+export interface ModelDefinition {
   id: string
   label: string
+  provider: ProviderKey
   modelId: string
   supportsImageInput: boolean
   price: {
@@ -53,34 +58,22 @@ interface ModelDefinitionBase {
   }
 }
 
-export type ModelDefinition = ModelDefinitionBase & (
-  | {
-      provider: 'openrouter'
-      routingProvider: string | null
-    }
-  | {
-      provider: 'chatgpt'
-    }
-)
-
 // `id` is Loora's stable key. `modelId` is the exact id sent to the provider.
 // Prices are USD per 1M tokens and power the existing usage limits.
 export const MODELS = [
   {
     id: 'mini',
     label: 'Mini',
-    provider: 'openrouter',
-    modelId: 'openrouter/free',
-    routingProvider: null,
+    provider: 'wafer',
+    modelId: 'MiniMax-M3',
     supportsImageInput: true,
-    price: { input: 0, output: 0 },
+    price: { input: 1.2, output: 4.9 },
   },
   {
     id: 'max',
     label: 'Max',
-    provider: 'openrouter',
-    modelId: 'z-ai/glm-5.2',
-    routingProvider: 'wafer/fp4',
+    provider: 'wafer',
+    modelId: 'GLM-5.2',
     supportsImageInput: false,
     price: { input: 1.5, output: 4.2 },
   },

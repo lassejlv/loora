@@ -2,11 +2,11 @@ import { describe, expect, it, mock } from 'bun:test'
 import { createGenerationUsageAccounting } from './usage-accounting'
 
 function harness({
-  unmetered = false,
+  usingChatGPT = false,
   subscriberFunded = false,
   generationLease = null,
 }: {
-  unmetered?: boolean
+  usingChatGPT?: boolean
   subscriberFunded?: boolean
   generationLease?: string | null
 } = {}) {
@@ -15,7 +15,7 @@ function harness({
   const releaseGenerationLease = mock(async () => {})
   const logError = mock(() => {})
   const accounting = createGenerationUsageAccounting({
-    unmetered,
+    usingChatGPT,
     subscriberFunded,
     userId: 'user-one',
     model: 'mini',
@@ -80,9 +80,9 @@ describe('generation usage accounting', () => {
     expect(releaseGenerationLease).toHaveBeenCalledWith('user-one', 'lease-one')
   })
 
-  it('keeps externally funded and free generations unmetered by Loora', async () => {
+  it('keeps ChatGPT generations unmetered by Loora', async () => {
     const { accounting, recordManagedUsage, recordSubscriberUsage } = harness({
-      unmetered: true,
+      usingChatGPT: true,
     })
     accounting.addSubagentUsage({ inputTokens: 50, outputTokens: 60 })
 
