@@ -531,7 +531,7 @@ function PublishedLinksSection() {
           take it offline immediately.
         </p>
       </div>
-      {egress && !egress.unlimited ? (
+      {egress ? (
         <div className="flex flex-col gap-1.5">
           <div className="flex items-baseline justify-between text-xs">
             <span className="text-muted-foreground">
@@ -539,27 +539,31 @@ function PublishedLinksSection() {
             </span>
             <span
               className={
-                egress.usedBytes >= egress.limitBytes
+                !egress.unlimited && egress.usedBytes >= egress.limitBytes
                   ? 'font-medium text-destructive'
                   : 'font-medium'
               }
             >
-              {formatGigabytes(egress.usedBytes)} / {formatGigabytes(egress.limitBytes)} GB
+              {egress.unlimited
+                ? `${formatGigabytes(egress.usedBytes)} GB · uncapped`
+                : `${formatGigabytes(egress.usedBytes)} / ${formatGigabytes(egress.limitBytes)} GB`}
             </span>
           </div>
-          <div className="h-1.5 overflow-hidden rounded-full bg-input">
-            <div
-              className={
-                egress.usedBytes >= egress.limitBytes
-                  ? 'h-full rounded-full bg-destructive'
-                  : 'h-full rounded-full bg-cx-accent'
-              }
-              style={{
-                width: `${Math.min(100, (egress.usedBytes / egress.limitBytes) * 100)}%`,
-              }}
-            />
-          </div>
-          {egress.usedBytes >= egress.limitBytes ? (
+          {!egress.unlimited ? (
+            <div className="h-1.5 overflow-hidden rounded-full bg-input">
+              <div
+                className={
+                  egress.usedBytes >= egress.limitBytes
+                    ? 'h-full rounded-full bg-destructive'
+                    : 'h-full rounded-full bg-cx-accent'
+                }
+                style={{
+                  width: `${Math.min(100, (egress.usedBytes / egress.limitBytes) * 100)}%`,
+                }}
+              />
+            </div>
+          ) : null}
+          {!egress.unlimited && egress.usedBytes >= egress.limitBytes ? (
             <p className="text-[11px] text-destructive">
               Limit reached — your published links are paused until usage drops out of the window.
             </p>
