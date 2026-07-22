@@ -82,6 +82,7 @@ import { AssetsPanel, type AssetMeta } from '#/components/assets-panel'
 import { SettingsPanel } from '#/components/settings-panel'
 import { HistoryPopover } from '#/components/history-panel'
 import { CodeEditorPanel } from '#/components/code-editor-panel'
+import { PublishButton } from '#/components/publish-button'
 import { deleteHistory } from '@loora/rpc/history'
 import { snapshotCanvas } from '#/lib/snapshot'
 import { AgentPanel } from '#/components/agent-panel'
@@ -2061,6 +2062,11 @@ function Editor({ preview = false, userId }: { preview?: boolean; userId?: strin
                 >
                   <MaximizeIcon data-slot="icon" />
                 </Button>
+                <PublishButton
+                  key={selectedShapes[0].id}
+                  designId={activeId}
+                  elementId={selectedShapes[0].id}
+                />
               </>
             )}
             <Button
