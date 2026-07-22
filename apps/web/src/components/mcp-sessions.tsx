@@ -1,11 +1,13 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { UnplugIcon } from 'lucide-react'
-import { RefreshCwIcon } from '#/components/icons'
+import { CheckIcon, CopyIcon, RefreshCwIcon } from '#/components/icons'
 import { Button } from '#/components/ui/button'
 import { IntegrationCard, IntegrationStatus } from '#/components/integration-card'
 import { orpc } from '#/lib/orpc-client'
 
 type McpSession = Awaited<ReturnType<typeof orpc.mcp.sessions>>[number]
+
+const MCP_SERVER_URL = 'https://mcp.loora.design/mcp'
 
 function formatDate(timestamp: number) {
   return new Intl.DateTimeFormat(undefined, {
@@ -19,6 +21,8 @@ export function McpSessions() {
   const [error, setError] = useState('')
   const [refreshing, setRefreshing] = useState(false)
   const [revoking, setRevoking] = useState<string | null>(null)
+  const [copied, setCopied] = useState(false)
+  const copyTimeout = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
 
   const load = async () => {
     try {
@@ -31,6 +35,7 @@ export function McpSessions() {
 
   useEffect(() => {
     void load()
+    return () => clearTimeout(copyTimeout.current)
   }, [])
 
   if (!sessions && !error) {
@@ -58,6 +63,25 @@ export function McpSessions() {
       description="Connect Claude Code, Codex, and other MCP clients to read and update your designs."
     >
       <div className="flex flex-col gap-3">
+        <div className="flex items-center gap-2">
+          <code className="min-w-0 flex-1 truncate rounded-md bg-muted px-3 py-2 font-mono text-xs">
+            {MCP_SERVER_URL}
+          </code>
+          <Button
+            variant="outline"
+            size="icon-sm"
+            className="shrink-0"
+            aria-label="Copy MCP server URL"
+            onClick={async () => {
+              await navigator.clipboard.writeText(MCP_SERVER_URL)
+              setCopied(true)
+              clearTimeout(copyTimeout.current)
+              copyTimeout.current = setTimeout(() => setCopied(false), 1500)
+            }}
+          >
+            {copied ? <CheckIcon data-slot="icon" /> : <CopyIcon data-slot="icon" />}
+          </Button>
+        </div>
         <div className="flex items-center justify-between gap-3">
           <p className="text-[11px] leading-relaxed text-muted-foreground">
             Clients authorize through loora.design and talk to the remote MCP server.
