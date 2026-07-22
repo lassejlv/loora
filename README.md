@@ -92,8 +92,8 @@ Canvas documents, shapes, version history, and multiple agent chats per design a
 ## AI providers and models
 
 Providers and models live in one typed catalog: [`packages/agent/src/models.ts`](packages/agent/src/models.ts).
-Server-managed models use OpenRouter and are restricted to Wafer. GLM uses Wafer's standard or
-fast endpoint, while MiniMax M3 uses the base Wafer route for the configured BYOK key. ChatGPT-backed models use each
+Server-managed models use OpenRouter. Mini uses OpenRouter's free-model router, while Max uses
+GLM through Wafer's standard endpoint. ChatGPT-backed models use each
 user's connected ChatGPT account and are only shown when that account reports the model as available.
 
 The managed provider uses one server-side OpenRouter key:
@@ -115,14 +115,15 @@ Then add models with any Loora label and upstream model ID:
   id: 'mini',
   label: 'Mini',
   provider: 'openrouter',
-  modelId: 'minimax/minimax-m3',
-  routingProvider: 'wafer',
+  modelId: 'openrouter/free',
+  routingProvider: null,
   supportsImageInput: true,
-  price: { input: 1.2, output: 4.9 },
+  price: { input: 0, output: 0 },
 }
 ```
 
-Use `routingProvider: 'wafer/fp4'` for standard Wafer or `'wafer/fast'` for its fast endpoint.
+Use `routingProvider: null` for OpenRouter-managed routers or a provider slug such as
+`'wafer/fp4'` to pin a model to a specific endpoint.
 Set `OPENROUTER_API_KEY` to the OpenRouter API key for the same workspace that owns the Wafer BYOK
 key. In OpenRouter's BYOK settings, keep that key prioritized and enable **Always use for this
 provider** so a failed Wafer key cannot fall back to OpenRouter-billed shared capacity. The provider

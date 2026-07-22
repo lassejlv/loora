@@ -13,7 +13,6 @@ describe('AI image input capabilities', () => {
   it('reads image support from the model catalog', () => {
     expect(modelSupportsImageInput('mini')).toBe(true)
     expect(modelSupportsImageInput('max')).toBe(false)
-    expect(modelSupportsImageInput('max-fast')).toBe(false)
     expect(modelSupportsImageInput('gpt-5.6-sol')).toBe(true)
     expect(modelSupportsImageInput('unknown')).toBe(true)
   })
@@ -148,7 +147,7 @@ describe('model message preparation', () => {
     expect(summaries[0].code).toHaveLength(1200)
     expect(summaries[0].code).not.toContain('truncated')
     expect(summaries[1].code).toContain('truncated — 1201 chars total')
-    expect(sanitizeModelNames('minimax/minimax-m3 failed')).toBe('Mini failed')
+    expect(sanitizeModelNames('openrouter/free failed')).toBe('Mini failed')
     expect(sanitizeModelNames('z-ai/glm-5.2 failed')).toBe('Max failed')
   })
 })

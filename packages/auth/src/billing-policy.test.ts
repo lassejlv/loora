@@ -174,7 +174,7 @@ describe('billing policy', () => {
     expect(leaseTokenCanRelease('token-a', 'token-b')).toBe(false)
   })
 
-  test('ChatGPT-backed and internal requests do not consume Polar credits', () => {
+  test('externally funded and internal requests do not consume Polar credits', () => {
     expect(usesPolarCredits(true, 'cache')).toBe(false)
     expect(usesPolarCredits(false, 'admin')).toBe(false)
     expect(usesPolarCredits(false, 'disabled')).toBe(false)

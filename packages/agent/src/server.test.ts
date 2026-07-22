@@ -195,7 +195,7 @@ describe('agent server HTTP contract', () => {
     signedIn = true
     billingSource = 'cache'
 
-    const response = await handleAgentChatRequest(chatRequest())
+    const response = await handleAgentChatRequest(chatRequest('max'))
 
     expect(response.status).toBe(409)
     expect(await response.json()).toMatchObject({ code: 'AI_GENERATION_IN_PROGRESS' })
@@ -208,7 +208,7 @@ describe('agent server HTTP contract', () => {
     generationLease = 'lease-one'
     flushAllowed = false
 
-    const response = await handleAgentChatRequest(chatRequest())
+    const response = await handleAgentChatRequest(chatRequest('max'))
 
     expect(response.status).toBe(503)
     expect(await response.json()).toMatchObject({ code: 'BILLING_TEMPORARILY_UNAVAILABLE' })
@@ -221,10 +221,20 @@ describe('agent server HTTP contract', () => {
     generationLease = 'lease-one'
     meterBalance = 0
 
-    const response = await handleAgentChatRequest(chatRequest())
+    const response = await handleAgentChatRequest(chatRequest('max'))
 
     expect(response.status).toBe(429)
     expect(await response.json()).toMatchObject({ code: 'AI_CREDITS_EXHAUSTED' })
     expect(releaseCalls).toEqual([['user-one', 'lease-one']])
+  })
+
+  it('keeps the free Mini model outside subscriber credit accounting', async () => {
+    signedIn = true
+    billingSource = 'cache'
+
+    const response = await handleAgentChatRequest(chatRequest('mini'))
+
+    expect(response.status).toBe(200)
+    expect(releaseCalls).toEqual([])
   })
 })

@@ -10,21 +10,19 @@ import {
 describe('agent model policy', () => {
   it('keeps unknown model selections on the existing default', () => {
     expect(getModel('unknown').id).toBe(DEFAULT_MODEL)
-    expect(getModel('mini')).toMatchObject({
-      modelId: 'minimax/minimax-m3',
-      provider: 'openrouter',
-      routingProvider: 'wafer',
-    })
+    expect(DEFAULT_MODEL).toBe('mini')
     expect(getProvider('openrouter')).toMatchObject({
       apiKeyEnv: 'OPENROUTER_API_KEY',
+    })
+    expect(getModel('mini')).toMatchObject({
+      modelId: 'openrouter/free',
+      routingProvider: null,
+      supportsImageInput: true,
+      price: { input: 0, output: 0 },
     })
     expect(getModel('max')).toMatchObject({
       modelId: 'z-ai/glm-5.2',
       routingProvider: 'wafer/fp4',
-    })
-    expect(getModel('max-fast')).toMatchObject({
-      modelId: 'z-ai/glm-5.2',
-      routingProvider: 'wafer/fast',
     })
   })
 

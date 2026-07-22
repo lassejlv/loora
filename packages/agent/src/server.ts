@@ -167,21 +167,24 @@ export async function handleAgentChatRequest(request: Request): Promise<Response
     const provider = createOpenRouter({
       apiKey,
     })
-    model = provider(modelConfig.modelId, {
-      provider: {
-        order: [modelConfig.routingProvider],
-        only: [modelConfig.routingProvider],
-        allow_fallbacks: false,
-      },
-    })
+    model = modelConfig.routingProvider
+      ? provider(modelConfig.modelId, {
+          provider: {
+            order: [modelConfig.routingProvider],
+            only: [modelConfig.routingProvider],
+            allow_fallbacks: false,
+          },
+        })
+      : provider(modelConfig.modelId)
   }
   const imageInputsEnabled = modelSupportsImageInput(key)
+  const usingFreeModel = modelConfig.price.input === 0 && modelConfig.price.output === 0
   const providerOptions = usingChatGPT
     ? { openai: { reasoningEffort } }
     : undefined
   let generationLease: string | null = null
   let includedCreditsAvailable = 0
-  const subscriberFunded = usesPolarCredits(usingChatGPT, billing.source)
+  const subscriberFunded = usesPolarCredits(usingChatGPT || usingFreeModel, billing.source)
 
   if (subscriberFunded) {
     generationLease = await acquireGenerationLease(session.user.id)
@@ -216,7 +219,7 @@ export async function handleAgentChatRequest(request: Request): Promise<Response
         { status: 503 },
       )
     }
-  } else if (!usingChatGPT) {
+  } else if (!usingChatGPT && !usingFreeModel) {
     const limitError = await checkLimits(session.user.id)
     if (limitError) {
       return Response.json({ error: limitError }, { status: 429 })
@@ -224,7 +227,7 @@ export async function handleAgentChatRequest(request: Request): Promise<Response
   }
 
   const usageAccounting = createGenerationUsageAccounting({
-    usingChatGPT,
+    unmetered: usingChatGPT || usingFreeModel,
     subscriberFunded,
     userId: session.user.id,
     model: key,

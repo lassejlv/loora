@@ -56,7 +56,7 @@ interface ModelDefinitionBase {
 export type ModelDefinition = ModelDefinitionBase & (
   | {
       provider: 'openrouter'
-      routingProvider: string
+      routingProvider: string | null
     }
   | {
       provider: 'chatgpt'
@@ -70,10 +70,10 @@ export const MODELS = [
     id: 'mini',
     label: 'Mini',
     provider: 'openrouter',
-    modelId: 'minimax/minimax-m3',
-    routingProvider: 'wafer',
+    modelId: 'openrouter/free',
+    routingProvider: null,
     supportsImageInput: true,
-    price: { input: 1.2, output: 4.9 },
+    price: { input: 0, output: 0 },
   },
   {
     id: 'max',
@@ -83,15 +83,6 @@ export const MODELS = [
     routingProvider: 'wafer/fp4',
     supportsImageInput: false,
     price: { input: 1.5, output: 4.2 },
-  },
-  {
-    id: 'max-fast',
-    label: 'Max Fast',
-    provider: 'openrouter',
-    modelId: 'z-ai/glm-5.2',
-    routingProvider: 'wafer/fast',
-    supportsImageInput: false,
-    price: { input: 4, output: 12 },
   },
   {
     id: 'gpt-5.6-sol',
