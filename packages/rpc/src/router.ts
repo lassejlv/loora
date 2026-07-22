@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, isNotNull, lt, or } from 'drizzle-orm'
+import { and, asc, desc, eq, gt, isNotNull, lt, or } from 'drizzle-orm'
 import { ORPCError, os } from '@orpc/server'
 import { z } from 'zod'
 import { db } from '@loora/db'
@@ -11,6 +11,7 @@ import {
   oauthAccessToken,
   oauthApplication,
   oauthConsent,
+  publishLink,
   user,
   userPreferences,
 } from '@loora/db/schema'
@@ -21,6 +22,7 @@ import { googleOAuthEnabled, type getSession } from '@loora/auth'
 import type { CanvasElement } from '@loora/db/canvas'
 import { assetKey, s3 } from './storage'
 import { createHandoffToken } from './handoff-token'
+import { PUBLISH_TTL_MS, publishLinkId } from './publish'
 import {
   authorizeBilling,
   createPlanCheckout,
@@ -207,6 +209,73 @@ const createDesignHandoff = protectedProcedure
       .limit(1)
     if (!found) throw new ORPCError('NOT_FOUND')
     return createHandoffToken(input.designId, context.user.id)
+  })
+
+// Live public link to one element: the row id is the URL capability, deleting
+// the row revokes it. Content stays live — the public route reads the design
+// at request time.
+const createPublishLink = protectedProcedure
+  .input(
+    z.object({
+      designId: z.string().min(1).max(128),
+      elementId: z.string().min(1).max(128),
+    }),
+  )
+  .handler(async ({ context, input }) => {
+    const [found] = await db
+      .select({ shapes: design.shapes })
+      .from(design)
+      .where(and(eq(design.id, input.designId), eq(design.userId, context.user.id)))
+      .limit(1)
+    if (!found || !found.shapes.some((shape) => shape.id === input.elementId)) {
+      throw new ORPCError('NOT_FOUND')
+    }
+
+    // Lazy cleanup: publishing sweeps this user's expired links.
+    await db
+      .delete(publishLink)
+      .where(and(eq(publishLink.userId, context.user.id), lt(publishLink.expiresAt, new Date())))
+
+    const id = publishLinkId()
+    const expiresAt = new Date(Date.now() + PUBLISH_TTL_MS)
+    await db.insert(publishLink).values({
+      id,
+      designId: input.designId,
+      userId: context.user.id,
+      elementId: input.elementId,
+      expiresAt,
+    })
+    return { id, expiresAt: expiresAt.getTime() }
+  })
+
+const deletePublishLink = protectedProcedure
+  .input(z.object({ id: z.string().min(1).max(64) }))
+  .handler(async ({ context, input }) => {
+    const deleted = await db
+      .delete(publishLink)
+      .where(and(eq(publishLink.id, input.id), eq(publishLink.userId, context.user.id)))
+      .returning({ id: publishLink.id })
+    return { deleted: deleted.length > 0 }
+  })
+
+const listPublishLinks = protectedProcedure
+  .input(z.object({ designId: z.string().min(1).max(128) }))
+  .handler(async ({ context, input }) => {
+    const rows = await db
+      .select({
+        id: publishLink.id,
+        elementId: publishLink.elementId,
+        expiresAt: publishLink.expiresAt,
+      })
+      .from(publishLink)
+      .where(
+        and(
+          eq(publishLink.userId, context.user.id),
+          eq(publishLink.designId, input.designId),
+          gt(publishLink.expiresAt, new Date()),
+        ),
+      )
+    return rows.map((row) => ({ ...row, expiresAt: row.expiresAt.getTime() }))
   })
 
 const listVersions = protectedProcedure
@@ -1092,6 +1161,11 @@ export const appRouter = {
   },
   handoff: {
     create: createDesignHandoff,
+  },
+  publish: {
+    create: createPublishLink,
+    delete: deletePublishLink,
+    list: listPublishLinks,
   },
   history: {
     list: listVersions,

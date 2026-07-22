@@ -165,6 +165,29 @@ export const designChat = pgTable(
   ],
 )
 
+// Short-lived public links to a single element ("publish this page"). The row
+// id doubles as the URL capability token, so deleting the row revokes the link
+// instantly; content stays live (served from the design at request time).
+export const publishLink = pgTable(
+  'publish_link',
+  {
+    id: text('id').primaryKey(),
+    designId: text('design_id').notNull(),
+    userId: text('user_id').notNull(),
+    elementId: text('element_id').notNull(),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+    expiresAt: timestamp('expires_at').notNull(),
+  },
+  (table) => [
+    foreignKey({
+      columns: [table.designId, table.userId],
+      foreignColumns: [design.id, design.userId],
+      name: 'publish_link_design_fk',
+    }).onDelete('cascade'),
+    index('publish_link_design_idx').on(table.userId, table.designId),
+  ],
+)
+
 // GitHub App user tokens are encrypted before they reach these columns. A user
 // token keeps repository access intersected with the person's current GitHub
 // permissions, unlike a long-lived installation-only association.

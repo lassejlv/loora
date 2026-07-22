@@ -88,6 +88,11 @@ function BlockPage() {
   // Bumped to remount the frame when an inline edit could not be mapped onto
   // the code — the frame DOM has the typed text, the code does not.
   const [frameNonce, setFrameNonce] = useState(0)
+  // Public 12h link for the active element; null = not published.
+  const [publish, setPublish] = useState<{ id: string; expiresAt: number } | null>(null)
+  const [publishOpen, setPublishOpen] = useState(false)
+  const [publishBusy, setPublishBusy] = useState(false)
+  const [copied, setCopied] = useState(false)
 
   const userId = session?.user.id ?? null
 
@@ -131,6 +136,26 @@ function BlockPage() {
 
   // Switching element (or leaving edit mode) drops any unapplied draft.
   const activeId = active?.id ?? null
+
+  // Pick up an existing live link for this element (e.g. published earlier or
+  // from another tab) so the button reflects reality.
+  useEffect(() => {
+    if (!userId || !activeId) return
+    let cancelled = false
+    setPublish(null)
+    setPublishOpen(false)
+    orpc.publish
+      .list({ designId })
+      .then((links) => {
+        if (cancelled) return
+        const found = links.find((link) => link.elementId === activeId)
+        setPublish(found ? { id: found.id, expiresAt: found.expiresAt } : null)
+      })
+      .catch(() => {})
+    return () => {
+      cancelled = true
+    }
+  }, [userId, designId, activeId])
   useEffect(() => {
     setDraft(null)
     setRenderError(null)
@@ -250,6 +275,44 @@ function BlockPage() {
       return
     }
     applyCode(result.code)
+  }
+
+  const publishPage = async () => {
+    if (!active || publishBusy) return
+    setPublishBusy(true)
+    try {
+      const created = await orpc.publish.create({ designId, elementId: active.id })
+      setPublish(created)
+      setPublishOpen(true)
+    } catch {
+      showEditNotice('Could not publish the page. Try again.')
+    } finally {
+      setPublishBusy(false)
+    }
+  }
+
+  const unpublishPage = async () => {
+    if (!publish || publishBusy) return
+    setPublishBusy(true)
+    try {
+      await orpc.publish.delete({ id: publish.id })
+      setPublish(null)
+      setPublishOpen(false)
+    } catch {
+      showEditNotice('Could not delete the link. Try again.')
+    } finally {
+      setPublishBusy(false)
+    }
+  }
+
+  const copyPublishUrl = async (url: string) => {
+    try {
+      await navigator.clipboard.writeText(url)
+      setCopied(true)
+      window.setTimeout(() => setCopied(false), 2000)
+    } catch {
+      showEditNotice('Could not copy — select the URL manually.')
+    }
   }
 
   const replaceImage = (assetId: string) => {
@@ -382,6 +445,22 @@ function BlockPage() {
           >
             Code
           </button>
+          <button
+            type="button"
+            aria-pressed={publishOpen}
+            title={publish ? 'Live link active — manage it' : 'Create a public link (expires in 12h)'}
+            className={
+              publish
+                ? 'rounded-full bg-secondary px-2 py-0.5 text-[11px] font-medium'
+                : 'rounded-full px-2 py-0.5 text-[11px] text-muted-foreground hover:text-foreground'
+            }
+            onClick={() => {
+              if (publish) setPublishOpen((v) => !v)
+              else void publishPage()
+            }}
+          >
+            {publishBusy ? 'Publishing…' : publish ? 'Live' : 'Publish'}
+          </button>
           {saveState !== 'idle' && (
             <span
               className={
@@ -419,6 +498,41 @@ function BlockPage() {
             Editor
           </Button>
         </div>
+        {publish && publishOpen ? (
+          <div className="absolute top-14 right-3 z-10 flex w-80 max-w-[calc(100vw-24px)] flex-col gap-2 rounded-xl border bg-card p-3 shadow-md">
+            <p className="text-xs font-medium">Live link</p>
+            <div className="flex items-center gap-1.5">
+              <input
+                readOnly
+                value={`${window.location.origin}/p/${publish.id}`}
+                onFocus={(e) => e.currentTarget.select()}
+                className="h-7 min-w-0 flex-1 rounded-md border bg-background px-2 font-mono text-[11px] outline-none"
+              />
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-7 px-2.5 text-xs"
+                onClick={() => void copyPublishUrl(`${window.location.origin}/p/${publish.id}`)}
+              >
+                {copied ? 'Copied' : 'Copy'}
+              </Button>
+            </div>
+            <div className="flex items-center justify-between">
+              <p className="text-[11px] text-muted-foreground">
+                Anyone with the link can view · expires in{' '}
+                {Math.max(1, Math.round((publish.expiresAt - Date.now()) / 3_600_000))}h
+              </p>
+              <button
+                type="button"
+                disabled={publishBusy}
+                className="text-[11px] font-medium text-destructive-foreground hover:underline disabled:opacity-50"
+                onClick={() => void unpublishPage()}
+              >
+                Delete link
+              </button>
+            </div>
+          </div>
+        ) : null}
         {imagePickSrc ? (
           <ImagePickerDialog
             onPick={(asset) => replaceImage(asset.id)}

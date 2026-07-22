@@ -14,6 +14,7 @@ import { Route as McpConsentRouteImport } from './routes/mcp-consent'
 import { Route as DotwellKnownOauthAuthorizationServerRouteImport } from './routes/[.]well-known.oauth-authorization-server'
 import { Route as ApiChatRouteImport } from './routes/api.chat'
 import { Route as BlockpageDesignIdRouteImport } from './routes/blockpage.$designId'
+import { Route as PLinkIdRouteImport } from './routes/p.$linkId'
 import { Route as ApiAssetIdRouteImport } from './routes/api.asset.$id'
 import { Route as ApiAuthSplatRouteImport } from './routes/api.auth.$'
 import { Route as ApiChatgptSplatRouteImport } from './routes/api.chatgpt.$'
@@ -25,8 +26,10 @@ import { Route as ApiGithubInstallRouteImport } from './routes/api.github.instal
 import { Route as ApiGithubSetupRouteImport } from './routes/api.github.setup'
 import { Route as ApiGithubWebhookRouteImport } from './routes/api.github.webhook'
 import { Route as ApiHandoffTokenRouteImport } from './routes/api.handoff.$token'
+import { Route as ApiPLinkIdRouteImport } from './routes/api.p.$linkId'
 import { Route as ApiRpcSplatRouteImport } from './routes/api.rpc.$'
 import { Route as ApiHandoffTokenAssetIdRouteImport } from './routes/api.handoff.$token.asset.$id'
+import { Route as ApiPLinkIdAssetIdRouteImport } from './routes/api.p.$linkId.asset.$id'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
@@ -52,6 +55,11 @@ const ApiChatRoute = ApiChatRouteImport.update({
 const BlockpageDesignIdRoute = BlockpageDesignIdRouteImport.update({
   id: '/blockpage/$designId',
   path: '/blockpage/$designId',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const PLinkIdRoute = PLinkIdRouteImport.update({
+  id: '/p/$linkId',
+  path: '/p/$linkId',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ApiAssetIdRoute = ApiAssetIdRouteImport.update({
@@ -109,6 +117,11 @@ const ApiHandoffTokenRoute = ApiHandoffTokenRouteImport.update({
   path: '/api/handoff/$token',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiPLinkIdRoute = ApiPLinkIdRouteImport.update({
+  id: '/api/p/$linkId',
+  path: '/api/p/$linkId',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ApiRpcSplatRoute = ApiRpcSplatRouteImport.update({
   id: '/api/rpc/$',
   path: '/api/rpc/$',
@@ -119,6 +132,11 @@ const ApiHandoffTokenAssetIdRoute = ApiHandoffTokenAssetIdRouteImport.update({
   path: '/asset/$id',
   getParentRoute: () => ApiHandoffTokenRoute,
 } as any)
+const ApiPLinkIdAssetIdRoute = ApiPLinkIdAssetIdRouteImport.update({
+  id: '/asset/$id',
+  path: '/asset/$id',
+  getParentRoute: () => ApiPLinkIdRoute,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -126,6 +144,7 @@ export interface FileRoutesByFullPath {
   '/.well-known/oauth-authorization-server': typeof DotwellKnownOauthAuthorizationServerRoute
   '/api/chat': typeof ApiChatRoute
   '/blockpage/$designId': typeof BlockpageDesignIdRoute
+  '/p/$linkId': typeof PLinkIdRoute
   '/api/asset/$id': typeof ApiAssetIdRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
   '/api/chatgpt/$': typeof ApiChatgptSplatRoute
@@ -137,8 +156,10 @@ export interface FileRoutesByFullPath {
   '/api/github/setup': typeof ApiGithubSetupRoute
   '/api/github/webhook': typeof ApiGithubWebhookRoute
   '/api/handoff/$token': typeof ApiHandoffTokenRouteWithChildren
+  '/api/p/$linkId': typeof ApiPLinkIdRouteWithChildren
   '/api/rpc/$': typeof ApiRpcSplatRoute
   '/api/handoff/$token/asset/$id': typeof ApiHandoffTokenAssetIdRoute
+  '/api/p/$linkId/asset/$id': typeof ApiPLinkIdAssetIdRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -146,6 +167,7 @@ export interface FileRoutesByTo {
   '/.well-known/oauth-authorization-server': typeof DotwellKnownOauthAuthorizationServerRoute
   '/api/chat': typeof ApiChatRoute
   '/blockpage/$designId': typeof BlockpageDesignIdRoute
+  '/p/$linkId': typeof PLinkIdRoute
   '/api/asset/$id': typeof ApiAssetIdRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
   '/api/chatgpt/$': typeof ApiChatgptSplatRoute
@@ -157,8 +179,10 @@ export interface FileRoutesByTo {
   '/api/github/setup': typeof ApiGithubSetupRoute
   '/api/github/webhook': typeof ApiGithubWebhookRoute
   '/api/handoff/$token': typeof ApiHandoffTokenRouteWithChildren
+  '/api/p/$linkId': typeof ApiPLinkIdRouteWithChildren
   '/api/rpc/$': typeof ApiRpcSplatRoute
   '/api/handoff/$token/asset/$id': typeof ApiHandoffTokenAssetIdRoute
+  '/api/p/$linkId/asset/$id': typeof ApiPLinkIdAssetIdRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -167,6 +191,7 @@ export interface FileRoutesById {
   '/.well-known/oauth-authorization-server': typeof DotwellKnownOauthAuthorizationServerRoute
   '/api/chat': typeof ApiChatRoute
   '/blockpage/$designId': typeof BlockpageDesignIdRoute
+  '/p/$linkId': typeof PLinkIdRoute
   '/api/asset/$id': typeof ApiAssetIdRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
   '/api/chatgpt/$': typeof ApiChatgptSplatRoute
@@ -178,8 +203,10 @@ export interface FileRoutesById {
   '/api/github/setup': typeof ApiGithubSetupRoute
   '/api/github/webhook': typeof ApiGithubWebhookRoute
   '/api/handoff/$token': typeof ApiHandoffTokenRouteWithChildren
+  '/api/p/$linkId': typeof ApiPLinkIdRouteWithChildren
   '/api/rpc/$': typeof ApiRpcSplatRoute
   '/api/handoff/$token/asset/$id': typeof ApiHandoffTokenAssetIdRoute
+  '/api/p/$linkId/asset/$id': typeof ApiPLinkIdAssetIdRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -189,6 +216,7 @@ export interface FileRouteTypes {
     | '/.well-known/oauth-authorization-server'
     | '/api/chat'
     | '/blockpage/$designId'
+    | '/p/$linkId'
     | '/api/asset/$id'
     | '/api/auth/$'
     | '/api/chatgpt/$'
@@ -200,8 +228,10 @@ export interface FileRouteTypes {
     | '/api/github/setup'
     | '/api/github/webhook'
     | '/api/handoff/$token'
+    | '/api/p/$linkId'
     | '/api/rpc/$'
     | '/api/handoff/$token/asset/$id'
+    | '/api/p/$linkId/asset/$id'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -209,6 +239,7 @@ export interface FileRouteTypes {
     | '/.well-known/oauth-authorization-server'
     | '/api/chat'
     | '/blockpage/$designId'
+    | '/p/$linkId'
     | '/api/asset/$id'
     | '/api/auth/$'
     | '/api/chatgpt/$'
@@ -220,8 +251,10 @@ export interface FileRouteTypes {
     | '/api/github/setup'
     | '/api/github/webhook'
     | '/api/handoff/$token'
+    | '/api/p/$linkId'
     | '/api/rpc/$'
     | '/api/handoff/$token/asset/$id'
+    | '/api/p/$linkId/asset/$id'
   id:
     | '__root__'
     | '/'
@@ -229,6 +262,7 @@ export interface FileRouteTypes {
     | '/.well-known/oauth-authorization-server'
     | '/api/chat'
     | '/blockpage/$designId'
+    | '/p/$linkId'
     | '/api/asset/$id'
     | '/api/auth/$'
     | '/api/chatgpt/$'
@@ -240,8 +274,10 @@ export interface FileRouteTypes {
     | '/api/github/setup'
     | '/api/github/webhook'
     | '/api/handoff/$token'
+    | '/api/p/$linkId'
     | '/api/rpc/$'
     | '/api/handoff/$token/asset/$id'
+    | '/api/p/$linkId/asset/$id'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -250,6 +286,7 @@ export interface RootRouteChildren {
   DotwellKnownOauthAuthorizationServerRoute: typeof DotwellKnownOauthAuthorizationServerRoute
   ApiChatRoute: typeof ApiChatRoute
   BlockpageDesignIdRoute: typeof BlockpageDesignIdRoute
+  PLinkIdRoute: typeof PLinkIdRoute
   ApiAssetIdRoute: typeof ApiAssetIdRoute
   ApiAuthSplatRoute: typeof ApiAuthSplatRoute
   ApiChatgptSplatRoute: typeof ApiChatgptSplatRoute
@@ -261,6 +298,7 @@ export interface RootRouteChildren {
   ApiGithubSetupRoute: typeof ApiGithubSetupRoute
   ApiGithubWebhookRoute: typeof ApiGithubWebhookRoute
   ApiHandoffTokenRoute: typeof ApiHandoffTokenRouteWithChildren
+  ApiPLinkIdRoute: typeof ApiPLinkIdRouteWithChildren
   ApiRpcSplatRoute: typeof ApiRpcSplatRoute
 }
 
@@ -299,6 +337,13 @@ declare module '@tanstack/react-router' {
       path: '/blockpage/$designId'
       fullPath: '/blockpage/$designId'
       preLoaderRoute: typeof BlockpageDesignIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/p/$linkId': {
+      id: '/p/$linkId'
+      path: '/p/$linkId'
+      fullPath: '/p/$linkId'
+      preLoaderRoute: typeof PLinkIdRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/api/asset/$id': {
@@ -378,6 +423,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiHandoffTokenRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/p/$linkId': {
+      id: '/api/p/$linkId'
+      path: '/api/p/$linkId'
+      fullPath: '/api/p/$linkId'
+      preLoaderRoute: typeof ApiPLinkIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/rpc/$': {
       id: '/api/rpc/$'
       path: '/api/rpc/$'
@@ -391,6 +443,13 @@ declare module '@tanstack/react-router' {
       fullPath: '/api/handoff/$token/asset/$id'
       preLoaderRoute: typeof ApiHandoffTokenAssetIdRouteImport
       parentRoute: typeof ApiHandoffTokenRoute
+    }
+    '/api/p/$linkId/asset/$id': {
+      id: '/api/p/$linkId/asset/$id'
+      path: '/asset/$id'
+      fullPath: '/api/p/$linkId/asset/$id'
+      preLoaderRoute: typeof ApiPLinkIdAssetIdRouteImport
+      parentRoute: typeof ApiPLinkIdRoute
     }
   }
 }
@@ -407,6 +466,18 @@ const ApiHandoffTokenRouteWithChildren = ApiHandoffTokenRoute._addFileChildren(
   ApiHandoffTokenRouteChildren,
 )
 
+interface ApiPLinkIdRouteChildren {
+  ApiPLinkIdAssetIdRoute: typeof ApiPLinkIdAssetIdRoute
+}
+
+const ApiPLinkIdRouteChildren: ApiPLinkIdRouteChildren = {
+  ApiPLinkIdAssetIdRoute: ApiPLinkIdAssetIdRoute,
+}
+
+const ApiPLinkIdRouteWithChildren = ApiPLinkIdRoute._addFileChildren(
+  ApiPLinkIdRouteChildren,
+)
+
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   McpConsentRoute: McpConsentRoute,
@@ -414,6 +485,7 @@ const rootRouteChildren: RootRouteChildren = {
     DotwellKnownOauthAuthorizationServerRoute,
   ApiChatRoute: ApiChatRoute,
   BlockpageDesignIdRoute: BlockpageDesignIdRoute,
+  PLinkIdRoute: PLinkIdRoute,
   ApiAssetIdRoute: ApiAssetIdRoute,
   ApiAuthSplatRoute: ApiAuthSplatRoute,
   ApiChatgptSplatRoute: ApiChatgptSplatRoute,
@@ -425,6 +497,7 @@ const rootRouteChildren: RootRouteChildren = {
   ApiGithubSetupRoute: ApiGithubSetupRoute,
   ApiGithubWebhookRoute: ApiGithubWebhookRoute,
   ApiHandoffTokenRoute: ApiHandoffTokenRouteWithChildren,
+  ApiPLinkIdRoute: ApiPLinkIdRouteWithChildren,
   ApiRpcSplatRoute: ApiRpcSplatRoute,
 }
 export const routeTree = rootRouteImport
