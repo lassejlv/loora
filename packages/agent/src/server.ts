@@ -168,7 +168,11 @@ export async function handleAgentChatRequest(request: Request): Promise<Response
       apiKey,
     })
     model = provider(modelConfig.modelId, {
-      provider: { only: [modelConfig.routingProvider] },
+      provider: {
+        order: [modelConfig.routingProvider],
+        only: [modelConfig.routingProvider],
+        allow_fallbacks: false,
+      },
     })
   }
   const imageInputsEnabled = modelSupportsImageInput(key)

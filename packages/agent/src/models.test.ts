@@ -10,8 +10,11 @@ import {
 describe('agent model policy', () => {
   it('keeps unknown model selections on the existing default', () => {
     expect(getModel('unknown').id).toBe(DEFAULT_MODEL)
-    expect(getModel('mini').modelId).toBe('minimax/minimax-m3')
-    expect(getModel('mini').provider).toBe('openrouter')
+    expect(getModel('mini')).toMatchObject({
+      modelId: 'minimax/minimax-m3',
+      provider: 'openrouter',
+      routingProvider: 'wafer',
+    })
     expect(getProvider('openrouter')).toMatchObject({
       apiKeyEnv: 'OPENROUTER_API_KEY',
     })

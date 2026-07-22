@@ -71,7 +71,7 @@ export const MODELS = [
     label: 'Mini',
     provider: 'openrouter',
     modelId: 'minimax/minimax-m3',
-    routingProvider: 'minimax',
+    routingProvider: 'wafer',
     supportsImageInput: true,
     price: { input: 1.2, output: 4.9 },
   },
