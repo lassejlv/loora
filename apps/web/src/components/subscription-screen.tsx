@@ -3,6 +3,7 @@ import { LogOutIcon } from '#/components/icons'
 import { clearWelcomeSeen } from '#/components/welcome-dialog'
 import { authClient } from '@loora/auth/client'
 import { orpc } from '#/lib/orpc-client'
+import { readAccessVerdict, writeAccessVerdict } from '#/lib/access-cache'
 import { Button } from '#/components/ui/button'
 import {
   Dialog,
@@ -17,6 +18,7 @@ type Plan = 'pro' | 'studio'
 type BillingStatus = Awaited<ReturnType<typeof orpc.billing.status>>
 
 interface SubscriptionScreenProps {
+  userId: string
   children: React.ReactNode
   preview: React.ReactNode
   redirect?: (url: string) => void
@@ -33,8 +35,11 @@ const plans = [
   { id: 'studio' as const, name: 'Studio', price: '$49', credits: '300 AI credits each month', note: '3× AI capacity' },
 ]
 
-export function SubscriptionScreen({ children, preview, redirect }: SubscriptionScreenProps) {
+export function SubscriptionScreen({ userId, children, preview, redirect }: SubscriptionScreenProps) {
   const [status, setStatus] = useState<BillingStatus | null>(null)
+  // Last load's verdict: mounts the editor immediately for subscribed users
+  // while the billing check re-runs. A live "no access" result wins.
+  const [optimistic] = useState(() => readAccessVerdict('billing', userId))
   const [pending, setPending] = useState(true)
   const [selectedPlan, setSelectedPlan] = useState<Plan | null>(null)
   const [error, setError] = useState('')
@@ -45,6 +50,7 @@ export function SubscriptionScreen({ children, preview, redirect }: Subscription
     try {
       const next = refresh ? await orpc.billing.refresh() : await orpc.billing.status()
       setStatus(next)
+      writeAccessVerdict('billing', userId, next.access)
       return next
     } catch {
       setError('Could not check your subscription. Please try again.')
@@ -52,7 +58,7 @@ export function SubscriptionScreen({ children, preview, redirect }: Subscription
     } finally {
       setPending(false)
     }
-  }, [])
+  }, [userId])
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search)
@@ -66,7 +72,7 @@ export function SubscriptionScreen({ children, preview, redirect }: Subscription
     })
   }, [loadStatus])
 
-  if (status?.access) return children
+  if (status ? status.access : optimistic) return children
 
   async function startCheckout(plan: Plan) {
     setSelectedPlan(plan)
@@ -80,6 +86,16 @@ export function SubscriptionScreen({ children, preview, redirect }: Subscription
       setError(`Could not open ${plan === 'pro' ? 'Pro' : 'Studio'} checkout. Please retry.`)
       setPending(false)
     }
+  }
+
+  // First billing check in flight: hold the shimmer instead of flashing the
+  // plan picker at already-subscribed users.
+  if (status === null && !error) {
+    return (
+      <main className="grid min-h-screen place-items-center bg-cx-canvas">
+        <p className="cx-shimmer text-sm">Opening your canvas…</p>
+      </main>
+    )
   }
 
   return (
@@ -136,9 +152,6 @@ export function SubscriptionScreen({ children, preview, redirect }: Subscription
                 </div>
               ))}
             </div>
-            {pending && status === null && selectedPlan === null ? (
-              <p className="cx-shimmer text-center text-xs">Checking subscription…</p>
-            ) : null}
             {status?.stale ? (
               <p className="text-xs text-muted-foreground">Billing data may be delayed. Refresh to try again.</p>
             ) : null}

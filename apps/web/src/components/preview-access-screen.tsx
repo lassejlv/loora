@@ -3,6 +3,7 @@ import { LogOutIcon } from '#/components/icons'
 import { clearWelcomeSeen } from '#/components/welcome-dialog'
 import { authClient } from '@loora/auth/client'
 import { orpc } from '#/lib/orpc-client'
+import { readAccessVerdict, writeAccessVerdict } from '#/lib/access-cache'
 import { Button } from '#/components/ui/button'
 import {
   Dialog,
@@ -14,12 +15,16 @@ import {
 } from '#/components/ui/dialog'
 
 interface PreviewAccessScreenProps {
+  userId: string
   children: React.ReactNode
   preview: React.ReactNode
 }
 
-export function PreviewAccessScreen({ children, preview }: PreviewAccessScreenProps) {
+export function PreviewAccessScreen({ userId, children, preview }: PreviewAccessScreenProps) {
   const [status, setStatus] = useState<{ granted: boolean; requested: boolean } | null>(null)
+  // Last load's verdict: lets a returning user mount the editor immediately
+  // while the check re-runs in the background. A live "revoked" result wins.
+  const [optimistic] = useState(() => readAccessVerdict('preview', userId))
   const [pending, setPending] = useState(true)
   const [error, setError] = useState('')
 
@@ -29,18 +34,29 @@ export function PreviewAccessScreen({ children, preview }: PreviewAccessScreenPr
     try {
       const next = await orpc.auth.previewAccess()
       setStatus({ granted: next.granted, requested: next.requested })
+      writeAccessVerdict('preview', userId, next.granted)
     } catch {
       setError('Could not check preview access. Please try again.')
     } finally {
       setPending(false)
     }
-  }, [])
+  }, [userId])
 
   useEffect(() => {
     void loadStatus()
   }, [loadStatus])
 
-  if (status?.granted) return children
+  if (status ? status.granted : optimistic) return children
+
+  // First-ever check in flight: hold the same shimmer the session check shows
+  // instead of flashing the request dialog at users who have access.
+  if (status === null && !error) {
+    return (
+      <main className="grid min-h-screen place-items-center bg-cx-canvas">
+        <p className="cx-shimmer text-sm">Opening your canvas…</p>
+      </main>
+    )
+  }
 
   return (
     <>

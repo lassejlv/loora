@@ -27,9 +27,20 @@ const noPlan = {
   source: 'polar' as const,
 }
 
+const CACHE_KEY = 'loora:access:billing:user-1'
+
+function renderScreen(redirect?: ReturnType<typeof mock>) {
+  return render(
+    <SubscriptionScreen userId="user-1" preview={<div>Preview canvas</div>} redirect={redirect}>
+      <div>Real editor</div>
+    </SubscriptionScreen>,
+  )
+}
+
 describe('SubscriptionScreen', () => {
   beforeEach(() => {
     window.history.replaceState({}, '', '/')
+    window.localStorage.clear()
     status.mockReset().mockResolvedValue(noPlan)
     refresh.mockReset().mockResolvedValue(noPlan)
     checkout.mockReset().mockResolvedValue({ url: 'https://polar.sh/checkout/pro-trial' })
@@ -40,11 +51,7 @@ describe('SubscriptionScreen', () => {
 
   test('keeps the editor inert and offers both plan checkouts', async () => {
     const redirect = mock()
-    render(
-      <SubscriptionScreen preview={<div>Preview canvas</div>} redirect={redirect}>
-        <div>Real editor</div>
-      </SubscriptionScreen>,
-    )
+    renderScreen(redirect)
 
     expect(await screen.findByText('$20')).toBeTruthy()
     expect(screen.getByText('$49')).toBeTruthy()
@@ -55,25 +62,44 @@ describe('SubscriptionScreen', () => {
     expect(redirect).toHaveBeenCalledWith('https://polar.sh/checkout/pro-trial')
   })
 
+  test('shows the loading shimmer, not the plan picker, while the first check runs', () => {
+    status.mockReturnValue(new Promise(() => {}))
+    renderScreen()
+
+    expect(screen.getByText('Opening your canvas…')).toBeTruthy()
+    expect(screen.queryByText('Choose your Loora plan')).toBeNull()
+    expect(screen.queryByText('Real editor')).toBeNull()
+  })
+
   test('mounts the real editor for an active subscription', async () => {
     status.mockResolvedValue({ ...noPlan, access: true, plan: 'pro' })
-    render(
-      <SubscriptionScreen preview={<div>Preview canvas</div>}>
-        <div>Real editor</div>
-      </SubscriptionScreen>,
-    )
+    renderScreen()
     expect(await screen.findByText('Real editor')).toBeTruthy()
     expect(screen.queryByText('Choose your Loora plan')).toBeNull()
+    expect(window.localStorage.getItem(CACHE_KEY)).toBe('1')
+  })
+
+  test('mounts the editor immediately from a cached verdict while the check re-runs', () => {
+    window.localStorage.setItem(CACHE_KEY, '1')
+    status.mockReturnValue(new Promise(() => {}))
+    renderScreen()
+
+    expect(screen.getByText('Real editor')).toBeTruthy()
+  })
+
+  test('drops the cached verdict when the subscription has lapsed', async () => {
+    window.localStorage.setItem(CACHE_KEY, '1')
+    renderScreen()
+
+    expect(screen.getByText('Real editor')).toBeTruthy()
+    expect(await screen.findByText('Choose your Loora plan')).toBeTruthy()
+    expect(window.localStorage.getItem(CACHE_KEY)).toBeNull()
   })
 
   test('refreshes after checkout and clears checkout query parameters', async () => {
     window.history.replaceState({}, '', '/?checkout=success&checkout_id=checkout-1')
     refresh.mockResolvedValue({ ...noPlan, access: true, plan: 'studio' })
-    render(
-      <SubscriptionScreen preview={<div>Preview canvas</div>}>
-        <div>Real editor</div>
-      </SubscriptionScreen>,
-    )
+    renderScreen()
     expect(await screen.findByText('Real editor')).toBeTruthy()
     expect(refresh).toHaveBeenCalledTimes(1)
     await waitFor(() => expect(window.location.search).toBe(''))

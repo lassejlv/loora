@@ -191,8 +191,8 @@ function App() {
   }
 
   return (
-    <PreviewAccessScreen preview={<Editor preview />}>
-      <SubscriptionScreen preview={<Editor preview />}>
+    <PreviewAccessScreen userId={session.user.id} preview={<Editor preview />}>
+      <SubscriptionScreen userId={session.user.id} preview={<Editor preview />}>
         <Editor userId={session.user.id} />
       </SubscriptionScreen>
     </PreviewAccessScreen>
