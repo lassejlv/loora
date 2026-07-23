@@ -134,6 +134,7 @@ const TOOL_META = {
   viewRepositoryImage: { icon: EyeIcon, label: 'Viewed repository image' },
 } as const
 
+/** Full catalog (incl. GitHub repo list — expensive). Used on doc load. */
 async function fetchMentionRemotes(designId: string) {
   const [assets, repos, binding] = await Promise.all([
     orpc.asset.list().catch((error) => {
@@ -152,6 +153,27 @@ async function fetchMentionRemotes(designId: string) {
   return {
     assets: assets.map((asset) => ({ id: asset.id, name: asset.name })),
     repos: repos.map((repo) => ({ fullName: repo.fullName })),
+    preferredRepo: binding?.fullName ?? null,
+  }
+}
+
+/**
+ * Cheap refresh for newly uploaded assets / relinked repo. Skips
+ * `github.repositories` — that syncs installations and hits GitHub per open.
+ */
+async function refreshMentionLocals(designId: string) {
+  const [assets, binding] = await Promise.all([
+    orpc.asset.list().catch((error) => {
+      console.error('[mentions] Failed to list assets:', error)
+      return [] as { id: string; name: string }[]
+    }),
+    orpc.github.binding({ designId }).catch((error) => {
+      console.error('[mentions] Failed to load linked repository:', error)
+      return null
+    }),
+  ])
+  return {
+    assets: assets.map((asset) => ({ id: asset.id, name: asset.name })),
     preferredRepo: binding?.fullName ?? null,
   }
 }
@@ -747,7 +769,8 @@ export const AgentPanel = memo(function AgentPanel({
     }
   }, [docId])
 
-  // Refresh when @ opens so newly uploaded assets / linked repos appear.
+  // Light refresh when @ opens so newly uploaded assets / relinks appear —
+  // without re-hitting the full GitHub repository list every keystroke session.
   const mentionOpenRef = useRef(false)
   useEffect(() => {
     const opened = mentionOpen && !mentionOpenRef.current
@@ -755,10 +778,9 @@ export const AgentPanel = memo(function AgentPanel({
     if (!opened) return
 
     let cancelled = false
-    void fetchMentionRemotes(docId).then((remote) => {
+    void refreshMentionLocals(docId).then((remote) => {
       if (cancelled) return
       setMentionAssets(remote.assets)
-      setMentionRepos(remote.repos)
       setPreferredRepo(remote.preferredRepo)
     })
     return () => {
@@ -770,13 +792,23 @@ export const AgentPanel = memo(function AgentPanel({
     setMentionIndex(0)
   }, [mentionQuery?.start, mentionQuery?.query])
 
+  // Keep apply/Escape dismiss until that @ is deleted so arrowing back into a
+  // completed `@Label` does not reopen the menu and steal Enter.
+  useEffect(() => {
+    if (mentionDismissedStart === null) return
+    if (input[mentionDismissedStart] !== '@') setMentionDismissedStart(null)
+  }, [input, mentionDismissedStart])
+
   const applyMention = (item: MentionItem) => {
     if (!mentionQuery) return
-    const next = insertMention(input, mentionQuery.start, caret, item.label)
+    const start = mentionQuery.start
+    const next = insertMention(input, start, caret, item.label)
     setInput(next.text)
     setCaret(next.caret)
     setTrackedMentions((current) => [...current, item])
-    setMentionDismissedStart(null)
+    // insert leaves caret after `@Label `; activeMentionQuery would still
+    // match that span and keep the menu open / steal Enter — dismiss it.
+    setMentionDismissedStart(start)
     requestAnimationFrame(() => {
       const el = composerRef.current
       if (!el) return
@@ -786,7 +818,8 @@ export const AgentPanel = memo(function AgentPanel({
   }
 
   const syncCaret = (el: HTMLTextAreaElement) => {
-    setCaret(el.selectionStart ?? el.value.length)
+    const next = el.selectionStart ?? el.value.length
+    setCaret((prev) => (prev === next ? prev : next))
   }
 
   useEffect(() => {

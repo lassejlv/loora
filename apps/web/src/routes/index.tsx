@@ -119,6 +119,7 @@ import { authClient } from '@loora/auth/client'
 import { SidebarProvider } from '#/components/ui/sidebar'
 import { orpc } from '#/lib/orpc-client'
 import { Drawer, DrawerPopup } from '#/components/ui/drawer'
+import { Dialog, DialogPopup } from '#/components/ui/dialog'
 import { useIsMobile } from '#/hooks/use-media-query'
 import {
   AlertDialog,
@@ -1720,11 +1721,10 @@ function Editor({ preview = false, userId }: { preview?: boolean; userId?: strin
           </DrawerPopup>
         </Drawer>
 
-        <Drawer open={settingsOpen} onOpenChange={setSettingsOpen} position="bottom">
-          <DrawerPopup
-            position="bottom"
-            variant="inset"
-            className="mx-auto h-[min(70svh,36rem)] w-full max-w-lg overflow-hidden rounded-2xl border"
+        <Dialog open={settingsOpen} onOpenChange={setSettingsOpen}>
+          <DialogPopup
+            showCloseButton={false}
+            className="h-[min(70svh,36rem)] overflow-hidden p-0"
           >
             <SettingsPanel
               onClose={() => setSettingsOpen(false)}
@@ -1733,8 +1733,8 @@ function Editor({ preview = false, userId }: { preview?: boolean; userId?: strin
               agentSystemPrompt={agentSystemPrompt}
               onSaveAgentSystemPrompt={saveAgentSystemPrompt}
             />
-          </DrawerPopup>
-        </Drawer>
+          </DialogPopup>
+        </Dialog>
 
         <div className="absolute top-4 right-4 flex items-center gap-1">
           {!preview ? (

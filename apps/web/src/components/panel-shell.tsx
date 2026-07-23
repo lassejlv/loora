@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react'
 import { XIcon } from '#/components/icons'
 import { Button } from '#/components/ui/button'
+import { ScrollArea } from '#/components/ui/scroll-area'
 import { Skeleton } from '#/components/ui/skeleton'
 import { cn } from '#/lib/utils'
 
@@ -12,6 +13,8 @@ export function PanelShell({
   children,
   bodyClassName,
   className,
+  /** Native overflow when the body hosts a filling child (e.g. Monaco). */
+  bodyScroll = true,
 }: {
   title: string
   description?: ReactNode
@@ -20,6 +23,7 @@ export function PanelShell({
   children: ReactNode
   bodyClassName?: string
   className?: string
+  bodyScroll?: boolean
 }) {
   return (
     <aside className={cn('flex h-full min-h-0 w-full flex-col bg-card', className)}>
@@ -46,9 +50,17 @@ export function PanelShell({
           ) : null}
         </div>
       </header>
-      <div className={cn('flex min-h-0 flex-1 flex-col overflow-y-auto', bodyClassName)}>
-        {children}
-      </div>
+      {bodyScroll ? (
+        <div className="min-h-0 flex-1">
+          <ScrollArea className="h-full" scrollFade>
+            <div className={cn('flex flex-col', bodyClassName)}>{children}</div>
+          </ScrollArea>
+        </div>
+      ) : (
+        <div className={cn('flex min-h-0 flex-1 flex-col overflow-hidden', bodyClassName)}>
+          {children}
+        </div>
+      )}
     </aside>
   )
 }

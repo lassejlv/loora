@@ -739,7 +739,7 @@ export function SettingsPanel({
   }
 
   return (
-    <PanelShell title="Settings" onClose={onClose} bodyClassName="p-6">
+    <PanelShell title="Settings" onClose={onClose} bodyClassName="p-6" className="bg-transparent">
       <Tabs
         value={tab}
         onValueChange={(value) => {

@@ -69,6 +69,16 @@ describe('insertMention', () => {
     expect(result.text).toBe('resize @Hero section  please')
     expect(result.caret).toBe(21)
   })
+
+  test('leaves an active query at the post-insert caret (composer must dismiss)', () => {
+    // Regression: without dismissing, the menu stays open and steals Enter/Tab.
+    const result = insertMention('@h', 0, 2, 'Hero')
+    expect(result.text).toBe('@Hero ')
+    expect(activeMentionQuery(result.text, result.caret)).toEqual({
+      start: 0,
+      query: 'Hero ',
+    })
+  })
 })
 
 describe('mentionSuffix', () => {

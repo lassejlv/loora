@@ -112,6 +112,7 @@ export function CodeEditorPanel({
         </Button>
       }
       bodyClassName="gap-2 p-3"
+      bodyScroll={false}
     >
       <div className="min-h-0 flex-1 overflow-hidden rounded-md border bg-background ring-ring/24 focus-within:border-ring focus-within:ring-2">
         <Suspense
