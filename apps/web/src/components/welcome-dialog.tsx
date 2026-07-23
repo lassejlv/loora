@@ -1,6 +1,5 @@
 import { useReducedMotion } from 'motion/react'
 import { motion } from 'motion/react'
-import { LayersIcon, MessageSquarePlusIcon, SparklesIcon } from '#/components/icons'
 import { Button } from '#/components/ui/button'
 import {
   Dialog,
@@ -32,89 +31,90 @@ export function clearWelcomeSeen() {
 
 const BEATS = [
   {
-    icon: SparklesIcon,
     title: 'Describe, don’t draw first',
     body: 'Tell the agent what you want. It places real HTML and React on the board.',
   },
   {
-    icon: LayersIcon,
     title: 'Arrange like a design tool',
     body: 'Select, group, nudge, and peek at code when you want control.',
   },
   {
-    icon: MessageSquarePlusIcon,
     title: 'Point and revise',
     body: 'Comment on a spot or keep chatting — the canvas stays the source of truth.',
   },
 ] as const
 
+/** Board vignette — product chrome, not a marketing card collage. */
 function WelcomeHero() {
   const reduceMotion = useReducedMotion()
 
   return (
     <div
       aria-hidden="true"
-      className="relative h-44 w-full shrink-0 overflow-hidden bg-cx-canvas sm:h-48"
+      className="relative h-40 w-full shrink-0 overflow-hidden border-b border-border bg-cx-canvas sm:h-44"
     >
       <div
-        className="absolute inset-0 opacity-90"
+        className="absolute inset-0"
         style={{
           backgroundImage: 'radial-gradient(circle, var(--cx-dot) 1px, transparent 1px)',
-          backgroundSize: '14px 14px',
+          backgroundSize: '16px 16px',
         }}
       />
-      <div className="absolute -left-10 -top-12 size-44 rounded-full bg-cx-accent/25 blur-3xl" />
-      <div className="absolute -right-8 bottom-0 size-36 rounded-full bg-cx-accent/10 blur-3xl" />
 
+      {/* Quiet neighbor frame — unselected */}
       <motion.div
-        className="absolute left-[8%] top-9 w-[7.5rem] -rotate-6 rounded-xl border border-black/8 bg-white p-2.5 shadow-[0_8px_24px_-12px_rgba(26,25,23,0.35)]"
-        initial={reduceMotion ? false : { y: 8, opacity: 0 }}
-        animate={{ y: 0, opacity: 1 }}
-        transition={{ duration: 0.45, ease: [0.22, 1, 0.36, 1] }}
+        className="absolute left-[12%] top-10 h-[4.5rem] w-28 border border-black/10 bg-background/80 dark:border-white/10"
+        initial={reduceMotion ? false : { opacity: 0 }}
+        animate={{ opacity: 1 }}
+        transition={{ duration: 0.35, ease: [0.22, 1, 0.36, 1] }}
       >
-        <div className="mb-2 h-1.5 w-8 rounded-full bg-cx-ink/15" />
-        <div className="space-y-1.5">
-          <div className="h-1.5 w-full rounded-full bg-cx-ink/10" />
-          <div className="h-1.5 w-4/5 rounded-full bg-cx-ink/10" />
-          <div className="h-8 rounded-lg bg-cx-accent/15" />
+          <div className="h-full w-full p-2">
+          <div className="h-2 w-10 bg-cx-ink/10" />
+          <div className="mt-2 h-full w-full bg-cx-ink/5" />
         </div>
       </motion.div>
 
+      {/* Selected frame with real selection chrome */}
       <motion.div
-        className="absolute left-1/2 top-7 w-[9.5rem] -translate-x-1/2 rotate-1 rounded-xl border border-black/8 bg-white p-2.5 shadow-[0_10px_28px_-12px_rgba(26,25,23,0.4)]"
-        initial={reduceMotion ? false : { y: 12, opacity: 0 }}
-        animate={{ y: 0, opacity: 1 }}
-        transition={{ duration: 0.5, delay: 0.06, ease: [0.22, 1, 0.36, 1] }}
+        className="absolute left-[38%] top-7 h-[5.75rem] w-40"
+        initial={reduceMotion ? false : { opacity: 0, y: 6 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.4, delay: reduceMotion ? 0 : 0.05, ease: [0.22, 1, 0.36, 1] }}
       >
-        <div className="mb-2 flex items-center gap-1.5">
-          <span className="size-2 rounded-full bg-cx-accent" />
-          <span className="h-1.5 w-12 rounded-full bg-cx-ink/15" />
+        <div className="relative h-full w-full border border-cx-accent bg-background shadow-[0_1px_0_rgba(0,0,0,0.04)]">
+          <div className="flex h-full flex-col gap-1.5 p-2.5">
+            <div className="h-2 w-14 bg-cx-ink/15" />
+            <div className="h-2 w-full bg-cx-ink/8" />
+            <div className="h-2 w-4/5 bg-cx-ink/8" />
+            <div className="mt-auto h-7 w-full bg-cx-ink/5" />
+          </div>
+          {/* Corner handles */}
+          {(['-left-1 -top-1', '-right-1 -top-1', '-left-1 -bottom-1', '-right-1 -bottom-1'] as const).map(
+            (pos) => (
+              <span
+                key={pos}
+                className={`absolute size-2 border border-cx-accent bg-background ${pos}`}
+              />
+            ),
+          )}
         </div>
-        <div className="grid grid-cols-2 gap-1.5">
-          <div className="h-10 rounded-lg bg-cx-canvas" />
-          <div className="h-10 rounded-lg bg-cx-accent/20" />
-          <div className="col-span-2 h-6 rounded-lg bg-cx-ink/8" />
+        {/* Element label chip — mirrors canvas chrome */}
+        <div className="absolute -top-5 left-0 flex items-center gap-1">
+          <span className="rounded-sm bg-cx-accent px-1.5 py-0.5 font-mono text-[9px] font-medium leading-none text-white">
+            hero
+          </span>
         </div>
       </motion.div>
 
+      {/* Comment pin */}
       <motion.div
-        className="absolute right-[7%] top-11 w-32 rotate-[5deg] rounded-xl border border-black/8 bg-white p-2.5 shadow-[0_8px_24px_-12px_rgba(26,25,23,0.35)]"
-        initial={reduceMotion ? false : { y: 10, opacity: 0 }}
-        animate={{ y: 0, opacity: 1 }}
-        transition={{ duration: 0.5, delay: 0.12, ease: [0.22, 1, 0.36, 1] }}
+        className="absolute right-[14%] top-[3.25rem] flex size-6 items-center justify-center rounded-full border border-border bg-background text-[10px] font-medium text-muted-foreground shadow-sm"
+        initial={reduceMotion ? false : { opacity: 0, scale: 0.85 }}
+        animate={{ opacity: 1, scale: 1 }}
+        transition={{ duration: 0.3, delay: reduceMotion ? 0 : 0.16, ease: [0.22, 1, 0.36, 1] }}
       >
-        <div className="mb-2 flex gap-1">
-          <span className="h-5 w-5 rounded-md bg-cx-accent/20" />
-          <span className="h-5 flex-1 rounded-md bg-cx-ink/8" />
-        </div>
-        <div className="space-y-1">
-          <div className="h-1.5 w-full rounded-full bg-cx-ink/10" />
-          <div className="h-1.5 w-3/4 rounded-full bg-cx-ink/10" />
-          <div className="mt-2 h-6 rounded-md bg-cx-ink" />
-        </div>
+        1
       </motion.div>
-
-      <div className="pointer-events-none absolute inset-x-0 bottom-0 h-10 bg-gradient-to-t from-popover to-transparent" />
     </div>
   )
 }
@@ -139,42 +139,37 @@ export function WelcomeDialog({
       >
         <WelcomeHero />
 
-        <DialogHeader className="gap-2.5 pt-4">
-          <p className="text-lg font-semibold tracking-tight">
+        <DialogHeader className="gap-3 pt-5">
+          <DialogTitle className="text-2xl font-semibold tracking-tight">
             loora<span className="text-cx-accent">.</span>
-          </p>
-          <DialogTitle className="text-2xl leading-tight tracking-tight">
-            The design harness.
           </DialogTitle>
+          <p className="text-base font-medium leading-snug text-muted-foreground">
+            The design harness.
+          </p>
           <DialogDescription className="text-sm leading-relaxed">
             Put an agent on an infinite canvas. It builds real UI in place — you steer, arrange, and
             ship from the board.
           </DialogDescription>
         </DialogHeader>
 
-        <DialogPanel className="flex flex-col gap-3 pt-1">
-          {BEATS.map((beat, index) => {
-            const Icon = beat.icon
-            return (
-              <motion.div
-                key={beat.title}
-                className="flex gap-3"
-                initial={enter.initial}
-                animate={enter.animate}
-                transition={{ ...transition, delay: reduceMotion ? 0 : 0.04 * index }}
-              >
-                <span className="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-lg bg-cx-accent/10 text-cx-accent">
-                  <Icon size={16} className="size-4" data-slot="icon" />
-                </span>
-                <div className="min-w-0">
-                  <p className="text-sm font-medium">{beat.title}</p>
-                  <p className="mt-0.5 text-xs leading-relaxed text-muted-foreground">
-                    {beat.body}
-                  </p>
-                </div>
-              </motion.div>
-            )
-          })}
+        <DialogPanel className="flex flex-col gap-0 border-t border-border pt-0">
+          {BEATS.map((beat, index) => (
+            <motion.div
+              key={beat.title}
+              className="flex gap-4 border-b border-border py-3 last:border-b-0"
+              initial={enter.initial}
+              animate={enter.animate}
+              transition={{ ...transition, delay: reduceMotion ? 0 : 0.03 * index }}
+            >
+              <span className="w-5 shrink-0 pt-0.5 font-mono text-[11px] tabular-nums text-muted-foreground">
+                {String(index + 1).padStart(2, '0')}
+              </span>
+              <div className="min-w-0">
+                <p className="text-sm font-medium">{beat.title}</p>
+                <p className="mt-0.5 text-xs leading-relaxed text-muted-foreground">{beat.body}</p>
+              </div>
+            </motion.div>
+          ))}
         </DialogPanel>
 
         <DialogFooter variant="bare" className="sm:justify-end">
