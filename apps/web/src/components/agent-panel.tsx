@@ -307,6 +307,17 @@ export const AgentPanel = memo(function AgentPanel({
   const recoveryRetries = useRef(0)
   const retryResponse = useRef<() => void>(() => {})
   const forceCanvasAction = useRef(false)
+  // Messages typed while the agent is busy. Delivered at the next step
+  // boundary: the wrapped sendAutomaticallyWhen suppresses the automatic
+  // continuation, and onFinish sends the queued text instead — so the model
+  // sees the tool results plus the user's steering in one request. When the
+  // run is already over, the same path simply starts the next turn.
+  const [queuedMessages, setQueuedMessages] = useState<string[]>([])
+  const queuedRef = useRef(queuedMessages)
+  queuedRef.current = queuedMessages
+  const dispatchPrompt = useRef<
+    (text: string, files?: { type: 'file'; mediaType: string; url: string }[]) => void
+  >(() => {})
   const chatsRef = useRef(chats)
   chatsRef.current = chats
   const composerRef = useRef<HTMLTextAreaElement>(null)
@@ -326,8 +337,25 @@ export const AgentPanel = memo(function AgentPanel({
           forceCanvasAction: forceCanvasAction.current,
         }),
       }),
-      sendAutomaticallyWhen: lastAssistantMessageIsCompleteWithToolCalls,
+      sendAutomaticallyWhen: (options) =>
+        queuedRef.current.length === 0 &&
+        lastAssistantMessageIsCompleteWithToolCalls(options),
       onFinish({ message, isAbort, isError }) {
+        if (isAbort && queuedRef.current.length > 0) {
+          // The user stopped the run; hand queued text back to the composer
+          // instead of firing it at an agent they just interrupted.
+          const queued = queuedRef.current
+          setQueuedMessages([])
+          setInput((current) =>
+            [current.trim(), ...queued].filter(Boolean).join('\n'),
+          )
+        } else if (!isError && queuedRef.current.length > 0) {
+          // The queue-flush effect sends the next message once every client
+          // tool has reported its render result; skip stall recovery here.
+          recoveryRetries.current = 0
+          forceCanvasAction.current = false
+          return
+        }
         const stoppedBeforeAction =
           !hasCanvasMutation(message) &&
           (forceCanvasAction.current || promisesCanvasWork(message))
@@ -623,45 +651,84 @@ export const AgentPanel = memo(function AgentPanel({
     void regenerate()
   }
 
+  // One send path for composer submits, comment pins, and queue flushes:
+  // chat title, history checkpoint, canvas snapshot, sendMessage.
+  dispatchPrompt.current = (text, files = []) => {
+    setStallError(null)
+    recoveryRetries.current = 0
+    if (activeChat?.title === 'New chat') {
+      const title = titleFromPrompt(text)
+      setChats((current) =>
+        current.map((chat) => (chat.id === activeChatId ? { ...chat, title } : chat)),
+      )
+    }
+    // safety checkpoint: restorable from History if the agent goes wrong
+    commitIfChanged(docId, `Before: ${text.slice(0, 60)}`, shapesRef.current)
+    void orpc.history
+      .commit({
+        id: `c${nanoid()}`,
+        designId: docId,
+        message: `Before: ${text.slice(0, 60)}`,
+        shapes: shapesRef.current,
+        skipIfUnchanged: true,
+      })
+      .catch((error) => console.error('[history] Failed to save checkpoint:', error))
+    void (async () => {
+      const snapshot = imageInputsEnabled ? await snapshotCanvas(shapesRef.current) : null
+      void sendMessage({
+        text,
+        files: imageInputsEnabled
+          ? [
+              ...files,
+              ...(snapshot
+                ? [{ type: 'file' as const, mediaType: 'image/png', url: snapshot }]
+                : []),
+            ]
+          : [],
+      })
+    })()
+  }
+
   // Canvas comment pins send through here. Returns false while the chat is
   // busy or still loading so the caller can keep the comment draft open.
   if (sendRef) {
     sendRef.current = (text: string): boolean => {
       if (!chatReady || status === 'streaming' || status === 'submitted') return false
-      setStallError(null)
-      recoveryRetries.current = 0
-      if (activeChat?.title === 'New chat') {
-        const title = titleFromPrompt(text)
-        setChats((current) =>
-          current.map((chat) => (chat.id === activeChatId ? { ...chat, title } : chat)),
-        )
-      }
-      // safety checkpoint: restorable from History if the agent goes wrong
-      commitIfChanged(docId, `Before: ${text.slice(0, 60)}`, shapesRef.current)
-      void orpc.history
-        .commit({
-          id: `c${nanoid()}`,
-          designId: docId,
-          message: `Before: ${text.slice(0, 60)}`,
-          shapes: shapesRef.current,
-          skipIfUnchanged: true,
-        })
-        .catch((error) => console.error('[history] Failed to save checkpoint:', error))
-      void (async () => {
-        const snapshot = imageInputsEnabled ? await snapshotCanvas(shapesRef.current) : null
-        void sendMessage({
-          text,
-          files: snapshot
-            ? [{ type: 'file' as const, mediaType: 'image/png', url: snapshot }]
-            : [],
-        })
-      })()
+      dispatchPrompt.current(text)
       return true
     }
   }
 
   const messagesRef = useRef(messages)
   messagesRef.current = messages
+
+  // Queue flush. Runs when the chat goes idle AND every tool part on the last
+  // assistant message has an output — client tools resolve after the stream
+  // closes (renders wait ~1.5s), and sending before they land would submit a
+  // conversation with incomplete tool results. The wrapped
+  // sendAutomaticallyWhen keeps the SDK from auto-continuing first, so the
+  // queued text rides in the same request as the tool results (steering).
+  useEffect(() => {
+    if (status !== 'ready' || queuedMessages.length === 0 || !chatReady) return
+    const last = messages[messages.length - 1]
+    if (last?.role === 'assistant') {
+      const pending = last.parts.some((part) => {
+        const p = part as unknown as ToolPart
+        return (
+          typeof p.type === 'string' &&
+          p.type.startsWith('tool-') &&
+          p.state !== 'output-available' &&
+          p.state !== 'output-error'
+        )
+      })
+      if (pending) return
+    }
+    const [next, ...rest] = queuedMessages
+    setQueuedMessages(rest)
+    recoveryRetries.current = 0
+    forceCanvasAction.current = false
+    dispatchPrompt.current(next)
+  }, [status, messages, queuedMessages, chatReady])
 
   // Live preview: while a createElement/updateElement call is still streaming
   // its input, push the partial code into the canvas so the design appears as
@@ -870,6 +937,7 @@ export const AgentPanel = memo(function AgentPanel({
     let cancelled = false
     setChatReady(false)
     setMessages([])
+    setQueuedMessages([])
 
     orpc.chat
       .get({ id: activeChatId })
@@ -1036,48 +1104,47 @@ export const AgentPanel = memo(function AgentPanel({
             onHover={setMentionIndex}
           />
         ) : null}
+        {queuedMessages.length > 0 && (
+          <div className="mb-2 flex flex-col gap-1" aria-label="Queued messages">
+            {queuedMessages.map((text, index) => (
+              <div
+                key={`${index}-${text.slice(0, 24)}`}
+                className="flex items-center gap-2 rounded-md border bg-muted/40 px-2 py-1.5 text-xs text-muted-foreground"
+              >
+                <Spinner className="size-3 shrink-0 opacity-50" aria-hidden />
+                <span className="min-w-0 flex-1 truncate">{text}</span>
+                <button
+                  type="button"
+                  aria-label="Remove queued message"
+                  className="shrink-0 rounded p-0.5 hover:bg-muted hover:text-foreground"
+                  onClick={() =>
+                    setQueuedMessages((queue) => queue.filter((_, i) => i !== index))
+                  }
+                >
+                  <XIcon className="size-3" />
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
         <PromptInput
           accept={imageInputsEnabled ? 'image/*' : 'application/x-loora-disabled'}
-          onSubmit={async ({ text, files }) => {
+          onSubmit={({ text, files }) => {
             const trimmed = text.trim()
-            if (!trimmed || !chatReady || status === 'streaming' || status === 'submitted') return
+            if (!trimmed || !chatReady) return
             const outbound = trimmed + mentionSuffix(trimmed, trackedMentions)
             setInput('')
             setCaret(0)
             setTrackedMentions([])
             setMentionDismissedStart(null)
-            setStallError(null)
-            recoveryRetries.current = 0
-            forceCanvasAction.current = false
-            if (activeChat?.title === 'New chat') {
-              const title = titleFromPrompt(trimmed)
-              setChats((current) =>
-                current.map((chat) => (chat.id === activeChatId ? { ...chat, title } : chat)),
-              )
+            if (status === 'streaming' || status === 'submitted') {
+              // Busy: queue instead of send. Delivered at the next step
+              // boundary (steering) or when the run finishes (next turn).
+              setQueuedMessages((queue) => [...queue, outbound])
+              return
             }
-            // safety checkpoint: restorable from History if the agent goes wrong
-            commitIfChanged(docId, `Before: ${trimmed.slice(0, 60)}`, shapesRef.current)
-            void orpc.history
-              .commit({
-                id: `c${nanoid()}`,
-                designId: docId,
-                message: `Before: ${trimmed.slice(0, 60)}`,
-                shapes: shapesRef.current,
-                skipIfUnchanged: true,
-              })
-              .catch((error) => console.error('[history] Failed to save checkpoint:', error))
-            const snapshot = imageInputsEnabled ? await snapshotCanvas(shapesRef.current) : null
-            sendMessage({
-              text: outbound,
-              files: imageInputsEnabled
-                ? [
-                    ...files,
-                    ...(snapshot
-                      ? [{ type: 'file' as const, mediaType: 'image/png', url: snapshot }]
-                      : []),
-                  ]
-                : [],
-            })
+            forceCanvasAction.current = false
+            dispatchPrompt.current(outbound, files)
           }}
         >
           <PromptInputTextarea
@@ -1112,7 +1179,9 @@ export const AgentPanel = memo(function AgentPanel({
             placeholder={
               !chatReady
                 ? 'Loading chat…'
-                : 'Describe a change… (@ to mention)'
+                : status === 'streaming' || status === 'submitted'
+                  ? 'Steer the agent — Enter queues your message…'
+                  : 'Describe a change… (@ to mention)'
             }
             disabled={!chatReady}
             className="w-full"
