@@ -26,6 +26,8 @@ COPY . .
 # declared ARGs reach the build env — without this line Vite inlines nothing.
 ARG VITE_DATABUDDY_CLIENT_ID
 ENV VITE_DATABUDDY_CLIENT_ID=$VITE_DATABUDDY_CLIENT_ID
+# Diagnostic: length 0 in the build log means Railway did not deliver the arg.
+RUN echo "VITE_DATABUDDY_CLIENT_ID length: ${#VITE_DATABUDDY_CLIENT_ID}"
 
 RUN bun run --cwd apps/web build --logLevel warn
 

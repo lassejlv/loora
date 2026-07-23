@@ -75,11 +75,14 @@ export const Route = createRootRoute({
   shellComponent: RootDocument,
 });
 
-// Inlined by Vite at build time; unset (e.g. a local build without the root
-// .env) simply skips analytics instead of sending events with a blank id.
-const DATABUDDY_CLIENT_ID = import.meta.env.VITE_DATABUDDY_CLIENT_ID as
-  | string
-  | undefined;
+// The id is a public identifier (every visitor sees it; Databuddy's domain
+// allowlist is the protection), so a hardcoded fallback is safe. The env var
+// still wins so other environments can point elsewhere or set '' to disable.
+// Railway's Dockerfile build-arg passthrough proved unreliable, hence the
+// fallback.
+const DATABUDDY_CLIENT_ID =
+  (import.meta.env.VITE_DATABUDDY_CLIENT_ID as string | undefined) ??
+  "c54c0e63-bc75-4058-b37a-75e3b5323ea2";
 
 function RootDocument({ children }: { children: React.ReactNode }) {
   useEffect(() => watchSystemTheme(), []);
