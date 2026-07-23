@@ -39,14 +39,7 @@ export function createGenerationUsageAccounting({
   releaseGenerationLease: (userId: string, token: string) => Promise<unknown>
   logError?: (...args: unknown[]) => void
 }) {
-  let subagentInputTokens = 0
-  let subagentOutputTokens = 0
-
   return {
-    addSubagentUsage(usage: TokenUsage) {
-      subagentInputTokens += usage.inputTokens ?? 0
-      subagentOutputTokens += usage.outputTokens ?? 0
-    },
     onError({ error }: { error: unknown }) {
       logError('[chat] stream error:', error)
       if (generationLease) {
@@ -56,8 +49,8 @@ export function createGenerationUsageAccounting({
     async onFinish({ totalUsage }: { totalUsage: TokenUsage }) {
       if (usingChatGPT) return
       try {
-        const inputTokens = (totalUsage.inputTokens ?? 0) + subagentInputTokens
-        const outputTokens = (totalUsage.outputTokens ?? 0) + subagentOutputTokens
+        const inputTokens = totalUsage.inputTokens ?? 0
+        const outputTokens = totalUsage.outputTokens ?? 0
         if (subscriberFunded) {
           await recordSubscriberUsage(
             userId,

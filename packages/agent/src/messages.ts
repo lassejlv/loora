@@ -140,18 +140,6 @@ export function messagesForModel(
   })
 }
 
-export function delegationUsedInCurrentTurn(messages: UIMessage[]) {
-  let lastUserIndex = -1
-  for (let index = messages.length - 1; index >= 0; index--) {
-    if (messages[index].role !== 'user') continue
-    lastUserIndex = index
-    break
-  }
-  return messages.slice(lastUserIndex + 1).some((message) =>
-    message.parts.some((part) => part.type === 'tool-delegateTasks'),
-  )
-}
-
 export function boundedJson(value: unknown, maxChars = 40_000) {
   const json = JSON.stringify(value)
   return json.length <= maxChars ? json : `${json.slice(0, maxChars)}…[truncated]`

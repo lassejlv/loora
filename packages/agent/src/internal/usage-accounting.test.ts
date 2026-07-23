@@ -36,16 +36,14 @@ function harness({
 }
 
 describe('generation usage accounting', () => {
-  it('combines parent and parallel worker usage for managed providers', async () => {
+  it('records managed usage from the generation totals', async () => {
     const { accounting, recordManagedUsage } = harness()
-    accounting.addSubagentUsage({ inputTokens: 11, outputTokens: 13 })
-    accounting.addSubagentUsage({ inputTokens: 11, outputTokens: 13 })
 
     await accounting.onFinish({
       totalUsage: { inputTokens: 100, outputTokens: 200 },
     })
 
-    expect(recordManagedUsage).toHaveBeenCalledWith('user-one', 'mini', 122, 226)
+    expect(recordManagedUsage).toHaveBeenCalledWith('user-one', 'mini', 100, 200)
   })
 
   it('records subscriber usage and releases the lease on finish', async () => {
@@ -84,7 +82,6 @@ describe('generation usage accounting', () => {
     const { accounting, recordManagedUsage, recordSubscriberUsage } = harness({
       usingChatGPT: true,
     })
-    accounting.addSubagentUsage({ inputTokens: 50, outputTokens: 60 })
 
     await accounting.onFinish({
       totalUsage: { inputTokens: 100, outputTokens: 200 },

@@ -27,7 +27,6 @@ import {
   UngroupIcon,
   PenLineIcon,
   Trash2Icon,
-  UsersIcon,
 } from 'lucide-react'
 import { cn } from '#/lib/utils'
 import { Button } from '#/components/ui/button'
@@ -1410,7 +1409,6 @@ type Block =
   | { kind: 'reasoning' }
   | { kind: 'tools'; parts: ToolPart[] }
   | { kind: 'question'; part: ToolPart }
-  | { kind: 'delegation'; part: ToolPart }
 
 function StreamingText({ text, streaming }: { text: string; streaming: boolean }) {
   const reduceMotion = useReducedMotion()
@@ -1469,8 +1467,6 @@ function toBlocks(parts: { type: string }[]): Block[] {
       blocks.push({ kind: 'reasoning' })
     } else if (part.type === 'tool-askQuestion') {
       blocks.push({ kind: 'question', part: part as ToolPart })
-    } else if (part.type === 'tool-delegateTasks') {
-      blocks.push({ kind: 'delegation', part: part as ToolPart })
     } else if (part.type.startsWith('tool-')) {
       const last = blocks[blocks.length - 1]
       if (last?.kind === 'tools') last.parts.push(part as ToolPart)
@@ -1519,12 +1515,6 @@ export const ChatMessageRow = memo(function ChatMessageRow({
             ) : null
           ) : block.kind === 'question' ? (
             <QuestionCard key={index} part={block.part} onAnswer={onAnswer} />
-          ) : block.kind === 'delegation' ? (
-            <DelegationCard
-              key={index}
-              part={block.part}
-              streaming={message.role === 'assistant' && isLast && streaming}
-            />
           ) : (
             <ToolGroup
               key={index}
@@ -1538,124 +1528,6 @@ export const ChatMessageRow = memo(function ChatMessageRow({
     </Message>
   )
 })
-
-type DelegationWorker = {
-  id: string
-  name: string
-  task: string
-  status: 'running' | 'completed' | 'failed'
-  result?: string
-  error?: string
-}
-
-function delegationWorkers(part: ToolPart): DelegationWorker[] {
-  const output = part.output?.workers
-  if (Array.isArray(output)) return output as DelegationWorker[]
-  const tasks = part.input?.tasks
-  if (!Array.isArray(tasks)) return []
-  return tasks.map((value, index) => {
-    const task = value as { name?: unknown; task?: unknown }
-    return {
-      id: `worker-${index + 1}`,
-      name: String(task.name ?? `Worker ${index + 1}`),
-      task: String(task.task ?? ''),
-      status: 'running',
-    }
-  })
-}
-
-function DelegationWorkerRow({
-  worker,
-  cancelled,
-}: {
-  worker: DelegationWorker
-  cancelled: boolean
-}) {
-  const [open, setOpen] = useState(false)
-  const status = cancelled && worker.status === 'running' ? 'cancelled' : worker.status
-  const row = (
-    <div className="flex min-w-0 items-center gap-2 px-3 py-2 text-xs">
-      <span className="min-w-0 flex-1">
-        <span className="block truncate font-medium">{worker.name}</span>
-        <span className="block truncate text-[11px] text-muted-foreground">{worker.task}</span>
-      </span>
-      {status === 'running' ? (
-        <Spinner aria-label="Sub-agent in progress" className="size-3.5 shrink-0 text-cx-accent" />
-      ) : status === 'completed' ? (
-        <CheckIcon aria-label="Sub-agent completed" className="size-3.5 shrink-0 text-muted-foreground" />
-      ) : status === 'cancelled' ? (
-        <span className="shrink-0 text-[11px] text-muted-foreground">cancelled</span>
-      ) : (
-        <XIcon aria-label="Sub-agent failed" className="size-3.5 shrink-0 text-destructive-foreground" />
-      )}
-      {worker.result && (
-        <ChevronRightIcon
-          className={cn('size-3.5 shrink-0 text-muted-foreground transition-transform', open && 'rotate-90')}
-        />
-      )}
-    </div>
-  )
-
-  if (!worker.result) {
-    return (
-      <div className="border-t first:border-t-0">
-        {row}
-        {worker.error && (
-          <p className="px-3 pb-2 text-[11px] text-destructive-foreground">{worker.error}</p>
-        )}
-      </div>
-    )
-  }
-
-  return (
-    <Collapsible open={open} onOpenChange={setOpen} className="border-t first:border-t-0">
-      <CollapsibleTrigger className="w-full text-left">{row}</CollapsibleTrigger>
-      <CollapsibleContent>
-        <pre className="max-h-64 overflow-auto whitespace-pre-wrap border-t bg-muted/30 px-3 py-2 font-mono text-[11px] text-muted-foreground">
-          {worker.result}
-        </pre>
-      </CollapsibleContent>
-    </Collapsible>
-  )
-}
-
-function DelegationCard({ part, streaming }: { part: ToolPart; streaming: boolean }) {
-  const workers = delegationWorkers(part)
-  const cancelled = !streaming && (
-    part.state !== 'output-available' || part.preliminary === true
-  )
-  const completed = workers.filter((worker) => worker.status !== 'running').length
-  const failures = workers.filter((worker) => worker.status === 'failed').length
-  const summary = cancelled
-    ? 'Cancelled'
-    : completed < workers.length
-      ? `${completed} of ${workers.length} complete`
-      : failures > 0
-        ? `${workers.length - failures} completed · ${failures} failed`
-        : 'Complete'
-
-  return (
-    <div className="overflow-hidden rounded-lg border bg-background">
-      <div className="flex items-center gap-2 px-3 py-2.5 text-xs">
-        <UsersIcon className="size-3.5 shrink-0 text-muted-foreground" />
-        <span className="font-medium">Working in parallel</span>
-        <span className="ml-auto text-[11px] text-muted-foreground">{summary}</span>
-      </div>
-      <div className="border-t">
-        {workers.length > 0 ? (
-          workers.map((worker) => (
-            <DelegationWorkerRow key={worker.id} worker={worker} cancelled={cancelled} />
-          ))
-        ) : (
-          <div className="flex items-center gap-2 px-3 py-2 text-xs text-muted-foreground">
-            <Spinner aria-label="Preparing sub-agents" className="size-3.5 text-cx-accent" />
-            Preparing tasks…
-          </div>
-        )}
-      </div>
-    </div>
-  )
-}
 
 function QuestionCard({
   part,

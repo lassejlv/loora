@@ -1,7 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import {
   buildAgentSystemPrompt,
-  buildSubagentSystemPrompt,
   composeAgentSystemPrompt,
 } from './prompts'
 
@@ -39,11 +38,5 @@ describe('agent prompt builders', () => {
     expect(result).toContain('/api/asset/asset-one')
     expect(result).toContain('The user currently has these element ids selected: ["one"]')
     expect(result.match(/Prefer concise replies\./g)).toHaveLength(1)
-  })
-
-  test('keeps sub-agents read-only and appends custom instructions', () => {
-    const result = buildSubagentSystemPrompt('Keep it short.')
-    expect(result).toContain('You cannot mutate the canvas')
-    expect(result.endsWith('--- End user supplementary instructions ---')).toBe(true)
   })
 })

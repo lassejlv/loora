@@ -1,6 +1,4 @@
-import type { ToolSet } from 'ai'
 import { z } from 'zod'
-import type { CanvasElement } from '@loora/db/canvas'
 import {
   getGitHubRepositoryContextByName,
   GitHubIntegrationError,
@@ -11,11 +9,6 @@ import {
   viewRepositoryImage,
   type GitHubRepositoryContext,
 } from '@loora/auth/github'
-import { boundedJson, repositoryToolNames } from './messages'
-import type {
-  DelegatedTask,
-  SubagentBatch,
-} from './internal/subagents'
 
 const elementFields = {
   name: z.string().max(200).describe('short layer label shown to the user, e.g. "Hero section"'),
@@ -48,82 +41,12 @@ const newElementSchema = z.object({
   code: elementFields.code,
 })
 
-export function createReadOnlyCanvasTools(shapes: CanvasElement[]): ToolSet {
-  return {
-    listCanvasElements: {
-      description:
-        'List the current canvas elements with geometry and short code previews. This is read-only.',
-      inputSchema: z.object({
-        query: z.string().trim().max(200).optional(),
-      }),
-      execute: async ({ query }: { query?: string }) => {
-        const needle = query?.toLowerCase()
-        const matches = needle
-          ? shapes.filter((element) =>
-              `${element.name}\n${element.code}`.toLowerCase().includes(needle),
-            )
-          : shapes
-        return {
-          elements: matches.slice(0, 100).map((element) => ({
-            id: element.id,
-            name: element.name,
-            x: element.x,
-            y: element.y,
-            w: element.w,
-            h: element.h,
-            r: element.r,
-            code: element.code.length <= 600
-              ? element.code
-              : `${element.code.slice(0, 600)}…[truncated]`,
-          })),
-          total: matches.length,
-          truncated: matches.length > 100,
-        }
-      },
-    },
-    searchCanvasElements: {
-      description:
-        'Search every canvas element for a code substring and return matching lines. This is read-only.',
-      inputSchema: z.object({ query: z.string().min(1).max(200) }),
-      execute: async ({ query }: { query: string }) => {
-        const needle = query.toLowerCase()
-        const matches: { id: string; name: string; line: number; text: string }[] = []
-        for (const element of shapes) {
-          const lines = element.code.split('\n')
-          for (let index = 0; index < lines.length; index++) {
-            if (!lines[index].toLowerCase().includes(needle)) continue
-            matches.push({
-              id: element.id,
-              name: element.name,
-              line: index + 1,
-              text: lines[index].trim().slice(0, 300),
-            })
-            if (matches.length === 50) return { matches, truncated: true }
-          }
-        }
-        return { matches, truncated: false }
-      },
-    },
-    readCanvasElement: {
-      description:
-        'Read one current canvas element, including its complete code. This is read-only.',
-      inputSchema: z.object({ id: z.string() }),
-      execute: async ({ id }: { id: string }) => {
-        const element = shapes.find((candidate) => candidate.id === id)
-        return element ?? { error: `No element with id ${id}` }
-      },
-    },
-  }
-}
-
 export function createAgentBaseTools({
   userId,
-  shapes,
   githubConnected,
   imageInputsEnabled,
 }: {
   userId: string
-  shapes: CanvasElement[]
   githubConnected: boolean
   imageInputsEnabled: boolean
 }) {
@@ -432,60 +355,5 @@ export function createAgentBaseTools({
         : {}),
   }
 
-  const workerTools: ToolSet = createReadOnlyCanvasTools(shapes ?? [])
-  for (const name of repositoryToolNames) {
-    const repositoryTool = (baseTools as ToolSet)[name]
-    if (repositoryTool) workerTools[name] = repositoryTool
-  }
-
-  return { baseTools, workerTools }
-}
-
-export function createDelegateTasksTool({
-  delegationUsed,
-  run,
-}: {
-  delegationUsed: boolean
-  run: (
-    tasks: DelegatedTask[],
-    abortSignal: AbortSignal | undefined,
-  ) => AsyncGenerator<SubagentBatch>
-}) {
-  let used = delegationUsed
-
-  return {
-    description:
-      'Delegate 2-3 independent, substantial research or implementation-drafting tasks to read-only sub-agents that run in parallel. Use at most once per user turn. Each task must be self-contained. Sub-agents cannot change the canvas; after they return, synthesize their results and make the requested canvas changes yourself.',
-    inputSchema: z.object({
-      tasks: z
-        .array(z.object({
-          name: z.string().trim().min(1).max(80),
-          task: z.string().trim().min(1).max(2_000),
-        }))
-        .min(2)
-        .max(3),
-    }),
-    execute: async function* (
-      { tasks }: { tasks: DelegatedTask[] },
-      { abortSignal }: { abortSignal?: AbortSignal },
-    ) {
-      if (used) {
-        yield {
-          workers: tasks.map((task, index) => ({
-            id: `worker-${index + 1}`,
-            ...task,
-            status: 'failed' as const,
-            error: 'Only one parallel delegation is allowed per user turn.',
-          })),
-        }
-        return
-      }
-      used = true
-      yield* run(tasks, abortSignal)
-    },
-    toModelOutput: ({ output }: { output: unknown }) => ({
-      type: 'text' as const,
-      value: boundedJson(output, 80_000),
-    }),
-  }
+  return baseTools
 }

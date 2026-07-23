@@ -4,7 +4,6 @@ import {
   convertToModelMessages,
   stepCountIs,
   streamText,
-  ToolLoopAgent,
   type UIMessage,
 } from 'ai'
 import type { CanvasElement } from '@loora/db/canvas'
@@ -14,14 +13,11 @@ import {
   getProvider,
 } from './models'
 import {
-  boundedJson,
-  canvasForPrompt,
-  delegationUsedInCurrentTurn,
   messagesForModel,
   modelSupportsImageInput,
   sanitizeModelNames,
 } from './messages'
-import { createAgentBaseTools, createDelegateTasksTool } from './tools'
+import { createAgentBaseTools } from './tools'
 import {
   checkLimits,
   recordSubscriberUsage,
@@ -39,21 +35,12 @@ import {
 import { remainingCredits, usesPolarCredits } from '@loora/auth/billing-policy'
 import { getTopUpCreditStatus } from '@loora/auth/credit-top-ups'
 import { canUseApp, previewAccessRequiredResponse } from '@loora/auth/preview-access'
-import { buildAgentSystemPrompt, buildSubagentSystemPrompt } from './prompts'
+import { buildAgentSystemPrompt } from './prompts'
 import { desc, eq } from 'drizzle-orm'
 import { db } from '@loora/db'
 import { asset, userPreferences } from '@loora/db/schema'
 import { chatgptAuth } from './internal/chatgpt-auth'
 import { getGitHubStatus } from '@loora/auth/github'
-import {
-  currentTurnSubagentImageParts,
-  MAX_SUBAGENT_STEPS,
-  prepareSubagentStep,
-  runParallelSubagents,
-  runSubagentStream,
-  subagentFailureMessage,
-  type SubagentOutcome,
-} from './internal/subagents'
 import { createGenerationUsageAccounting } from './internal/usage-accounting'
 
 export async function handleAgentChatGPTRequest(request: Request): Promise<Response> {
@@ -243,86 +230,11 @@ export async function handleAgentChatRequest(request: Request): Promise<Response
   }
 
   // Shared shape for tools whose output is a PNG the model should look at.
-  const { baseTools, workerTools } = createAgentBaseTools({
+  const tools = createAgentBaseTools({
     userId: session.user.id,
-    shapes: shapes ?? [],
     githubConnected,
     imageInputsEnabled,
   })
-
-  const workerSharedContext = [
-    'Current canvas elements (long code is previewed; use readCanvasElement for complete code):',
-    boundedJson(canvasForPrompt(shapes ?? [])),
-    `Selected element ids: ${boundedJson(selectedIds ?? [])}`,
-    'Available assets:',
-    boundedJson(assets.map((item) => ({
-      name: item.name,
-      mediaType: item.mediaType,
-      src: `/api/asset/${item.id}`,
-    }))),
-  ].join('\n')
-  const workerImageParts = currentTurnSubagentImageParts(messages, imageInputsEnabled)
-
-  const delegateTasks = createDelegateTasksTool({
-    delegationUsed: delegationUsedInCurrentTurn(messages),
-    run: (tasks, abortSignal) =>
-      runParallelSubagents(tasks, async (task): Promise<SubagentOutcome> => {
-        const worker = new ToolLoopAgent({
-          model,
-          instructions: buildSubagentSystemPrompt(agentSystemPrompt),
-          tools: workerTools,
-          stopWhen: stepCountIs(MAX_SUBAGENT_STEPS),
-          prepareStep: prepareSubagentStep,
-          maxOutputTokens: 8_000,
-          providerOptions,
-        })
-
-        try {
-          const workerPrompt = [
-            `Your task: ${task.task}`,
-            '',
-            workerSharedContext,
-          ].join('\n')
-          const result = await runSubagentStream(
-            worker,
-            {
-              messages: await convertToModelMessages([{
-                role: 'user',
-                parts: [
-                  { type: 'text', text: workerPrompt },
-                  ...workerImageParts,
-                ],
-              }]),
-              abortSignal,
-              timeout: 90_000,
-            },
-          )
-          usageAccounting.addSubagentUsage(result.totalUsage)
-          const text = result.text.trim()
-          if (!text) {
-            const finalStep = result.steps.at(-1)
-            console.warn('[chat] Sub-agent returned no deliverable:', {
-              task: task.name,
-              stepCount: result.steps.length,
-              finishReason: finalStep?.finishReason,
-              toolCallCount: finalStep?.toolCalls.length ?? 0,
-            })
-          }
-          return text
-            ? { result: text }
-            : { error: 'Sub-agent returned no deliverable.' }
-        } catch (error) {
-          console.error(`[chat] Sub-agent "${task.name}" failed:`, error)
-          return {
-            error: subagentFailureMessage(error, {
-              aborted: abortSignal?.aborted === true,
-              usingChatGPT,
-            }),
-          }
-        }
-      }),
-  })
-  const tools = { ...baseTools, delegateTasks }
 
   const result = streamText({
     model,
