@@ -72,6 +72,15 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '#/components/ui/dropdown-menu'
+import { MentionMenu } from '#/components/mention-menu'
+import {
+  activeMentionQuery,
+  composerMentionItems,
+  filterMentionItems,
+  insertMention,
+  mentionSuffix,
+  type MentionItem,
+} from '#/lib/mentions'
 
 type ChatState = ReturnType<typeof useChat>
 type ChatSummary = {
@@ -96,6 +105,36 @@ function titleFromPrompt(prompt: string) {
   const title = prompt.trim().replace(/\s+/g, ' ')
   return title.length > 48 ? `${title.slice(0, 47)}…` : title
 }
+
+// Kept above AgentPanel so the composer can build @-mention tool rows without
+// hitting a temporal-dead-zone on TOOL_META.
+const TOOL_META = {
+  createElement: { icon: PlusIcon, label: 'Create' },
+  createElements: { icon: PlusIcon, label: 'Create' },
+  updateElement: { icon: PenLineIcon, label: 'Update' },
+  editElement: { icon: PenLineIcon, label: 'Edit' },
+  arrangeElements: { icon: MoveIcon, label: 'Arrange' },
+  reorderElements: { icon: LayersIcon, label: 'Reorder' },
+  groupElements: { icon: GroupIcon, label: 'Group' },
+  ungroupElements: { icon: UngroupIcon, label: 'Ungroup' },
+  searchCanvas: { icon: SearchIcon, label: 'Search' },
+  readElementLogs: { icon: ScrollTextIcon, label: 'Logs' },
+  viewElement: { icon: EyeIcon, label: 'Inspect' },
+  deleteElement: { icon: Trash2Icon, label: 'Delete' },
+  readElement: { icon: BookOpenIcon, label: 'Read' },
+  loadSkill: { icon: BookOpenIcon, label: 'Skill' },
+  viewCanvas: { icon: EyeIcon, label: 'Verify' },
+  listGitHubRepositories: { icon: LayersIcon, label: 'Listed repositories' },
+  listRepositoryTree: { icon: LayersIcon, label: 'Browsed repository' },
+  searchRepositoryCode: { icon: SearchIcon, label: 'Searched repository' },
+  readRepositoryFile: { icon: BookOpenIcon, label: 'Read repository file' },
+  viewRepositoryImage: { icon: EyeIcon, label: 'Viewed repository image' },
+} as const
+
+const MENTION_TOOLS = (Object.keys(TOOL_META) as (keyof typeof TOOL_META)[]).map((id) => ({
+  id,
+  hint: TOOL_META[id].label,
+}))
 
 function hasAssistantOutput(message: UIMessage) {
   return message.parts.some((part) => {
@@ -161,6 +200,12 @@ export const AgentPanel = memo(function AgentPanel({
   sendRef?: React.RefObject<((text: string) => boolean) | null>
 }) {
   const [input, setInput] = useState('')
+  const [caret, setCaret] = useState(0)
+  const [mentionAssets, setMentionAssets] = useState<{ id: string; name: string }[]>([])
+  const [mentionRepos, setMentionRepos] = useState<{ fullName: string }[]>([])
+  const [trackedMentions, setTrackedMentions] = useState<MentionItem[]>([])
+  const [mentionIndex, setMentionIndex] = useState(0)
+  const [mentionDismissedStart, setMentionDismissedStart] = useState<number | null>(null)
   const [model, setModel] = useState(() => {
     // localStorage is absent in the node test environment
     const stored = typeof localStorage === 'undefined' ? null : localStorage.getItem('loora:model')
@@ -654,6 +699,64 @@ export const AgentPanel = memo(function AgentPanel({
   }, [chatReady])
 
   useEffect(() => {
+    let cancelled = false
+    void Promise.all([
+      orpc.asset.list().catch((error) => {
+        console.error('[mentions] Failed to list assets:', error)
+        return [] as { id: string; name: string }[]
+      }),
+      orpc.github.repositories().catch((error) => {
+        console.error('[mentions] Failed to list repositories:', error)
+        return [] as { fullName: string }[]
+      }),
+    ]).then(([assets, repos]) => {
+      if (cancelled) return
+      setMentionAssets(assets.map((asset) => ({ id: asset.id, name: asset.name })))
+      setMentionRepos(repos.map((repo) => ({ fullName: repo.fullName })))
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  const mentionQuery = activeMentionQuery(input, caret)
+  const mentionOpen = Boolean(mentionQuery && mentionDismissedStart !== mentionQuery.start)
+  const mentionItems = mentionOpen && mentionQuery
+    ? filterMentionItems(
+        composerMentionItems({
+          elements: shapesRef.current,
+          assets: mentionAssets,
+          tools: MENTION_TOOLS,
+          repos: mentionRepos,
+        }),
+        mentionQuery.query,
+      )
+    : []
+
+  useEffect(() => {
+    setMentionIndex(0)
+  }, [mentionQuery?.start, mentionQuery?.query])
+
+  const applyMention = (item: MentionItem) => {
+    if (!mentionQuery) return
+    const next = insertMention(input, mentionQuery.start, caret, item.label)
+    setInput(next.text)
+    setCaret(next.caret)
+    setTrackedMentions((current) => [...current, item])
+    setMentionDismissedStart(null)
+    requestAnimationFrame(() => {
+      const el = composerRef.current
+      if (!el) return
+      el.focus()
+      el.setSelectionRange(next.caret, next.caret)
+    })
+  }
+
+  const syncCaret = (el: HTMLTextAreaElement) => {
+    setCaret(el.selectionStart ?? el.value.length)
+  }
+
+  useEffect(() => {
     if (status !== 'submitted' && status !== 'streaming') return
     // Gemini may think for a long stretch before the first stream token; keep this
     // above typical design-task time-to-first-tool so we don't abort healthy work.
@@ -859,13 +962,25 @@ export const AgentPanel = memo(function AgentPanel({
         <ConversationScrollButton />
       </Conversation>
 
-      <div className="border-t p-3">
+      <div className="relative border-t p-3">
+        {mentionOpen && mentionItems.length > 0 ? (
+          <MentionMenu
+            items={mentionItems}
+            activeIndex={mentionIndex}
+            onSelect={applyMention}
+            onHover={setMentionIndex}
+          />
+        ) : null}
         <PromptInput
           accept={imageInputsEnabled ? 'image/*' : 'application/x-loora-disabled'}
           onSubmit={async ({ text, files }) => {
             const trimmed = text.trim()
             if (!trimmed || !chatReady || status === 'streaming' || status === 'submitted') return
+            const outbound = trimmed + mentionSuffix(trimmed, trackedMentions)
             setInput('')
+            setCaret(0)
+            setTrackedMentions([])
+            setMentionDismissedStart(null)
             setStallError(null)
             recoveryRetries.current = 0
             forceCanvasAction.current = false
@@ -888,7 +1003,7 @@ export const AgentPanel = memo(function AgentPanel({
               .catch((error) => console.error('[history] Failed to save checkpoint:', error))
             const snapshot = imageInputsEnabled ? await snapshotCanvas(shapesRef.current) : null
             sendMessage({
-              text: trimmed,
+              text: outbound,
               files: imageInputsEnabled
                 ? [
                     ...files,
@@ -903,11 +1018,36 @@ export const AgentPanel = memo(function AgentPanel({
           <PromptInputTextarea
             ref={composerRef}
             value={input}
-            onChange={(e) => setInput(e.target.value)}
+            onChange={(e) => {
+              setInput(e.target.value)
+              syncCaret(e.target)
+            }}
+            onClick={(e) => syncCaret(e.currentTarget)}
+            onSelect={(e) => syncCaret(e.currentTarget)}
+            onKeyUp={(e) => syncCaret(e.currentTarget)}
+            onKeyDown={(e) => {
+              if (!mentionOpen || mentionItems.length === 0) return
+              if (e.key === 'ArrowDown') {
+                e.preventDefault()
+                setMentionIndex((index) => (index + 1) % mentionItems.length)
+              } else if (e.key === 'ArrowUp') {
+                e.preventDefault()
+                setMentionIndex(
+                  (index) => (index - 1 + mentionItems.length) % mentionItems.length,
+                )
+              } else if (e.key === 'Enter' || e.key === 'Tab') {
+                e.preventDefault()
+                const item = mentionItems[mentionIndex]
+                if (item) applyMention(item)
+              } else if (e.key === 'Escape') {
+                e.preventDefault()
+                if (mentionQuery) setMentionDismissedStart(mentionQuery.start)
+              }
+            }}
             placeholder={
               !chatReady
                 ? 'Loading chat…'
-                : 'Describe a change…'
+                : 'Describe a change… (@ to mention)'
             }
             disabled={!chatReady}
             className="w-full"
@@ -1123,29 +1263,6 @@ interface ToolPart {
   errorText?: string
   preliminary?: boolean
 }
-
-const TOOL_META = {
-  createElement: { icon: PlusIcon, label: 'Create' },
-  createElements: { icon: PlusIcon, label: 'Create' },
-  updateElement: { icon: PenLineIcon, label: 'Update' },
-  editElement: { icon: PenLineIcon, label: 'Edit' },
-  arrangeElements: { icon: MoveIcon, label: 'Arrange' },
-  reorderElements: { icon: LayersIcon, label: 'Reorder' },
-  groupElements: { icon: GroupIcon, label: 'Group' },
-  ungroupElements: { icon: UngroupIcon, label: 'Ungroup' },
-  searchCanvas: { icon: SearchIcon, label: 'Search' },
-  readElementLogs: { icon: ScrollTextIcon, label: 'Logs' },
-  viewElement: { icon: EyeIcon, label: 'Inspect' },
-  deleteElement: { icon: Trash2Icon, label: 'Delete' },
-  readElement: { icon: BookOpenIcon, label: 'Read' },
-  loadSkill: { icon: BookOpenIcon, label: 'Skill' },
-  viewCanvas: { icon: EyeIcon, label: 'Verify' },
-  listGitHubRepositories: { icon: LayersIcon, label: 'Listed repositories' },
-  listRepositoryTree: { icon: LayersIcon, label: 'Browsed repository' },
-  searchRepositoryCode: { icon: SearchIcon, label: 'Searched repository' },
-  readRepositoryFile: { icon: BookOpenIcon, label: 'Read repository file' },
-  viewRepositoryImage: { icon: EyeIcon, label: 'Viewed repository image' },
-} as const
 
 function describeElement(s: Partial<CanvasElement> | undefined) {
   if (!s) return ''

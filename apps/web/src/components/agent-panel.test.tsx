@@ -13,6 +13,9 @@ const orpc = {
     save: mock(),
   },
   history: { commit: mock() },
+  asset: {
+    list: mock(),
+  },
   github: {
     status: mock(),
     repositories: mock(),
@@ -55,6 +58,7 @@ describe('AgentPanel empty response recovery', () => {
     orpc.chat.get.mockResolvedValue({ messages: [] })
     orpc.chat.save.mockResolvedValue({})
     orpc.history.commit.mockResolvedValue({})
+    orpc.asset.list.mockResolvedValue([])
     orpc.github.status.mockResolvedValue({
       enabled: false,
       connected: false,
@@ -125,7 +129,7 @@ describe('AgentPanel empty response recovery', () => {
       </SidebarProvider>,
     )
 
-    const input = await screen.findByPlaceholderText('Describe a change…')
+    const input = await screen.findByPlaceholderText('Describe a change… (@ to mention)')
     await waitFor(() => expect((input as HTMLTextAreaElement).disabled).toBe(false))
     expect(screen.queryByText('No repository')).toBeNull()
     fireEvent.change(input, { target: { value: 'Make a portfolio website' } })
@@ -173,7 +177,7 @@ describe('AgentPanel empty response recovery', () => {
       </SidebarProvider>,
     )
 
-    const input = await screen.findByPlaceholderText('Describe a change…')
+    const input = await screen.findByPlaceholderText('Describe a change… (@ to mention)')
     const effortButton = screen.getByTitle('Reasoning effort')
     expect(effortButton.textContent).toContain('Max')
     fireEvent.click(effortButton)
@@ -222,7 +226,7 @@ describe('AgentPanel empty response recovery', () => {
       </SidebarProvider>,
     )
 
-    const input = await screen.findByPlaceholderText('Describe a change…')
+    const input = await screen.findByPlaceholderText('Describe a change… (@ to mention)')
     await waitFor(() => expect((input as HTMLTextAreaElement).disabled).toBe(false))
     fireEvent.change(input, { target: { value: 'Make a portfolio website' } })
     fireEvent.submit(input.closest('form')!)
@@ -300,7 +304,7 @@ describe('AgentPanel empty response recovery', () => {
       </SidebarProvider>,
     )
 
-    const input = await screen.findByPlaceholderText('Describe a change…')
+    const input = await screen.findByPlaceholderText('Describe a change… (@ to mention)')
     await waitFor(() => expect((input as HTMLTextAreaElement).disabled).toBe(false))
     fireEvent.change(input, { target: { value: 'Make a portfolio website' } })
     fireEvent.submit(input.closest('form')!)
@@ -347,7 +351,7 @@ describe('AgentPanel empty response recovery', () => {
       </SidebarProvider>,
     )
 
-    const input = await screen.findByPlaceholderText('Describe a change…')
+    const input = await screen.findByPlaceholderText('Describe a change… (@ to mention)')
     await waitFor(() => expect((input as HTMLTextAreaElement).disabled).toBe(false))
     fireEvent.change(input, { target: { value: 'Update this rectangle' } })
     fireEvent.submit(input.closest('form')!)
@@ -393,7 +397,7 @@ describe('AgentPanel empty response recovery', () => {
       </SidebarProvider>,
     )
 
-    const input = await screen.findByPlaceholderText('Describe a change…')
+    const input = await screen.findByPlaceholderText('Describe a change… (@ to mention)')
     await waitFor(() => expect((input as HTMLTextAreaElement).disabled).toBe(false))
     fireEvent.change(input, { target: { value: 'Update this rectangle' } })
     fireEvent.submit(input.closest('form')!)
