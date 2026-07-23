@@ -1,69 +1,69 @@
-import { HeadContent, Scripts, createRootRoute } from '@tanstack/react-router'
-import { Databuddy } from '@databuddy/sdk/react'
-import { TanStackRouterDevtoolsPanel } from '@tanstack/react-router-devtools'
-import { TanStackDevtools } from '@tanstack/react-devtools'
-import { NuqsAdapter } from 'nuqs/adapters/tanstack-router'
-import { useEffect } from 'react'
+import { HeadContent, Scripts, createRootRoute } from "@tanstack/react-router";
+import { Databuddy } from "@databuddy/sdk/react";
+import { TanStackRouterDevtoolsPanel } from "@tanstack/react-router-devtools";
+import { TanStackDevtools } from "@tanstack/react-devtools";
+import { NuqsAdapter } from "nuqs/adapters/tanstack-router";
+import { useEffect } from "react";
 
-import appCss from '../styles.css?url'
-import { THEME_INIT_SCRIPT, watchSystemTheme } from '#/lib/theme'
+import appCss from "../styles.css?url";
+import { THEME_INIT_SCRIPT, watchSystemTheme } from "#/lib/theme";
 
 export const Route = createRootRoute({
   head: () => ({
     meta: [
       {
-        charSet: 'utf-8',
+        charSet: "utf-8",
       },
       {
-        name: 'viewport',
-        content: 'width=device-width, initial-scale=1',
+        name: "viewport",
+        content: "width=device-width, initial-scale=1",
       },
       {
-        title: 'loora',
+        title: "loora",
       },
       {
-        name: 'theme-color',
-        content: '#2440e6',
+        name: "theme-color",
+        content: "#2440e6",
       },
       {
-        name: 'application-name',
-        content: 'loora',
+        name: "application-name",
+        content: "loora",
       },
       {
-        name: 'apple-mobile-web-app-title',
-        content: 'loora',
+        name: "apple-mobile-web-app-title",
+        content: "loora",
       },
     ],
     links: [
       {
-        rel: 'stylesheet',
+        rel: "stylesheet",
         href: appCss,
       },
       // Prefer PNG in the tab; ICO is the fallback for older clients.
       {
-        rel: 'icon',
-        type: 'image/png',
-        sizes: '32x32',
-        href: '/favicon-32x32.png',
+        rel: "icon",
+        type: "image/png",
+        sizes: "32x32",
+        href: "/favicon-32x32.png",
       },
       {
-        rel: 'icon',
-        type: 'image/png',
-        sizes: '16x16',
-        href: '/favicon-16x16.png',
+        rel: "icon",
+        type: "image/png",
+        sizes: "16x16",
+        href: "/favicon-16x16.png",
       },
       {
-        rel: 'shortcut icon',
-        href: '/favicon.ico',
+        rel: "shortcut icon",
+        href: "/favicon.ico",
       },
       {
-        rel: 'apple-touch-icon',
-        sizes: '180x180',
-        href: '/apple-touch-icon.png',
+        rel: "apple-touch-icon",
+        sizes: "180x180",
+        href: "/apple-touch-icon.png",
       },
       {
-        rel: 'manifest',
-        href: '/manifest.json',
+        rel: "manifest",
+        href: "/manifest.json",
       },
     ],
     scripts: [
@@ -73,14 +73,16 @@ export const Route = createRootRoute({
     ],
   }),
   shellComponent: RootDocument,
-})
+});
 
 // Inlined by Vite at build time; unset (e.g. a local build without the root
 // .env) simply skips analytics instead of sending events with a blank id.
-const DATABUDDY_CLIENT_ID = import.meta.env.VITE_DATABUDDY_CLIENT_ID as string | undefined
+const DATABUDDY_CLIENT_ID = import.meta.env.VITE_DATABUDDY_CLIENT_ID as
+  | string
+  | undefined;
 
 function RootDocument({ children }: { children: React.ReactNode }) {
-  useEffect(() => watchSystemTheme(), [])
+  useEffect(() => watchSystemTheme(), []);
   return (
     <html lang="en">
       <head>
@@ -88,16 +90,24 @@ function RootDocument({ children }: { children: React.ReactNode }) {
       </head>
       <body>
         {DATABUDDY_CLIENT_ID && (
-          <Databuddy clientId={DATABUDDY_CLIENT_ID} trackWebVitals trackErrors />
+          <Databuddy
+            clientId={DATABUDDY_CLIENT_ID}
+            trackWebVitals
+            trackErrors
+            trackHashChanges={true}
+            trackAttributes={true}
+            trackOutgoingLinks={true}
+            trackInteractions={true}
+          />
         )}
         <NuqsAdapter>{children}</NuqsAdapter>
         <TanStackDevtools
           config={{
-            position: 'bottom-right',
+            position: "bottom-right",
           }}
           plugins={[
             {
-              name: 'Tanstack Router',
+              name: "Tanstack Router",
               render: <TanStackRouterDevtoolsPanel />,
             },
           ]}
@@ -105,5 +115,5 @@ function RootDocument({ children }: { children: React.ReactNode }) {
         <Scripts />
       </body>
     </html>
-  )
+  );
 }
