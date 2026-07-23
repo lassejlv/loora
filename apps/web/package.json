@@ -7,7 +7,7 @@
   },
   "scripts": {
     "dev": "bun --env-file=../../.env run vite dev --port 3000",
-    "build": "vite build",
+    "build": "bun --env-file=../../.env run vite build",
     "preview": "vite preview",
     "start": "bun --env-file=../../.env run .output/server/index.mjs",
     "test": "bun test --preload ./src/test/setup.ts",
@@ -17,6 +17,7 @@
     "@ai-sdk/openai": "^4.0.16",
     "@ai-sdk/react": "^4.0.34",
     "@base-ui/react": "^1.6.0",
+    "@databuddy/sdk": "^2.6.0",
     "@loora/agent": "workspace:*",
     "@loora/auth": "workspace:*",
     "@loora/db": "workspace:*",

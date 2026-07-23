@@ -19,3 +19,5 @@ README.md
 **/__tests__
 **/*.test.ts
 **/*.test.tsx
+.env
+.env.*

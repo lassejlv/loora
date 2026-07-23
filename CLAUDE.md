@@ -25,7 +25,7 @@ New shadcn components: `bunx shadcn@latest add <name>` from `apps/web/` (config 
 
 TanStack Start (file routes; `/` has `ssr: false`) + React 19 + Vite 8 on the Bun runtime; Tailwind v4; Drizzle ORM over Neon's fetch-based serverless driver; Better Auth (email + Google when `GOOGLE_CLIENT_ID`/`SECRET` are set); oRPC at `/api/rpc`; Vercel AI SDK v7. Bun workspaces monorepo (`apps/web`, `packages/db|auth|rpc` as `@loora/*`, isolated linker + `run.bun` in `bunfig.toml`, shared versions in the root catalog; packages export TS source, no build step). Import alias `#/*` → `apps/web/src/*` (web app only; packages use relative or `@loora/*` imports). Routes generate into `apps/web/src/routeTree.gen.ts`. Deploys on Railway (`railway.json`, `Dockerfile`).
 
-Env (see README): `DATABASE_URL`, `BETTER_AUTH_SECRET`, `BETTER_AUTH_URL`, `REQUIRE_PREVIEW_ACCESS`, `WAFER_API_KEY`, `LWC_SECRET`, `CODEX_CLIENT_VERSION`, optional `S3_*`, optional Google OAuth pair.
+Env (see README): `DATABASE_URL`, `BETTER_AUTH_SECRET`, `BETTER_AUTH_URL`, `REQUIRE_PREVIEW_ACCESS`, `WAFER_API_KEY`, `LWC_SECRET`, `CODEX_CLIENT_VERSION`, optional `S3_*`, optional Google OAuth pair, optional `VITE_DATABUDDY_CLIENT_ID` (Databuddy analytics; build-time, inlined into the client bundle — must be set in the Railway build env, unset skips analytics).
 
 ## Core architecture
 

@@ -1,4 +1,5 @@
 import { HeadContent, Scripts, createRootRoute } from '@tanstack/react-router'
+import { Databuddy } from '@databuddy/sdk/react'
 import { TanStackRouterDevtoolsPanel } from '@tanstack/react-router-devtools'
 import { TanStackDevtools } from '@tanstack/react-devtools'
 import { NuqsAdapter } from 'nuqs/adapters/tanstack-router'
@@ -74,6 +75,10 @@ export const Route = createRootRoute({
   shellComponent: RootDocument,
 })
 
+// Inlined by Vite at build time; unset (e.g. a local build without the root
+// .env) simply skips analytics instead of sending events with a blank id.
+const DATABUDDY_CLIENT_ID = import.meta.env.VITE_DATABUDDY_CLIENT_ID as string | undefined
+
 function RootDocument({ children }: { children: React.ReactNode }) {
   useEffect(() => watchSystemTheme(), [])
   return (
@@ -82,6 +87,9 @@ function RootDocument({ children }: { children: React.ReactNode }) {
         <HeadContent />
       </head>
       <body>
+        {DATABUDDY_CLIENT_ID && (
+          <Databuddy clientId={DATABUDDY_CLIENT_ID} trackWebVitals trackErrors />
+        )}
         <NuqsAdapter>{children}</NuqsAdapter>
         <TanStackDevtools
           config={{
