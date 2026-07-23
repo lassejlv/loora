@@ -22,6 +22,11 @@ COPY --from=deps /app ./
 # matching CSS hashes for client and SSR builds.
 COPY . .
 
+# Railway exposes service variables to Docker builds as build args, but only
+# declared ARGs reach the build env — without this line Vite inlines nothing.
+ARG VITE_DATABUDDY_CLIENT_ID
+ENV VITE_DATABUDDY_CLIENT_ID=$VITE_DATABUDDY_CLIENT_ID
+
 RUN bun run --cwd apps/web build --logLevel warn
 
 FROM oven/bun:1.3.14-slim AS runtime
