@@ -56,4 +56,6 @@ COPY --from=build /app/apps/web/.output ./apps/web/.output
 USER bun
 EXPOSE 3000
 
-CMD ["sh", "-c", "bun run --cwd packages/db migrate:deploy && exec bun run apps/web/.output/server/index.mjs"]
+# --smol trades GC frequency for a smaller heap; CPU sits near zero in
+# production so the tradeoff is free memory.
+CMD ["sh", "-c", "bun run --cwd packages/db migrate:deploy && exec bun --smol run apps/web/.output/server/index.mjs"]

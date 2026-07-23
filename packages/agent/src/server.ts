@@ -236,22 +236,29 @@ export async function handleAgentChatRequest(request: Request): Promise<Response
     imageInputsEnabled,
   })
 
+  // Materialize the prompt and model messages before streamText so nothing in
+  // the long-lived stream (or its onError/onFinish callbacks) captures the raw
+  // request payload — multi-MB canvases and snapshot images become GC-eligible
+  // as soon as this handler returns instead of living for the whole generation.
+  const system = buildAgentSystemPrompt({
+    customInstructions: agentSystemPrompt,
+    forceCanvasAction,
+    imageInputsEnabled,
+    githubConnected,
+    assets,
+    shapes,
+    selectedIds,
+  })
+  const modelMessages = await convertToModelMessages(
+    messagesForModel(messages, imageInputsEnabled),
+    { tools, ignoreIncompleteToolCalls: true },
+  )
+
   const result = streamText({
     model,
     providerOptions,
-    system: buildAgentSystemPrompt({
-      customInstructions: agentSystemPrompt,
-      forceCanvasAction,
-      imageInputsEnabled,
-      githubConnected,
-      assets,
-      shapes,
-      selectedIds,
-    }),
-    messages: await convertToModelMessages(
-      messagesForModel(messages, imageInputsEnabled),
-      { tools, ignoreIncompleteToolCalls: true },
-    ),
+    system,
+    messages: modelMessages,
     stopWhen: stepCountIs(40),
     tools,
     // Design tasks (multi-shape layouts, components) routinely need >60s; a short abort
