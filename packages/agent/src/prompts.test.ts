@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test'
 import {
   buildAgentSystemPrompt,
   composeAgentSystemPrompt,
+  renderPromptTemplate,
 } from './prompts'
 
 describe('composeAgentSystemPrompt', () => {
@@ -38,5 +39,23 @@ describe('agent prompt builders', () => {
     expect(result).toContain('/api/asset/asset-one')
     expect(result).toContain('The user currently has these element ids selected: ["one"]')
     expect(result.match(/Prefer concise replies\./g)).toHaveLength(1)
+    expect(result).toContain('You are the design agent inside loora')
+    expect(result).not.toContain('{{')
+  })
+
+  test('conditional placeholders leave no blank gaps and unknown ones throw', () => {
+    expect(renderPromptTemplate('a\n{{gone}}\nb', { gone: '' })).toBe('a\n\nb')
+    expect(() => renderPromptTemplate('{{ typo }}', {})).toThrow('Unknown prompt placeholder')
+
+    const result = buildAgentSystemPrompt({
+      customInstructions: '',
+      imageInputsEnabled: true,
+      githubConnected: false,
+      assets: [],
+      shapes: [],
+    })
+    expect(result).not.toContain('{{')
+    expect(result).not.toContain('\n\n\n')
+    expect(result).toContain('Verify loop')
   })
 })
