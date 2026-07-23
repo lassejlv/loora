@@ -64,7 +64,7 @@ What shapes this code:
 - **Approval tools.** `deleteElement` and `askQuestion` park in an approval-requested state and are resolved by inline UI cards, so the user can decline a deletion.
 - **Misc.** `sanitizeModelNames` scrubs upstream model ids out of error text; `allowLongRunningChatRequest` disables Bun's 10s inactivity timeout per chat request (reasoning models stall before the first chunk); the client aborts after 120s of no progress; `onFinish` records token usage.
 
-The system prompt is assembled in `packages/agent/src/prompts.ts` from the behavior rules, `DESIGN_SKILL_PROMPT` (`packages/agent/src/design-skill.ts` — frontend-design / apple-design / no-vibe-code guidance, plus the loora palette), the user's asset list (top 100), the current canvas JSON, and the selection.
+The system prompt text lives in `packages/agent/src/agent-prompt.txt` with `{{placeholder}}` slots; `buildAgentSystemPrompt` (`prompts.ts`) fills them server-side (`renderPromptTemplate` throws on unknown keys) with `DESIGN_SKILL_PROMPT` (`design-skill.ts` — frontend-design / apple-design / no-vibe-code / restraint guidance, plus the loora palette), the user's asset list (top 100), the current canvas JSON, and the selection. A Vite plugin (`txtAsText` in `apps/web/vite.config.ts`) inlines `.txt` imports as strings to match Bun's `with { type: 'text' }` — without it Vite ships an asset URL instead of the prompt.
 
 ### Editor state — `apps/web/src/routes/index.tsx`
 
