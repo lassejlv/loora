@@ -176,6 +176,13 @@
       "when": 1784753378086,
       "tag": "0024_melted_brood",
       "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1784849487096,
+      "tag": "0025_whole_jigsaw",
+      "breakpoints": true
     }
   ]
 }

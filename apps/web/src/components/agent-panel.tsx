@@ -133,8 +133,22 @@ const TOOL_META = {
   viewRepositoryImage: { icon: EyeIcon, label: 'Viewed repository image' },
 } as const
 
-/** Full catalog (incl. GitHub repo list — expensive). Used on doc load. */
-async function fetchMentionRemotes(designId: string) {
+/**
+ * Full catalog (incl. GitHub repo list — expensive). Used on doc load.
+ * Cached briefly because every mounted ChatSession asks on mount, and
+ * parallel sessions would otherwise multiply the GitHub sync.
+ */
+const mentionRemoteCache = new Map<string, { at: number; promise: ReturnType<typeof loadMentionRemotes> }>()
+
+function fetchMentionRemotes(designId: string) {
+  const cached = mentionRemoteCache.get(designId)
+  if (cached && performance.now() - cached.at < 30_000) return cached.promise
+  const promise = loadMentionRemotes(designId)
+  mentionRemoteCache.set(designId, { at: performance.now(), promise })
+  return promise
+}
+
+async function loadMentionRemotes(designId: string) {
   const [assets, repos, binding] = await Promise.all([
     orpc.asset.list().catch((error) => {
       console.error('[mentions] Failed to list assets:', error)
@@ -224,6 +238,25 @@ function AgentThinking({ label = 'Thinking' }: { label?: string }) {
   )
 }
 
+type ChatSessionApi = {
+  dispatch: (text: string) => void
+  busy: () => boolean
+  ready: () => boolean
+}
+
+type SharedSessionProps = {
+  actions: ElementActions
+  shapesRef: React.RefObject<CanvasElement[]>
+  selectedIdsRef?: React.RefObject<string[]>
+  docId: string
+}
+
+/**
+ * Shell that owns the chat list and mounts one ChatSession per chat that is
+ * either active or still running. Sessions keep their useChat instance (and
+ * the client-side tool loop) alive while hidden, so switching chats no longer
+ * kills an in-flight generation — that is what makes parallel agents work.
+ */
 export const AgentPanel = memo(function AgentPanel({
   actions,
   shapesRef,
@@ -231,14 +264,177 @@ export const AgentPanel = memo(function AgentPanel({
   docId,
   ready = true,
   sendRef,
-}: {
-  actions: ElementActions
-  shapesRef: React.RefObject<CanvasElement[]>
-  selectedIdsRef?: React.RefObject<string[]>
-  docId: string
+}: SharedSessionProps & {
   ready?: boolean
   // Exposes a send-message entry point for canvas comment pins.
   sendRef?: React.RefObject<((text: string) => boolean) | null>
+}) {
+  const [chats, setChats] = useState<ChatSummary[]>([])
+  const [activeChatId, setActiveChatId] = useState<string | null>(null)
+  const [runningIds, setRunningIds] = useState<string[]>([])
+  const sessionApis = useRef(new Map<string, ChatSessionApi>())
+
+  useEffect(() => {
+    let cancelled = false
+    setChats([])
+    setActiveChatId(null)
+    setRunningIds([])
+    if (!ready) return
+
+    void (async () => {
+      try {
+        let stored = await orpc.chat.list({ designId: docId })
+        if (stored.length === 0) {
+          const created = await orpc.chat.create({
+            id: `chat:${docId}`,
+            designId: docId,
+            title: 'New chat',
+          })
+          stored = [created]
+        }
+        if (!cancelled) {
+          setChats(stored)
+          setActiveChatId(stored[0].id)
+        }
+      } catch (error) {
+        console.error('[chat] Failed to list chats:', error)
+      }
+    })()
+
+    return () => {
+      cancelled = true
+    }
+  }, [docId, ready])
+
+  const createChat = async () => {
+    const created = await orpc.chat.create({
+      id: `chat_${nanoid()}`,
+      designId: docId,
+      title: 'New chat',
+    })
+    setChats((current) => [created, ...current])
+    setActiveChatId(created.id)
+  }
+
+  const onTitleChange = useCallback((chatId: string, title: string) => {
+    setChats((current) =>
+      current.map((chat) => (chat.id === chatId ? { ...chat, title } : chat)),
+    )
+  }, [])
+
+  const onRunningChange = useCallback((chatId: string, running: boolean) => {
+    setRunningIds((current) => {
+      if (running) return current.includes(chatId) ? current : [...current, chatId]
+      return current.includes(chatId) ? current.filter((id) => id !== chatId) : current
+    })
+  }, [])
+
+  const registerApi = useCallback((chatId: string, api: ChatSessionApi | null) => {
+    if (api) sessionApis.current.set(chatId, api)
+    else sessionApis.current.delete(chatId)
+  }, [])
+
+  // Canvas comment pins send through here. Returns false while the active
+  // chat is busy or still loading so the caller can keep the comment draft open.
+  if (sendRef) {
+    sendRef.current = (text: string): boolean => {
+      const api = activeChatId ? sessionApis.current.get(activeChatId) : null
+      if (!api || !api.ready() || api.busy()) return false
+      api.dispatch(text)
+      return true
+    }
+  }
+
+  const activeBusy = activeChatId !== null && runningIds.includes(activeChatId)
+  // Mounted = active chat + every chat with an in-flight run. An idle chat
+  // unmounts on switch (its unmount save flushes); a running one stays alive.
+  const mountedChats = chats.filter(
+    (chat) => chat.id === activeChatId || runningIds.includes(chat.id),
+  )
+  const activeChat = chats.find((chat) => chat.id === activeChatId)
+
+  return (
+    <Sidebar
+      variant="floating"
+      resizable
+      className="[&_[data-slot=sidebar-inner]]:overflow-hidden [&_[data-slot=sidebar-inner]]:rounded-2xl [&_[data-slot=sidebar-inner]]:shadow-sm"
+    >
+      <header className="flex items-center gap-2 border-b px-3 py-2.5">
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <button
+              type="button"
+              disabled={!activeChat}
+              className="inline-flex min-w-0 max-w-full items-center gap-2 rounded-md px-2 py-1 text-left text-sm font-semibold leading-none outline-none hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none"
+            >
+              <span
+                className={cn(
+                  'size-1.5 shrink-0 rounded-full',
+                  activeBusy ? 'animate-pulse bg-cx-accent' : 'bg-muted-foreground/40',
+                )}
+              />
+              <span className="truncate leading-none">{activeChat?.title ?? 'Loading…'}</span>
+              <ChevronDownIcon className="size-3.5 shrink-0 text-muted-foreground opacity-70" />
+            </button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="start" className="w-64">
+            <DropdownMenuLabel className="text-xs text-muted-foreground">Chats</DropdownMenuLabel>
+            {chats.map((chat) => (
+              <DropdownMenuItem key={chat.id} onSelect={() => setActiveChatId(chat.id)}>
+                <MessageSquareIcon />
+                <span className="min-w-0 flex-1 truncate">{chat.title}</span>
+                {runningIds.includes(chat.id) && (
+                  <Spinner aria-label="Agent running" className="size-3 text-cx-accent" />
+                )}
+                {chat.id === activeChatId && <CheckIcon className="text-foreground" />}
+              </DropdownMenuItem>
+            ))}
+            <DropdownMenuSeparator />
+            <DropdownMenuItem onSelect={() => void createChat()}>
+              <PlusIcon />
+              New chat
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </header>
+
+      {mountedChats.map((chat) => (
+        <ChatSession
+          key={chat.id}
+          chatId={chat.id}
+          title={chat.title}
+          active={chat.id === activeChatId}
+          actions={actions}
+          shapesRef={shapesRef}
+          selectedIdsRef={selectedIdsRef}
+          docId={docId}
+          onTitleChange={onTitleChange}
+          onRunningChange={onRunningChange}
+          registerApi={registerApi}
+        />
+      ))}
+    </Sidebar>
+  )
+})
+
+function ChatSession({
+  chatId,
+  title,
+  active,
+  actions,
+  shapesRef,
+  selectedIdsRef,
+  docId,
+  onTitleChange,
+  onRunningChange,
+  registerApi,
+}: SharedSessionProps & {
+  chatId: string
+  title: string
+  active: boolean
+  onTitleChange: (chatId: string, title: string) => void
+  onRunningChange: (chatId: string, running: boolean) => void
+  registerApi: (chatId: string, api: ChatSessionApi | null) => void
 }) {
   const [input, setInput] = useState('')
   const [caret, setCaret] = useState(0)
@@ -302,8 +498,8 @@ export const AgentPanel = memo(function AgentPanel({
   const streamedCreates = useRef(new Map<string, string>())
   const streamedAppliedAt = useRef(new Map<string, number>())
   const [stallError, setStallError] = useState<string | null>(null)
-  const [chats, setChats] = useState<ChatSummary[]>([])
-  const [activeChatId, setActiveChatId] = useState<string | null>(null)
+  const titleRef = useRef(title)
+  titleRef.current = title
   const recoveryRetries = useRef(0)
   const retryResponse = useRef<() => void>(() => {})
   const forceCanvasAction = useRef(false)
@@ -318,20 +514,18 @@ export const AgentPanel = memo(function AgentPanel({
   const dispatchPrompt = useRef<
     (text: string, files?: { type: 'file'; mediaType: string; url: string }[]) => void
   >(() => {})
-  const chatsRef = useRef(chats)
-  chatsRef.current = chats
   const composerRef = useRef<HTMLTextAreaElement>(null)
-  const activeChat = chats.find((chat) => chat.id === activeChatId)
 
   const { messages, setMessages, sendMessage, regenerate, addToolOutput, status, stop, error } =
     useChat({
+      id: chatId,
       transport: new DefaultChatTransport({
         api: '/api/chat',
         body: () => ({
           shapes: shapesRef.current,
           selectedIds: selectedIdsRef?.current ?? [],
           designId: docId,
-          chatId: activeChatId,
+          chatId,
           model: modelRef.current,
           reasoningEffort: reasoningEffortRef.current,
           forceCanvasAction: forceCanvasAction.current,
@@ -656,11 +850,8 @@ export const AgentPanel = memo(function AgentPanel({
   dispatchPrompt.current = (text, files = []) => {
     setStallError(null)
     recoveryRetries.current = 0
-    if (activeChat?.title === 'New chat') {
-      const title = titleFromPrompt(text)
-      setChats((current) =>
-        current.map((chat) => (chat.id === activeChatId ? { ...chat, title } : chat)),
-      )
+    if (titleRef.current === 'New chat') {
+      onTitleChange(chatId, titleFromPrompt(text))
     }
     // safety checkpoint: restorable from History if the agent goes wrong
     commitIfChanged(docId, `Before: ${text.slice(0, 60)}`, shapesRef.current)
@@ -689,18 +880,30 @@ export const AgentPanel = memo(function AgentPanel({
     })()
   }
 
-  // Canvas comment pins send through here. Returns false while the chat is
-  // busy or still loading so the caller can keep the comment draft open.
-  if (sendRef) {
-    sendRef.current = (text: string): boolean => {
-      if (!chatReady || status === 'streaming' || status === 'submitted') return false
-      dispatchPrompt.current(text)
-      return true
-    }
-  }
-
   const messagesRef = useRef(messages)
   messagesRef.current = messages
+
+  // Report run state up (chat-list spinner, mount lifetime) and expose the
+  // send entry point for comment pins.
+  const busy = status === 'streaming' || status === 'submitted'
+  const busyRef = useRef(busy)
+  busyRef.current = busy
+  const chatReadyRef = useRef(chatReady)
+  chatReadyRef.current = chatReady
+  useEffect(() => {
+    onRunningChange(chatId, busy)
+  }, [busy, chatId, onRunningChange])
+  useEffect(() => {
+    registerApi(chatId, {
+      dispatch: (text) => dispatchPrompt.current(text),
+      busy: () => busyRef.current,
+      ready: () => chatReadyRef.current,
+    })
+    return () => {
+      registerApi(chatId, null)
+      onRunningChange(chatId, false)
+    }
+  }, [chatId, registerApi, onRunningChange])
 
   // Queue flush. Runs when the chat goes idle AND every tool part on the last
   // assistant message has an output — client tools resolve after the stream
@@ -804,8 +1007,8 @@ export const AgentPanel = memo(function AgentPanel({
   }, [messages, status, actions])
 
   useEffect(() => {
-    if (chatReady) composerRef.current?.focus()
-  }, [chatReady])
+    if (chatReady && active) composerRef.current?.focus()
+  }, [chatReady, active])
 
   const mentionQuery = activeMentionQuery(input, caret)
   const mentionOpen = Boolean(mentionQuery && mentionDismissedStart !== mentionQuery.start)
@@ -899,48 +1102,12 @@ export const AgentPanel = memo(function AgentPanel({
     return () => window.clearTimeout(timeout)
   }, [messages, status, stop])
 
+  // Load this chat's stored messages once on mount; the session is keyed by
+  // chatId so a chat switch mounts a fresh session instead of resetting state.
   useEffect(() => {
     let cancelled = false
-    setChatReady(false)
-    setChats([])
-    setActiveChatId(null)
-    setMessages([])
-    if (!ready) return
-
-    void (async () => {
-      try {
-        let stored = await orpc.chat.list({ designId: docId })
-        if (stored.length === 0) {
-          const created = await orpc.chat.create({
-            id: `chat:${docId}`,
-            designId: docId,
-            title: 'New chat',
-          })
-          stored = [created]
-        }
-        if (!cancelled) {
-          setChats(stored)
-          setActiveChatId(stored[0].id)
-        }
-      } catch (error) {
-        console.error('[chat] Failed to list chats:', error)
-      }
-    })()
-
-    return () => {
-      cancelled = true
-    }
-  }, [docId, ready, setMessages])
-
-  useEffect(() => {
-    if (!activeChatId) return
-    let cancelled = false
-    setChatReady(false)
-    setMessages([])
-    setQueuedMessages([])
-
     orpc.chat
-      .get({ id: activeChatId })
+      .get({ id: chatId })
       .then(({ messages: stored }) => {
         if (!cancelled) {
           setMessages(stored as UIMessage[])
@@ -952,46 +1119,34 @@ export const AgentPanel = memo(function AgentPanel({
     return () => {
       cancelled = true
     }
-  }, [activeChatId, setMessages])
+  }, [chatId, setMessages])
 
   useEffect(() => {
-    if (!chatReady || !activeChatId || !activeChat) return
+    if (!chatReady) return
     const timeout = window.setTimeout(() => {
       void orpc.chat
         .save({
-          id: activeChatId,
-          title: activeChat.title,
+          id: chatId,
+          title: titleRef.current,
           messages: sanitizeChatMessagesForStorage(messages),
         })
         .catch((error) => console.error('[chat] Failed to save chat:', error))
     }, 500)
     return () => window.clearTimeout(timeout)
-  }, [activeChat, activeChatId, chatReady, messages])
+  }, [chatId, chatReady, messages])
 
   useEffect(() => {
-    if (!chatReady || !activeChatId) return
-    const chatId = activeChatId
+    if (!chatReady) return
     return () => {
-      const title = chatsRef.current.find((chat) => chat.id === chatId)?.title ?? 'New chat'
       void orpc.chat
         .save({
           id: chatId,
-          title,
+          title: titleRef.current,
           messages: sanitizeChatMessagesForStorage(messagesRef.current),
         })
         .catch((error) => console.error('[chat] Failed to save chat:', error))
     }
-  }, [activeChatId, chatReady])
-
-  const createChat = async () => {
-    const created = await orpc.chat.create({
-      id: `chat_${nanoid()}`,
-      designId: docId,
-      title: 'New chat',
-    })
-    setChats((current) => [created, ...current])
-    setActiveChatId(created.id)
-  }
+  }, [chatId, chatReady])
 
   const answerQuestion = useCallback((toolCallId: string, answer: string) => {
     addToolOutputRef.current({
@@ -1017,50 +1172,12 @@ export const AgentPanel = memo(function AgentPanel({
     } as Parameters<typeof addToolOutput>[0])
   }, [actions, shapesRef])
 
-  return (
-    <Sidebar
-      variant="floating"
-      resizable
-      className="[&_[data-slot=sidebar-inner]]:overflow-hidden [&_[data-slot=sidebar-inner]]:rounded-2xl [&_[data-slot=sidebar-inner]]:shadow-sm"
-    >
-      <header className="flex items-center gap-2 border-b px-3 py-2.5">
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <button
-              type="button"
-              disabled={status === 'streaming' || status === 'submitted' || !activeChat}
-              className="inline-flex min-w-0 max-w-full items-center gap-2 rounded-md px-2 py-1 text-left text-sm font-semibold leading-none outline-none hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none"
-            >
-              <span
-                className={cn(
-                  'size-1.5 shrink-0 rounded-full',
-                  status === 'streaming' || status === 'submitted'
-                    ? 'animate-pulse bg-cx-accent'
-                    : 'bg-muted-foreground/40',
-                )}
-              />
-              <span className="truncate leading-none">{activeChat?.title ?? 'Loading…'}</span>
-              <ChevronDownIcon className="size-3.5 shrink-0 text-muted-foreground opacity-70" />
-            </button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="start" className="w-64">
-            <DropdownMenuLabel className="text-xs text-muted-foreground">Chats</DropdownMenuLabel>
-            {chats.map((chat) => (
-              <DropdownMenuItem key={chat.id} onSelect={() => setActiveChatId(chat.id)}>
-                <MessageSquareIcon />
-                <span className="min-w-0 flex-1 truncate">{chat.title}</span>
-                {chat.id === activeChatId && <CheckIcon className="text-foreground" />}
-              </DropdownMenuItem>
-            ))}
-            <DropdownMenuSeparator />
-            <DropdownMenuItem onSelect={() => void createChat()}>
-              <PlusIcon />
-              New chat
-            </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
-      </header>
+  // Hidden sessions keep every hook (the useChat loop, tool execution,
+  // persistence) alive; only the visible chrome is skipped.
+  if (!active) return null
 
+  return (
+    <>
       <Conversation className="min-h-0 flex-1">
         <ConversationContent className="gap-4">
           {messages.length === 0 && (
@@ -1215,9 +1332,9 @@ export const AgentPanel = memo(function AgentPanel({
           </PromptInputFooter>
         </PromptInput>
       </div>
-    </Sidebar>
+    </>
   )
-})
+}
 
 // Non-OK API responses reach useChat as their raw JSON body, e.g. '{"error":"…"}'.
 function readableError(message?: string) {

@@ -169,7 +169,7 @@ export async function handleAgentChatRequest(request: Request): Promise<Response
     generationLease = await acquireGenerationLease(session.user.id)
     if (!generationLease) {
       return Response.json(
-        { error: 'Another AI generation is already running.', code: 'AI_GENERATION_IN_PROGRESS' },
+        { error: 'Too many AI generations are running at once. Wait for one to finish.', code: 'AI_GENERATION_IN_PROGRESS' },
         { status: 409 },
       )
     }

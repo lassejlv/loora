@@ -16,6 +16,7 @@ import { getTopUpCreditStatus } from './credit-top-ups'
 const CACHE_MAX_AGE_MS = 5 * 60 * 1000
 const REFRESH_RATE_LIMIT_MS = 10 * 1000
 const LEASE_MS = 6 * 60 * 1000
+const MAX_CONCURRENT_GENERATIONS = 3
 const refreshedAt = new Map<string, number>()
 
 export interface BillingStatus {
@@ -291,10 +292,19 @@ export async function acquireGenerationLease(userId: string) {
     eq(aiGenerationLease.userId, userId),
     lte(aiGenerationLease.expiresAt, now),
   ))
+  // Capped concurrency instead of a single mutex so parallel chats can each
+  // run a generation. The count+insert pair is not atomic; a race can briefly
+  // exceed the cap by one, which spend-wise is the same as the old lease
+  // being released a request earlier — acceptable.
+  const active = await db
+    .select({ token: aiGenerationLease.token })
+    .from(aiGenerationLease)
+    .where(eq(aiGenerationLease.userId, userId))
+  if (active.length >= MAX_CONCURRENT_GENERATIONS) return null
   const [lease] = await db
     .insert(aiGenerationLease)
     .values({ userId, token, acquiredAt: now, expiresAt: new Date(now.getTime() + LEASE_MS) })
-    .onConflictDoNothing({ target: aiGenerationLease.userId })
+    .onConflictDoNothing()
     .returning({ token: aiGenerationLease.token })
   return lease?.token ?? null
 }

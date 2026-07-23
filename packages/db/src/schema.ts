@@ -403,14 +403,17 @@ export const billingCreditTopUp = pgTable(
   (table) => [index('billing_credit_top_up_user_paid_idx').on(table.userId, table.paidAt)],
 )
 
-export const aiGenerationLease = pgTable('ai_generation_lease', {
-  userId: text('user_id')
-    .primaryKey()
-    .references(() => user.id, { onDelete: 'cascade' }),
-  token: text('token').notNull(),
-  acquiredAt: timestamp('acquired_at').notNull(),
-  expiresAt: timestamp('expires_at').notNull(),
-})
+export const aiGenerationLease = pgTable(
+  'ai_generation_lease',
+  {
+    userId: text('user_id').references(() => user.id, { onDelete: 'cascade' }).notNull(),
+    token: text('token').notNull(),
+    acquiredAt: timestamp('acquired_at').notNull(),
+    expiresAt: timestamp('expires_at').notNull(),
+  },
+  // One row per concurrent generation; the cap is enforced in acquireGenerationLease.
+  (table) => [primaryKey({ columns: [table.userId, table.token] })],
+)
 
 // Login-with-ChatGPT sessions (tokens encrypted at rest by the handler).
 // Keyed by the handler's opaque session id, not by app user.
