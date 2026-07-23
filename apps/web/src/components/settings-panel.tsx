@@ -219,12 +219,82 @@ function BillingTab({ isAdmin }: { isAdmin: boolean }) {
   )
 }
 
-function AdminTab() {
+function AdminDeleteUserDialog({
+  account,
+  deleting,
+  onDelete,
+}: {
+  account: AdminUserUsage
+  deleting: boolean
+  onDelete: (account: AdminUserUsage, email: string) => Promise<void>
+}) {
+  const [open, setOpen] = useState(false)
+  const [email, setEmail] = useState('')
+  const confirmed = email === account.email
+
+  return (
+    <AlertDialog
+      open={open}
+      onOpenChange={(next) => {
+        setOpen(next)
+        if (!next) setEmail('')
+      }}
+    >
+      <AlertDialogTrigger
+        render={
+          <Button variant="destructive" size="xs" disabled={deleting}>
+            {deleting ? 'Deleting…' : 'Delete account'}
+          </Button>
+        }
+      />
+      <AlertDialogPopup>
+        <AlertDialogHeader>
+          <AlertDialogTitle>Delete {account.name}?</AlertDialogTitle>
+          <AlertDialogDescription>
+            This permanently deletes {account.email} and all of their designs, chats, assets, and
+            integrations. Type their email to confirm. This cannot be undone.
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <div className="px-6 pb-2">
+          <Input
+            autoComplete="off"
+            autoFocus
+            aria-label={`Type ${account.email} to confirm deletion`}
+            placeholder={account.email}
+            value={email}
+            onChange={(event) => setEmail(event.target.value)}
+          />
+        </div>
+        <AlertDialogFooter>
+          <AlertDialogClose render={<Button variant="outline" size="sm">Cancel</Button>} />
+          <Button
+            variant="destructive"
+            size="sm"
+            disabled={!confirmed || deleting}
+            onClick={() => {
+              void onDelete(account, email)
+                .then(() => {
+                  setOpen(false)
+                  setEmail('')
+                })
+                .catch(() => undefined)
+            }}
+          >
+            {deleting ? 'Deleting…' : 'Delete account'}
+          </Button>
+        </AlertDialogFooter>
+      </AlertDialogPopup>
+    </AlertDialog>
+  )
+}
+
+function AdminTab({ currentUserId }: { currentUserId: string }) {
   const [users, setUsers] = useState<AdminUserUsage[] | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [resetting, setResetting] = useState<string | null>(null)
   const [savingAccess, setSavingAccess] = useState<string | null>(null)
   const [savingMultiplier, setSavingMultiplier] = useState<string | null>(null)
+  const [deleting, setDeleting] = useState<string | null>(null)
   const [multiplierDrafts, setMultiplierDrafts] = useState<Record<string, string>>({})
 
   useEffect(() => {
@@ -319,6 +389,25 @@ function AdminTab() {
       setError(`Could not update preview access for ${account.email}.`)
     } finally {
       setSavingAccess(null)
+    }
+  }
+
+  async function handleDelete(account: AdminUserUsage, email: string) {
+    setDeleting(account.id)
+    setError(null)
+    try {
+      await orpc.admin.deleteUser({ userId: account.id, email })
+      setUsers((current) => current?.filter((user) => user.id !== account.id) ?? null)
+      setMultiplierDrafts((current) => {
+        const next = { ...current }
+        delete next[account.id]
+        return next
+      })
+    } catch (err) {
+      setError(err instanceof Error ? err.message : `Could not delete ${account.email}.`)
+      throw err
+    } finally {
+      setDeleting(null)
     }
   }
 
@@ -432,6 +521,13 @@ function AdminTab() {
                   {resetting === account.id ? 'Resetting…' : 'Reset usage'}
                 </Button>
               </div>
+              {!account.isAdmin && account.id !== currentUserId ? (
+                <AdminDeleteUserDialog
+                  account={account}
+                  deleting={deleting === account.id}
+                  onDelete={handleDelete}
+                />
+              ) : null}
             </div>
           </div>
         ))}
@@ -843,9 +939,9 @@ export function SettingsPanel({
           />
         </TabsPanel>
 
-        {isAdmin ? (
+        {isAdmin && session?.user.id ? (
           <TabsPanel value="admin">
-            <AdminTab />
+            <AdminTab currentUserId={session.user.id} />
           </TabsPanel>
         ) : null}
       </Tabs>

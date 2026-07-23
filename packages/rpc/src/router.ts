@@ -1006,13 +1006,13 @@ const requestPreviewAccess = signedInProcedure.handler(async ({ context }) => {
   return { requested: true, granted: false }
 })
 
-const deleteAccount = signedInProcedure.handler(async ({ context }) => {
+async function deleteUserAccountData(userId: string) {
   // S3 objects don't cascade with the user row; collect and delete them first.
   if (s3) {
     const keys = await db
       .select({ storageKey: asset.storageKey })
       .from(asset)
-      .where(and(eq(asset.userId, context.user.id), isNotNull(asset.storageKey)))
+      .where(and(eq(asset.userId, userId), isNotNull(asset.storageKey)))
     for (const { storageKey } of keys) {
       if (storageKey) {
         await s3
@@ -1023,7 +1023,11 @@ const deleteAccount = signedInProcedure.handler(async ({ context }) => {
   }
 
   // Everything else (designs, chats, sessions, oauth tokens, usage) cascades.
-  await db.delete(user).where(eq(user.id, context.user.id))
+  await db.delete(user).where(eq(user.id, userId))
+}
+
+const deleteAccount = signedInProcedure.handler(async ({ context }) => {
+  await deleteUserAccountData(context.user.id)
   return { deleted: true }
 })
 
@@ -1044,7 +1048,7 @@ const createSubscriptionCheckout = previewProcedure
         message: 'Manage your existing subscription from Billing.',
       })
     }
-    return createPlanCheckout(context.user.id, input.plan)
+    return createPlanCheckout(context.user, input.plan)
   })
 
 const createCreditTopUp = protectedProcedure
@@ -1058,7 +1062,7 @@ const createCreditTopUp = protectedProcedure
         message: 'Credit top-ups become available after the Pro trial.',
       })
     }
-    return createTopUpCheckout(context.user.id, input.amountCents)
+    return createTopUpCheckout(context.user, input.amountCents)
   })
 
 const completeCreditTopUp = previewProcedure
@@ -1140,6 +1144,41 @@ const setUserPreviewAccess = adminProcedure
 
     if (!updated) throw new ORPCError('NOT_FOUND')
     return updated
+  })
+
+const deleteUserAccount = adminProcedure
+  .input(
+    z.object({
+      userId: z.string().min(1).max(128),
+      email: z.string().trim().email().max(320),
+    }),
+  )
+  .handler(async ({ context, input }) => {
+    if (input.userId === context.user.id) {
+      throw new ORPCError('FORBIDDEN', {
+        message: 'You cannot delete your own account from Admin.',
+      })
+    }
+
+    const [target] = await db
+      .select({ id: user.id, email: user.email, isAdmin: user.isAdmin })
+      .from(user)
+      .where(eq(user.id, input.userId))
+      .limit(1)
+    if (!target) throw new ORPCError('NOT_FOUND')
+    if (target.isAdmin) {
+      throw new ORPCError('FORBIDDEN', {
+        message: 'Admin accounts cannot be deleted.',
+      })
+    }
+    if (target.email !== input.email) {
+      throw new ORPCError('BAD_REQUEST', {
+        message: 'Email confirmation does not match.',
+      })
+    }
+
+    await deleteUserAccountData(target.id)
+    return { deleted: true }
   })
 
 const getPreferences = protectedProcedure.handler(async ({ context }) => {
@@ -1278,5 +1317,6 @@ export const appRouter = {
     resetUsage: resetUserUsage,
     setUsageMultiplier: setUserUsageMultiplier,
     setPreviewAccess: setUserPreviewAccess,
+    deleteUser: deleteUserAccount,
   },
 }

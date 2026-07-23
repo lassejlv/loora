@@ -251,20 +251,24 @@ export async function getBillingStatus(user: BillingUser, force = false): Promis
   return statusFromEntitlement(user.id, cached, 'cache', stale)
 }
 
-export async function createPlanCheckout(userId: string, plan: BillingPlan) {
+export async function createPlanCheckout(
+  user: { id: string; email: string },
+  plan: BillingPlan,
+) {
   const { config } = getPolarRuntime()
   if (!config) throw new Error('Polar is not configured')
   const proTrial = plan === 'pro'
   const checkout = await getPolarClient().checkouts.create({
     products: [proTrial ? config.proProductId : config.studioProductId],
-    externalCustomerId: userId,
+    externalCustomerId: user.id,
+    customerEmail: user.email,
     allowTrial: proTrial,
     trialInterval: proTrial ? 'day' : undefined,
     trialIntervalCount: proTrial ? 3 : undefined,
     metadata: {
       loora_kind: 'subscription',
       loora_plan: plan,
-      loora_user_id: userId,
+      loora_user_id: user.id,
     },
     successUrl: `${config.origin}/?checkout=success&checkout_id={CHECKOUT_ID}`,
     returnUrl: config.origin,

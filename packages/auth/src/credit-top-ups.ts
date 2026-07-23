@@ -100,7 +100,10 @@ export async function applyRefundedTopUpOrder(order: Order, eventAt = new Date()
   return updated ?? paid
 }
 
-export async function createTopUpCheckout(userId: string, amountCents: number) {
+export async function createTopUpCheckout(
+  user: { id: string; email: string },
+  amountCents: number,
+) {
   if (!isValidTopUpAmount(amountCents)) throw new Error('Invalid top-up amount')
   const { config } = getPolarRuntime()
   if (!config) throw new Error('Polar top-ups are not configured')
@@ -108,10 +111,11 @@ export async function createTopUpCheckout(userId: string, amountCents: number) {
   const checkout = await getPolarClient().checkouts.create({
     products: [config.topUpProductId],
     amount: amountCents,
-    externalCustomerId: userId,
+    externalCustomerId: user.id,
+    customerEmail: user.email,
     metadata: {
       loora_kind: 'credit_top_up',
-      loora_user_id: userId,
+      loora_user_id: user.id,
     },
     allowDiscountCodes: false,
     successUrl: `${config.origin}/?topup=success&checkout_id={CHECKOUT_ID}`,
