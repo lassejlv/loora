@@ -1,12 +1,25 @@
-import { GithubIcon, ImageIcon, SquareIcon, WrenchIcon } from 'lucide-react'
+import { GithubIcon, ImageIcon, SquareIcon } from 'lucide-react'
 import { cn } from '#/lib/utils'
 import type { MentionItem, MentionKind } from '#/lib/mentions'
 
-const KIND_META: Record<MentionKind, { title: string; icon: typeof SquareIcon }> = {
+export const MENTION_KIND_META: Record<
+  MentionKind,
+  { title: string; icon: typeof SquareIcon }
+> = {
   element: { title: 'Canvas elements', icon: SquareIcon },
   asset: { title: 'Assets', icon: ImageIcon },
-  tool: { title: 'Tools', icon: WrenchIcon },
   repo: { title: 'Repositories', icon: GithubIcon },
+}
+
+/** Compact inline chip for a mention inside a user chat bubble. */
+export function MentionChip({ kind, label }: { kind: MentionKind; label: string }) {
+  const Icon = MENTION_KIND_META[kind].icon
+  return (
+    <span className="mx-0.5 inline-flex translate-y-px items-center gap-1 rounded-md bg-background/70 px-1.5 py-0.5 align-baseline text-xs font-medium text-foreground">
+      <Icon aria-hidden="true" className="size-3 shrink-0 text-muted-foreground" />
+      <span className="max-w-48 truncate">@{label}</span>
+    </span>
+  )
 }
 
 /**
@@ -34,7 +47,7 @@ export function MentionMenu({
       className="absolute inset-x-3 bottom-full z-50 mb-1 max-h-64 overflow-y-auto rounded-lg border bg-popover p-1 text-popover-foreground shadow-md"
     >
       {items.map((item, index) => {
-        const meta = KIND_META[item.kind]
+        const meta = MENTION_KIND_META[item.kind]
         const Icon = meta.icon
         const firstOfKind = index === 0 || items[index - 1]!.kind !== item.kind
         return (

@@ -72,13 +72,16 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '#/components/ui/dropdown-menu'
-import { MentionMenu } from '#/components/mention-menu'
+import { MentionMenu, MentionChip } from '#/components/mention-menu'
 import {
   activeMentionQuery,
   composerMentionItems,
   filterMentionItems,
   insertMention,
   mentionSuffix,
+  parseMentionSuffix,
+  segmentMentionText,
+  stripMentionSuffix,
   type MentionItem,
 } from '#/lib/mentions'
 
@@ -106,8 +109,8 @@ function titleFromPrompt(prompt: string) {
   return title.length > 48 ? `${title.slice(0, 47)}…` : title
 }
 
-// Kept above AgentPanel so the composer can build @-mention tool rows without
-// hitting a temporal-dead-zone on TOOL_META.
+// Kept above AgentPanel so ChatMessageRow / tool UI can reference it without
+// a temporal-dead-zone on TOOL_META.
 const TOOL_META = {
   createElement: { icon: PlusIcon, label: 'Create' },
   createElements: { icon: PlusIcon, label: 'Create' },
@@ -131,10 +134,27 @@ const TOOL_META = {
   viewRepositoryImage: { icon: EyeIcon, label: 'Viewed repository image' },
 } as const
 
-const MENTION_TOOLS = (Object.keys(TOOL_META) as (keyof typeof TOOL_META)[]).map((id) => ({
-  id,
-  hint: TOOL_META[id].label,
-}))
+async function fetchMentionRemotes(designId: string) {
+  const [assets, repos, binding] = await Promise.all([
+    orpc.asset.list().catch((error) => {
+      console.error('[mentions] Failed to list assets:', error)
+      return [] as { id: string; name: string }[]
+    }),
+    orpc.github.repositories().catch((error) => {
+      console.error('[mentions] Failed to list repositories:', error)
+      return [] as { fullName: string }[]
+    }),
+    orpc.github.binding({ designId }).catch((error) => {
+      console.error('[mentions] Failed to load linked repository:', error)
+      return null
+    }),
+  ])
+  return {
+    assets: assets.map((asset) => ({ id: asset.id, name: asset.name })),
+    repos: repos.map((repo) => ({ fullName: repo.fullName })),
+    preferredRepo: binding?.fullName ?? null,
+  }
+}
 
 function hasAssistantOutput(message: UIMessage) {
   return message.parts.some((part) => {
@@ -203,6 +223,7 @@ export const AgentPanel = memo(function AgentPanel({
   const [caret, setCaret] = useState(0)
   const [mentionAssets, setMentionAssets] = useState<{ id: string; name: string }[]>([])
   const [mentionRepos, setMentionRepos] = useState<{ fullName: string }[]>([])
+  const [preferredRepo, setPreferredRepo] = useState<string | null>(null)
   const [trackedMentions, setTrackedMentions] = useState<MentionItem[]>([])
   const [mentionIndex, setMentionIndex] = useState(0)
   const [mentionDismissedStart, setMentionDismissedStart] = useState<number | null>(null)
@@ -698,27 +719,6 @@ export const AgentPanel = memo(function AgentPanel({
     if (chatReady) composerRef.current?.focus()
   }, [chatReady])
 
-  useEffect(() => {
-    let cancelled = false
-    void Promise.all([
-      orpc.asset.list().catch((error) => {
-        console.error('[mentions] Failed to list assets:', error)
-        return [] as { id: string; name: string }[]
-      }),
-      orpc.github.repositories().catch((error) => {
-        console.error('[mentions] Failed to list repositories:', error)
-        return [] as { fullName: string }[]
-      }),
-    ]).then(([assets, repos]) => {
-      if (cancelled) return
-      setMentionAssets(assets.map((asset) => ({ id: asset.id, name: asset.name })))
-      setMentionRepos(repos.map((repo) => ({ fullName: repo.fullName })))
-    })
-    return () => {
-      cancelled = true
-    }
-  }, [])
-
   const mentionQuery = activeMentionQuery(input, caret)
   const mentionOpen = Boolean(mentionQuery && mentionDismissedStart !== mentionQuery.start)
   const mentionItems = mentionOpen && mentionQuery
@@ -726,12 +726,45 @@ export const AgentPanel = memo(function AgentPanel({
         composerMentionItems({
           elements: shapesRef.current,
           assets: mentionAssets,
-          tools: MENTION_TOOLS,
           repos: mentionRepos,
+          selectedIds: selectedIdsRef?.current ?? [],
+          preferredRepo,
         }),
         mentionQuery.query,
       )
     : []
+
+  useEffect(() => {
+    let cancelled = false
+    void fetchMentionRemotes(docId).then((remote) => {
+      if (cancelled) return
+      setMentionAssets(remote.assets)
+      setMentionRepos(remote.repos)
+      setPreferredRepo(remote.preferredRepo)
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [docId])
+
+  // Refresh when @ opens so newly uploaded assets / linked repos appear.
+  const mentionOpenRef = useRef(false)
+  useEffect(() => {
+    const opened = mentionOpen && !mentionOpenRef.current
+    mentionOpenRef.current = mentionOpen
+    if (!opened) return
+
+    let cancelled = false
+    void fetchMentionRemotes(docId).then((remote) => {
+      if (cancelled) return
+      setMentionAssets(remote.assets)
+      setMentionRepos(remote.repos)
+      setPreferredRepo(remote.preferredRepo)
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [mentionOpen, docId])
 
   useEffect(() => {
     setMentionIndex(0)
@@ -1368,6 +1401,30 @@ function StreamingText({ text, streaming }: { text: string; streaming: boolean }
   )
 }
 
+/** User bubbles: hide the machine mention suffix and chip surviving @labels. */
+function UserMessageText({ text }: { text: string }) {
+  const { body, suffix } = stripMentionSuffix(text)
+  const mentions = suffix ? parseMentionSuffix(suffix) : []
+  const segments = mentions.length > 0 ? segmentMentionText(body, mentions) : null
+
+  if (!segments) {
+    // Parse failed or no mentions — still never show the raw suffix.
+    return <span className="whitespace-pre-wrap">{body}</span>
+  }
+
+  return (
+    <span className="whitespace-pre-wrap">
+      {segments.map((segment, index) =>
+        segment.type === 'text' ? (
+          <span key={index}>{segment.value}</span>
+        ) : (
+          <MentionChip key={index} kind={segment.item.kind} label={segment.item.label} />
+        ),
+      )}
+    </span>
+  )
+}
+
 // Group consecutive tool calls so a burst of 20 creates reads as one line.
 // Questions stay standalone - they need their own interactive card.
 function toBlocks(parts: { type: string }[]): Block[] {
@@ -1414,11 +1471,15 @@ export const ChatMessageRow = memo(function ChatMessageRow({
       <MessageContent>
         {blocks.map((block, index) =>
           block.kind === 'text' ? (
-            <StreamingText
-              key={index}
-              text={block.text}
-              streaming={message.role === 'assistant' && isLast && streaming}
-            />
+            message.role === 'user' ? (
+              <UserMessageText key={index} text={block.text} />
+            ) : (
+              <StreamingText
+                key={index}
+                text={block.text}
+                streaming={isLast && streaming}
+              />
+            )
           ) : block.kind === 'reasoning' ? (
             isLast && index === blocks.length - 1 && streaming ? (
               <AgentThinking key={index} label="Reasoning" />
