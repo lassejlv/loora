@@ -1,9 +1,25 @@
-import { useEffect } from 'react'
+import { useEffect, useRef } from 'react'
 import { createFileRoute, Link } from '@tanstack/react-router'
-import { motion, useReducedMotion } from 'motion/react'
+import {
+  motion,
+  useReducedMotion,
+  useScroll,
+  useSpring,
+  useTransform,
+  type MotionValue,
+} from 'motion/react'
 import { Button } from '#/components/ui/button'
 import { applyTheme, getThemePreference } from '#/lib/theme'
 import { fadeUp, uiTransition } from '#/lib/motion'
+
+function useParallax(
+  value: MotionValue<number>,
+  distance: number,
+  enabled: boolean,
+) {
+  const raw = useTransform(value, [0, 1], enabled ? [distance, -distance] : [0, 0])
+  return useSpring(raw, { stiffness: 120, damping: 28, mass: 0.4 })
+}
 
 export const Route = createFileRoute('/landing')({
   ssr: false,
@@ -72,18 +88,78 @@ const CONTRAST = [
   },
 ] as const
 
-function BoardMoment({ reduceMotion }: { reduceMotion: boolean | null }) {
+function CoverParallax({ reduceMotion }: { reduceMotion: boolean | null }) {
+  const ref = useRef<HTMLElement>(null)
+  const enabled = !reduceMotion
+  const { scrollYProgress } = useScroll({
+    target: ref,
+    offset: ['start end', 'end start'],
+  })
+  const y = useParallax(scrollYProgress, 72, enabled)
+  const scale = useTransform(
+    scrollYProgress,
+    [0, 0.5, 1],
+    enabled ? [1.08, 1.02, 1.08] : [1, 1, 1],
+  )
+
   return (
-    <div
-      aria-hidden="true"
-      className="relative aspect-[16/9] w-full overflow-hidden bg-[#f1f0ec]"
-      style={{
-        backgroundImage: 'radial-gradient(circle, #d3d1c9 1px, transparent 1px)',
-        backgroundSize: '16px 16px',
+    <motion.section
+      ref={ref}
+      className="relative w-full overflow-hidden bg-[#f1f0ec]"
+      aria-label="Product preview"
+      initial={reduceMotion ? { opacity: 0 } : { opacity: 0, scale: 0.985 }}
+      animate={{ opacity: 1, scale: 1 }}
+      transition={{
+        duration: reduceMotion ? 0.12 : 0.5,
+        delay: reduceMotion ? 0 : 0.1,
+        ease: [0.22, 1, 0.36, 1],
       }}
     >
+      <motion.img
+        src="/landing-cover.png"
+        alt="loora canvas with a selected UI frame and selection handles"
+        width={1536}
+        height={1024}
+        className="block h-auto w-full scale-110 object-cover object-center will-change-transform"
+        style={{ y, scale }}
+        decoding="async"
+        fetchPriority="high"
+      />
+    </motion.section>
+  )
+}
+
+function BoardMoment({ reduceMotion }: { reduceMotion: boolean | null }) {
+  const ref = useRef<HTMLDivElement>(null)
+  const enabled = !reduceMotion
+  const { scrollYProgress } = useScroll({
+    target: ref,
+    offset: ['start end', 'end start'],
+  })
+  const gridY = useParallax(scrollYProgress, 28, enabled)
+  const backY = useParallax(scrollYProgress, 40, enabled)
+  const mainY = useParallax(scrollYProgress, 64, enabled)
+  const panelY = useParallax(scrollYProgress, 88, enabled)
+  const pinY = useParallax(scrollYProgress, 110, enabled)
+
+  return (
+    <div
+      ref={ref}
+      aria-hidden="true"
+      className="relative aspect-[16/9] w-full overflow-hidden bg-[#f1f0ec]"
+    >
       <motion.div
-        className="absolute left-[8%] top-[22%] hidden h-[42%] w-[22%] border border-black/10 bg-[#fafaf8] sm:block"
+        className="absolute inset-[-12%] will-change-transform"
+        style={{
+          y: gridY,
+          backgroundImage: 'radial-gradient(circle, #d3d1c9 1px, transparent 1px)',
+          backgroundSize: '16px 16px',
+        }}
+      />
+
+      <motion.div
+        className="absolute left-[8%] top-[22%] hidden h-[42%] w-[22%] border border-black/10 bg-[#fafaf8] will-change-transform sm:block"
+        style={{ y: backY }}
         initial={reduceMotion ? false : { opacity: 0 }}
         whileInView={{ opacity: 1 }}
         viewport={{ once: true, amount: 0.3 }}
@@ -98,9 +174,10 @@ function BoardMoment({ reduceMotion }: { reduceMotion: boolean | null }) {
       </motion.div>
 
       <motion.div
-        className="absolute left-[18%] top-[16%] h-[58%] w-[48%] sm:left-[28%] sm:w-[40%]"
-        initial={reduceMotion ? false : { opacity: 0, y: 8 }}
-        whileInView={{ opacity: 1, y: 0 }}
+        className="absolute left-[18%] top-[16%] h-[58%] w-[48%] will-change-transform sm:left-[28%] sm:w-[40%]"
+        style={{ y: mainY }}
+        initial={reduceMotion ? false : { opacity: 0 }}
+        whileInView={{ opacity: 1 }}
         viewport={{ once: true, amount: 0.3 }}
         transition={{ duration: 0.45, delay: reduceMotion ? 0 : 0.06, ease: [0.22, 1, 0.36, 1] }}
       >
@@ -132,9 +209,10 @@ function BoardMoment({ reduceMotion }: { reduceMotion: boolean | null }) {
       </motion.div>
 
       <motion.div
-        className="absolute bottom-[18%] right-[8%] top-[16%] hidden w-[22%] border border-black/10 bg-[#fafaf8] sm:flex sm:flex-col"
-        initial={reduceMotion ? false : { opacity: 0, x: 8 }}
-        whileInView={{ opacity: 1, x: 0 }}
+        className="absolute bottom-[18%] right-[8%] top-[16%] hidden w-[22%] border border-black/10 bg-[#fafaf8] will-change-transform sm:flex sm:flex-col"
+        style={{ y: panelY }}
+        initial={reduceMotion ? false : { opacity: 0 }}
+        whileInView={{ opacity: 1 }}
         viewport={{ once: true, amount: 0.3 }}
         transition={{ duration: 0.4, delay: reduceMotion ? 0 : 0.12, ease: [0.22, 1, 0.36, 1] }}
       >
@@ -154,7 +232,8 @@ function BoardMoment({ reduceMotion }: { reduceMotion: boolean | null }) {
       </motion.div>
 
       <motion.div
-        className="absolute right-[34%] top-[28%] flex size-6 items-center justify-center rounded-full border border-black/10 bg-[#fafaf8] text-[10px] font-medium text-[#75726b] sm:right-[38%]"
+        className="absolute right-[34%] top-[28%] flex size-6 items-center justify-center rounded-full border border-black/10 bg-[#fafaf8] text-[10px] font-medium text-[#75726b] will-change-transform sm:right-[38%]"
+        style={{ y: pinY }}
         initial={reduceMotion ? false : { opacity: 0, scale: 0.85 }}
         whileInView={{ opacity: 1, scale: 1 }}
         viewport={{ once: true }}
@@ -170,6 +249,14 @@ function LandingPage() {
   const reduceMotion = useReducedMotion()
   const enter = fadeUp(reduceMotion)
   const transition = uiTransition(reduceMotion)
+  const heroRef = useRef<HTMLElement>(null)
+  const enabled = !reduceMotion
+  const { scrollYProgress: heroProgress } = useScroll({
+    target: heroRef,
+    offset: ['start start', 'end start'],
+  })
+  const heroY = useTransform(heroProgress, [0, 1], enabled ? [0, 56] : [0, 0])
+  const heroOpacity = useTransform(heroProgress, [0, 0.85], enabled ? [1, 0.35] : [1, 1])
 
   // Canvas shell locks body scroll (`overflow: hidden` + fixed height); unlock for this page.
   useEffect(() => {
@@ -207,8 +294,11 @@ function LandingPage() {
       </header>
 
       <main>
-        <section className="mx-auto flex w-full max-w-6xl flex-col gap-8 px-5 pb-10 pt-4 sm:gap-10 sm:px-8 sm:pb-14 sm:pt-6">
-          <div className="max-w-2xl">
+        <section
+          ref={heroRef}
+          className="mx-auto flex w-full max-w-6xl flex-col gap-8 px-5 pb-10 pt-4 sm:gap-10 sm:px-8 sm:pb-14 sm:pt-6"
+        >
+          <motion.div className="max-w-2xl will-change-transform" style={{ y: heroY, opacity: heroOpacity }}>
             <motion.h1
               className="text-[2rem] font-semibold leading-[1.1] tracking-tight sm:text-4xl sm:leading-[1.08]"
               initial={enter.initial}
@@ -236,30 +326,10 @@ function LandingPage() {
                 Open the board
               </Button>
             </motion.div>
-          </div>
+          </motion.div>
         </section>
 
-        <motion.section
-          className="w-full bg-[#f1f0ec]"
-          aria-label="Product preview"
-          initial={reduceMotion ? { opacity: 0 } : { opacity: 0, scale: 0.985 }}
-          animate={{ opacity: 1, scale: 1 }}
-          transition={{
-            duration: reduceMotion ? 0.12 : 0.5,
-            delay: reduceMotion ? 0 : 0.1,
-            ease: [0.22, 1, 0.36, 1],
-          }}
-        >
-          <img
-            src="/landing-cover.png"
-            alt="loora canvas with a selected UI frame and selection handles"
-            width={1536}
-            height={1024}
-            className="block h-auto w-full object-cover object-center"
-            decoding="async"
-            fetchPriority="high"
-          />
-        </motion.section>
+        <CoverParallax reduceMotion={reduceMotion} />
 
         <section className="mx-auto w-full max-w-6xl px-5 py-16 sm:px-8 sm:py-24">
           <div className="grid gap-10 sm:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)] sm:gap-16">
