@@ -76,15 +76,17 @@ type Palette = {
   dot: string
   page: string
   ok: string
+  dotAccent: string
+  glow: string
   /** Text that sits on the accent — dark mode's accent is light, so it isn't white. */
   accentInk: string
 }
 
 const LIGHT: Palette = {
-  accent: '#2440e6',
-  accentSoft: 'rgba(36,64,230,0.10)',
-  accentFaint: 'rgba(36,64,230,0.05)',
-  accentWire: 'rgba(36,64,230,0.35)',
+  accent: '#1e3dea',
+  accentSoft: 'rgba(30,61,234,0.10)',
+  accentFaint: 'rgba(30,61,234,0.05)',
+  accentWire: 'rgba(30,61,234,0.35)',
   wireStrong: '#c6c6c6',
   wireMid: '#d2d2d2',
   wireSoft: '#dedede',
@@ -94,14 +96,16 @@ const LIGHT: Palette = {
   dot: '#d3d1c9',
   page: '#fafaf8',
   ok: '#059669',
+  dotAccent: 'rgba(30,61,234,0.20)',
+  glow: 'rgba(30,61,234,0.07)',
   accentInk: '#ffffff',
 }
 
 const DARK: Palette = {
-  accent: '#8087ff',
-  accentSoft: 'rgba(128,135,255,0.14)',
-  accentFaint: 'rgba(128,135,255,0.07)',
-  accentWire: 'rgba(128,135,255,0.40)',
+  accent: '#738af4',
+  accentSoft: 'rgba(115,138,244,0.14)',
+  accentFaint: 'rgba(115,138,244,0.07)',
+  accentWire: 'rgba(115,138,244,0.40)',
   wireStrong: '#4a4f5c',
   wireMid: '#3c404b',
   wireSoft: '#31343d',
@@ -111,6 +115,8 @@ const DARK: Palette = {
   dot: '#2e3038',
   page: '#101114',
   ok: '#34d399',
+  dotAccent: 'rgba(115,138,244,0.30)',
+  glow: 'rgba(115,138,244,0.10)',
   accentInk: '#101114',
 }
 
@@ -134,6 +140,41 @@ function useThemePalette(): Palette {
   }, [])
 
   return dark ? DARK : LIGHT
+}
+
+/**
+ * Halftone field behind the hero: an accent-tinted dot grid masked so it packs
+ * in behind the demo and dissolves upward, with a soft wash under it. Clipped to
+ * the shell's top corners by its own overflow — the shell can't clip it itself
+ * without breaking the sticky nav.
+ */
+function HeroField() {
+  const palette = usePalette()
+  const fade =
+    'radial-gradient(ellipse 75% 70% at 50% 100%, #000 10%, rgba(0,0,0,0.55) 45%, transparent 78%)'
+
+  return (
+    <div
+      aria-hidden="true"
+      className="pointer-events-none absolute inset-x-0 top-0 h-[620px] overflow-hidden rounded-t-[20px] sm:h-[780px] sm:rounded-t-[28px]"
+    >
+      <div
+        className="absolute inset-0"
+        style={{
+          background: `radial-gradient(ellipse 60% 55% at 50% 92%, ${palette.glow}, transparent 70%)`,
+        }}
+      />
+      <div
+        className="absolute inset-0"
+        style={{
+          backgroundImage: `radial-gradient(circle, ${palette.dotAccent} 1px, transparent 1px)`,
+          backgroundSize: '16px 16px',
+          maskImage: fade,
+          WebkitMaskImage: fade,
+        }}
+      />
+    </div>
+  )
 }
 
 function reveal(reduce: boolean | null, delay = 0) {
@@ -1219,12 +1260,23 @@ function LandingPage() {
           into the browser chrome. No overflow-hidden here: it would make the
           sticky nav stick inside this box instead of the viewport. */}
       <div className="min-h-dvh bg-[#eae8e2] p-2 antialiased sm:p-3 dark:bg-[#08090b]">
-        <div className="min-h-[calc(100dvh-1rem)] rounded-[20px] bg-background text-foreground sm:min-h-[calc(100dvh-1.5rem)] sm:rounded-[28px]">
+        <div className="relative min-h-[calc(100dvh-1rem)] rounded-[20px] bg-background text-foreground sm:min-h-[calc(100dvh-1.5rem)] sm:rounded-[28px]">
+          <HeroField />
+
           <header className="sticky top-2 z-50 px-4 pt-3 sm:top-3 sm:pt-4">
-            <nav className="mx-auto flex h-12 w-full max-w-[1080px] items-center justify-between rounded-full border border-border bg-background/80 pl-5 pr-2 backdrop-blur-xl">
-              <p className="text-[17px] font-semibold tracking-[-0.03em]">
-                loora<span style={{ color: palette.accent }}>.</span>
-              </p>
+            <nav className="mx-auto flex h-12 w-full max-w-[1080px] items-center justify-between rounded-full border border-border bg-background/80 pl-2 pr-2 backdrop-blur-xl">
+              <div className="flex items-center gap-2">
+                <img
+                  src="/logo192.png"
+                  alt=""
+                  width={32}
+                  height={32}
+                  className="size-8 rounded-full"
+                />
+                <p className="text-[17px] font-semibold tracking-[-0.03em]">
+                  loora<span style={{ color: palette.accent }}>.</span>
+                </p>
+              </div>
               <div className="flex items-center gap-1">
                 <button
                   type="button"
@@ -1245,7 +1297,7 @@ function LandingPage() {
             </nav>
           </header>
 
-      <main>
+      <main className="relative z-10">
         <section className="mx-auto w-full max-w-[820px] px-5 pb-12 pt-16 text-center sm:pb-16 sm:pt-24">
           <motion.p
             className={EYEBROW}
@@ -1497,7 +1549,7 @@ function LandingPage() {
         </section>
       </main>
 
-          <footer className="mx-auto flex w-full max-w-[1080px] items-center justify-between border-t border-border px-5 py-6 text-[13px] text-muted-foreground/70">
+          <footer className="relative z-10 mx-auto flex w-full max-w-[1080px] items-center justify-between border-t border-border px-5 py-6 text-[13px] text-muted-foreground/70">
             <p className="font-medium text-foreground">
               loora<span style={{ color: palette.accent }}>.</span>
             </p>

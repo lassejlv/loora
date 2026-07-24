@@ -11,7 +11,7 @@
   --cx-canvas: #f1f0ec;
   --cx-dot: #d3d1c9;
   --cx-ink: #1a1917;
-  --cx-accent: #2440e6;
+  --cx-accent: #1e3dea;
 
   --background: #fafaf8;
   --foreground: var(--cx-ink);
@@ -293,7 +293,7 @@ body {
   --cx-canvas: #17181c;
   --cx-dot: #2e3038;
   --cx-ink: #e9eaee;
-  --cx-accent: #8087ff;
+  --cx-accent: #738af4;
 
   --background: #101114;
   --foreground: var(--cx-ink);
