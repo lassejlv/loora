@@ -20,7 +20,7 @@ CREATE TABLE "design_draft" (
 --> statement-breakpoint
 DROP INDEX "design_chat_design_idx";--> statement-breakpoint
 DROP INDEX "design_version_design_idx";--> statement-breakpoint
-ALTER TABLE "design" ADD COLUMN "revision" integer DEFAULT 0 NOT NULL;--> statement-breakpoint
+ALTER TABLE "design" ADD COLUMN IF NOT EXISTS "revision" integer DEFAULT 0 NOT NULL;--> statement-breakpoint
 ALTER TABLE "design_chat" ADD COLUMN "draft_id" text;--> statement-breakpoint
 ALTER TABLE "design_version" ADD COLUMN "draft_id" text;--> statement-breakpoint
 ALTER TABLE "design_draft" ADD CONSTRAINT "design_draft_design_fk" FOREIGN KEY ("design_id","user_id") REFERENCES "public"."design"("id","user_id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
