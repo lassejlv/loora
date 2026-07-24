@@ -86,6 +86,7 @@ describe('model message preparation', () => {
         parts: [
           { type: 'reasoning' as const, text: 'old reasoning' },
           { type: 'file' as const, mediaType: 'image/png', url: 'old-image' },
+          { type: 'file' as const, mediaType: 'application/pdf', url: 'old-pdf' },
           {
             type: 'tool-updateElement' as const,
             state: 'output-available' as const,

@@ -1,7 +1,12 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { AnimatePresence, motion, useReducedMotion } from 'motion/react'
 import { useChat } from '@ai-sdk/react'
-import { DefaultChatTransport, lastAssistantMessageIsCompleteWithToolCalls, type UIMessage } from 'ai'
+import {
+  DefaultChatTransport,
+  lastAssistantMessageIsCompleteWithToolCalls,
+  type FileUIPart,
+  type UIMessage,
+} from 'ai'
 import {
   ChatGPTProxyError,
   createChatGPTProxyProvider,
@@ -21,8 +26,10 @@ import {
 import { Spinner } from '#/components/ui/spinner'
 import {
   BookOpenIcon,
+  FileTextIcon,
   GroupIcon,
   MoveIcon,
+  PaperclipIcon,
   ScrollTextIcon,
   UngroupIcon,
   PenLineIcon,
@@ -39,9 +46,12 @@ import {
 import { Message, MessageContent } from '#/components/ai-elements/message'
 import {
   PromptInput,
+  PromptInputButton,
   PromptInputFooter,
+  PromptInputHeader,
   PromptInputSubmit,
   PromptInputTextarea,
+  usePromptInputAttachments,
 } from '#/components/ai-elements/prompt-input'
 import { applyCodeEdits, type CanvasElement, type CodeEdit, type ElementActions } from '#/lib/canvas'
 import { awaitRenderResult, captureElement, measureElement, readElementLogs } from '#/components/element-frame'
@@ -90,6 +100,26 @@ type ChatSummary = {
   title: string
   updatedAt: number
 }
+
+const DOCUMENT_UPLOAD_ACCEPT = [
+  'application/pdf',
+  'application/json',
+  'application/xml',
+  'text/*',
+  '.md',
+  '.txt',
+  '.csv',
+  '.json',
+  '.html',
+  '.css',
+  '.js',
+  '.jsx',
+  '.ts',
+  '.tsx',
+  '.xml',
+  '.yaml',
+  '.yml',
+].join(',')
 
 // Shimmer until the assistant starts producing visible text (covers tool rounds too).
 function isThinking(status: ChatState['status'], messages: ChatState['messages']) {
@@ -511,9 +541,7 @@ function ChatSession({
   const [queuedMessages, setQueuedMessages] = useState<string[]>([])
   const queuedRef = useRef(queuedMessages)
   queuedRef.current = queuedMessages
-  const dispatchPrompt = useRef<
-    (text: string, files?: { type: 'file'; mediaType: string; url: string }[]) => void
-  >(() => {})
+  const dispatchPrompt = useRef<(text: string, files?: FileUIPart[]) => void>(() => {})
   const composerRef = useRef<HTMLTextAreaElement>(null)
   // Executor shared by live onToolCall and reload recovery; the id set makes
   // execution idempotent when a resumed stream replays calls recovery already ran.
@@ -865,32 +893,37 @@ function ChatSession({
   dispatchPrompt.current = (text, files = []) => {
     setStallError(null)
     recoveryRetries.current = 0
+    const promptLabel =
+      text.trim() ||
+      files.map((file) => file.filename).filter(Boolean).join(', ') ||
+      'Attached files'
     if (titleRef.current === 'New chat') {
-      onTitleChange(chatId, titleFromPrompt(text))
+      onTitleChange(chatId, titleFromPrompt(promptLabel))
     }
     // safety checkpoint: restorable from History if the agent goes wrong
-    commitIfChanged(docId, `Before: ${text.slice(0, 60)}`, shapesRef.current)
+    commitIfChanged(docId, `Before: ${promptLabel.slice(0, 60)}`, shapesRef.current)
     void orpc.history
       .commit({
         id: `c${nanoid()}`,
         designId: docId,
-        message: `Before: ${text.slice(0, 60)}`,
+        message: `Before: ${promptLabel.slice(0, 60)}`,
         shapes: shapesRef.current,
         skipIfUnchanged: true,
       })
       .catch((error) => console.error('[history] Failed to save checkpoint:', error))
     void (async () => {
       const snapshot = imageInputsEnabled ? await snapshotCanvas(shapesRef.current) : null
+      const uploadedFiles = imageInputsEnabled
+        ? files
+        : files.filter((file) => !file.mediaType.startsWith('image/'))
       void sendMessage({
         text,
-        files: imageInputsEnabled
-          ? [
-              ...files,
-              ...(snapshot
-                ? [{ type: 'file' as const, mediaType: 'image/png', url: snapshot }]
-                : []),
-            ]
-          : [],
+        files: [
+          ...uploadedFiles,
+          ...(snapshot
+            ? [{ type: 'file' as const, mediaType: 'image/png', url: snapshot }]
+            : []),
+        ],
       })
     })()
   }
@@ -1284,11 +1317,25 @@ function ChatSession({
           </div>
         )}
         <PromptInput
-          accept={imageInputsEnabled ? 'image/*' : 'application/x-loora-disabled'}
-          onSubmit={({ text, files }) => {
+          accept={
+            imageInputsEnabled
+              ? `image/*,${DOCUMENT_UPLOAD_ACCEPT}`
+              : DOCUMENT_UPLOAD_ACCEPT
+          }
+          maxFiles={5}
+          maxFileSize={10 * 1024 * 1024}
+          multiple
+          onError={({ message }) => setStallError(message)}
+          onSubmit={async ({ text, files }) => {
             const trimmed = text.trim()
-            if (!trimmed || !chatReady) return
-            const outbound = trimmed + mentionSuffix(trimmed, trackedMentions)
+            if ((!trimmed && files.length === 0) || !chatReady) return
+            if ((status === 'streaming' || status === 'submitted') && files.length > 0) {
+              setStallError('Wait for the current run to finish before sending attachments.')
+              throw new Error('Attachments cannot be queued during an active run.')
+            }
+            const outbound = trimmed
+              ? trimmed + mentionSuffix(trimmed, trackedMentions)
+              : ''
             setInput('')
             setCaret(0)
             setTrackedMentions([])
@@ -1303,6 +1350,7 @@ function ChatSession({
             dispatchPrompt.current(outbound, files)
           }}
         >
+          <ComposerAttachmentTray />
           <PromptInputTextarea
             ref={composerRef}
             value={input}
@@ -1344,6 +1392,7 @@ function ChatSession({
           />
           <PromptInputFooter>
             <div className="flex items-center gap-1">
+              <ComposerAttachmentButton disabled={!chatReady || busy} />
               <ModelPicker
                 model={model}
                 chatGPTModels={chatGPTModels}
@@ -1359,19 +1408,95 @@ function ChatSession({
                 />
               ) : null}
             </div>
-            <PromptInputSubmit
+            <ComposerSubmit
               status={status}
               onStop={() => stop()}
-              disabled={
-                status !== 'streaming' &&
-                status !== 'submitted' &&
-                (!chatReady || !input.trim())
-              }
+              chatReady={chatReady}
+              hasText={Boolean(input.trim())}
             />
           </PromptInputFooter>
         </PromptInput>
       </div>
     </>
+  )
+}
+
+function ComposerAttachmentTray() {
+  const { files, remove } = usePromptInputAttachments()
+  if (files.length === 0) return null
+
+  return (
+    <PromptInputHeader className="gap-2 pb-0">
+      {files.map((file) => {
+        const label = file.filename || (file.mediaType.startsWith('image/') ? 'Pasted image' : 'File')
+        return (
+          <div
+            key={file.id}
+            className="group/attachment relative flex min-w-0 max-w-44 items-center gap-2 rounded-md border bg-muted/40 p-1.5 pr-7 text-xs"
+          >
+            {file.mediaType.startsWith('image/') ? (
+              <img
+                src={file.url}
+                alt={label}
+                className="size-9 shrink-0 rounded object-cover"
+              />
+            ) : (
+              <div className="flex size-9 shrink-0 items-center justify-center rounded bg-background">
+                <FileTextIcon className="size-4 text-muted-foreground" aria-hidden />
+              </div>
+            )}
+            <span className="truncate" title={label}>{label}</span>
+            <button
+              type="button"
+              aria-label={`Remove ${label}`}
+              className="absolute right-1.5 top-1.5 rounded p-0.5 text-muted-foreground hover:bg-muted hover:text-foreground"
+              onClick={() => remove(file.id)}
+            >
+              <XIcon className="size-3" />
+            </button>
+          </div>
+        )
+      })}
+    </PromptInputHeader>
+  )
+}
+
+function ComposerAttachmentButton({ disabled }: { disabled: boolean }) {
+  const { openFileDialog } = usePromptInputAttachments()
+  return (
+    <PromptInputButton
+      aria-label="Attach files"
+      disabled={disabled}
+      onClick={openFileDialog}
+      tooltip="Attach files"
+    >
+      <PaperclipIcon className="size-4" />
+    </PromptInputButton>
+  )
+}
+
+function ComposerSubmit({
+  chatReady,
+  hasText,
+  status,
+  onStop,
+}: {
+  chatReady: boolean
+  hasText: boolean
+  status: ChatState['status']
+  onStop: () => void
+}) {
+  const { files } = usePromptInputAttachments()
+  return (
+    <PromptInputSubmit
+      status={status}
+      onStop={onStop}
+      disabled={
+        status !== 'streaming' &&
+        status !== 'submitted' &&
+        (!chatReady || (!hasText && files.length === 0))
+      }
+    />
   )
 }
 
@@ -1631,6 +1756,7 @@ function toolSummary(name: string, part: ToolPart, elements: CanvasElement[]) {
 
 type Block =
   | { kind: 'text'; text: string }
+  | { kind: 'file'; part: FileUIPart }
   | { kind: 'reasoning' }
   | { kind: 'tools'; parts: ToolPart[] }
   | { kind: 'question'; part: ToolPart }
@@ -1681,6 +1807,32 @@ function UserMessageText({ text }: { text: string }) {
   )
 }
 
+function ChatFileAttachment({ file }: { file: FileUIPart }) {
+  const label = file.filename || (file.mediaType.startsWith('image/') ? 'Image' : 'File')
+
+  if (file.mediaType.startsWith('image/')) {
+    return (
+      <figure className="overflow-hidden rounded-md border bg-background/40">
+        <img
+          src={file.url}
+          alt={label}
+          className="max-h-64 w-full max-w-sm object-contain"
+        />
+        <figcaption className="truncate px-2 py-1 text-[11px] text-muted-foreground">
+          {label}
+        </figcaption>
+      </figure>
+    )
+  }
+
+  return (
+    <div className="flex max-w-xs items-center gap-2 rounded-md border bg-background/40 px-2.5 py-2">
+      <FileTextIcon className="size-4 shrink-0 text-muted-foreground" aria-hidden />
+      <span className="truncate text-xs">{label}</span>
+    </div>
+  )
+}
+
 // Group consecutive tool calls so a burst of 20 creates reads as one line.
 // Questions stay standalone - they need their own interactive card.
 function toBlocks(parts: { type: string }[]): Block[] {
@@ -1688,6 +1840,8 @@ function toBlocks(parts: { type: string }[]): Block[] {
   for (const part of parts) {
     if (part.type === 'text') {
       blocks.push({ kind: 'text', text: (part as unknown as { text: string }).text })
+    } else if (part.type === 'file') {
+      blocks.push({ kind: 'file', part: part as FileUIPart })
     } else if (part.type === 'reasoning') {
       blocks.push({ kind: 'reasoning' })
     } else if (part.type === 'tool-askQuestion') {
@@ -1734,6 +1888,8 @@ export const ChatMessageRow = memo(function ChatMessageRow({
                 streaming={isLast && streaming}
               />
             )
+          ) : block.kind === 'file' ? (
+            <ChatFileAttachment key={index} file={block.part} />
           ) : block.kind === 'reasoning' ? (
             isLast && index === blocks.length - 1 && streaming ? (
               <AgentThinking key={index} label="Reasoning" />

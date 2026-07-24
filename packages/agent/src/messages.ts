@@ -125,7 +125,7 @@ export function messagesForModel(
     const parts = message.parts.flatMap((part) => {
       if (part.type === 'tool-loadSkill' || part.type === 'step-start') return []
       if (repositoryToolTypes.has(part.type)) return [compactRepositoryToolPart(part)]
-      if (old && part.type === 'file' && part.mediaType?.startsWith('image/')) return []
+      if (old && part.type === 'file') return []
       if (part.type === 'text' || part.type === 'reasoning') {
         if (!('text' in part) || typeof part.text !== 'string' || part.text.trim().length === 0) {
           return []

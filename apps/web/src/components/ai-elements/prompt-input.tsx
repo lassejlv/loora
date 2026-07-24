@@ -72,10 +72,20 @@ import {
 // Helpers
 // ============================================================================
 
-const convertBlobUrlToDataUrl = async (url: string): Promise<string | null> => {
+const TEXT_FILE_EXTENSION = /\.(?:md|txt|csv|json|html?|css|jsx?|tsx?|xml|ya?ml)$/i;
+
+const mediaTypeForFile = (file: File) =>
+  file.type || (TEXT_FILE_EXTENSION.test(file.name) ? "text/plain" : "application/octet-stream");
+
+const convertBlobUrlToDataUrl = async (
+  url: string,
+  mediaType: string
+): Promise<string | null> => {
   try {
     const response = await fetch(url);
     const blob = await response.blob();
+    const typedBlob =
+      blob.type || !mediaType ? blob : blob.slice(0, blob.size, mediaType);
     // FileReader uses callback-based API, wrapping in Promise is necessary
     // oxlint-disable-next-line eslint-plugin-promise(avoid-new)
     return new Promise((resolve) => {
@@ -84,7 +94,7 @@ const convertBlobUrlToDataUrl = async (url: string): Promise<string | null> => {
       reader.onloadend = () => resolve(reader.result as string);
       // oxlint-disable-next-line eslint-plugin-unicorn(prefer-add-event-listener)
       reader.onerror = () => resolve(null);
-      reader.readAsDataURL(blob);
+      reader.readAsDataURL(typedBlob);
     });
   } catch {
     return null;
@@ -266,7 +276,7 @@ export const PromptInputProvider = ({
       ...incoming.map((file) => ({
         filename: file.name,
         id: nanoid(),
-        mediaType: file.type,
+        mediaType: mediaTypeForFile(file),
         type: "file" as const,
         url: URL.createObjectURL(file),
       })),
@@ -558,6 +568,9 @@ export const PromptInput = ({
         .filter(Boolean);
 
       return patterns.some((pattern) => {
+        if (pattern.startsWith(".")) {
+          return f.name.toLowerCase().endsWith(pattern.toLowerCase());
+        }
         if (pattern.endsWith("/*")) {
           // e.g: image/* -> image/
           const prefix = pattern.slice(0, -1);
@@ -609,7 +622,7 @@ export const PromptInput = ({
           next.push({
             filename: file.name,
             id: nanoid(),
-            mediaType: file.type,
+            mediaType: mediaTypeForFile(file),
             type: "file",
             url: URL.createObjectURL(file),
           });
@@ -858,7 +871,10 @@ export const PromptInput = ({
         const convertedFiles: FileUIPart[] = await Promise.all(
           files.map(async ({ id: _id, ...item }) => {
             if (item.url?.startsWith("blob:")) {
-              const dataUrl = await convertBlobUrlToDataUrl(item.url);
+              const dataUrl = await convertBlobUrlToDataUrl(
+                item.url,
+                item.mediaType
+              );
               // If conversion failed, keep the original blob URL
               return {
                 ...item,

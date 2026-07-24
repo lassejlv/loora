@@ -374,6 +374,74 @@ describe('AgentPanel empty response recovery', () => {
     expect(requestBody).toContain('"mediaType":"image/png"')
   })
 
+  it('adds an image from the clipboard and sends it without requiring text', async () => {
+    const originalCreateObjectURL = URL.createObjectURL
+    Object.defineProperty(URL, 'createObjectURL', {
+      configurable: true,
+      value: mock(() => 'data:image/png;base64,cGFzdGVk'),
+    })
+    snapshotCanvas.mockResolvedValueOnce(null)
+    const chatFetch = mock().mockResolvedValue(
+      stream(
+        { type: 'start' },
+        { type: 'text-start', id: 'answer' },
+        { type: 'text-delta', id: 'answer', delta: 'Got it.' },
+        { type: 'text-end', id: 'answer' },
+        { type: 'finish' },
+      ),
+    )
+    globalThis.fetch = withResume204(chatFetch)
+
+    const shapesRef = { current: [] as CanvasElement[] }
+    const actions: ElementActions = {
+      createElement: mock(),
+      createElements: mock(),
+      updateElement: mock(),
+      deleteElement: mock(),
+      reorderElements: mock(),
+      groupElements: mock(),
+      ungroupElements: mock(),
+    }
+
+    try {
+      render(
+        <SidebarProvider>
+          <AgentPanel actions={actions} shapesRef={shapesRef} docId="test" />
+        </SidebarProvider>,
+      )
+
+      const input = await screen.findByPlaceholderText('Describe a change… (@ to mention)')
+      await waitFor(() => expect((input as HTMLTextAreaElement).disabled).toBe(false))
+      const file = new File(['pasted'], 'reference.png', { type: 'image/png' })
+      fireEvent.paste(input, {
+        clipboardData: {
+          items: [{ kind: 'file', getAsFile: () => file }],
+        },
+      })
+
+      expect(await screen.findByAltText('reference.png')).toBeTruthy()
+      const submit = screen.getByRole('button', { name: 'Submit' })
+      await waitFor(() => expect((submit as HTMLButtonElement).disabled).toBe(false))
+      fireEvent.click(submit)
+
+      await waitFor(() => expect(chatFetch).toHaveBeenCalledTimes(1))
+      const body = JSON.parse((chatFetch.mock.calls[0]?.[1] as RequestInit)?.body as string)
+      const user = body.messages.find((message: UIMessage) => message.role === 'user')
+      expect(user.parts).toContainEqual({
+        type: 'file',
+        filename: 'reference.png',
+        mediaType: 'image/png',
+        url: 'data:image/png;base64,cGFzdGVk',
+      })
+      expect(await screen.findByText('Got it.')).toBeTruthy()
+    } finally {
+      Object.defineProperty(URL, 'createObjectURL', {
+        configurable: true,
+        value: originalCreateObjectURL,
+      })
+    }
+  })
+
   it('does not capture or send canvas images with Max', async () => {
     localStorage.setItem('loora:model', 'max')
     const chatFetch = mock().mockResolvedValue(
