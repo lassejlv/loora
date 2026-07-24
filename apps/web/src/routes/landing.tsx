@@ -56,6 +56,31 @@ function reveal(reduce: boolean | null, delay = 0) {
   }
 }
 
+/**
+ * Drives a looping storyboard: one duration per beat, advancing only while
+ * `active` so an offscreen demo costs nothing. `lap` counts completed loops,
+ * which is how the canvas demo rotates its example prompts.
+ */
+function useScriptedLoop(durations: readonly number[], active: boolean) {
+  const [tick, setTick] = useState(0)
+  const [lap, setLap] = useState(0)
+
+  useEffect(() => {
+    if (!active) return
+    const id = setTimeout(() => {
+      if (tick + 1 >= durations.length) {
+        setLap((current) => current + 1)
+        setTick(0)
+      } else {
+        setTick(tick + 1)
+      }
+    }, durations[tick])
+    return () => clearTimeout(id)
+  }, [tick, active, durations])
+
+  return { tick, lap }
+}
+
 /* ------------------------------------------------------------------------- *
  * Canvas primitives.
  *
@@ -350,8 +375,8 @@ function RecordingCursor({ phase }: { phase: number }) {
 function CanvasDemo({ reduceMotion }: { reduceMotion: boolean | null }) {
   const ref = useRef<HTMLDivElement>(null)
   const inView = useInView(ref, { amount: 0.3 })
-  const [tick, setTick] = useState(0)
-  const [index, setIndex] = useState(0)
+  const { tick, lap } = useScriptedLoop(PHASES, !reduceMotion && inView)
+  const index = lap % EXAMPLES.length
 
   // Layered scroll drift, small and springless. Anchored at `start start` so the
   // scene sits exactly where it was authored when the page is at rest.
@@ -365,19 +390,6 @@ function CanvasDemo({ reduceMotion }: { reduceMotion: boolean | null }) {
   const phase = reduceMotion ? LAST_PHASE : tick
   const example = EXAMPLES[index]
   const { Scene } = example
-
-  useEffect(() => {
-    if (reduceMotion || !inView) return
-    const id = setTimeout(() => {
-      if (tick === LAST_PHASE) {
-        setIndex((current) => (current + 1) % EXAMPLES.length)
-        setTick(0)
-      } else {
-        setTick((current) => current + 1)
-      }
-    }, PHASES[tick])
-    return () => clearTimeout(id)
-  }, [tick, inView, reduceMotion])
 
   const typing = phase === 0
   const working = phase >= 1 && phase < 4
@@ -626,44 +638,168 @@ function CommentMock() {
   )
 }
 
-/**
- * Branch diagram. The viewBox is 16:10 like the container, so the drawn lanes and
- * the percentage-positioned labels line up.
- */
-function BranchMock() {
+/* ------------------------------------------------------------------------- *
+ * Branch demo.
+ *
+ * Beats: idle on main, fork off, two commits land on the branch, compare, checks
+ * pass, merge back, settled — then it loops. The viewBox is 16:10 like the
+ * container, so drawn lanes and percentage-positioned labels line up.
+ * ------------------------------------------------------------------------- */
+
+const BRANCH_PHASES = [1100, 900, 700, 700, 1700, 1200, 900, 1600]
+
+const BRANCH_STATUS = [
+  null,
+  'branch created',
+  '1 change',
+  '2 changes',
+  'reviewing',
+  'checks passed',
+  'merging',
+  'merged to main',
+] as const
+
+/** A commit dot that pops in on its beat. */
+function CommitDot({
+  cx,
+  cy,
+  on,
+  accent,
+}: {
+  cx: number
+  cy: number
+  on: boolean
+  accent?: boolean
+}) {
   return (
-    <div className={`relative aspect-[16/10] w-full overflow-hidden ${PANEL}`}>
+    <motion.circle
+      cx={cx}
+      cy={cy}
+      r="4.5"
+      fill="#fafaf8"
+      stroke={accent ? ACCENT : '#1a1917'}
+      strokeOpacity={accent ? 1 : 0.28}
+      strokeWidth="2"
+      initial={false}
+      animate={{ opacity: on ? 1 : 0, scale: on ? 1 : 0.4 }}
+      transition={{ duration: 0.25, ease: [0.22, 1, 0.36, 1] }}
+      style={{ transformOrigin: `${cx}px ${cy}px` }}
+    />
+  )
+}
+
+function BranchDemo({ reduceMotion }: { reduceMotion: boolean | null }) {
+  const ref = useRef<HTMLDivElement>(null)
+  const inView = useInView(ref, { amount: 0.4 })
+  const { tick } = useScriptedLoop(BRANCH_PHASES, !reduceMotion && inView)
+
+  // Reduced motion holds the merged state — the end of the story, not the start.
+  const phase = reduceMotion ? BRANCH_PHASES.length - 1 : tick
+
+  const forked = phase >= 1
+  const merging = phase >= 6
+  const merged = phase >= 7
+  const status = BRANCH_STATUS[phase]
+
+  return (
+    <div ref={ref} className={`relative aspect-[16/10] w-full overflow-hidden ${PANEL}`}>
       <DotField />
+
       <svg viewBox="0 0 320 200" className="absolute inset-0 h-full w-full" fill="none">
-        <path d="M24 60 H296" stroke="#1a1917" strokeOpacity="0.16" strokeWidth="2" />
-        <path
-          d="M88 60 C 112 60, 112 132, 136 132 H 184 C 208 132, 208 60, 232 60"
+        <path d="M20 54 H300" stroke="#1a1917" strokeOpacity="0.16" strokeWidth="2" />
+
+        {/* fork out, then run along the branch lane */}
+        <motion.path
+          d="M84 54 C 108 54, 108 112, 132 112 H 196"
           stroke={ACCENT}
           strokeWidth="2"
+          strokeLinecap="round"
+          initial={false}
+          animate={{ pathLength: forked ? 1 : 0, opacity: merged ? 0.35 : 1 }}
+          transition={{ duration: reduceMotion ? 0 : 0.6, ease: [0.22, 1, 0.36, 1] }}
         />
-        {[40, 88, 232, 280].map((cx) => (
-          <circle
-            key={cx}
-            cx={cx}
-            cy={60}
-            r="4.5"
-            fill="#fafaf8"
-            stroke="#1a1917"
-            strokeOpacity="0.28"
-            strokeWidth="2"
-          />
-        ))}
-        {[148, 172].map((cx) => (
-          <circle key={cx} cx={cx} cy={132} r="4.5" fill="#fafaf8" stroke={ACCENT} strokeWidth="2" />
-        ))}
+
+        {/* merge back into main */}
+        <motion.path
+          d="M196 112 C 220 112, 220 54, 244 54"
+          stroke={ACCENT}
+          strokeWidth="2"
+          strokeLinecap="round"
+          initial={false}
+          animate={{ pathLength: merging ? 1 : 0, opacity: merged ? 0.35 : 1 }}
+          transition={{ duration: reduceMotion ? 0 : 0.5, ease: [0.22, 1, 0.36, 1] }}
+        />
+
+        <CommitDot cx={40} cy={54} on />
+        <CommitDot cx={84} cy={54} on />
+        <CommitDot cx={152} cy={112} on={phase >= 2} accent />
+        <CommitDot cx={176} cy={112} on={phase >= 3} accent />
+        <CommitDot cx={244} cy={54} on={merged} accent />
+        <CommitDot cx={288} cy={54} on={merged} />
       </svg>
-      <span className="absolute left-[7%] top-[17%] font-mono text-[9px] text-[#9b978f]">main</span>
-      <span className="absolute left-[41%] top-[73%] font-mono text-[9px]" style={{ color: ACCENT }}>
-        pricing-v2
-      </span>
-      <span className="absolute bottom-[8%] right-[6%] rounded-full border border-[#1a1917]/8 bg-white px-2 py-1 font-mono text-[9px] leading-none text-[#75726b]">
-        2 changes · no conflicts
-      </span>
+
+      <span className="absolute left-[5%] top-[16%] font-mono text-[9px] text-[#9b978f]">main</span>
+
+      <AnimatePresence>
+        {forked && (
+          <motion.span
+            className="absolute left-[41%] top-[62%] font-mono text-[9px]"
+            style={{ color: ACCENT, opacity: merged ? 0.5 : 1 }}
+            initial={{ opacity: 0, y: 4 }}
+            animate={{ opacity: merged ? 0.5 : 1, y: 0 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.25 }}
+          >
+            pricing-v2
+          </motion.span>
+        )}
+      </AnimatePresence>
+
+      {/* compare panel — the diff summary the branch carries */}
+      <AnimatePresence>
+        {phase >= 4 && !merged && (
+          <motion.div
+            className="absolute bottom-[7%] left-[5%] w-[38%] rounded-lg border border-[#1a1917]/8 bg-white p-2 shadow-sm"
+            initial={{ opacity: 0, y: 6 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: 4 }}
+            transition={{ duration: 0.28, ease: [0.22, 1, 0.36, 1] }}
+          >
+            <p className="font-mono text-[8.5px] leading-none text-[#9b978f]">compare</p>
+            <div className="mt-1.5 flex items-center gap-2 font-mono text-[9px] leading-none">
+              <span className="text-emerald-600">+3</span>
+              <span className="text-[#75726b]">~2</span>
+              <span className="text-red-700">−1</span>
+            </div>
+            <div className="mt-2 flex flex-col gap-1">
+              <Wire w="80%" h={5} tone="soft" />
+              <Wire w="58%" h={5} tone="soft" />
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* one status chip that carries the story */}
+      <div className="absolute bottom-[7%] right-[5%]">
+        <AnimatePresence mode="wait">
+          {status && (
+            <motion.span
+              key={status}
+              className="flex items-center gap-1.5 rounded-full border border-[#1a1917]/8 bg-white px-2 py-1 font-mono text-[9px] leading-none text-[#75726b] shadow-sm"
+              initial={{ opacity: 0, y: 4 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -4 }}
+              transition={{ duration: 0.2 }}
+            >
+              <span
+                className="size-1.5 rounded-full"
+                style={{ background: merged ? '#059669' : ACCENT }}
+              />
+              {status}
+            </motion.span>
+          )}
+        </AnimatePresence>
+      </div>
     </div>
   )
 }
@@ -919,7 +1055,7 @@ function LandingPage() {
               className="border-t border-[#1a1917]/8 sm:border-l sm:border-t-0"
               {...reveal(reduceMotion, 0.06)}
             >
-              <BranchMock />
+              <BranchDemo reduceMotion={reduceMotion} />
             </motion.div>
           </div>
         </section>
