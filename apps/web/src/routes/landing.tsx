@@ -96,8 +96,8 @@ const LIGHT: Palette = {
   dot: '#d3d1c9',
   page: '#fafaf8',
   ok: '#059669',
-  dotAccent: 'rgba(30,61,234,0.20)',
-  glow: 'rgba(30,61,234,0.07)',
+  dotAccent: 'rgba(30,61,234,0.34)',
+  glow: 'rgba(30,61,234,0.13)',
   accentInk: '#ffffff',
 }
 
@@ -115,8 +115,8 @@ const DARK: Palette = {
   dot: '#2e3038',
   page: '#101114',
   ok: '#34d399',
-  dotAccent: 'rgba(115,138,244,0.30)',
-  glow: 'rgba(115,138,244,0.10)',
+  dotAccent: 'rgba(115,138,244,0.46)',
+  glow: 'rgba(115,138,244,0.20)',
   accentInk: '#101114',
 }
 
@@ -148,31 +148,61 @@ function useThemePalette(): Palette {
  * the shell's top corners by its own overflow — the shell can't clip it itself
  * without breaking the sticky nav.
  */
-function HeroField() {
+function HeroField({ reduceMotion }: { reduceMotion: boolean | null }) {
   const palette = usePalette()
+  const loop = !reduceMotion
   const fade =
-    'radial-gradient(ellipse 75% 70% at 50% 100%, #000 10%, rgba(0,0,0,0.55) 45%, transparent 78%)'
+    'radial-gradient(ellipse 82% 80% at 50% 100%, #000 18%, rgba(0,0,0,0.62) 55%, transparent 88%)'
+  const dots = (color: string, r: string) =>
+    `radial-gradient(circle, ${color} ${r}, transparent ${r})`
 
   return (
     <div
       aria-hidden="true"
-      className="pointer-events-none absolute inset-x-0 top-0 h-[620px] overflow-hidden rounded-t-[20px] sm:h-[780px] sm:rounded-t-[28px]"
+      className="pointer-events-none absolute inset-x-0 top-0 h-[660px] overflow-hidden rounded-t-[20px] sm:h-[860px] sm:rounded-t-[28px]"
     >
-      <div
+      {/* wash, breathing */}
+      <motion.div
         className="absolute inset-0"
         style={{
-          background: `radial-gradient(ellipse 60% 55% at 50% 92%, ${palette.glow}, transparent 70%)`,
+          background: `radial-gradient(ellipse 66% 60% at 50% 92%, ${palette.glow}, transparent 72%)`,
         }}
+        animate={loop ? { opacity: [0.7, 1, 0.7], scale: [1, 1.07, 1] } : undefined}
+        transition={{ duration: 9, repeat: Infinity, ease: 'easeInOut' }}
       />
-      <div
-        className="absolute inset-0"
+
+      {/* a light travelling under the dots, so the field never sits still */}
+      <motion.div
+        className="absolute -inset-y-40 left-0 w-[55%]"
         style={{
-          backgroundImage: `radial-gradient(circle, ${palette.dotAccent} 1px, transparent 1px)`,
-          backgroundSize: '16px 16px',
-          maskImage: fade,
-          WebkitMaskImage: fade,
+          background: `radial-gradient(ellipse at center, ${palette.glow}, transparent 66%)`,
         }}
+        animate={loop ? { x: ['-35%', '115%'] } : undefined}
+        transition={{ duration: 16, repeat: Infinity, repeatType: 'reverse', ease: 'easeInOut' }}
       />
+
+      {/* Two dot layers drifting at different rates and directions. Each shifts by
+          exactly one tile, so the loop is seamless. */}
+      <div className="absolute inset-0" style={{ maskImage: fade, WebkitMaskImage: fade }}>
+        <motion.div
+          className="absolute inset-[-30%]"
+          style={{
+            backgroundImage: dots(palette.dotAccent, '1.4px'),
+            backgroundSize: '18px 18px',
+          }}
+          animate={loop ? { x: [0, 18], y: [0, 18] } : undefined}
+          transition={{ duration: 7, repeat: Infinity, ease: 'linear' }}
+        />
+        <motion.div
+          className="absolute inset-[-30%]"
+          style={{
+            backgroundImage: dots(palette.accentSoft, '2.4px'),
+            backgroundSize: '52px 52px',
+          }}
+          animate={loop ? { x: [0, -52], y: [0, 26] } : undefined}
+          transition={{ duration: 26, repeat: Infinity, ease: 'linear' }}
+        />
+      </div>
     </div>
   )
 }
@@ -1261,7 +1291,7 @@ function LandingPage() {
           sticky nav stick inside this box instead of the viewport. */}
       <div className="min-h-dvh bg-[#eae8e2] p-2 antialiased sm:p-3 dark:bg-[#08090b]">
         <div className="relative min-h-[calc(100dvh-1rem)] rounded-[20px] bg-background text-foreground sm:min-h-[calc(100dvh-1.5rem)] sm:rounded-[28px]">
-          <HeroField />
+          <HeroField reduceMotion={reduceMotion} />
 
           <header className="sticky top-2 z-50 px-4 pt-3 sm:top-3 sm:pt-4">
             <nav className="mx-auto flex h-12 w-full max-w-[1080px] items-center justify-between rounded-full border border-border bg-background/80 pl-2 pr-2 backdrop-blur-xl">
