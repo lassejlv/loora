@@ -35,6 +35,17 @@ const { AgentPanel, ChatMessageRow } = await import('./agent-panel')
 const originalFetch = globalThis.fetch
 const originalLocalStorage = Object.getOwnPropertyDescriptor(globalThis, 'localStorage')
 
+// resume: true fires a GET /api/chat/:id/stream on every session mount;
+// answer it with 204 (nothing to resume) so tests only count generation POSTs.
+function withResume204(handler: (...args: unknown[]) => unknown) {
+  return ((url: RequestInfo | URL, init?: RequestInit) => {
+    if (!init?.method || init.method === 'GET') {
+      return Promise.resolve(new Response(null, { status: 204 }))
+    }
+    return handler(url, init)
+  }) as unknown as typeof fetch
+}
+
 function stream(...chunks: object[]) {
   const body = [...chunks.map((chunk) => `data: ${JSON.stringify(chunk)}\n\n`), 'data: [DONE]\n\n'].join('')
   return new Response(body, { headers: { 'Content-Type': 'text/event-stream' } })
@@ -110,7 +121,7 @@ describe('AgentPanel empty response recovery', () => {
           { type: 'finish' },
         ),
       )
-    globalThis.fetch = chatFetch as unknown as typeof fetch
+    globalThis.fetch = withResume204(chatFetch)
 
     const shapesRef = { current: [] as CanvasElement[] }
     const actions: ElementActions = {
@@ -158,7 +169,7 @@ describe('AgentPanel empty response recovery', () => {
         { type: 'finish' },
       ),
     )
-    globalThis.fetch = chatFetch as unknown as typeof fetch
+    globalThis.fetch = withResume204(chatFetch)
 
     const shapesRef = { current: [] as CanvasElement[] }
     const actions: ElementActions = {
@@ -207,7 +218,7 @@ describe('AgentPanel empty response recovery', () => {
           { type: 'finish' },
         ),
       )
-    globalThis.fetch = chatFetch as unknown as typeof fetch
+    globalThis.fetch = withResume204(chatFetch)
 
     const shapesRef = { current: [] as CanvasElement[] }
     const actions: ElementActions = {
@@ -283,7 +294,7 @@ describe('AgentPanel empty response recovery', () => {
           { type: 'finish' },
         ),
       )
-    globalThis.fetch = chatFetch as unknown as typeof fetch
+    globalThis.fetch = withResume204(chatFetch)
 
     const shapesRef = { current: [] as CanvasElement[] }
     const actions: ElementActions = {
@@ -328,7 +339,7 @@ describe('AgentPanel empty response recovery', () => {
         { type: 'finish' },
       ),
     )
-    globalThis.fetch = chatFetch as unknown as typeof fetch
+    globalThis.fetch = withResume204(chatFetch)
 
     const shapesRef = {
       current: [
@@ -374,7 +385,7 @@ describe('AgentPanel empty response recovery', () => {
         { type: 'finish' },
       ),
     )
-    globalThis.fetch = chatFetch as unknown as typeof fetch
+    globalThis.fetch = withResume204(chatFetch)
 
     const shapesRef = {
       current: [

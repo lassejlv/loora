@@ -515,10 +515,19 @@ function ChatSession({
     (text: string, files?: { type: 'file'; mediaType: string; url: string }[]) => void
   >(() => {})
   const composerRef = useRef<HTMLTextAreaElement>(null)
+  // Executor shared by live onToolCall and reload recovery; the id set makes
+  // execution idempotent when a resumed stream replays calls recovery already ran.
+  const runToolCall = useRef<
+    (toolCall: { toolName: string; toolCallId: string; input: unknown; dynamic?: boolean }) => void
+  >(() => {})
+  const executedToolCallIds = useRef(new Set<string>())
 
   const { messages, setMessages, sendMessage, regenerate, addToolOutput, status, stop, error } =
     useChat({
       id: chatId,
+      // Reattach to an in-flight generation after a reload (GET
+      // /api/chat/:chatId/stream; 204 when there is nothing to resume).
+      resume: true,
       transport: new DefaultChatTransport({
         api: '/api/chat',
         body: () => ({
@@ -577,7 +586,14 @@ function ChatSession({
         )
       },
       onToolCall({ toolCall }) {
+        runToolCall.current(toolCall)
+      },
+    })
+
+  runToolCall.current = (toolCall) => {
         if (toolCall.dynamic) return
+        if (executedToolCallIds.current.has(toolCall.toolCallId)) return
+        executedToolCallIds.current.add(toolCall.toolCallId)
         const input = toolCall.input as Record<string, unknown>
         const respond = (output: unknown) =>
           addToolOutput({
@@ -835,8 +851,7 @@ function ChatSession({
         } catch (error) {
           fail(error instanceof Error ? error.message : 'The canvas tool failed.')
         }
-      },
-    })
+  }
   const addToolOutputRef = useRef(addToolOutput)
   addToolOutputRef.current = addToolOutput
 
@@ -904,6 +919,30 @@ function ChatSession({
       onRunningChange(chatId, false)
     }
   }, [chatId, registerApi, onRunningChange])
+
+  // Reload recovery: a saved chat can end with tool calls that never produced
+  // outputs (the tab closed between the stream finishing and the tools
+  // running). Execute them once the stored messages land — their outputs
+  // re-arm sendAutomaticallyWhen, so the interrupted loop continues on its
+  // own. A live resumed stream takes priority; its calls arrive via onToolCall
+  // and the executed-id set keeps the two paths from double-running anything.
+  const recoveredRef = useRef(false)
+  useEffect(() => {
+    if (!chatReady || recoveredRef.current) return
+    if (status === 'streaming' || status === 'submitted') return
+    recoveredRef.current = true
+    const last = messagesRef.current[messagesRef.current.length - 1]
+    if (!last || last.role !== 'assistant') return
+    for (const part of last.parts) {
+      const p = part as unknown as ToolPart
+      if (typeof p.type !== 'string' || !p.type.startsWith('tool-')) continue
+      if (p.state !== 'input-available') continue
+      const toolName = p.type.slice(5)
+      // Approval tools park for the user's inline answer — never auto-run.
+      if (toolName === 'askQuestion' || toolName === 'deleteElement') continue
+      runToolCall.current({ toolName, toolCallId: p.toolCallId, input: p.input })
+    }
+  }, [chatReady, status])
 
   // Queue flush. Runs when the chat goes idle AND every tool part on the last
   // assistant message has an output — client tools resolve after the stream

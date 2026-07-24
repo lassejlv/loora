@@ -18,6 +18,8 @@
     "@opencoredev/loginwithchatgpt-server": "^0.2.0",
     "ai": "catalog:",
     "drizzle-orm": "catalog:",
+    "redis": "^6.1.0",
+    "resumable-stream": "^2.2.12",
     "zod": "catalog:"
   },
   "devDependencies": {
