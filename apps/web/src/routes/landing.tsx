@@ -115,7 +115,7 @@ const DARK: Palette = {
   dot: '#2e3038',
   page: '#101114',
   ok: '#34d399',
-  dotAccent: 'rgba(115,138,244,0.46)',
+  dotAccent: 'rgba(115,138,244,0.40)',
   glow: 'rgba(115,138,244,0.20)',
   accentInk: '#101114',
 }
@@ -152,7 +152,7 @@ function HeroField({ reduceMotion }: { reduceMotion: boolean | null }) {
   const palette = usePalette()
   const loop = !reduceMotion
   const fade =
-    'radial-gradient(ellipse 82% 80% at 50% 100%, #000 18%, rgba(0,0,0,0.62) 55%, transparent 88%)'
+    'radial-gradient(ellipse 58% 62% at 50% 88%, #000 0%, rgba(0,0,0,0.5) 42%, transparent 72%)'
   const dots = (color: string, r: string) =>
     `radial-gradient(circle, ${color} ${r}, transparent ${r})`
 
@@ -173,7 +173,7 @@ function HeroField({ reduceMotion }: { reduceMotion: boolean | null }) {
 
       {/* a light travelling under the dots, so the field never sits still */}
       <motion.div
-        className="absolute -inset-y-40 left-0 w-[55%]"
+        className="absolute -inset-y-32 left-0 w-[42%] opacity-70"
         style={{
           background: `radial-gradient(ellipse at center, ${palette.glow}, transparent 66%)`,
         }}
@@ -574,7 +574,7 @@ function CanvasDemo({ reduceMotion }: { reduceMotion: boolean | null }) {
   const revised = phase >= 6
 
   return (
-    <div ref={ref} className={`relative aspect-[4/3] w-full overflow-hidden ${PANEL} sm:aspect-[3/2]`}>
+    <div ref={ref} className={`relative aspect-[4/3] w-full overflow-hidden ${PANEL} sm:aspect-[16/10]`}>
       <DotField y={dotsY} />
 
       {/* The unselected neighbour, as on the cover. */}
@@ -1289,8 +1289,8 @@ function LandingPage() {
       {/* Gutter + rounded shell, so the page reads as a card rather than running
           into the browser chrome. No overflow-hidden here: it would make the
           sticky nav stick inside this box instead of the viewport. */}
-      <div className="min-h-dvh bg-[#eae8e2] p-2 antialiased sm:p-3 dark:bg-[#08090b]">
-        <div className="relative min-h-[calc(100dvh-1rem)] rounded-[20px] bg-background text-foreground sm:min-h-[calc(100dvh-1.5rem)] sm:rounded-[28px]">
+      <div className="min-h-dvh bg-[#e6e3dc] p-2 antialiased sm:p-3 dark:bg-black">
+        <div className="relative min-h-[calc(100dvh-1rem)] rounded-[20px] border border-border bg-background text-foreground sm:min-h-[calc(100dvh-1.5rem)] sm:rounded-[28px]">
           <HeroField reduceMotion={reduceMotion} />
 
           <header className="sticky top-2 z-50 px-4 pt-3 sm:top-3 sm:pt-4">
@@ -1328,7 +1328,7 @@ function LandingPage() {
           </header>
 
       <main className="relative z-10">
-        <section className="mx-auto w-full max-w-[820px] px-5 pb-12 pt-16 text-center sm:pb-16 sm:pt-24">
+        <section className="mx-auto w-full max-w-[820px] px-5 pb-9 pt-10 text-center sm:pb-12 sm:pt-16">
           <motion.p
             className={EYEBROW}
             initial={reduceMotion ? { opacity: 0 } : { opacity: 0, y: 6 }}
