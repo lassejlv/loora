@@ -543,55 +543,156 @@ function CanvasDemo({ reduceMotion }: { reduceMotion: boolean | null }) {
  * Section mocks, on the same canvas language.
  * ------------------------------------------------------------------------- */
 
-/** Code on the left, the element it renders on the right. */
-function LiveUiMock() {
+/** Uses the shared loop, gated on visibility, holding the last beat when reduced. */
+function useMockLoop(durations: readonly number[], reduceMotion: boolean | null) {
+  const ref = useRef<HTMLDivElement>(null)
+  const inView = useInView(ref, { amount: 0.4 })
+  const { tick } = useScriptedLoop(durations, !reduceMotion && inView)
+  return { ref, phase: reduceMotion ? durations.length - 1 : tick }
+}
+
+const LIVE_PHASES = [1400, 900, 1100, 900, 1400, 1300]
+
+/** Code on the left, the element it renders on the right — edit one, both move. */
+function LiveUiMock({ reduceMotion }: { reduceMotion: boolean | null }) {
+  const { ref, phase } = useMockLoop(LIVE_PHASES, reduceMotion)
+  const rendered = phase >= 1
+  const editing = phase === 3
+  const updated = phase >= 4
+
+  const lines = [
+    { w: '70%', accent: true },
+    { w: '90%', accent: false },
+    { w: '55%', accent: false },
+    { w: updated ? '64%' : '80%', accent: updated },
+    { w: '40%', accent: true },
+  ]
+
   return (
-    <div className={`relative aspect-[16/10] w-full overflow-hidden ${PANEL}`}>
+    <div ref={ref} className={`relative aspect-[16/10] w-full overflow-hidden ${PANEL}`}>
       <div className="absolute inset-0 grid grid-cols-2">
         <div className="flex flex-col gap-1.5 border-r border-[#1a1917]/8 bg-white p-4">
           <span className="font-mono text-[9px] text-[#9b978f]">App.tsx</span>
           <div className="mt-1 flex flex-col gap-1.5">
-            <div className="h-1.5" style={{ width: '70%', background: 'rgba(36,64,230,0.3)' }} />
-            <Wire w="90%" h={6} tone="soft" />
-            <Wire w="55%" h={6} tone="soft" />
-            <Wire w="80%" h={6} tone="soft" />
-            <div className="h-1.5" style={{ width: '40%', background: 'rgba(36,64,230,0.3)' }} />
+            {lines.map((line, index) => (
+              <motion.div
+                key={index}
+                className="-mx-1 rounded-sm px-1"
+                initial={false}
+                animate={{
+                  opacity: phase >= 0 ? 1 : 0,
+                  background:
+                    editing && index === 3 ? 'rgba(36,64,230,0.12)' : 'rgba(36,64,230,0)',
+                }}
+                transition={{ duration: 0.25, delay: phase === 0 ? index * 0.12 : 0 }}
+              >
+                <motion.div
+                  className="h-1.5"
+                  initial={false}
+                  animate={{
+                    width: line.w,
+                    background: line.accent ? 'rgba(36,64,230,0.35)' : WIRE.soft,
+                  }}
+                  transition={{ duration: 0.3, ease: [0.22, 1, 0.36, 1] }}
+                />
+              </motion.div>
+            ))}
           </div>
         </div>
-        <div className="flex items-center justify-center p-4">
-          <div className="w-full border border-[#e4e4e2] bg-white p-3">
-            <div className="flex flex-col gap-1.5">
-              <Wire w="60%" h={10} tone="strong" />
-              <Wire w="95%" h={7} tone="soft" />
-              <div className="mt-1 h-4 w-16" style={{ background: WIRE.mid }} />
-            </div>
-          </div>
+
+        <div className="relative flex items-center justify-center p-4">
+          <AnimatePresence>
+            {rendered && (
+              <motion.div
+                className="w-full border border-[#e4e4e2] bg-white p-3"
+                initial={{ opacity: 0, y: 6 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0 }}
+                transition={{ duration: 0.3, ease: [0.22, 1, 0.36, 1] }}
+              >
+                <div className="flex flex-col gap-1.5">
+                  <Wire w="60%" h={10} tone="strong" />
+                  <Wire w="95%" h={7} tone="soft" />
+                  <motion.div
+                    className="mt-1 h-4"
+                    initial={false}
+                    animate={{
+                      width: updated ? 76 : 60,
+                      background: updated ? ACCENT : WIRE.mid,
+                    }}
+                    transition={{ duration: 0.35, ease: [0.22, 1, 0.36, 1] }}
+                  />
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
+
+          <AnimatePresence>
+            {phase >= 2 && (
+              <motion.span
+                className="absolute right-2 top-2 flex items-center gap-1 rounded-full border border-[#1a1917]/8 bg-white px-1.5 py-0.5 font-mono text-[8.5px] leading-none text-[#75726b]"
+                initial={{ opacity: 0, scale: 0.9 }}
+                animate={{ opacity: 1, scale: 1 }}
+                exit={{ opacity: 0 }}
+                transition={{ duration: 0.2 }}
+              >
+                <span className="size-1 rounded-full bg-emerald-500" />
+                ok
+              </motion.span>
+            )}
+          </AnimatePresence>
         </div>
       </div>
     </div>
   )
 }
 
-/** Layer stack on the left, the selected element on the right. */
-function ControlMock() {
+const CONTROL_PHASES = [1300, 1200, 1100, 1000, 1500]
+
+/** Selection follows the layer you pick, then gets resized and nudged by hand. */
+function ControlMock({ reduceMotion }: { reduceMotion: boolean | null }) {
+  const { ref, phase } = useMockLoop(CONTROL_PHASES, reduceMotion)
+
+  // Which layer is selected, and the box that selection puts on the canvas.
+  const active = phase === 0 ? 0 : phase === 4 ? 2 : 1
+  const box =
+    phase === 0
+      ? { top: '14%', height: '34%', width: '34%' }
+      : phase === 1
+        ? { top: '30%', height: '44%', width: '34%' }
+        : phase === 2
+          ? { top: '30%', height: '44%', width: '48%' }
+          : phase === 3
+            ? { top: '38%', height: '44%', width: '48%' }
+            : { top: '52%', height: '30%', width: '48%' }
+
   return (
-    <div className={`relative aspect-[16/10] w-full overflow-hidden ${PANEL}`}>
+    <div ref={ref} className={`relative aspect-[16/10] w-full overflow-hidden ${PANEL}`}>
       <DotField />
-      <div className="absolute left-[7%] top-[16%] flex w-[27%] flex-col gap-0.5 rounded-lg border border-[#1a1917]/8 bg-white p-1.5">
+
+      <div className="absolute left-[7%] top-[16%] z-10 flex w-[27%] flex-col gap-0.5 rounded-lg border border-[#1a1917]/8 bg-white p-1.5">
         {['hero', 'pricing', 'footer'].map((layer, index) => (
-          <span
+          <motion.span
             key={layer}
-            className={`rounded px-1.5 py-1 font-mono text-[9px] leading-none ${
-              index === 1 ? 'bg-[#2440e6]/10 text-[#2440e6]' : 'text-[#9b978f]'
-            }`}
+            className="rounded px-1.5 py-1 font-mono text-[9px] leading-none"
+            initial={false}
+            animate={{
+              background: index === active ? 'rgba(36,64,230,0.1)' : 'rgba(36,64,230,0)',
+              color: index === active ? ACCENT : '#9b978f',
+            }}
+            transition={{ duration: 0.25 }}
           >
             {layer}
-          </span>
+          </motion.span>
         ))}
       </div>
-      <div
-        className="absolute inset-y-[22%] left-[44%] w-[42%] bg-white"
+
+      <motion.div
+        className="absolute left-[44%] bg-white"
         style={{ border: `1px solid ${ACCENT}` }}
+        initial={false}
+        animate={box}
+        transition={{ duration: 0.4, ease: [0.22, 1, 0.36, 1] }}
       >
         <div className="flex flex-col gap-2 p-3">
           <Wire w="50%" h={12} tone="strong" />
@@ -606,34 +707,93 @@ function ControlMock() {
             style={{ border: `1.5px solid ${ACCENT}` }}
           />
         ))}
-      </div>
+      </motion.div>
     </div>
   )
 }
 
-/** A pin dropped on a spot, with the note that steers the next turn. */
-function CommentMock() {
+const COMMENT_PHASES = [900, 600, 1500, 1000, 1200, 1000, 1400]
+
+/** Pin a spot, say what's wrong, and watch the next turn land on that spot. */
+function CommentMock({ reduceMotion }: { reduceMotion: boolean | null }) {
+  const { ref, phase } = useMockLoop(COMMENT_PHASES, reduceMotion)
+  const pinned = phase >= 1
+  const noted = phase >= 2
+  const working = phase === 3
+  const fixed = phase >= 4
+  const resolved = phase >= 5
+
   return (
-    <div className={`relative aspect-[16/10] w-full overflow-hidden ${PANEL}`}>
+    <div ref={ref} className={`relative aspect-[16/10] w-full overflow-hidden ${PANEL}`}>
       <DotField />
+
       <div className="absolute inset-x-[12%] inset-y-[16%] border border-[#e4e4e2] bg-white p-3">
         <div className="flex flex-col gap-2">
           <Wire w="40%" h={12} tone="strong" />
-          <Wire w="100%" h={8} tone="soft" />
-          <Wire w="70%" h={8} tone="soft" />
+          {/* the line the note is aimed at */}
+          <motion.div
+            className="h-2"
+            initial={false}
+            animate={{ width: fixed ? '62%' : '100%', background: WIRE.soft }}
+            transition={{ duration: 0.45, ease: [0.22, 1, 0.36, 1] }}
+          />
+          <motion.div
+            className="h-2"
+            initial={false}
+            animate={{ width: fixed ? '44%' : '70%', background: WIRE.soft }}
+            transition={{ duration: 0.45, delay: 0.06, ease: [0.22, 1, 0.36, 1] }}
+          />
         </div>
       </div>
-      <div className="absolute left-[44%] top-[34%] flex items-start gap-1.5">
-        <span
-          className="flex size-5 shrink-0 items-center justify-center rounded-full text-[9px] font-medium text-white shadow-sm"
-          style={{ background: ACCENT }}
-        >
-          1
-        </span>
-        <span className="rounded-lg rounded-tl-sm border border-[#1a1917]/8 bg-white px-2 py-1 text-[10px] leading-tight text-[#1a1917] shadow-sm">
-          tighten this
-        </span>
-      </div>
+
+      <AnimatePresence>
+        {pinned && (
+          <motion.div
+            className="absolute left-[44%] top-[34%] flex items-start gap-1.5"
+            initial={{ opacity: 0, scale: 0.8, y: 4 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            exit={{ opacity: 0, scale: 0.9 }}
+            transition={{ duration: 0.25, ease: [0.22, 1, 0.36, 1] }}
+          >
+            <motion.span
+              className="flex size-5 shrink-0 items-center justify-center rounded-full text-[9px] font-medium text-white shadow-sm"
+              initial={false}
+              animate={{ background: resolved ? '#059669' : ACCENT }}
+              transition={{ duration: 0.3 }}
+            >
+              {resolved ? '✓' : '1'}
+            </motion.span>
+
+            <AnimatePresence>
+              {noted && (
+                <motion.span
+                  className="flex items-center gap-1.5 overflow-hidden whitespace-nowrap rounded-lg rounded-tl-sm border border-[#1a1917]/8 bg-white px-2 py-1 text-[10px] leading-tight text-[#1a1917] shadow-sm"
+                  initial={{ opacity: 0, x: -4 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  exit={{ opacity: 0 }}
+                  transition={{ duration: 0.2 }}
+                >
+                  <motion.span
+                    initial={reduceMotion ? false : { clipPath: 'inset(0 100% 0 0)' }}
+                    animate={{ clipPath: 'inset(0 0% 0 0)' }}
+                    transition={{ duration: reduceMotion ? 0 : 0.6, ease: 'linear' }}
+                  >
+                    tighten this
+                  </motion.span>
+                  {working && (
+                    <motion.span
+                      className="size-1.5 shrink-0 rounded-full"
+                      style={{ background: ACCENT }}
+                      animate={{ opacity: [0.3, 1, 0.3] }}
+                      transition={{ duration: 1.1, repeat: Infinity }}
+                    />
+                  )}
+                </motion.span>
+              )}
+            </AnimatePresence>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   )
 }
@@ -1071,7 +1231,7 @@ function LandingPage() {
               {...reveal(reduceMotion)}
             >
               <div className="border-b border-[#1a1917]/8 sm:border-b-0 sm:border-r">
-                <LiveUiMock />
+                <LiveUiMock reduceMotion={reduceMotion} />
               </div>
               <div className="flex flex-col justify-center p-6 sm:p-8">
                 <p className="text-[19px] font-medium tracking-[-0.03em] sm:text-[24px]">
@@ -1093,7 +1253,7 @@ function LandingPage() {
                   {...reveal(reduceMotion, 0.06 + 0.05 * index)}
                 >
                   <div className="border-b border-[#1a1917]/8">
-                    <Mock />
+                    <Mock reduceMotion={reduceMotion} />
                   </div>
                   <div className="p-5">
                     <p className="text-[16px] font-medium tracking-[-0.025em]">{item.title}</p>
