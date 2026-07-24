@@ -9,6 +9,16 @@ import {
   useTransform,
   type MotionValue,
 } from 'motion/react'
+import {
+  FigmaIcon,
+  GitCompareIcon,
+  GithubIcon,
+  ImageIcon,
+  KeyRoundIcon,
+  LinkIcon,
+  MessagesSquareIcon,
+  TerminalIcon,
+} from 'lucide-react'
 import { Button } from '#/components/ui/button'
 import { applyTheme, getThemePreference } from '#/lib/theme'
 
@@ -984,47 +994,56 @@ const BEATS = [
 ] as const
 
 // Every line here has to be true of the shipped product — the router groups and
-// agent tools are the source, not the pitch.
+// agent tools are the source, not the pitch. Bodies are held to roughly one
+// length so the grid doesn't end up with eight different amounts of dead space.
 const MORE = [
   {
     label: 'github',
+    icon: GithubIcon,
     title: 'It reads your repo',
-    body: 'Connect GitHub and the agent lists, searches, and reads real files — so new UI matches the components you already have.',
+    body: 'The agent searches and reads your real files, so new UI matches what’s there.',
   },
   {
     label: 'figma',
+    icon: FigmaIcon,
     title: 'Import from Figma',
-    body: 'Pull frames onto the board and keep going in live code instead of a flat picture.',
+    body: 'Pull frames onto the board and keep going in live code, not a flat picture.',
   },
   {
     label: 'history',
+    icon: GitCompareIcon,
     title: 'Versions with diffs',
-    body: 'Commit as you go. Compare any two points, see what was added, removed, or changed, and roll back.',
+    body: 'Commit as you go, compare any two points, and roll back what didn’t work.',
   },
   {
     label: 'mcp',
+    icon: TerminalIcon,
     title: 'Drive it from your editor',
-    body: 'loora is an MCP server. Point Claude or Cursor at a board and it can create, edit, and branch without a browser.',
+    body: 'loora is an MCP server — Claude and Cursor can build and branch without a browser.',
   },
   {
     label: 'chats',
+    icon: MessagesSquareIcon,
     title: 'Agents in parallel',
-    body: 'Run several chats at once across designs. Steer mid-generation, queue the next instruction, close the tab and come back.',
+    body: 'Run several chats at once. Steer mid-generation, or close the tab and come back.',
   },
   {
     label: 'share',
+    icon: LinkIcon,
     title: 'Publish and hand off',
-    body: 'Put a live element behind a public link, or send a read-only board to whoever just needs to look.',
+    body: 'Put a live element behind a public link, or share a read-only board.',
   },
   {
     label: 'assets',
+    icon: ImageIcon,
     title: 'Images and export',
-    body: 'Upload assets the agent can place, then export the board as JSON or standalone HTML.',
+    body: 'Upload assets the agent can place, then export as JSON or standalone HTML.',
   },
   {
     label: 'models',
+    icon: KeyRoundIcon,
     title: 'Bring your own account',
-    body: 'Connect your ChatGPT account and generations run on your plan instead of ours.',
+    body: 'Connect your ChatGPT account and generations run on your plan, not ours.',
   },
 ] as const
 
@@ -1276,13 +1295,22 @@ function LandingPage() {
             className="mt-10 grid gap-px overflow-hidden rounded-2xl border border-[#1a1917]/8 bg-[#1a1917]/8 sm:grid-cols-2 lg:grid-cols-4"
             {...reveal(reduceMotion)}
           >
-            {MORE.map((item) => (
-              <div key={item.label} className="bg-white p-5">
-                <p className="font-mono text-[10px] text-[#9b978f]">{item.label}</p>
-                <p className="mt-2.5 text-[15px] font-medium tracking-[-0.02em]">{item.title}</p>
-                <p className="mt-1.5 text-[13px] leading-[1.5] text-[#75726b]">{item.body}</p>
-              </div>
-            ))}
+            {MORE.map((item) => {
+              const Icon = item.icon
+              return (
+                <div
+                  key={item.label}
+                  className="bg-white p-6 transition-colors hover:bg-[#fbfbfa]"
+                >
+                  <div className="flex items-center gap-2 text-[#9b978f]">
+                    <Icon className="size-[15px] shrink-0" strokeWidth={1.75} />
+                    <span className="font-mono text-[10px]">{item.label}</span>
+                  </div>
+                  <p className="mt-3.5 text-[15px] font-medium tracking-[-0.02em]">{item.title}</p>
+                  <p className="mt-1.5 text-[13px] leading-[1.55] text-[#75726b]">{item.body}</p>
+                </div>
+              )
+            })}
           </motion.div>
         </section>
 
