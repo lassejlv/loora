@@ -86,8 +86,11 @@ const DATABUDDY_CLIENT_ID =
 
 function RootDocument({ children }: { children: React.ReactNode }) {
   useEffect(() => watchSystemTheme(), []);
+  // THEME_INIT_SCRIPT puts `.dark` on <html> before hydration, so the DOM always
+  // carries an attribute the server markup never had. Without suppression React 19
+  // reports a hydration mismatch on every dark-mode load.
   return (
-    <html lang="en">
+    <html lang="en" suppressHydrationWarning>
       <head>
         <HeadContent />
       </head>
