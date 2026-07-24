@@ -10,6 +10,9 @@ import {
   type MotionValue,
 } from 'motion/react'
 import {
+  ArrowRightIcon,
+  CheckIcon,
+  CodeIcon,
   FigmaIcon,
   GitCompareIcon,
   GithubIcon,
@@ -18,8 +21,12 @@ import {
   LinkIcon,
   MessagesSquareIcon,
   MoonIcon,
+  MousePointer2Icon,
+  Share2Icon,
+  SquareIcon,
   SunIcon,
   TerminalIcon,
+  TypeIcon,
 } from 'lucide-react'
 import { Button } from '#/components/ui/button'
 import {
@@ -713,6 +720,112 @@ function CanvasDemo({ reduceMotion }: { reduceMotion: boolean | null }) {
   )
 }
 
+/**
+ * The editor around the canvas. Static on purpose — it frames the demo so the
+ * board reads as a real tool rather than a floating illustration, and the only
+ * thing that should be moving is the work happening inside it.
+ */
+function AppChrome({ children }: { children: React.ReactNode }) {
+  const palette = usePalette()
+  const tools = [MousePointer2Icon, SquareIcon, ImageIcon, TypeIcon, CodeIcon]
+
+  return (
+    <div className="overflow-hidden rounded-2xl border border-border bg-card shadow-[0_1px_2px_rgba(0,0,0,0.05),0_32px_64px_-32px_rgba(0,0,0,0.35)]">
+      <div className="flex h-11 items-center justify-between border-b border-border px-3">
+        <div className="flex items-center gap-2">
+          <img src="/logo192.png" alt="" width={20} height={20} className="size-5 rounded-full" />
+          <span className="text-[13px] font-semibold tracking-[-0.02em]">
+            loora<span style={{ color: palette.accent }}>.</span>
+          </span>
+        </div>
+
+        <div className="hidden items-center gap-0.5 rounded-lg border border-border p-0.5 sm:flex">
+          {tools.map((Tool, index) => (
+            <span
+              key={index}
+              className="flex size-6 items-center justify-center rounded-md"
+              style={
+                index === 0
+                  ? { background: palette.accent, color: palette.accentInk }
+                  : { color: 'var(--color-muted-foreground)' }
+              }
+            >
+              <Tool className="size-3.5" strokeWidth={1.75} />
+            </span>
+          ))}
+        </div>
+
+        <div className="flex items-center gap-2">
+          <span className="hidden items-center gap-1 rounded-md border border-border px-2 py-1 text-[11px] text-muted-foreground sm:inline-flex">
+            <Share2Icon className="size-3" strokeWidth={1.75} />
+            Share
+          </span>
+          <span
+            className="flex size-6 items-center justify-center rounded-full text-[10px] font-medium"
+            style={{ background: palette.accent, color: palette.accentInk }}
+          >
+            L
+          </span>
+        </div>
+      </div>
+
+      <div className="flex">
+        <aside className="hidden w-[132px] shrink-0 flex-col gap-0.5 border-r border-border p-2 lg:flex">
+          <p className="px-1.5 pb-1 font-mono text-[9px] text-muted-foreground/70">layers</p>
+          {['header', 'hero', 'pricing', 'footer'].map((layer, index) => (
+            <span
+              key={layer}
+              className="rounded-md px-1.5 py-1 text-[11px]"
+              style={
+                index === 1
+                  ? { background: palette.accentSoft, color: palette.accent }
+                  : { color: 'var(--color-muted-foreground)' }
+              }
+            >
+              {layer}
+            </span>
+          ))}
+        </aside>
+
+        <div className="relative min-w-0 flex-1">{children}</div>
+
+        <aside className="hidden w-[152px] shrink-0 flex-col gap-3 border-l border-border p-2 lg:flex">
+          <p className="px-1.5 font-mono text-[9px] text-muted-foreground/70">properties</p>
+          {[
+            { label: 'layout', fields: ['W 1280', 'H auto'] },
+            { label: 'spacing', fields: ['48'] },
+            { label: 'type', fields: ['Archivo', '64 / bold'] },
+          ].map((group) => (
+            <div key={group.label} className="flex flex-col gap-1">
+              <p className="px-1.5 text-[10px] text-muted-foreground/70">{group.label}</p>
+              <div className="flex flex-wrap gap-1">
+                {group.fields.map((field) => (
+                  <span
+                    key={field}
+                    className="rounded-md border border-border px-1.5 py-1 font-mono text-[9px] text-muted-foreground"
+                  >
+                    {field}
+                  </span>
+                ))}
+              </div>
+            </div>
+          ))}
+          <div className="flex flex-col gap-1">
+            <p className="px-1.5 text-[10px] text-muted-foreground/70">fill</p>
+            <span className="flex items-center gap-1.5 rounded-md border border-border px-1.5 py-1 font-mono text-[9px] text-muted-foreground">
+              <span
+                className="size-2.5 rounded-[3px] border border-border"
+                style={{ background: palette.accent }}
+              />
+              {palette.accent}
+            </span>
+          </div>
+        </aside>
+      </div>
+    </div>
+  )
+}
+
 /* ------------------------------------------------------------------------- *
  * Section mocks, on the same canvas language.
  * ------------------------------------------------------------------------- */
@@ -1329,16 +1442,17 @@ function LandingPage() {
 
       <main className="relative z-10">
         <section className="mx-auto w-full max-w-[820px] px-5 pb-9 pt-10 text-center sm:pb-12 sm:pt-16">
-          <motion.p
-            className={EYEBROW}
+          <motion.div
             initial={reduceMotion ? { opacity: 0 } : { opacity: 0, y: 6 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: reduceMotion ? 0.12 : 0.4, ease: [0.22, 1, 0.36, 1] }}
           >
-            the agent design harness
-          </motion.p>
+            <span className="inline-flex items-center rounded-full border border-border bg-card/60 px-3 py-1 text-[10px] font-medium uppercase tracking-[0.14em] text-muted-foreground">
+              The agent design harness
+            </span>
+          </motion.div>
           <motion.h1
-            className="mt-4 text-[38px] font-semibold leading-[0.98] tracking-[-0.045em] sm:text-[62px]"
+            className="mt-5 text-[38px] font-semibold leading-[0.98] tracking-[-0.045em] sm:text-[62px]"
             initial={reduceMotion ? { opacity: 0 } : { opacity: 0, y: 10 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{
@@ -1349,7 +1463,7 @@ function LandingPage() {
           >
             You don’t need a mockup
             <br />
-            to see the real thing.
+            to see <span style={{ color: palette.accent }}>the real thing.</span>
           </motion.h1>
           <motion.p
             className={`mx-auto mt-5 max-w-[520px] ${BODY} sm:text-base`}
@@ -1377,22 +1491,41 @@ function LandingPage() {
             <Button
               render={<Link to="/" />}
               size="lg"
-              className="w-full rounded-full px-5 sm:w-auto"
+              className="group w-full rounded-full border-transparent px-5 hover:opacity-90 sm:w-auto"
+              style={{ background: palette.accent, color: palette.accentInk }}
             >
               Open the board
+              <ArrowRightIcon className="size-4 transition-transform group-hover:translate-x-0.5" />
             </Button>
             <a
               href="#board"
-              className="inline-flex h-10 items-center justify-center rounded-full border border-border px-5 text-sm font-medium transition-colors hover:bg-foreground/5 sm:h-9"
+              className="inline-flex h-10 items-center justify-center rounded-full border border-border px-5 text-sm font-medium transition-colors hover:bg-foreground/5"
             >
-              See it work
+              See it in action
             </a>
           </motion.div>
+
+          <motion.ul
+            className="mt-7 flex flex-wrap items-center justify-center gap-x-6 gap-y-2 text-[13px] text-muted-foreground"
+            initial={reduceMotion ? { opacity: 0 } : { opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{
+              duration: reduceMotion ? 0.12 : 0.5,
+              delay: reduceMotion ? 0 : 0.16,
+              ease: [0.22, 1, 0.36, 1],
+            }}
+          >
+            {['Live HTML & React', 'Infinite canvas', 'Branches and history'].map((claim) => (
+              <li key={claim} className="flex items-center gap-1.5">
+                <CheckIcon className="size-3.5" style={{ color: palette.accent }} strokeWidth={2.5} />
+                {claim}
+              </li>
+            ))}
+          </motion.ul>
         </section>
 
         <section className="mx-auto w-full max-w-[1080px] px-5" aria-label="Product demo">
           <motion.div
-            className="overflow-hidden rounded-2xl border border-border bg-card p-1.5 shadow-[0_1px_2px_rgba(26,25,23,0.04),0_32px_64px_-32px_rgba(26,25,23,0.28)]"
             initial={reduceMotion ? { opacity: 0 } : { opacity: 0, y: 16, scale: 0.99 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
             transition={{
@@ -1401,9 +1534,9 @@ function LandingPage() {
               ease: [0.22, 1, 0.36, 1],
             }}
           >
-            <div className="overflow-hidden rounded-xl">
+            <AppChrome>
               <CanvasDemo reduceMotion={reduceMotion} />
-            </div>
+            </AppChrome>
           </motion.div>
         </section>
 
