@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { createContext, useContext, useEffect, useRef, useState } from 'react'
 import { createFileRoute, Link } from '@tanstack/react-router'
 import {
   AnimatePresence,
@@ -17,10 +17,17 @@ import {
   KeyRoundIcon,
   LinkIcon,
   MessagesSquareIcon,
+  MoonIcon,
+  SunIcon,
   TerminalIcon,
 } from 'lucide-react'
 import { Button } from '#/components/ui/button'
-import { applyTheme, getThemePreference } from '#/lib/theme'
+import {
+  getThemePreference,
+  setThemePreference,
+  watchSystemTheme,
+  type ThemePreference,
+} from '#/lib/theme'
 
 export const Route = createFileRoute('/landing')({
   ssr: false,
@@ -44,14 +51,90 @@ export const Route = createFileRoute('/landing')({
   component: LandingPage,
 })
 
-// The marketing surface runs its own light palette — the app's tokens follow the
-// user's theme, and this page forces light regardless.
-const CARD = 'rounded-2xl border border-[#1a1917]/8 bg-white'
-const PANEL = 'bg-[#f1f0ec]'
-const EYEBROW = 'font-mono text-[11px] lowercase tracking-[0.02em] text-[#9b978f]'
+const CARD = 'rounded-2xl border border-border bg-card'
+const PANEL = 'bg-cx-canvas'
+const EYEBROW = 'font-mono text-[11px] lowercase tracking-[0.02em] text-muted-foreground/70'
 const H2 = 'text-[28px] leading-[1.04] tracking-[-0.04em] sm:text-[40px]'
-const BODY = 'text-[15px] leading-[1.55] text-[#75726b]'
-const ACCENT = '#2440e6'
+const BODY = 'text-[15px] leading-[1.55] text-muted-foreground'
+
+/**
+ * Page chrome rides the app's Tailwind tokens, which already theme themselves.
+ * The mocks can't: motion interpolates colour values, and it can't interpolate
+ * `var(--x)`, so anything animated needs a concrete hex per theme.
+ */
+type Palette = {
+  accent: string
+  accentSoft: string
+  accentFaint: string
+  accentWire: string
+  wireStrong: string
+  wireMid: string
+  wireSoft: string
+  surface: string
+  tint: string
+  line: string
+  dot: string
+  page: string
+  ok: string
+  /** Text that sits on the accent — dark mode's accent is light, so it isn't white. */
+  accentInk: string
+}
+
+const LIGHT: Palette = {
+  accent: '#2440e6',
+  accentSoft: 'rgba(36,64,230,0.10)',
+  accentFaint: 'rgba(36,64,230,0.05)',
+  accentWire: 'rgba(36,64,230,0.35)',
+  wireStrong: '#c6c6c6',
+  wireMid: '#d2d2d2',
+  wireSoft: '#dedede',
+  surface: '#ffffff',
+  tint: '#f4f4f2',
+  line: '#e4e4e2',
+  dot: '#d3d1c9',
+  page: '#fafaf8',
+  ok: '#059669',
+  accentInk: '#ffffff',
+}
+
+const DARK: Palette = {
+  accent: '#8087ff',
+  accentSoft: 'rgba(128,135,255,0.14)',
+  accentFaint: 'rgba(128,135,255,0.07)',
+  accentWire: 'rgba(128,135,255,0.40)',
+  wireStrong: '#4a4f5c',
+  wireMid: '#3c404b',
+  wireSoft: '#31343d',
+  surface: '#1c1e24',
+  tint: '#232630',
+  line: '#2e3138',
+  dot: '#2e3038',
+  page: '#101114',
+  ok: '#34d399',
+  accentInk: '#101114',
+}
+
+const PaletteContext = createContext<Palette>(LIGHT)
+
+const usePalette = () => useContext(PaletteContext)
+
+/** Tracks the `dark` class so the mocks re-render with matching colours. */
+function useThemePalette(): Palette {
+  const [dark, setDark] = useState(
+    () => typeof document !== 'undefined' && document.documentElement.classList.contains('dark'),
+  )
+
+  useEffect(() => {
+    const root = document.documentElement
+    const sync = () => setDark(root.classList.contains('dark'))
+    sync()
+    const observer = new MutationObserver(sync)
+    observer.observe(root, { attributes: true, attributeFilter: ['class'] })
+    return () => observer.disconnect()
+  }, [])
+
+  return dark ? DARK : LIGHT
+}
 
 function reveal(reduce: boolean | null, delay = 0) {
   return {
@@ -100,9 +183,9 @@ function useScriptedLoop(durations: readonly number[], active: boolean) {
  * handles. Nothing here is rounded — rounding is for app chrome, not elements.
  * ------------------------------------------------------------------------- */
 
-const WIRE = { strong: '#c6c6c6', mid: '#d2d2d2', soft: '#dedede' } as const
+type WireTone = 'strong' | 'mid' | 'soft'
 
-type WireTone = keyof typeof WIRE
+const WIRE_KEY = { strong: 'wireStrong', mid: 'wireMid', soft: 'wireSoft' } as const
 
 function Wire({
   w,
@@ -115,7 +198,10 @@ function Wire({
   tone?: WireTone
   className?: string
 }) {
-  return <div className={className} style={{ width: w, height: h, background: WIRE[tone] }} />
+  const palette = usePalette()
+  return (
+    <div className={className} style={{ width: w, height: h, background: palette[WIRE_KEY[tone]] }} />
+  )
 }
 
 /** Streams a wireframe block in on a delay, the way generated code lands. */
@@ -140,12 +226,13 @@ function StreamWire({
 }
 
 function DotField({ y }: { y?: MotionValue<number> }) {
+  const palette = usePalette()
   return (
     <motion.div
       aria-hidden="true"
       className="absolute inset-[-10%]"
       style={{
-        backgroundImage: 'radial-gradient(circle, #d3d1c9 1px, transparent 1px)',
+        backgroundImage: `radial-gradient(circle, ${palette.dot} 1px, transparent 1px)`,
         backgroundSize: '24px 24px',
         y,
       }}
@@ -153,8 +240,9 @@ function DotField({ y }: { y?: MotionValue<number> }) {
   )
 }
 
-/** Four corner handles: white fill, 1.5px accent stroke, square. */
+/** Four corner handles: element-surface fill, 1.5px accent stroke, square. */
 function Handles() {
+  const palette = usePalette()
   return (
     <>
       {(
@@ -162,8 +250,8 @@ function Handles() {
       ).map((pos) => (
         <motion.span
           key={pos}
-          className={`absolute size-2 bg-white ${pos}`}
-          style={{ border: `1.5px solid ${ACCENT}` }}
+          className={`absolute size-2 bg-card ${pos}`}
+          style={{ border: `1.5px solid ${palette.accent}` }}
           initial={{ opacity: 0, scale: 0.5 }}
           animate={{ opacity: 1, scale: 1 }}
           exit={{ opacity: 0 }}
@@ -180,11 +268,12 @@ function Handles() {
 
 /** The layout from the cover: nav row, rule, then a two-column hero. */
 function HeroScene({ on, revised }: { on: boolean; revised: boolean }) {
+  const palette = usePalette()
   return (
     <div className="flex h-full flex-col">
       <StreamWire step={0} on={on}>
         <div className="flex items-center justify-between px-[4%] py-[3.5%]">
-          <span className="block size-[7%] min-h-3 min-w-3 rounded-full bg-[#c6c6c6]" />
+          <span className="block size-[7%] min-h-3 min-w-3 rounded-full" style={{ background: palette.wireStrong }} />
           <div className="flex items-center gap-[3%]">
             {[0, 1, 2, 3].map((item) => (
               <Wire key={item} w="34px" h={9} tone="mid" />
@@ -192,7 +281,7 @@ function HeroScene({ on, revised }: { on: boolean; revised: boolean }) {
           </div>
           <Wire w="46px" h={16} tone="mid" />
         </div>
-        <div className="h-px w-full bg-[#e6e6e4]" />
+        <div className="h-px w-full" style={{ background: palette.line }} />
       </StreamWire>
 
       <div className="flex flex-1 items-center gap-[5%] px-[4%] py-[4%]">
@@ -214,7 +303,7 @@ function HeroScene({ on, revised }: { on: boolean; revised: boolean }) {
         </div>
         <StreamWire step={5} on={on}>
           <div className="h-full w-full" style={{ minWidth: 64 }}>
-            <div className="h-full w-full" style={{ background: WIRE.soft, aspectRatio: '1 / 1' }} />
+            <div className="h-full w-full" style={{ background: palette.wireSoft, aspectRatio: '1 / 1' }} />
           </div>
         </StreamWire>
       </div>
@@ -223,6 +312,7 @@ function HeroScene({ on, revised }: { on: boolean; revised: boolean }) {
 }
 
 function PricingScene({ on, revised }: { on: boolean; revised: boolean }) {
+  const palette = usePalette()
   return (
     <div className="flex h-full flex-col gap-[3%] p-[4%]">
       <StreamWire step={0} on={on}>
@@ -236,9 +326,9 @@ function PricingScene({ on, revised }: { on: boolean; revised: boolean }) {
             initial={false}
             animate={{
               opacity: on ? 1 : 0,
-              background: revised && col === 1 ? 'rgba(36,64,230,0.05)' : '#f4f4f2',
+              background: revised && col === 1 ? palette.accentFaint : palette.tint,
               boxShadow:
-                revised && col === 1 ? `inset 0 0 0 1px ${ACCENT}` : 'inset 0 0 0 1px #e6e6e4',
+                revised && col === 1 ? `inset 0 0 0 1px ${palette.accent}` : `inset 0 0 0 1px ${palette.line}`,
             }}
             transition={{ duration: 0.28, delay: on ? 0.12 + col * 0.1 : 0 }}
           >
@@ -256,6 +346,7 @@ function PricingScene({ on, revised }: { on: boolean; revised: boolean }) {
 }
 
 function SettingsScene({ on, revised }: { on: boolean; revised: boolean }) {
+  const palette = usePalette()
   return (
     <div className="flex h-full gap-[4%] p-[4%]">
       <div className="flex w-[28%] flex-col gap-[5px]">
@@ -266,7 +357,7 @@ function SettingsScene({ on, revised }: { on: boolean; revised: boolean }) {
             initial={false}
             animate={{
               opacity: on ? 1 : 0,
-              background: revised && row === 1 ? 'rgba(36,64,230,0.1)' : 'transparent',
+              background: revised && row === 1 ? palette.accentSoft : 'transparent',
             }}
             transition={{ duration: 0.25, delay: on ? row * 0.07 : 0 }}
           >
@@ -274,7 +365,7 @@ function SettingsScene({ on, revised }: { on: boolean; revised: boolean }) {
           </motion.div>
         ))}
       </div>
-      <div className="flex flex-1 flex-col gap-[9px] border-l border-[#e6e6e4] pl-[5%]">
+      <div className="flex flex-1 flex-col gap-[9px] border-l pl-[5%]" style={{ borderColor: palette.line }}>
         <StreamWire step={0} on={on}>
           <Wire w="44%" h={14} tone="strong" />
         </StreamWire>
@@ -342,6 +433,7 @@ const CURSOR_MARKS = [
 ] as const
 
 function RecordingCursor({ phase }: { phase: number }) {
+  const palette = usePalette()
   const mark = CURSOR_MARKS[phase]
   return (
     <motion.div
@@ -355,7 +447,7 @@ function RecordingCursor({ phase }: { phase: number }) {
           <motion.span
             key={phase}
             className="absolute -left-2.5 -top-2.5 size-6 rounded-full"
-            style={{ border: `1.5px solid ${ACCENT}` }}
+            style={{ border: `1.5px solid ${palette.accent}` }}
             initial={{ opacity: 0.55, scale: 0.4 }}
             animate={{ opacity: 0, scale: 1.5 }}
             exit={{ opacity: 0 }}
@@ -383,6 +475,7 @@ function RecordingCursor({ phase }: { phase: number }) {
 }
 
 function CanvasDemo({ reduceMotion }: { reduceMotion: boolean | null }) {
+  const palette = usePalette()
   const ref = useRef<HTMLDivElement>(null)
   const inView = useInView(ref, { amount: 0.3 })
   const { tick, lap } = useScriptedLoop(PHASES, !reduceMotion && inView)
@@ -415,14 +508,14 @@ function CanvasDemo({ reduceMotion }: { reduceMotion: boolean | null }) {
 
       {/* The unselected neighbour, as on the cover. */}
       <motion.div
-        className="absolute left-[9%] top-[29%] h-[38%] w-[19%] border border-[#e4e4e2] bg-white"
-        style={{ y: asideY }}
+        className="absolute left-[9%] top-[29%] h-[38%] w-[19%] border bg-card"
+        style={{ y: asideY, borderColor: palette.line }}
       >
         <div className="flex flex-col gap-[8px] p-[9%]">
           <Wire w="80%" h={14} tone="strong" />
           <Wire w="66%" h={10} />
           <Wire w="46%" h={10} />
-          <div className="mt-[6px] h-[52%] w-full" style={{ background: WIRE.soft }} />
+          <div className="mt-[6px] h-[52%] w-full" style={{ background: palette.wireSoft }} />
         </div>
       </motion.div>
 
@@ -444,8 +537,8 @@ function CanvasDemo({ reduceMotion }: { reduceMotion: boolean | null }) {
               <AnimatePresence>
                 {selected && (
                   <motion.span
-                    className="absolute -top-6 left-0 rounded-md px-2 py-0.5 text-[11px] font-medium leading-tight text-white sm:text-[13px]"
-                    style={{ background: ACCENT }}
+                    className="absolute -top-6 left-0 rounded-md px-2 py-0.5 text-[11px] font-medium leading-tight sm:text-[13px]"
+                    style={{ background: palette.accent, color: palette.accentInk }}
                     initial={{ opacity: 0, y: 3 }}
                     animate={{ opacity: 1, y: 0 }}
                     exit={{ opacity: 0 }}
@@ -457,8 +550,8 @@ function CanvasDemo({ reduceMotion }: { reduceMotion: boolean | null }) {
               </AnimatePresence>
 
               <motion.div
-                className="h-full w-full bg-white"
-                animate={{ borderColor: selected ? ACCENT : '#e4e4e2' }}
+                className="h-full w-full bg-card"
+                animate={{ borderColor: selected ? palette.accent : palette.line }}
                 transition={{ duration: 0.25 }}
                 style={{ borderWidth: 1, borderStyle: 'solid' }}
               >
@@ -477,12 +570,12 @@ function CanvasDemo({ reduceMotion }: { reduceMotion: boolean | null }) {
                     transition={{ duration: 0.25, ease: [0.22, 1, 0.36, 1] }}
                   >
                     <span
-                      className="flex size-5 shrink-0 items-center justify-center rounded-full text-[10px] font-medium text-white shadow-sm"
-                      style={{ background: ACCENT }}
+                      className="flex size-5 shrink-0 items-center justify-center rounded-full text-[10px] font-medium shadow-sm"
+                      style={{ background: palette.accent, color: palette.accentInk }}
                     >
                       1
                     </span>
-                    <span className="whitespace-nowrap rounded-lg rounded-tl-sm border border-[#1a1917]/8 bg-white px-2 py-1 text-[10px] leading-tight text-[#1a1917] shadow-sm sm:text-[11px]">
+                    <span className="whitespace-nowrap rounded-lg rounded-tl-sm border border-border bg-card px-2 py-1 text-[10px] leading-tight text-foreground shadow-sm sm:text-[11px]">
                       {example.note}
                     </span>
                   </motion.div>
@@ -500,7 +593,7 @@ function CanvasDemo({ reduceMotion }: { reduceMotion: boolean | null }) {
         <AnimatePresence>
           {(working || revised) && (
             <motion.div
-              className="mb-2 flex w-fit items-center gap-1.5 rounded-full border border-[#1a1917]/8 bg-white px-2.5 py-1 shadow-sm"
+              className="mb-2 flex w-fit items-center gap-1.5 rounded-full border border-border bg-card px-2.5 py-1 shadow-sm"
               initial={{ opacity: 0, y: 6 }}
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: 4 }}
@@ -508,22 +601,22 @@ function CanvasDemo({ reduceMotion }: { reduceMotion: boolean | null }) {
             >
               <motion.span
                 className="size-1.5 rounded-full"
-                style={{ background: ACCENT }}
+                style={{ background: palette.accent }}
                 animate={{ opacity: [0.3, 1, 0.3] }}
                 transition={{ duration: 1.1, repeat: Infinity }}
               />
-              <span className="font-mono text-[10px] leading-none" style={{ color: ACCENT }}>
+              <span className="font-mono text-[10px] leading-none" style={{ color: palette.accent }}>
                 {revised ? 'editElement' : 'createElement'}
               </span>
             </motion.div>
           )}
         </AnimatePresence>
 
-        <div className="flex h-10 items-center gap-2 rounded-xl border border-[#1a1917]/8 bg-white px-3 shadow-[0_1px_2px_rgba(26,25,23,0.05),0_8px_24px_-16px_rgba(26,25,23,0.3)]">
+        <div className="flex h-10 items-center gap-2 rounded-xl border border-border bg-card px-3 shadow-[0_1px_2px_rgba(26,25,23,0.05),0_8px_24px_-16px_rgba(26,25,23,0.3)]">
           <AnimatePresence mode="wait">
             <motion.p
               key={index}
-              className="min-w-0 flex-1 truncate text-[12px] text-[#1a1917] sm:text-[13px]"
+              className="min-w-0 flex-1 truncate text-[12px] text-foreground sm:text-[13px]"
               initial={reduceMotion ? { opacity: 0 } : { clipPath: 'inset(0 100% 0 0)' }}
               animate={reduceMotion ? { opacity: 1 } : { clipPath: 'inset(0 0% 0 0)' }}
               exit={{ opacity: 0 }}
@@ -538,8 +631,8 @@ function CanvasDemo({ reduceMotion }: { reduceMotion: boolean | null }) {
             transition={typing ? { duration: 0.9, repeat: Infinity } : { duration: 0.15 }}
           />
           <span
-            className="flex size-6 shrink-0 items-center justify-center rounded-lg text-[10px] font-medium text-white"
-            style={{ background: ACCENT }}
+            className="flex size-6 shrink-0 items-center justify-center rounded-lg text-[10px] font-medium"
+            style={{ background: palette.accent, color: palette.accentInk }}
           >
             ↑
           </span>
@@ -565,6 +658,7 @@ const LIVE_PHASES = [1400, 900, 1100, 900, 1400, 1300]
 
 /** Code on the left, the element it renders on the right — edit one, both move. */
 function LiveUiMock({ reduceMotion }: { reduceMotion: boolean | null }) {
+  const palette = usePalette()
   const { ref, phase } = useMockLoop(LIVE_PHASES, reduceMotion)
   const rendered = phase >= 1
   const editing = phase === 3
@@ -581,8 +675,8 @@ function LiveUiMock({ reduceMotion }: { reduceMotion: boolean | null }) {
   return (
     <div ref={ref} className={`relative aspect-[16/10] w-full overflow-hidden ${PANEL}`}>
       <div className="absolute inset-0 grid grid-cols-2">
-        <div className="flex flex-col gap-1.5 border-r border-[#1a1917]/8 bg-white p-4">
-          <span className="font-mono text-[9px] text-[#9b978f]">App.tsx</span>
+        <div className="flex flex-col gap-1.5 border-r border-border bg-card p-4">
+          <span className="font-mono text-[9px] text-muted-foreground/70">App.tsx</span>
           <div className="mt-1 flex flex-col gap-1.5">
             {lines.map((line, index) => (
               <motion.div
@@ -592,7 +686,7 @@ function LiveUiMock({ reduceMotion }: { reduceMotion: boolean | null }) {
                 animate={{
                   opacity: phase >= 0 ? 1 : 0,
                   background:
-                    editing && index === 3 ? 'rgba(36,64,230,0.12)' : 'rgba(36,64,230,0)',
+                    editing && index === 3 ? palette.accentSoft : 'rgba(0,0,0,0)',
                 }}
                 transition={{ duration: 0.25, delay: phase === 0 ? index * 0.12 : 0 }}
               >
@@ -601,7 +695,7 @@ function LiveUiMock({ reduceMotion }: { reduceMotion: boolean | null }) {
                   initial={false}
                   animate={{
                     width: line.w,
-                    background: line.accent ? 'rgba(36,64,230,0.35)' : WIRE.soft,
+                    background: line.accent ? palette.accentWire : palette.wireSoft,
                   }}
                   transition={{ duration: 0.3, ease: [0.22, 1, 0.36, 1] }}
                 />
@@ -614,7 +708,8 @@ function LiveUiMock({ reduceMotion }: { reduceMotion: boolean | null }) {
           <AnimatePresence>
             {rendered && (
               <motion.div
-                className="w-full border border-[#e4e4e2] bg-white p-3"
+                className="w-full border bg-card p-3"
+                style={{ borderColor: palette.line }}
                 initial={{ opacity: 0, y: 6 }}
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0 }}
@@ -628,7 +723,7 @@ function LiveUiMock({ reduceMotion }: { reduceMotion: boolean | null }) {
                     initial={false}
                     animate={{
                       width: updated ? 76 : 60,
-                      background: updated ? ACCENT : WIRE.mid,
+                      background: updated ? palette.accent : palette.wireMid,
                     }}
                     transition={{ duration: 0.35, ease: [0.22, 1, 0.36, 1] }}
                   />
@@ -640,13 +735,13 @@ function LiveUiMock({ reduceMotion }: { reduceMotion: boolean | null }) {
           <AnimatePresence>
             {phase >= 2 && (
               <motion.span
-                className="absolute right-2 top-2 flex items-center gap-1 rounded-full border border-[#1a1917]/8 bg-white px-1.5 py-0.5 font-mono text-[8.5px] leading-none text-[#75726b]"
+                className="absolute right-2 top-2 flex items-center gap-1 rounded-full border border-border bg-card px-1.5 py-0.5 font-mono text-[8.5px] leading-none text-muted-foreground"
                 initial={{ opacity: 0, scale: 0.9 }}
                 animate={{ opacity: 1, scale: 1 }}
                 exit={{ opacity: 0 }}
                 transition={{ duration: 0.2 }}
               >
-                <span className="size-1 rounded-full bg-emerald-500" />
+                <span className="size-1 rounded-full" style={{ background: palette.ok }} />
                 ok
               </motion.span>
             )}
@@ -661,6 +756,7 @@ const CONTROL_PHASES = [1300, 1200, 1100, 1000, 1500]
 
 /** Selection follows the layer you pick, then gets resized and nudged by hand. */
 function ControlMock({ reduceMotion }: { reduceMotion: boolean | null }) {
+  const palette = usePalette()
   const { ref, phase } = useMockLoop(CONTROL_PHASES, reduceMotion)
 
   // Which layer is selected, and the box that selection puts on the canvas.
@@ -680,15 +776,15 @@ function ControlMock({ reduceMotion }: { reduceMotion: boolean | null }) {
     <div ref={ref} className={`relative aspect-[16/10] w-full overflow-hidden ${PANEL}`}>
       <DotField />
 
-      <div className="absolute left-[7%] top-[16%] z-10 flex w-[27%] flex-col gap-0.5 rounded-lg border border-[#1a1917]/8 bg-white p-1.5">
+      <div className="absolute left-[7%] top-[16%] z-10 flex w-[27%] flex-col gap-0.5 rounded-lg border border-border bg-card p-1.5">
         {['hero', 'pricing', 'footer'].map((layer, index) => (
           <motion.span
             key={layer}
             className="rounded px-1.5 py-1 font-mono text-[9px] leading-none"
             initial={false}
             animate={{
-              background: index === active ? 'rgba(36,64,230,0.1)' : 'rgba(36,64,230,0)',
-              color: index === active ? ACCENT : '#9b978f',
+              background: index === active ? palette.accentSoft : 'rgba(0,0,0,0)',
+              color: index === active ? palette.accent : 'rgba(128,128,128,0.9)',
             }}
             transition={{ duration: 0.25 }}
           >
@@ -698,8 +794,8 @@ function ControlMock({ reduceMotion }: { reduceMotion: boolean | null }) {
       </div>
 
       <motion.div
-        className="absolute left-[44%] bg-white"
-        style={{ border: `1px solid ${ACCENT}` }}
+        className="absolute left-[44%] bg-card"
+        style={{ border: `1px solid ${palette.accent}` }}
         initial={false}
         animate={box}
         transition={{ duration: 0.4, ease: [0.22, 1, 0.36, 1] }}
@@ -713,8 +809,8 @@ function ControlMock({ reduceMotion }: { reduceMotion: boolean | null }) {
         ).map((pos) => (
           <span
             key={pos}
-            className={`absolute size-2 bg-white ${pos}`}
-            style={{ border: `1.5px solid ${ACCENT}` }}
+            className={`absolute size-2 bg-card ${pos}`}
+            style={{ border: `1.5px solid ${palette.accent}` }}
           />
         ))}
       </motion.div>
@@ -726,6 +822,7 @@ const COMMENT_PHASES = [900, 600, 1500, 1000, 1200, 1000, 1400]
 
 /** Pin a spot, say what's wrong, and watch the next turn land on that spot. */
 function CommentMock({ reduceMotion }: { reduceMotion: boolean | null }) {
+  const palette = usePalette()
   const { ref, phase } = useMockLoop(COMMENT_PHASES, reduceMotion)
   const pinned = phase >= 1
   const noted = phase >= 2
@@ -737,20 +834,23 @@ function CommentMock({ reduceMotion }: { reduceMotion: boolean | null }) {
     <div ref={ref} className={`relative aspect-[16/10] w-full overflow-hidden ${PANEL}`}>
       <DotField />
 
-      <div className="absolute inset-x-[12%] inset-y-[16%] border border-[#e4e4e2] bg-white p-3">
+      <div
+        className="absolute inset-x-[12%] inset-y-[16%] border bg-card p-3"
+        style={{ borderColor: palette.line }}
+      >
         <div className="flex flex-col gap-2">
           <Wire w="40%" h={12} tone="strong" />
           {/* the line the note is aimed at */}
           <motion.div
             className="h-2"
             initial={false}
-            animate={{ width: fixed ? '62%' : '100%', background: WIRE.soft }}
+            animate={{ width: fixed ? '62%' : '100%', background: palette.wireSoft }}
             transition={{ duration: 0.45, ease: [0.22, 1, 0.36, 1] }}
           />
           <motion.div
             className="h-2"
             initial={false}
-            animate={{ width: fixed ? '44%' : '70%', background: WIRE.soft }}
+            animate={{ width: fixed ? '44%' : '70%', background: palette.wireSoft }}
             transition={{ duration: 0.45, delay: 0.06, ease: [0.22, 1, 0.36, 1] }}
           />
         </div>
@@ -766,9 +866,9 @@ function CommentMock({ reduceMotion }: { reduceMotion: boolean | null }) {
             transition={{ duration: 0.25, ease: [0.22, 1, 0.36, 1] }}
           >
             <motion.span
-              className="flex size-5 shrink-0 items-center justify-center rounded-full text-[9px] font-medium text-white shadow-sm"
+              className="flex size-5 shrink-0 items-center justify-center rounded-full text-[9px] font-medium shadow-sm"
               initial={false}
-              animate={{ background: resolved ? '#059669' : ACCENT }}
+              animate={{ background: resolved ? palette.ok : palette.accent, color: palette.accentInk }}
               transition={{ duration: 0.3 }}
             >
               {resolved ? '✓' : '1'}
@@ -777,7 +877,7 @@ function CommentMock({ reduceMotion }: { reduceMotion: boolean | null }) {
             <AnimatePresence>
               {noted && (
                 <motion.span
-                  className="flex items-center gap-1.5 overflow-hidden whitespace-nowrap rounded-lg rounded-tl-sm border border-[#1a1917]/8 bg-white px-2 py-1 text-[10px] leading-tight text-[#1a1917] shadow-sm"
+                  className="flex items-center gap-1.5 overflow-hidden whitespace-nowrap rounded-lg rounded-tl-sm border border-border bg-card px-2 py-1 text-[10px] leading-tight text-foreground shadow-sm"
                   initial={{ opacity: 0, x: -4 }}
                   animate={{ opacity: 1, x: 0 }}
                   exit={{ opacity: 0 }}
@@ -793,7 +893,7 @@ function CommentMock({ reduceMotion }: { reduceMotion: boolean | null }) {
                   {working && (
                     <motion.span
                       className="size-1.5 shrink-0 rounded-full"
-                      style={{ background: ACCENT }}
+                      style={{ background: palette.accent }}
                       animate={{ opacity: [0.3, 1, 0.3] }}
                       transition={{ duration: 1.1, repeat: Infinity }}
                     />
@@ -841,13 +941,14 @@ function CommitDot({
   on: boolean
   accent?: boolean
 }) {
+  const palette = usePalette()
   return (
     <motion.circle
       cx={cx}
       cy={cy}
       r="4.5"
-      fill="#fafaf8"
-      stroke={accent ? ACCENT : '#1a1917'}
+      fill={palette.page}
+      stroke={accent ? palette.accent : '#1a1917'}
       strokeOpacity={accent ? 1 : 0.28}
       strokeWidth="2"
       initial={false}
@@ -859,6 +960,7 @@ function CommitDot({
 }
 
 function BranchDemo({ reduceMotion }: { reduceMotion: boolean | null }) {
+  const palette = usePalette()
   const ref = useRef<HTMLDivElement>(null)
   const inView = useInView(ref, { amount: 0.4 })
   const { tick } = useScriptedLoop(BRANCH_PHASES, !reduceMotion && inView)
@@ -881,7 +983,7 @@ function BranchDemo({ reduceMotion }: { reduceMotion: boolean | null }) {
         {/* fork out, then run along the branch lane */}
         <motion.path
           d="M84 54 C 108 54, 108 112, 132 112 H 196"
-          stroke={ACCENT}
+          stroke={palette.accent}
           strokeWidth="2"
           strokeLinecap="round"
           initial={false}
@@ -892,7 +994,7 @@ function BranchDemo({ reduceMotion }: { reduceMotion: boolean | null }) {
         {/* merge back into main */}
         <motion.path
           d="M196 112 C 220 112, 220 54, 244 54"
-          stroke={ACCENT}
+          stroke={palette.accent}
           strokeWidth="2"
           strokeLinecap="round"
           initial={false}
@@ -908,13 +1010,13 @@ function BranchDemo({ reduceMotion }: { reduceMotion: boolean | null }) {
         <CommitDot cx={288} cy={54} on={merged} />
       </svg>
 
-      <span className="absolute left-[5%] top-[16%] font-mono text-[9px] text-[#9b978f]">main</span>
+      <span className="absolute left-[5%] top-[16%] font-mono text-[9px] text-muted-foreground/70">main</span>
 
       <AnimatePresence>
         {forked && (
           <motion.span
             className="absolute left-[41%] top-[62%] font-mono text-[9px]"
-            style={{ color: ACCENT, opacity: merged ? 0.5 : 1 }}
+            style={{ color: palette.accent, opacity: merged ? 0.5 : 1 }}
             initial={{ opacity: 0, y: 4 }}
             animate={{ opacity: merged ? 0.5 : 1, y: 0 }}
             exit={{ opacity: 0 }}
@@ -929,16 +1031,16 @@ function BranchDemo({ reduceMotion }: { reduceMotion: boolean | null }) {
       <AnimatePresence>
         {phase >= 4 && !merged && (
           <motion.div
-            className="absolute bottom-[7%] left-[5%] w-[38%] rounded-lg border border-[#1a1917]/8 bg-white p-2 shadow-sm"
+            className="absolute bottom-[7%] left-[5%] w-[38%] rounded-lg border border-border bg-card p-2 shadow-sm"
             initial={{ opacity: 0, y: 6 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: 4 }}
             transition={{ duration: 0.28, ease: [0.22, 1, 0.36, 1] }}
           >
-            <p className="font-mono text-[8.5px] leading-none text-[#9b978f]">compare</p>
+            <p className="font-mono text-[8.5px] leading-none text-muted-foreground/70">compare</p>
             <div className="mt-1.5 flex items-center gap-2 font-mono text-[9px] leading-none">
               <span className="text-emerald-600">+3</span>
-              <span className="text-[#75726b]">~2</span>
+              <span className="text-muted-foreground">~2</span>
               <span className="text-red-700">−1</span>
             </div>
             <div className="mt-2 flex flex-col gap-1">
@@ -955,7 +1057,7 @@ function BranchDemo({ reduceMotion }: { reduceMotion: boolean | null }) {
           {status && (
             <motion.span
               key={status}
-              className="flex items-center gap-1.5 rounded-full border border-[#1a1917]/8 bg-white px-2 py-1 font-mono text-[9px] leading-none text-[#75726b] shadow-sm"
+              className="flex items-center gap-1.5 rounded-full border border-border bg-card px-2 py-1 font-mono text-[9px] leading-none text-muted-foreground shadow-sm"
               initial={{ opacity: 0, y: 4 }}
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: -4 }}
@@ -963,7 +1065,7 @@ function BranchDemo({ reduceMotion }: { reduceMotion: boolean | null }) {
             >
               <span
                 className="size-1.5 rounded-full"
-                style={{ background: merged ? '#059669' : ACCENT }}
+                style={{ background: merged ? palette.ok : palette.accent }}
               />
               {status}
             </motion.span>
@@ -1075,6 +1177,10 @@ const CONTRAST = [
 
 function LandingPage() {
   const reduceMotion = useReducedMotion()
+  const palette = useThemePalette()
+  const [theme, setTheme] = useState<ThemePreference>('system')
+
+  useEffect(() => setTheme(getThemePreference()), [])
 
   // Canvas shell locks body scroll (`overflow: hidden` + fixed height); unlock for this page.
   useEffect(() => {
@@ -1086,7 +1192,6 @@ function LandingPage() {
       bodyOverflow: body.style.overflow,
       bodyOverscroll: body.style.overscrollBehavior,
     }
-    root.classList.remove('dark')
     root.style.height = 'auto'
     body.style.height = 'auto'
     body.style.overflow = 'auto'
@@ -1096,22 +1201,49 @@ function LandingPage() {
       body.style.height = prev.bodyHeight
       body.style.overflow = prev.bodyOverflow
       body.style.overscrollBehavior = prev.bodyOverscroll
-      applyTheme(getThemePreference())
     }
   }, [])
 
+  // Keeps a `system` preference honest if the OS flips while the page is open.
+  useEffect(() => watchSystemTheme(), [])
+
+  const toggleTheme = () => {
+    const next = document.documentElement.classList.contains('dark') ? 'light' : 'dark'
+    setThemePreference(next)
+    setTheme(next)
+  }
+
   return (
-    <div className="min-h-dvh bg-[#fafaf8] text-[#1a1917] antialiased">
-      <header className="sticky top-0 z-50 px-4 pt-3 sm:pt-4">
-        <nav className="mx-auto flex h-12 w-full max-w-[1080px] items-center justify-between rounded-full border border-[#1a1917]/8 bg-[#fafaf8]/80 pl-5 pr-2 backdrop-blur-xl">
-          <p className="text-[17px] font-semibold tracking-[-0.03em]">
-            loora<span style={{ color: ACCENT }}>.</span>
-          </p>
-          <Button render={<Link to="/" />} size="sm" className="rounded-full px-4">
-            Open the board
-          </Button>
-        </nav>
-      </header>
+    <PaletteContext.Provider value={palette}>
+      {/* Gutter + rounded shell, so the page reads as a card rather than running
+          into the browser chrome. No overflow-hidden here: it would make the
+          sticky nav stick inside this box instead of the viewport. */}
+      <div className="min-h-dvh bg-[#eae8e2] p-2 antialiased sm:p-3 dark:bg-[#08090b]">
+        <div className="min-h-[calc(100dvh-1rem)] rounded-[20px] bg-background text-foreground sm:min-h-[calc(100dvh-1.5rem)] sm:rounded-[28px]">
+          <header className="sticky top-2 z-50 px-4 pt-3 sm:top-3 sm:pt-4">
+            <nav className="mx-auto flex h-12 w-full max-w-[1080px] items-center justify-between rounded-full border border-border bg-background/80 pl-5 pr-2 backdrop-blur-xl">
+              <p className="text-[17px] font-semibold tracking-[-0.03em]">
+                loora<span style={{ color: palette.accent }}>.</span>
+              </p>
+              <div className="flex items-center gap-1">
+                <button
+                  type="button"
+                  onClick={toggleTheme}
+                  aria-label="Toggle theme"
+                  className="flex size-8 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-foreground/5 hover:text-foreground"
+                >
+                  {theme === 'dark' ? (
+                    <SunIcon className="size-4" strokeWidth={1.75} />
+                  ) : (
+                    <MoonIcon className="size-4" strokeWidth={1.75} />
+                  )}
+                </button>
+                <Button render={<Link to="/" />} size="sm" className="rounded-full px-4">
+                  Open the board
+                </Button>
+              </div>
+            </nav>
+          </header>
 
       <main>
         <section className="mx-auto w-full max-w-[820px] px-5 pb-12 pt-16 text-center sm:pb-16 sm:pt-24">
@@ -1169,7 +1301,7 @@ function LandingPage() {
             </Button>
             <a
               href="#board"
-              className="inline-flex h-10 items-center justify-center rounded-full border border-[#1a1917]/10 px-5 text-sm font-medium transition-colors hover:bg-[#1a1917]/4 sm:h-9"
+              className="inline-flex h-10 items-center justify-center rounded-full border border-border px-5 text-sm font-medium transition-colors hover:bg-foreground/5 sm:h-9"
             >
               See it work
             </a>
@@ -1178,7 +1310,7 @@ function LandingPage() {
 
         <section className="mx-auto w-full max-w-[1080px] px-5" aria-label="Product demo">
           <motion.div
-            className="overflow-hidden rounded-2xl border border-[#1a1917]/8 bg-white p-1.5 shadow-[0_1px_2px_rgba(26,25,23,0.04),0_32px_64px_-32px_rgba(26,25,23,0.28)]"
+            className="overflow-hidden rounded-2xl border border-border bg-card p-1.5 shadow-[0_1px_2px_rgba(26,25,23,0.04),0_32px_64px_-32px_rgba(26,25,23,0.28)]"
             initial={reduceMotion ? { opacity: 0 } : { opacity: 0, y: 16, scale: 0.99 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
             transition={{
@@ -1195,7 +1327,7 @@ function LandingPage() {
 
         <section className="mx-auto w-full max-w-[1080px] px-5 py-14 sm:py-20">
           <div
-            className={`grid ${CARD} divide-y divide-[#1a1917]/8 sm:grid-cols-3 sm:divide-x sm:divide-y-0`}
+            className={`grid ${CARD} divide-y divide-border sm:grid-cols-3 sm:divide-x sm:divide-y-0`}
           >
             {BEATS.map((beat, index) => (
               <motion.div
@@ -1204,7 +1336,7 @@ function LandingPage() {
                 {...reveal(reduceMotion, 0.04 * index)}
               >
                 <p className="text-[15px] font-medium tracking-[-0.02em]">{beat.title}</p>
-                <p className="mt-1.5 text-[13.5px] leading-[1.5] text-[#75726b]">{beat.body}</p>
+                <p className="mt-1.5 text-[13.5px] leading-[1.5] text-muted-foreground">{beat.body}</p>
               </motion.div>
             ))}
           </div>
@@ -1231,7 +1363,7 @@ function LandingPage() {
               </p>
             </motion.div>
             <motion.div
-              className="border-t border-[#1a1917]/8 sm:border-l sm:border-t-0"
+              className="border-t border-border sm:border-l sm:border-t-0"
               {...reveal(reduceMotion, 0.06)}
             >
               <BranchDemo reduceMotion={reduceMotion} />
@@ -1249,14 +1381,14 @@ function LandingPage() {
               className={`overflow-hidden ${CARD} sm:col-span-2 sm:grid sm:grid-cols-[1.1fr_0.9fr]`}
               {...reveal(reduceMotion)}
             >
-              <div className="border-b border-[#1a1917]/8 sm:border-b-0 sm:border-r">
+              <div className="border-b border-border sm:border-b-0 sm:border-r">
                 <LiveUiMock reduceMotion={reduceMotion} />
               </div>
               <div className="flex flex-col justify-center p-6 sm:p-8">
                 <p className="text-[19px] font-medium tracking-[-0.03em] sm:text-[24px]">
                   Real UI, not mockups
                 </p>
-                <p className="mt-2.5 text-[14px] leading-[1.55] text-[#75726b] sm:text-[15px]">
+                <p className="mt-2.5 text-[14px] leading-[1.55] text-muted-foreground sm:text-[15px]">
                   Every element on the board is live HTML or React — the same stuff you ship,
                   rendered in place. Not a picture of a button. The button.
                 </p>
@@ -1271,12 +1403,12 @@ function LandingPage() {
                   className={`overflow-hidden ${CARD} transition-shadow hover:shadow-[0_1px_2px_rgba(26,25,23,0.04),0_16px_32px_-24px_rgba(26,25,23,0.24)]`}
                   {...reveal(reduceMotion, 0.06 + 0.05 * index)}
                 >
-                  <div className="border-b border-[#1a1917]/8">
+                  <div className="border-b border-border">
                     <Mock reduceMotion={reduceMotion} />
                   </div>
                   <div className="p-5">
                     <p className="text-[16px] font-medium tracking-[-0.025em]">{item.title}</p>
-                    <p className="mt-1.5 text-[13.5px] leading-[1.5] text-[#75726b]">{item.body}</p>
+                    <p className="mt-1.5 text-[13.5px] leading-[1.5] text-muted-foreground">{item.body}</p>
                   </div>
                 </motion.div>
               )
@@ -1292,7 +1424,7 @@ function LandingPage() {
           {/* gap-px over a hairline-coloured container draws the grid lines, which
               survives the 1→2→4 column change without nth-child bookkeeping. */}
           <motion.div
-            className="mt-10 grid gap-px overflow-hidden rounded-2xl border border-[#1a1917]/8 bg-[#1a1917]/8 sm:grid-cols-2 lg:grid-cols-4"
+            className="mt-10 grid gap-px overflow-hidden rounded-2xl border border-border bg-border sm:grid-cols-2 lg:grid-cols-4"
             {...reveal(reduceMotion)}
           >
             {MORE.map((item) => {
@@ -1300,14 +1432,14 @@ function LandingPage() {
               return (
                 <div
                   key={item.label}
-                  className="bg-white p-6 transition-colors hover:bg-[#fbfbfa]"
+                  className="bg-card p-6 transition-colors hover:bg-foreground/3"
                 >
-                  <div className="flex items-center gap-2 text-[#9b978f]">
+                  <div className="flex items-center gap-2 text-muted-foreground/70">
                     <Icon className="size-[15px] shrink-0" strokeWidth={1.75} />
                     <span className="font-mono text-[10px]">{item.label}</span>
                   </div>
                   <p className="mt-3.5 text-[15px] font-medium tracking-[-0.02em]">{item.title}</p>
-                  <p className="mt-1.5 text-[13px] leading-[1.55] text-[#75726b]">{item.body}</p>
+                  <p className="mt-1.5 text-[13px] leading-[1.55] text-muted-foreground">{item.body}</p>
                 </div>
               )
             })}
@@ -1327,18 +1459,17 @@ function LandingPage() {
                 key={row.label}
                 className={
                   row.tone === 'accent'
-                    ? 'rounded-2xl border border-[#2440e6]/20 bg-[#2440e6]/4 p-6 sm:p-7'
+                    ? 'rounded-2xl border border-cx-accent/20 bg-cx-accent/4 p-6 sm:p-7'
                     : `${CARD} p-6 sm:p-7`
                 }
                 {...reveal(reduceMotion, 0.05 * index)}
               >
                 <p
-                  className="font-mono text-[11px]"
-                  style={{ color: row.tone === 'accent' ? ACCENT : '#9b978f' }}
+                  className={`font-mono text-[11px] ${row.tone === 'accent' ? 'text-cx-accent' : 'text-muted-foreground/70'}`}
                 >
                   {row.label}
                 </p>
-                <p className="mt-3 text-[15px] leading-[1.5] text-[#1a1917]/80 sm:text-base">
+                <p className="mt-3 text-[15px] leading-[1.5] text-foreground/80 sm:text-base">
                   {row.body}
                 </p>
               </motion.div>
@@ -1348,7 +1479,7 @@ function LandingPage() {
 
         <section className="mx-auto w-full max-w-[1080px] px-5 pb-14 sm:pb-20">
           <motion.div
-            className={`${PANEL} rounded-3xl border border-[#1a1917]/8 px-6 py-14 text-center sm:px-10 sm:py-20`}
+            className={`${PANEL} rounded-3xl border border-border px-6 py-14 text-center sm:px-10 sm:py-20`}
             {...reveal(reduceMotion)}
           >
             <h2 className="mx-auto max-w-[520px] text-[30px] font-semibold leading-[1.02] tracking-[-0.04em] sm:text-[44px]">
@@ -1366,12 +1497,14 @@ function LandingPage() {
         </section>
       </main>
 
-      <footer className="mx-auto flex w-full max-w-[1080px] items-center justify-between border-t border-[#1a1917]/8 px-5 py-6 text-[13px] text-[#9b978f]">
-        <p className="font-medium text-[#1a1917]">
-          loora<span style={{ color: ACCENT }}>.</span>
-        </p>
-        <p>The design harness.</p>
-      </footer>
-    </div>
+          <footer className="mx-auto flex w-full max-w-[1080px] items-center justify-between border-t border-border px-5 py-6 text-[13px] text-muted-foreground/70">
+            <p className="font-medium text-foreground">
+              loora<span style={{ color: palette.accent }}>.</span>
+            </p>
+            <p>The design harness.</p>
+          </footer>
+        </div>
+      </div>
+    </PaletteContext.Provider>
   )
 }
