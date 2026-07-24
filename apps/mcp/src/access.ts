@@ -2,7 +2,7 @@ import { eq } from 'drizzle-orm'
 import { db } from '@loora/db'
 import { user } from '@loora/db/schema'
 import { canUseApp } from '@loora/auth/preview-access'
-import { authorizeBilling } from '@loora/auth/billing'
+import { authorizeBilling } from '@loora/billing/billing'
 
 export class AccessDeniedError extends Error {}
 

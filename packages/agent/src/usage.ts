@@ -2,10 +2,10 @@ import { and, asc, eq, gt, gte, sql } from 'drizzle-orm'
 import { db } from '@loora/db'
 import { aiUsage, user } from '@loora/db/schema'
 import { getModel, type ModelKey } from './models'
-import { creditUnitsForCost } from '@loora/auth/billing-policy'
-import { getTopUpCreditStatus } from '@loora/auth/credit-top-ups'
-import { allocateTopUpCredits } from '@loora/auth/top-up-policy'
-import { reportPolarUsage } from '@loora/auth/billing-usage'
+import { creditUnitsForCost } from '@loora/billing/billing-policy'
+import { getTopUpCreditStatus } from '@loora/billing/credit-top-ups'
+import { allocateTopUpCredits } from '@loora/billing/top-up-policy'
+import { reportPolarUsage } from '@loora/billing/billing-usage'
 
 export const DAILY_LIMIT_USD = 0.5
 export const WEEKLY_LIMIT_USD = 2

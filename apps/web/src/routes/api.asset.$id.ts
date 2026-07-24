@@ -4,7 +4,7 @@ import { and, eq } from 'drizzle-orm'
 import { db } from '@loora/db'
 import { asset } from '@loora/db/schema'
 import { requireSession } from '@loora/auth'
-import { authorizeBilling, subscriptionRequiredResponse } from '@loora/auth/billing'
+import { authorizeBilling, subscriptionRequiredResponse } from '@loora/billing/billing'
 import { canUseApp, previewAccessRequiredResponse } from '@loora/auth/preview-access'
 import { s3 } from '@loora/rpc/storage'
 

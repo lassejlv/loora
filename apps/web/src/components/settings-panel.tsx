@@ -43,6 +43,8 @@ interface UsageStatus {
   weeklyLimitUsd: number
 }
 
+type BillingStatus = Awaited<ReturnType<typeof orpc.billing.status>>
+
 interface AdminUserUsage {
   id: string
   name: string
@@ -121,24 +123,18 @@ function UsageTab() {
   )
 }
 
-function BillingTab({ isAdmin }: { isAdmin: boolean }) {
-  const [billing, setBilling] = useState<Awaited<ReturnType<typeof orpc.billing.status>> | null>(null)
-  const [error, setError] = useState('')
+function BillingTab({
+  isAdmin,
+  initialBilling,
+  loadError,
+}: {
+  isAdmin: boolean
+  initialBilling: BillingStatus | null
+  loadError: boolean
+}) {
+  const [billing, setBilling] = useState(initialBilling)
+  const [error, setError] = useState(loadError ? 'Could not load billing.' : '')
   const [openingPortal, setOpeningPortal] = useState(false)
-
-  useEffect(() => {
-    let cancelled = false
-    orpc.billing.status()
-      .then((status) => {
-        if (!cancelled) setBilling(status)
-      })
-      .catch(() => {
-        if (!cancelled) setError('Could not load billing.')
-      })
-    return () => {
-      cancelled = true
-    }
-  }, [])
 
   if (isAdmin) {
     return (
@@ -821,11 +817,30 @@ export function SettingsPanel({
 }) {
   const { data: session } = authClient.useSession()
   const isAdmin = session?.user.isAdmin === true
+  const [billing, setBilling] = useState<BillingStatus | null>(null)
+  const [billingLoadFailed, setBillingLoadFailed] = useState(false)
   const [{ settings, integration }, setUrlState] = useQueryStates(editorSearchParams, {
     history: 'replace',
   })
-  const tab: SettingsTab = settings ?? 'account'
+  const showBilling = billing?.required === true || billingLoadFailed
+  const tab: SettingsTab = settings === 'billing' && billing?.required === false
+    ? 'account'
+    : settings ?? 'account'
   const integrationTab: IntegrationTab = integration ?? 'chatgpt'
+
+  useEffect(() => {
+    let cancelled = false
+    orpc.billing.status()
+      .then((status) => {
+        if (!cancelled) setBilling(status)
+      })
+      .catch(() => {
+        if (!cancelled) setBillingLoadFailed(true)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [])
 
   async function signOut() {
     // Do not leave one Loora account's ChatGPT cookie available after switching users.
@@ -845,11 +860,17 @@ export function SettingsPanel({
         }}
         className="flex flex-col gap-6"
       >
-        <TabsList className={`grid w-full grid-cols-3 ${isAdmin ? 'sm:grid-cols-6' : 'sm:grid-cols-5'}`}>
+        <TabsList
+          className={`grid w-full grid-cols-3 ${
+            isAdmin
+              ? showBilling ? 'sm:grid-cols-6' : 'sm:grid-cols-5'
+              : showBilling ? 'sm:grid-cols-5' : 'sm:grid-cols-4'
+          }`}
+        >
           <TabsTab value="account">Account</TabsTab>
           <TabsTab value="agent">Agent</TabsTab>
           <TabsTab value="integrations">Integrations</TabsTab>
-          <TabsTab value="billing">Billing</TabsTab>
+          {showBilling ? <TabsTab value="billing">Billing</TabsTab> : null}
           <TabsTab value="shortcuts">Shortcuts</TabsTab>
           {isAdmin ? <TabsTab value="admin">Admin</TabsTab> : null}
         </TabsList>
@@ -928,9 +949,15 @@ export function SettingsPanel({
           </Tabs>
         </TabsPanel>
 
-        <TabsPanel value="billing">
-          <BillingTab isAdmin={isAdmin} />
-        </TabsPanel>
+        {showBilling ? (
+          <TabsPanel value="billing">
+            <BillingTab
+              isAdmin={isAdmin}
+              initialBilling={billing}
+              loadError={billingLoadFailed}
+            />
+          </TabsPanel>
+        ) : null}
 
         <TabsPanel value="shortcuts">
           <ShortcutsSettings

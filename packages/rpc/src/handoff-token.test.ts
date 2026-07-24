@@ -22,6 +22,14 @@ describe('handoff tokens', () => {
     expect(created.expiresAt).toBeGreaterThan(Date.now())
   })
 
+  it('binds a handoff to its draft when requested', async () => {
+    const created = await createHandoffToken('design-1', 'user-1', 60, 'draft-1')
+    const claims = await readHandoffToken(created.token)
+
+    expect(claims?.designId).toBe('design-1')
+    expect(claims?.draftId).toBe('draft-1')
+  })
+
   it('rejects tampered and expired tokens', async () => {
     const current = await createHandoffToken('design-1', 'user-1')
     const expired = await createHandoffToken('design-1', 'user-1', -1)

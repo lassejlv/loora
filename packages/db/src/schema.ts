@@ -13,6 +13,7 @@ import {
 } from 'drizzle-orm/pg-core'
 import type { UIMessage } from 'ai'
 import type { CanvasElement } from './canvas'
+import type { DraftStatus } from './drafts'
 import type { ShortcutConfig } from './shortcuts'
 import { EMPTY_SHORTCUT_CONFIG } from './shortcuts'
 
@@ -103,6 +104,7 @@ export const design = pgTable(
       .references(() => user.id, { onDelete: 'cascade' }),
     name: text('name').notNull(),
     shapes: jsonb('shapes').$type<CanvasElement[]>().default([]).notNull(),
+    revision: integer('revision').default(0).notNull(),
     createdAt: timestamp('created_at').defaultNow().notNull(),
     updatedAt: timestamp('updated_at')
       .defaultNow()
@@ -115,11 +117,46 @@ export const design = pgTable(
   ],
 )
 
+export const designDraft = pgTable(
+  'design_draft',
+  {
+    id: text('id').notNull(),
+    designId: text('design_id').notNull(),
+    userId: text('user_id').notNull(),
+    name: text('name').notNull(),
+    description: text('description').default('').notNull(),
+    status: text('status').$type<DraftStatus>().default('active').notNull(),
+    baseShapes: jsonb('base_shapes').$type<CanvasElement[]>().notNull(),
+    shapes: jsonb('shapes').$type<CanvasElement[]>().notNull(),
+    baseRevision: integer('base_revision').notNull(),
+    revision: integer('revision').default(0).notNull(),
+    appliedVersionId: text('applied_version_id'),
+    proposedAt: timestamp('proposed_at'),
+    appliedAt: timestamp('applied_at'),
+    closedAt: timestamp('closed_at'),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+    updatedAt: timestamp('updated_at')
+      .defaultNow()
+      .$onUpdate(() => new Date())
+      .notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.id, table.userId] }),
+    foreignKey({
+      columns: [table.designId, table.userId],
+      foreignColumns: [design.id, design.userId],
+      name: 'design_draft_design_fk',
+    }).onDelete('cascade'),
+    index('design_draft_design_idx').on(table.userId, table.designId, table.status, table.updatedAt),
+  ],
+)
+
 export const designVersion = pgTable(
   'design_version',
   {
     id: text('id').notNull(),
     designId: text('design_id').notNull(),
+    draftId: text('draft_id'),
     userId: text('user_id').notNull(),
     message: text('message').notNull(),
     shapes: jsonb('shapes').$type<CanvasElement[]>().notNull(),
@@ -135,7 +172,17 @@ export const designVersion = pgTable(
       foreignColumns: [design.id, design.userId],
       name: 'design_version_design_fk',
     }).onDelete('cascade'),
-    index('design_version_design_idx').on(table.userId, table.designId, table.createdAt),
+    foreignKey({
+      columns: [table.draftId, table.userId],
+      foreignColumns: [designDraft.id, designDraft.userId],
+      name: 'design_version_draft_fk',
+    }).onDelete('cascade'),
+    index('design_version_design_idx').on(
+      table.userId,
+      table.designId,
+      table.draftId,
+      table.createdAt,
+    ),
   ],
 )
 
@@ -144,6 +191,7 @@ export const designChat = pgTable(
   {
     id: text('id').notNull(),
     designId: text('design_id').notNull(),
+    draftId: text('draft_id'),
     userId: text('user_id').notNull(),
     title: text('title').default('New chat').notNull(),
     messages: jsonb('messages').$type<UIMessage[]>().default([]).notNull(),
@@ -162,7 +210,17 @@ export const designChat = pgTable(
       foreignColumns: [design.id, design.userId],
       name: 'design_chat_design_fk',
     }).onDelete('cascade'),
-    index('design_chat_design_idx').on(table.userId, table.designId, table.updatedAt),
+    foreignKey({
+      columns: [table.draftId, table.userId],
+      foreignColumns: [designDraft.id, designDraft.userId],
+      name: 'design_chat_draft_fk',
+    }).onDelete('cascade'),
+    index('design_chat_design_idx').on(
+      table.userId,
+      table.designId,
+      table.draftId,
+      table.updatedAt,
+    ),
   ],
 )
 

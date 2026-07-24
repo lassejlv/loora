@@ -35,7 +35,13 @@ export function FigmaImportDialog({
   open: boolean
   onOpenChange: (open: boolean) => void
   onImported: (result: ImportResult, destination: FigmaImportDestination) => void
-  currentDocument: { id: string; name: string; shapes: CanvasElement[] }
+  currentDocument: {
+    id: string
+    name: string
+    shapes: CanvasElement[]
+    draftId?: string | null
+    revision?: number
+  }
   initialDestination?: FigmaImportDestination
 }) {
   const [url, setUrl] = useState(() => window.sessionStorage.getItem(PENDING_KEY) ?? '')
@@ -93,7 +99,9 @@ export function FigmaImportDialog({
     try {
       const imported = await orpc.figma.import({
         url: source,
-        ...(destination === 'current' ? { target: currentDocument } : {}),
+        ...(destination === 'current'
+          ? { target: { ...currentDocument, revision: currentDocument.revision ?? 0 } }
+          : {}),
       })
       window.sessionStorage.removeItem(PENDING_KEY)
       window.sessionStorage.removeItem(PENDING_DESTINATION_KEY)

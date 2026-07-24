@@ -9,6 +9,7 @@
   "dependencies": {
     "@loora/agent": "workspace:*",
     "@loora/auth": "workspace:*",
+    "@loora/billing": "workspace:*",
     "@loora/db": "workspace:*",
     "@orpc/server": "^1.14.8",
     "ai": "catalog:",

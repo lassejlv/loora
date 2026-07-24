@@ -29,7 +29,6 @@ import { Route as ApiGithubWebhookRouteImport } from './routes/api.github.webhoo
 import { Route as ApiHandoffTokenRouteImport } from './routes/api.handoff.$token'
 import { Route as ApiPLinkIdRouteImport } from './routes/api.p.$linkId'
 import { Route as ApiRpcSplatRouteImport } from './routes/api.rpc.$'
-import { Route as ApiChatChatIdStreamRouteImport } from './routes/api.chat.$chatId.stream'
 import { Route as ApiHandoffTokenAssetIdRouteImport } from './routes/api.handoff.$token.asset.$id'
 import { Route as ApiPLinkIdAssetIdRouteImport } from './routes/api.p.$linkId.asset.$id'
 
@@ -134,11 +133,6 @@ const ApiRpcSplatRoute = ApiRpcSplatRouteImport.update({
   path: '/api/rpc/$',
   getParentRoute: () => rootRouteImport,
 } as any)
-const ApiChatChatIdStreamRoute = ApiChatChatIdStreamRouteImport.update({
-  id: '/$chatId/stream',
-  path: '/$chatId/stream',
-  getParentRoute: () => ApiChatRoute,
-} as any)
 const ApiHandoffTokenAssetIdRoute = ApiHandoffTokenAssetIdRouteImport.update({
   id: '/asset/$id',
   path: '/asset/$id',
@@ -155,7 +149,7 @@ export interface FileRoutesByFullPath {
   '/landing': typeof LandingRoute
   '/mcp-consent': typeof McpConsentRoute
   '/.well-known/oauth-authorization-server': typeof DotwellKnownOauthAuthorizationServerRoute
-  '/api/chat': typeof ApiChatRouteWithChildren
+  '/api/chat': typeof ApiChatRoute
   '/blockpage/$designId': typeof BlockpageDesignIdRoute
   '/p/$linkId': typeof PLinkIdRoute
   '/api/asset/$id': typeof ApiAssetIdRoute
@@ -171,7 +165,6 @@ export interface FileRoutesByFullPath {
   '/api/handoff/$token': typeof ApiHandoffTokenRouteWithChildren
   '/api/p/$linkId': typeof ApiPLinkIdRouteWithChildren
   '/api/rpc/$': typeof ApiRpcSplatRoute
-  '/api/chat/$chatId/stream': typeof ApiChatChatIdStreamRoute
   '/api/handoff/$token/asset/$id': typeof ApiHandoffTokenAssetIdRoute
   '/api/p/$linkId/asset/$id': typeof ApiPLinkIdAssetIdRoute
 }
@@ -180,7 +173,7 @@ export interface FileRoutesByTo {
   '/landing': typeof LandingRoute
   '/mcp-consent': typeof McpConsentRoute
   '/.well-known/oauth-authorization-server': typeof DotwellKnownOauthAuthorizationServerRoute
-  '/api/chat': typeof ApiChatRouteWithChildren
+  '/api/chat': typeof ApiChatRoute
   '/blockpage/$designId': typeof BlockpageDesignIdRoute
   '/p/$linkId': typeof PLinkIdRoute
   '/api/asset/$id': typeof ApiAssetIdRoute
@@ -196,7 +189,6 @@ export interface FileRoutesByTo {
   '/api/handoff/$token': typeof ApiHandoffTokenRouteWithChildren
   '/api/p/$linkId': typeof ApiPLinkIdRouteWithChildren
   '/api/rpc/$': typeof ApiRpcSplatRoute
-  '/api/chat/$chatId/stream': typeof ApiChatChatIdStreamRoute
   '/api/handoff/$token/asset/$id': typeof ApiHandoffTokenAssetIdRoute
   '/api/p/$linkId/asset/$id': typeof ApiPLinkIdAssetIdRoute
 }
@@ -206,7 +198,7 @@ export interface FileRoutesById {
   '/landing': typeof LandingRoute
   '/mcp-consent': typeof McpConsentRoute
   '/.well-known/oauth-authorization-server': typeof DotwellKnownOauthAuthorizationServerRoute
-  '/api/chat': typeof ApiChatRouteWithChildren
+  '/api/chat': typeof ApiChatRoute
   '/blockpage/$designId': typeof BlockpageDesignIdRoute
   '/p/$linkId': typeof PLinkIdRoute
   '/api/asset/$id': typeof ApiAssetIdRoute
@@ -222,7 +214,6 @@ export interface FileRoutesById {
   '/api/handoff/$token': typeof ApiHandoffTokenRouteWithChildren
   '/api/p/$linkId': typeof ApiPLinkIdRouteWithChildren
   '/api/rpc/$': typeof ApiRpcSplatRoute
-  '/api/chat/$chatId/stream': typeof ApiChatChatIdStreamRoute
   '/api/handoff/$token/asset/$id': typeof ApiHandoffTokenAssetIdRoute
   '/api/p/$linkId/asset/$id': typeof ApiPLinkIdAssetIdRoute
 }
@@ -249,7 +240,6 @@ export interface FileRouteTypes {
     | '/api/handoff/$token'
     | '/api/p/$linkId'
     | '/api/rpc/$'
-    | '/api/chat/$chatId/stream'
     | '/api/handoff/$token/asset/$id'
     | '/api/p/$linkId/asset/$id'
   fileRoutesByTo: FileRoutesByTo
@@ -274,7 +264,6 @@ export interface FileRouteTypes {
     | '/api/handoff/$token'
     | '/api/p/$linkId'
     | '/api/rpc/$'
-    | '/api/chat/$chatId/stream'
     | '/api/handoff/$token/asset/$id'
     | '/api/p/$linkId/asset/$id'
   id:
@@ -299,7 +288,6 @@ export interface FileRouteTypes {
     | '/api/handoff/$token'
     | '/api/p/$linkId'
     | '/api/rpc/$'
-    | '/api/chat/$chatId/stream'
     | '/api/handoff/$token/asset/$id'
     | '/api/p/$linkId/asset/$id'
   fileRoutesById: FileRoutesById
@@ -309,7 +297,7 @@ export interface RootRouteChildren {
   LandingRoute: typeof LandingRoute
   McpConsentRoute: typeof McpConsentRoute
   DotwellKnownOauthAuthorizationServerRoute: typeof DotwellKnownOauthAuthorizationServerRoute
-  ApiChatRoute: typeof ApiChatRouteWithChildren
+  ApiChatRoute: typeof ApiChatRoute
   BlockpageDesignIdRoute: typeof BlockpageDesignIdRoute
   PLinkIdRoute: typeof PLinkIdRoute
   ApiAssetIdRoute: typeof ApiAssetIdRoute
@@ -469,13 +457,6 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiRpcSplatRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/api/chat/$chatId/stream': {
-      id: '/api/chat/$chatId/stream'
-      path: '/$chatId/stream'
-      fullPath: '/api/chat/$chatId/stream'
-      preLoaderRoute: typeof ApiChatChatIdStreamRouteImport
-      parentRoute: typeof ApiChatRoute
-    }
     '/api/handoff/$token/asset/$id': {
       id: '/api/handoff/$token/asset/$id'
       path: '/asset/$id'
@@ -492,17 +473,6 @@ declare module '@tanstack/react-router' {
     }
   }
 }
-
-interface ApiChatRouteChildren {
-  ApiChatChatIdStreamRoute: typeof ApiChatChatIdStreamRoute
-}
-
-const ApiChatRouteChildren: ApiChatRouteChildren = {
-  ApiChatChatIdStreamRoute: ApiChatChatIdStreamRoute,
-}
-
-const ApiChatRouteWithChildren =
-  ApiChatRoute._addFileChildren(ApiChatRouteChildren)
 
 interface ApiHandoffTokenRouteChildren {
   ApiHandoffTokenAssetIdRoute: typeof ApiHandoffTokenAssetIdRoute
@@ -534,7 +504,7 @@ const rootRouteChildren: RootRouteChildren = {
   McpConsentRoute: McpConsentRoute,
   DotwellKnownOauthAuthorizationServerRoute:
     DotwellKnownOauthAuthorizationServerRoute,
-  ApiChatRoute: ApiChatRouteWithChildren,
+  ApiChatRoute: ApiChatRoute,
   BlockpageDesignIdRoute: BlockpageDesignIdRoute,
   PLinkIdRoute: PLinkIdRoute,
   ApiAssetIdRoute: ApiAssetIdRoute,

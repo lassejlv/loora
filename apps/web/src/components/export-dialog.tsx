@@ -43,6 +43,8 @@ export function ExportDialog({
   shapes,
   selectedIds,
   databaseReady,
+  draftId,
+  flush,
 }: {
   open: boolean
   onOpenChange: (open: boolean) => void
@@ -50,6 +52,8 @@ export function ExportDialog({
   shapes: CanvasElement[]
   selectedIds: string[]
   databaseReady: boolean
+  draftId?: string | null
+  flush?: () => Promise<void>
 }) {
   const targets = useMemo(
     () => (selectedIds.length ? shapes.filter((shape) => selectedIds.includes(shape.id)) : shapes),
@@ -71,8 +75,8 @@ export function ExportDialog({
     setError(null)
     setCopied(false)
     try {
-      await orpc.design.save({ id: doc.id, name: doc.name, shapes })
-      const created = await orpc.handoff.create({ designId: doc.id })
+      await flush?.()
+      const created = await orpc.handoff.create({ designId: doc.id, draftId })
       setHandoff({
         url: `${window.location.origin}/api/handoff/${created.token}`,
         expiresAt: created.expiresAt,

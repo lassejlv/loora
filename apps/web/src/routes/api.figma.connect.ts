@@ -1,7 +1,7 @@
 import '@tanstack/react-start'
 import { createFileRoute } from '@tanstack/react-router'
 import { requireSession } from '@loora/auth'
-import { authorizeBilling, subscriptionRequiredResponse } from '@loora/auth/billing'
+import { authorizeBilling, subscriptionRequiredResponse } from '@loora/billing/billing'
 import { canUseApp, previewAccessRequiredResponse } from '@loora/auth/preview-access'
 import { createFigmaOAuthFlow } from '@loora/auth/figma'
 

@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, gt, gte, isNotNull, lt, or, sql } from 'drizzle-orm'
+import { and, asc, desc, eq, gt, gte, isNotNull, isNull, lt, or, sql } from 'drizzle-orm'
 import { ORPCError, os } from '@orpc/server'
 import { z } from 'zod'
 import { db } from '@loora/db'
@@ -6,6 +6,7 @@ import {
   asset,
   design,
   designChat,
+  designDraft,
   designGithubRepository,
   designVersion,
   oauthAccessToken,
@@ -21,6 +22,11 @@ import { parseShortcutConfig, shortcutConfigSchema } from './shortcuts'
 import { agentSystemPromptSchema } from './agent-prompt'
 import { googleOAuthEnabled, type getSession } from '@loora/auth'
 import type { CanvasElement } from '@loora/db/canvas'
+import {
+  canvasDiff,
+  mergeCanvas,
+  type MergeChoice,
+} from '@loora/db/drafts'
 import { assetKey, s3 } from './storage'
 import { createHandoffToken } from './handoff-token'
 import {
@@ -37,10 +43,10 @@ import {
   createPlanCheckout,
   getBillingStatus,
   refreshBillingStatus,
-} from '@loora/auth/billing'
+} from '@loora/billing/billing'
 import { canUseApp, isPreviewAccessRequired } from '@loora/auth/preview-access'
-import { completeTopUpCheckout, createTopUpCheckout } from '@loora/auth/credit-top-ups'
-import { MAX_TOP_UP_CENTS, MIN_TOP_UP_CENTS } from '@loora/auth/top-up-policy'
+import { completeTopUpCheckout, createTopUpCheckout } from '@loora/billing/credit-top-ups'
+import { MAX_TOP_UP_CENTS, MIN_TOP_UP_CENTS } from '@loora/billing/top-up-policy'
 import { sortCommitsOldestFirst, toHistoryPage } from './history'
 import {
   DAILY_LIMIT_USD,
@@ -85,6 +91,11 @@ const shapeSchema = z.object({
   code: z.string().max(200_000),
   groupId: z.string().max(128).optional(),
 })
+
+const draftIdSchema = z.string().min(1).max(128)
+const optionalDraftIdSchema = draftIdSchema.nullish()
+const draftTargetWhere = (draftId: string | null | undefined) =>
+  draftId ? eq(designVersion.draftId, draftId) : isNull(designVersion.draftId)
 
 const requireUser = os.$context<ORPCContext>().middleware(async ({ context, next }) => {
   if (!context.session) throw new ORPCError('UNAUTHORIZED')
@@ -152,7 +163,12 @@ async function ensureDesign(designId: string, userId: string) {
 
 const listDesigns = protectedProcedure.handler(async ({ context }) => {
   return db
-    .select({ id: design.id, name: design.name, updatedAt: design.updatedAt })
+    .select({
+      id: design.id,
+      name: design.name,
+      revision: design.revision,
+      updatedAt: design.updatedAt,
+    })
     .from(design)
     .where(eq(design.userId, context.user.id))
     .orderBy(asc(design.createdAt))
@@ -163,7 +179,13 @@ const getDesign = protectedProcedure
   .input(z.object({ id: z.string().min(1).max(128) }))
   .handler(async ({ context, input }) => {
     const [found] = await db
-      .select({ id: design.id, name: design.name, shapes: design.shapes, updatedAt: design.updatedAt })
+      .select({
+        id: design.id,
+        name: design.name,
+        shapes: design.shapes,
+        revision: design.revision,
+        updatedAt: design.updatedAt,
+      })
       .from(design)
       .where(and(eq(design.id, input.id), eq(design.userId, context.user.id)))
       .limit(1)
@@ -178,23 +200,56 @@ const saveDesign = protectedProcedure
       id: z.string().min(1).max(128),
       name: z.string().trim().min(1).max(200),
       shapes: z.array(shapeSchema).max(10_000),
+      expectedRevision: z.number().int().nonnegative().optional(),
     }),
   )
   .handler(async ({ context, input }) => {
-    const [saved] = await db
-      .insert(design)
-      .values({ ...input, userId: context.user.id })
-      .onConflictDoUpdate({
-        target: [design.id, design.userId],
-        set: {
-          name: input.name,
-          shapes: input.shapes,
-          updatedAt: new Date(),
-        },
-      })
-      .returning({ id: design.id, updatedAt: design.updatedAt })
+    const { expectedRevision, ...values } = input
+    const [existing] = await db
+      .select({ revision: design.revision })
+      .from(design)
+      .where(and(eq(design.id, input.id), eq(design.userId, context.user.id)))
+      .limit(1)
 
-    return saved
+    if (!existing) {
+      const [created] = await db
+        .insert(design)
+        .values({ ...values, userId: context.user.id })
+        .returning({
+          id: design.id,
+          revision: design.revision,
+          updatedAt: design.updatedAt,
+        })
+      return { ...created, updatedAt: created.updatedAt.getTime() }
+    }
+
+    if (expectedRevision !== undefined && expectedRevision !== existing.revision) {
+      throw new ORPCError('CONFLICT', { message: 'Main changed since it was loaded.' })
+    }
+
+    const [saved] = await db
+      .update(design)
+      .set({
+        name: input.name,
+        shapes: input.shapes,
+        revision: existing.revision + 1,
+        updatedAt: new Date(),
+      })
+      .where(
+        and(
+          eq(design.id, input.id),
+          eq(design.userId, context.user.id),
+          eq(design.revision, existing.revision),
+        ),
+      )
+      .returning({
+        id: design.id,
+        revision: design.revision,
+        updatedAt: design.updatedAt,
+      })
+
+    if (!saved) throw new ORPCError('CONFLICT', { message: 'Main changed while it was saving.' })
+    return { ...saved, updatedAt: saved.updatedAt.getTime() }
   })
 
 const deleteDesign = protectedProcedure
@@ -208,8 +263,409 @@ const deleteDesign = protectedProcedure
     return { deleted: deleted.length > 0 }
   })
 
+async function getOwnedDraft(userId: string, designId: string, draftId: string) {
+  const [draft] = await db
+    .select()
+    .from(designDraft)
+    .where(
+      and(
+        eq(designDraft.id, draftId),
+        eq(designDraft.designId, designId),
+        eq(designDraft.userId, userId),
+      ),
+    )
+    .limit(1)
+  if (!draft) throw new ORPCError('NOT_FOUND')
+  return draft
+}
+
+async function getDraftComparison(userId: string, designId: string, draftId: string) {
+  const [main, draft] = await Promise.all([
+    db
+      .select({
+        shapes: design.shapes,
+        revision: design.revision,
+      })
+      .from(design)
+      .where(and(eq(design.id, designId), eq(design.userId, userId)))
+      .limit(1)
+      .then((rows) => rows[0]),
+    getOwnedDraft(userId, designId, draftId),
+  ])
+  if (!main) throw new ORPCError('NOT_FOUND')
+  const merge = mergeCanvas(draft.baseShapes, main.shapes, draft.shapes)
+  return {
+    draft: {
+      id: draft.id,
+      name: draft.name,
+      description: draft.description,
+      status: draft.status,
+      baseRevision: draft.baseRevision,
+      revision: draft.revision,
+      proposedAt: draft.proposedAt?.getTime() ?? null,
+      appliedAt: draft.appliedAt?.getTime() ?? null,
+      closedAt: draft.closedAt?.getTime() ?? null,
+    },
+    mainRevision: main.revision,
+    mainShapes: main.shapes,
+    draftShapes: draft.shapes,
+    baseShapes: draft.baseShapes,
+    summary: merge.summary,
+    conflicts: merge.conflicts,
+    unresolved: merge.unresolved,
+  }
+}
+
+const listDrafts = protectedProcedure
+  .input(
+    z.object({
+      designId: z.string().min(1).max(128),
+      includeArchived: z.boolean().default(true),
+    }),
+  )
+  .handler(async ({ context, input }) => {
+    const rows = await db
+      .select({
+        id: designDraft.id,
+        name: designDraft.name,
+        description: designDraft.description,
+        status: designDraft.status,
+        baseRevision: designDraft.baseRevision,
+        revision: designDraft.revision,
+        proposedAt: designDraft.proposedAt,
+        appliedAt: designDraft.appliedAt,
+        closedAt: designDraft.closedAt,
+        createdAt: designDraft.createdAt,
+        updatedAt: designDraft.updatedAt,
+      })
+      .from(designDraft)
+      .where(
+        and(
+          eq(designDraft.designId, input.designId),
+          eq(designDraft.userId, context.user.id),
+          input.includeArchived
+            ? undefined
+            : or(eq(designDraft.status, 'active'), eq(designDraft.status, 'proposed')),
+        ),
+      )
+      .orderBy(desc(designDraft.updatedAt))
+
+    return rows.map((row) => ({
+      ...row,
+      proposedAt: row.proposedAt?.getTime() ?? null,
+      appliedAt: row.appliedAt?.getTime() ?? null,
+      closedAt: row.closedAt?.getTime() ?? null,
+      createdAt: row.createdAt.getTime(),
+      updatedAt: row.updatedAt.getTime(),
+    }))
+  })
+
+const createDraft = protectedProcedure
+  .input(
+    z.object({
+      id: draftIdSchema,
+      designId: z.string().min(1).max(128),
+      name: z.string().trim().min(1).max(200),
+      description: z.string().trim().max(2_000).default(''),
+    }),
+  )
+  .handler(async ({ context, input }) => {
+    const [main] = await db
+      .select({ shapes: design.shapes, revision: design.revision })
+      .from(design)
+      .where(and(eq(design.id, input.designId), eq(design.userId, context.user.id)))
+      .limit(1)
+    if (!main) throw new ORPCError('NOT_FOUND')
+
+    const [created] = await db
+      .insert(designDraft)
+      .values({
+        ...input,
+        userId: context.user.id,
+        baseShapes: main.shapes,
+        shapes: main.shapes,
+        baseRevision: main.revision,
+      })
+      .returning()
+
+    return {
+      ...created,
+      proposedAt: null,
+      appliedAt: null,
+      closedAt: null,
+      createdAt: created.createdAt.getTime(),
+      updatedAt: created.updatedAt.getTime(),
+    }
+  })
+
+const getDraft = protectedProcedure
+  .input(z.object({ designId: z.string().min(1).max(128), id: draftIdSchema }))
+  .handler(async ({ context, input }) => {
+    const draft = await getOwnedDraft(context.user.id, input.designId, input.id)
+    return {
+      ...draft,
+      proposedAt: draft.proposedAt?.getTime() ?? null,
+      appliedAt: draft.appliedAt?.getTime() ?? null,
+      closedAt: draft.closedAt?.getTime() ?? null,
+      createdAt: draft.createdAt.getTime(),
+      updatedAt: draft.updatedAt.getTime(),
+    }
+  })
+
+const saveDraft = protectedProcedure
+  .input(
+    z.object({
+      designId: z.string().min(1).max(128),
+      id: draftIdSchema,
+      shapes: z.array(shapeSchema).max(10_000),
+      expectedRevision: z.number().int().nonnegative(),
+    }),
+  )
+  .handler(async ({ context, input }) => {
+    const [saved] = await db
+      .update(designDraft)
+      .set({
+        shapes: input.shapes,
+        revision: input.expectedRevision + 1,
+        updatedAt: new Date(),
+      })
+      .where(
+        and(
+          eq(designDraft.id, input.id),
+          eq(designDraft.designId, input.designId),
+          eq(designDraft.userId, context.user.id),
+          eq(designDraft.status, 'active'),
+          eq(designDraft.revision, input.expectedRevision),
+        ),
+      )
+      .returning({ revision: designDraft.revision, updatedAt: designDraft.updatedAt })
+
+    if (!saved) {
+      const draft = await getOwnedDraft(context.user.id, input.designId, input.id)
+      if (draft.status !== 'active') {
+        throw new ORPCError('CONFLICT', { message: 'This draft is read-only.' })
+      }
+      throw new ORPCError('CONFLICT', { message: 'This draft changed since it was loaded.' })
+    }
+    return { revision: saved.revision, updatedAt: saved.updatedAt.getTime() }
+  })
+
+const renameDraft = protectedProcedure
+  .input(
+    z.object({
+      designId: z.string().min(1).max(128),
+      id: draftIdSchema,
+      name: z.string().trim().min(1).max(200),
+    }),
+  )
+  .handler(async ({ context, input }) => {
+    const [updated] = await db
+      .update(designDraft)
+      .set({ name: input.name, updatedAt: new Date() })
+      .where(
+        and(
+          eq(designDraft.id, input.id),
+          eq(designDraft.designId, input.designId),
+          eq(designDraft.userId, context.user.id),
+          eq(designDraft.status, 'active'),
+        ),
+      )
+      .returning({ id: designDraft.id, name: designDraft.name })
+    if (!updated) throw new ORPCError('CONFLICT', { message: 'Only active drafts can be renamed.' })
+    return updated
+  })
+
+const proposeDraft = protectedProcedure
+  .input(
+    z.object({
+      designId: z.string().min(1).max(128),
+      id: draftIdSchema,
+      description: z.string().trim().max(2_000).default(''),
+    }),
+  )
+  .handler(async ({ context, input }) => {
+    const now = new Date()
+    const [updated] = await db
+      .update(designDraft)
+      .set({
+        status: 'proposed',
+        description: input.description,
+        proposedAt: now,
+        updatedAt: now,
+      })
+      .where(
+        and(
+          eq(designDraft.id, input.id),
+          eq(designDraft.designId, input.designId),
+          eq(designDraft.userId, context.user.id),
+          eq(designDraft.status, 'active'),
+        ),
+      )
+      .returning({ id: designDraft.id, status: designDraft.status, proposedAt: designDraft.proposedAt })
+    if (!updated) throw new ORPCError('CONFLICT', { message: 'Only active drafts can be proposed.' })
+    return { ...updated, proposedAt: updated.proposedAt?.getTime() ?? null }
+  })
+
+const reopenDraft = protectedProcedure
+  .input(z.object({ designId: z.string().min(1).max(128), id: draftIdSchema }))
+  .handler(async ({ context, input }) => {
+    const [updated] = await db
+      .update(designDraft)
+      .set({ status: 'active', proposedAt: null, updatedAt: new Date() })
+      .where(
+        and(
+          eq(designDraft.id, input.id),
+          eq(designDraft.designId, input.designId),
+          eq(designDraft.userId, context.user.id),
+          eq(designDraft.status, 'proposed'),
+        ),
+      )
+      .returning({ id: designDraft.id, status: designDraft.status })
+    if (!updated) throw new ORPCError('CONFLICT', { message: 'Only proposed drafts can be reopened.' })
+    return updated
+  })
+
+const closeDraft = protectedProcedure
+  .input(z.object({ designId: z.string().min(1).max(128), id: draftIdSchema }))
+  .handler(async ({ context, input }) => {
+    const now = new Date()
+    const [updated] = await db
+      .update(designDraft)
+      .set({ status: 'closed', closedAt: now, updatedAt: now })
+      .where(
+        and(
+          eq(designDraft.id, input.id),
+          eq(designDraft.designId, input.designId),
+          eq(designDraft.userId, context.user.id),
+          or(eq(designDraft.status, 'active'), eq(designDraft.status, 'proposed')),
+        ),
+      )
+      .returning({ id: designDraft.id, status: designDraft.status, closedAt: designDraft.closedAt })
+    if (!updated) throw new ORPCError('CONFLICT', { message: 'This draft is already archived.' })
+    return { ...updated, closedAt: updated.closedAt?.getTime() ?? null }
+  })
+
+const compareDraft = protectedProcedure
+  .input(z.object({ designId: z.string().min(1).max(128), id: draftIdSchema }))
+  .handler(({ context, input }) => getDraftComparison(context.user.id, input.designId, input.id))
+
+const applyDraft = protectedProcedure
+  .input(
+    z.object({
+      designId: z.string().min(1).max(128),
+      id: draftIdSchema,
+      expectedMainRevision: z.number().int().nonnegative(),
+      expectedDraftRevision: z.number().int().nonnegative(),
+      resolutions: z.record(z.string(), z.enum(['main', 'draft'])).default({}),
+    }),
+  )
+  .handler(async ({ context, input }) => {
+    const comparison = await getDraftComparison(context.user.id, input.designId, input.id)
+    if (
+      comparison.mainRevision !== input.expectedMainRevision ||
+      comparison.draft.revision !== input.expectedDraftRevision
+    ) {
+      throw new ORPCError('CONFLICT', { message: 'Main or the draft changed during review.' })
+    }
+    if (comparison.draft.status !== 'active' && comparison.draft.status !== 'proposed') {
+      throw new ORPCError('CONFLICT', { message: 'This draft is already archived.' })
+    }
+
+    const merge = mergeCanvas(
+      comparison.baseShapes,
+      comparison.mainShapes,
+      comparison.draftShapes,
+      input.resolutions as Record<string, MergeChoice>,
+    )
+    if (merge.unresolved.length > 0) {
+      return {
+        applied: false as const,
+        unresolved: merge.unresolved,
+        conflicts: merge.conflicts,
+      }
+    }
+
+    const beforeId = `v${crypto.randomUUID().replaceAll('-', '')}`
+    const appliedId = `v${crypto.randomUUID().replaceAll('-', '')}`
+    const now = new Date()
+    await db.transaction(async (tx) => {
+      const [updatedMain] = await tx
+        .update(design)
+        .set({
+          shapes: merge.shapes,
+          revision: input.expectedMainRevision + 1,
+          updatedAt: now,
+        })
+        .where(
+          and(
+            eq(design.id, input.designId),
+            eq(design.userId, context.user.id),
+            eq(design.revision, input.expectedMainRevision),
+          ),
+        )
+        .returning({ id: design.id })
+      if (!updatedMain) {
+        throw new ORPCError('CONFLICT', { message: 'Main changed while applying the draft.' })
+      }
+
+      await tx.insert(designVersion).values([
+        {
+          id: beforeId,
+          designId: input.designId,
+          userId: context.user.id,
+          message: `Before applying: ${comparison.draft.name}`,
+          shapes: comparison.mainShapes,
+          ...canvasDiff([], comparison.mainShapes),
+        },
+        {
+          id: appliedId,
+          designId: input.designId,
+          userId: context.user.id,
+          message: `Applied draft: ${comparison.draft.name}`,
+          shapes: merge.shapes,
+          ...canvasDiff(comparison.mainShapes, merge.shapes),
+        },
+      ])
+
+      const [updatedDraft] = await tx
+        .update(designDraft)
+        .set({
+          status: 'applied',
+          appliedAt: now,
+          appliedVersionId: appliedId,
+          updatedAt: now,
+        })
+        .where(
+          and(
+            eq(designDraft.id, input.id),
+            eq(designDraft.designId, input.designId),
+            eq(designDraft.userId, context.user.id),
+            eq(designDraft.revision, input.expectedDraftRevision),
+            or(eq(designDraft.status, 'active'), eq(designDraft.status, 'proposed')),
+          ),
+        )
+        .returning({ id: designDraft.id })
+      if (!updatedDraft) {
+        throw new ORPCError('CONFLICT', { message: 'The draft changed while it was applying.' })
+      }
+    })
+
+    return {
+      applied: true as const,
+      revision: input.expectedMainRevision + 1,
+      versionId: appliedId,
+      shapes: merge.shapes,
+      unresolved: [] as string[],
+    }
+  })
+
 const createDesignHandoff = protectedProcedure
-  .input(z.object({ designId: z.string().min(1).max(128) }))
+  .input(
+    z.object({
+      designId: z.string().min(1).max(128),
+      draftId: optionalDraftIdSchema,
+    }),
+  )
   .handler(async ({ context, input }) => {
     const [found] = await db
       .select({ id: design.id })
@@ -217,7 +673,10 @@ const createDesignHandoff = protectedProcedure
       .where(and(eq(design.id, input.designId), eq(design.userId, context.user.id)))
       .limit(1)
     if (!found) throw new ORPCError('NOT_FOUND')
-    return createHandoffToken(input.designId, context.user.id)
+    if (input.draftId) {
+      await getOwnedDraft(context.user.id, input.designId, input.draftId)
+    }
+    return createHandoffToken(input.designId, context.user.id, undefined, input.draftId)
   })
 
 // Live public link to one element: the row id is the URL capability, deleting
@@ -327,6 +786,7 @@ const listVersions = protectedProcedure
   .input(
     z.object({
       designId: z.string().min(1).max(128),
+      draftId: optionalDraftIdSchema,
       limit: z.number().int().min(1).max(50).default(20),
       cursor: z
         .object({
@@ -352,6 +812,7 @@ const listVersions = protectedProcedure
         and(
           eq(designVersion.designId, input.designId),
           eq(designVersion.userId, context.user.id),
+          draftTargetWhere(input.draftId),
           cursorDate
             ? or(
                 lt(designVersion.createdAt, cursorDate),
@@ -370,6 +831,7 @@ const compareVersion = protectedProcedure
   .input(
     z.object({
       designId: z.string().min(1).max(128),
+      draftId: optionalDraftIdSchema,
       id: z.string().min(1).max(128),
     }),
   )
@@ -387,6 +849,7 @@ const compareVersion = protectedProcedure
           eq(designVersion.id, input.id),
           eq(designVersion.designId, input.designId),
           eq(designVersion.userId, context.user.id),
+          draftTargetWhere(input.draftId),
         ),
       )
       .limit(1)
@@ -404,6 +867,7 @@ const compareVersion = protectedProcedure
         and(
           eq(designVersion.designId, input.designId),
           eq(designVersion.userId, context.user.id),
+          draftTargetWhere(input.draftId),
           or(
             lt(designVersion.createdAt, current.createdAt),
             and(eq(designVersion.createdAt, current.createdAt), lt(designVersion.id, current.id)),
@@ -426,6 +890,7 @@ const importVersions = protectedProcedure
   .input(
     z.object({
       designId: z.string().min(1).max(128),
+      draftId: optionalDraftIdSchema,
       commits: z
         .array(
           z.object({
@@ -444,19 +909,29 @@ const importVersions = protectedProcedure
   )
   .handler(async ({ context, input }) => {
     await ensureDesign(input.designId, context.user.id)
-    const queries = sortCommitsOldestFirst(input.commits).map((commit) => {
-      const { at, ...values } = commit
-      return db
-        .insert(designVersion)
-        .values({
-          ...values,
-          designId: input.designId,
-          userId: context.user.id,
-          createdAt: new Date(at),
-        })
-        .onConflictDoNothing({ target: [designVersion.id, designVersion.userId] })
+    if (input.draftId) {
+      const draft = await getOwnedDraft(context.user.id, input.designId, input.draftId)
+      if (draft.status !== 'active') {
+        throw new ORPCError('CONFLICT', { message: 'This draft is read-only.' })
+      }
+    }
+    // Sequential inside one transaction: the bun-sql driver has no batch(), and a
+    // single connection can't run these in parallel anyway.
+    await db.transaction(async (tx) => {
+      for (const commit of sortCommitsOldestFirst(input.commits)) {
+        const { at, ...values } = commit
+        await tx
+          .insert(designVersion)
+          .values({
+            ...values,
+            designId: input.designId,
+            draftId: input.draftId ?? null,
+            userId: context.user.id,
+            createdAt: new Date(at),
+          })
+          .onConflictDoNothing({ target: [designVersion.id, designVersion.userId] })
+      }
     })
-    await db.batch(queries as [typeof queries[number], ...typeof queries])
     return { processed: input.commits.length }
   })
 
@@ -465,12 +940,19 @@ const commitVersion = protectedProcedure
     z.object({
       id: z.string().min(1).max(128),
       designId: z.string().min(1).max(128),
+      draftId: optionalDraftIdSchema,
       message: z.string().trim().min(1).max(200),
       shapes: z.array(shapeSchema).max(10_000),
       skipIfUnchanged: z.boolean().optional(),
     }),
   )
   .handler(async ({ context, input }) => {
+    if (input.draftId) {
+      const draft = await getOwnedDraft(context.user.id, input.designId, input.draftId)
+      if (draft.status !== 'active') {
+        throw new ORPCError('CONFLICT', { message: 'This draft is read-only.' })
+      }
+    }
     const [latest] = await db
       .select({ shapes: designVersion.shapes })
       .from(designVersion)
@@ -478,6 +960,7 @@ const commitVersion = protectedProcedure
         and(
           eq(designVersion.designId, input.designId),
           eq(designVersion.userId, context.user.id),
+          draftTargetWhere(input.draftId),
         ),
       )
       .orderBy(desc(designVersion.createdAt), desc(designVersion.id))
@@ -497,6 +980,7 @@ const commitVersion = protectedProcedure
       .values({
         id: input.id,
         designId: input.designId,
+        draftId: input.draftId ?? null,
         userId: context.user.id,
         message: input.message,
         shapes: input.shapes,
@@ -520,6 +1004,7 @@ const listChats = protectedProcedure
     const chats = await db
       .select({
         id: designChat.id,
+        draftId: designChat.draftId,
         title: designChat.title,
         githubRepositoryId: designChat.githubRepositoryId,
         githubRepositoryFullName: designChat.githubRepositoryFullName,
@@ -539,11 +1024,18 @@ const createChat = protectedProcedure
     z.object({
       id: z.string().min(1).max(128),
       designId: z.string().min(1).max(128),
+      draftId: optionalDraftIdSchema,
       title: z.string().trim().min(1).max(200).default('New chat'),
     }),
   )
   .handler(async ({ context, input }) => {
     await ensureDesign(input.designId, context.user.id)
+    if (input.draftId) {
+      const draft = await getOwnedDraft(context.user.id, input.designId, input.draftId)
+      if (draft.status !== 'active') {
+        throw new ORPCError('CONFLICT', { message: 'Chats can only start on active drafts.' })
+      }
+    }
     const [repository] = await db
       .select({
         id: designGithubRepository.repositoryId,
@@ -562,6 +1054,7 @@ const createChat = protectedProcedure
       .insert(designChat)
       .values({
         ...input,
+        draftId: input.draftId ?? null,
         userId: context.user.id,
         messages: [],
         githubRepositoryId: repository?.id ?? null,
@@ -572,6 +1065,7 @@ const createChat = protectedProcedure
       .onConflictDoNothing({ target: [designChat.id, designChat.userId] })
       .returning({
         id: designChat.id,
+        draftId: designChat.draftId,
         title: designChat.title,
         githubRepositoryId: designChat.githubRepositoryId,
         githubRepositoryFullName: designChat.githubRepositoryFullName,
@@ -583,6 +1077,7 @@ const createChat = protectedProcedure
     const [existing] = await db
       .select({
         id: designChat.id,
+        draftId: designChat.draftId,
         title: designChat.title,
         githubRepositoryId: designChat.githubRepositoryId,
         githubRepositoryFullName: designChat.githubRepositoryFullName,
@@ -772,6 +1267,8 @@ const importFigma = protectedProcedure
           id: z.string().min(1).max(128),
           name: z.string().trim().min(1).max(200),
           shapes: z.array(shapeSchema).max(10_000),
+          draftId: optionalDraftIdSchema,
+          revision: z.number().int().nonnegative(),
         })
         .optional(),
     }),
@@ -1262,6 +1759,18 @@ export const appRouter = {
     get: getDesign,
     save: saveDesign,
     delete: deleteDesign,
+  },
+  draft: {
+    list: listDrafts,
+    create: createDraft,
+    get: getDraft,
+    save: saveDraft,
+    rename: renameDraft,
+    propose: proposeDraft,
+    reopen: reopenDraft,
+    compare: compareDraft,
+    apply: applyDraft,
+    close: closeDraft,
   },
   handoff: {
     create: createDesignHandoff,

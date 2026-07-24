@@ -1,9 +1,9 @@
 import { and, eq, inArray } from 'drizzle-orm'
 import { db } from '@loora/db'
-import { asset, design, user } from '@loora/db/schema'
+import { asset, design, designDraft, user } from '@loora/db/schema'
 import { readHandoffToken } from './handoff-token'
 import type { CanvasElement } from '@loora/db/canvas'
-import { authorizeBilling } from '@loora/auth/billing'
+import { authorizeBilling } from '@loora/billing/billing'
 import { canUseApp } from '@loora/auth/preview-access'
 
 export function referencedAssetIds(shapes: CanvasElement[]) {
@@ -37,8 +37,26 @@ export async function getHandoffDesign(token: string) {
   })).access) {
     return null
   }
-  const { isAdmin: _isAdmin, previewAccess: _previewAccess, ...handoff } = found
-  return { ...handoff, userId: claims.userId }
+  let shapes = found.shapes
+  let updatedAt = found.updatedAt
+  if (claims.draftId) {
+    const [draft] = await db
+      .select({ shapes: designDraft.shapes, updatedAt: designDraft.updatedAt })
+      .from(designDraft)
+      .where(
+        and(
+          eq(designDraft.id, claims.draftId),
+          eq(designDraft.designId, claims.designId),
+          eq(designDraft.userId, claims.userId),
+        ),
+      )
+      .limit(1)
+    if (!draft) return null
+    shapes = draft.shapes
+    updatedAt = draft.updatedAt
+  }
+  const { isAdmin: _isAdmin, previewAccess: _previewAccess, shapes: _shapes, updatedAt: _updatedAt, ...handoff } = found
+  return { ...handoff, shapes, updatedAt, userId: claims.userId }
 }
 
 export async function buildHandoffPayload(token: string, origin: string) {

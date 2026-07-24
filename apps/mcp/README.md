@@ -65,8 +65,19 @@ Separate Railway service off the same repo, config `apps/mcp/railway.json`
 (builds `apps/mcp/Dockerfile`). Point mcp.loora.design at it. Migrations stay
 with the web service.
 
-## Caveat
+## Draft targets
 
-Tools write whole shape arrays straight to the database. The web app's
-debounced `design.save` does the same, so concurrent edits to a design that is
-open in a browser can overwrite each other — last write wins.
+Element and history tools accept an optional `draftId`; omitting it keeps the
+backward-compatible Main behavior. Draft lifecycle tools are:
+
+- `list_drafts`, `create_draft`
+- `propose_draft`, `reopen_draft`, `close_draft`
+- `compare_draft`, `apply_draft`
+
+`compare_draft` returns the current Main and draft revisions plus whole-element
+and layer-order conflicts. Pass those revisions and one `main` or `draft`
+choice for every conflict to `apply_draft`.
+
+Main and draft element writes use revision-checked retries. That preserves
+unrelated browser or MCP changes and returns the resolved target revision.
+Proposed, applied, and closed drafts are read-only.

@@ -27,6 +27,7 @@ import { Spinner } from '#/components/ui/spinner'
 import {
   BookOpenIcon,
   FileTextIcon,
+  GitBranchPlusIcon,
   GroupIcon,
   MoveIcon,
   PaperclipIcon,
@@ -37,6 +38,15 @@ import {
 } from 'lucide-react'
 import { cn } from '#/lib/utils'
 import { Button } from '#/components/ui/button'
+import { Input } from '#/components/ui/input'
+import {
+  Dialog,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogPopup,
+  DialogTitle,
+} from '#/components/ui/dialog'
 import {
   Conversation,
   ConversationContent,
@@ -97,6 +107,7 @@ import {
 type ChatState = ReturnType<typeof useChat>
 type ChatSummary = {
   id: string
+  draftId?: string | null
   title: string
   updatedAt: number
 }
@@ -279,6 +290,7 @@ type SharedSessionProps = {
   shapesRef: React.RefObject<CanvasElement[]>
   selectedIdsRef?: React.RefObject<string[]>
   docId: string
+  draftId?: string | null
 }
 
 /**
@@ -292,9 +304,28 @@ export const AgentPanel = memo(function AgentPanel({
   shapesRef,
   selectedIdsRef,
   docId,
+  draftId = null,
+  getTargetBindings,
+  isTargetReadOnly,
+  onTargetChange,
+  branches = [],
+  onCreateBranch,
+  onRunningTargetsChange,
   ready = true,
   sendRef,
 }: SharedSessionProps & {
+  getTargetBindings?: (draftId: string | null) => {
+    actions: ElementActions
+    shapesRef: React.RefObject<CanvasElement[]>
+  }
+  isTargetReadOnly?: (draftId: string | null) => boolean
+  onTargetChange?: (
+    draftId: string | null,
+    options?: { announce?: boolean },
+  ) => void
+  branches?: Array<{ id: string; name: string }>
+  onCreateBranch?: (name: string) => Promise<{ id: string; name: string }>
+  onRunningTargetsChange?: (draftIds: Array<string | null>) => void
   ready?: boolean
   // Exposes a send-message entry point for canvas comment pins.
   sendRef?: React.RefObject<((text: string) => boolean) | null>
@@ -302,7 +333,12 @@ export const AgentPanel = memo(function AgentPanel({
   const [chats, setChats] = useState<ChatSummary[]>([])
   const [activeChatId, setActiveChatId] = useState<string | null>(null)
   const [runningIds, setRunningIds] = useState<string[]>([])
+  const [branchDialogOpen, setBranchDialogOpen] = useState(false)
+  const [branchName, setBranchName] = useState('')
+  const [branchError, setBranchError] = useState<string | null>(null)
+  const [creatingBranch, setCreatingBranch] = useState(false)
   const sessionApis = useRef(new Map<string, ChatSessionApi>())
+  const creatingTarget = useRef<string | null>(null)
 
   useEffect(() => {
     let cancelled = false
@@ -314,17 +350,20 @@ export const AgentPanel = memo(function AgentPanel({
     void (async () => {
       try {
         let stored = await orpc.chat.list({ designId: docId })
-        if (stored.length === 0) {
+        let matching = stored.filter((chat) => (chat.draftId ?? null) === draftId)
+        if (matching.length === 0 && !isTargetReadOnly?.(draftId)) {
           const created = await orpc.chat.create({
-            id: `chat:${docId}`,
+            id: `chat_${nanoid()}`,
             designId: docId,
+            draftId,
             title: 'New chat',
           })
-          stored = [created]
+          stored = [created, ...stored]
+          matching = [created]
         }
         if (!cancelled) {
           setChats(stored)
-          setActiveChatId(stored[0].id)
+          setActiveChatId(matching[0]?.id ?? null)
         }
       } catch (error) {
         console.error('[chat] Failed to list chats:', error)
@@ -336,15 +375,67 @@ export const AgentPanel = memo(function AgentPanel({
     }
   }, [docId, ready])
 
-  const createChat = async () => {
+  const createChat = async (targetDraftId = draftId) => {
+    if (isTargetReadOnly?.(targetDraftId)) return
     const created = await orpc.chat.create({
       id: `chat_${nanoid()}`,
       designId: docId,
+      draftId: targetDraftId,
       title: 'New chat',
     })
     setChats((current) => [created, ...current])
     setActiveChatId(created.id)
+    onTargetChange?.(targetDraftId)
   }
+
+  const createBranchChat = async () => {
+    const name = branchName.trim()
+    if (!name || !onCreateBranch) return
+    setCreatingBranch(true)
+    setBranchError(null)
+    try {
+      const branch = await onCreateBranch(name)
+      await createChat(branch.id)
+      setBranchDialogOpen(false)
+      setBranchName('')
+    } catch (error) {
+      setBranchError(
+        error instanceof Error ? error.message : 'Could not create this branch.',
+      )
+    } finally {
+      setCreatingBranch(false)
+    }
+  }
+
+  useEffect(() => {
+    if (!ready || chats.length === 0) return
+    const active = chats.find((chat) => chat.id === activeChatId)
+    if ((active?.draftId ?? null) === draftId) return
+    const matching = chats.find((chat) => (chat.draftId ?? null) === draftId)
+    if (matching) {
+      setActiveChatId(matching.id)
+      return
+    }
+    if (isTargetReadOnly?.(draftId)) return
+    const marker = draftId ?? 'main'
+    if (creatingTarget.current === marker) return
+    creatingTarget.current = marker
+    void orpc.chat
+      .create({
+        id: `chat_${nanoid()}`,
+        designId: docId,
+        draftId,
+        title: 'New chat',
+      })
+      .then((created) => {
+        setChats((current) => [created, ...current])
+        setActiveChatId(created.id)
+      })
+      .catch((error) => console.error('[chat] Failed to create target chat:', error))
+      .finally(() => {
+        if (creatingTarget.current === marker) creatingTarget.current = null
+      })
+  }, [activeChatId, chats, docId, draftId, ready])
 
   const onTitleChange = useCallback((chatId: string, title: string) => {
     setChats((current) =>
@@ -358,6 +449,14 @@ export const AgentPanel = memo(function AgentPanel({
       return current.includes(chatId) ? current.filter((id) => id !== chatId) : current
     })
   }, [])
+
+  useEffect(() => {
+    onRunningTargetsChange?.(
+      runningIds.map(
+        (id) => chats.find((chat) => chat.id === id)?.draftId ?? null,
+      ),
+    )
+  }, [chats, runningIds, onRunningTargetsChange])
 
   const registerApi = useCallback((chatId: string, api: ChatSessionApi | null) => {
     if (api) sessionApis.current.set(chatId, api)
@@ -382,68 +481,175 @@ export const AgentPanel = memo(function AgentPanel({
     (chat) => chat.id === activeChatId || runningIds.includes(chat.id),
   )
   const activeChat = chats.find((chat) => chat.id === activeChatId)
+  const targetBusy = chats.some(
+    (chat) =>
+      runningIds.includes(chat.id) &&
+      chat.id !== activeChatId &&
+      (chat.draftId ?? null) === (activeChat?.draftId ?? null),
+  )
+
+  const selectChat = (chat: ChatSummary) => {
+    setActiveChatId(chat.id)
+    onTargetChange?.(chat.draftId ?? null, { announce: true })
+  }
+
+  const branchLabel = (targetDraftId: string | null | undefined) =>
+    targetDraftId
+      ? branches.find((branch) => branch.id === targetDraftId)?.name ?? 'Unknown branch'
+      : 'Main'
 
   return (
-    <Sidebar
-      variant="floating"
-      resizable
-      className="[&_[data-slot=sidebar-inner]]:overflow-hidden [&_[data-slot=sidebar-inner]]:rounded-2xl [&_[data-slot=sidebar-inner]]:shadow-sm"
-    >
-      <header className="flex items-center gap-2 border-b px-3 py-2.5">
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <button
-              type="button"
-              disabled={!activeChat}
-              className="inline-flex min-w-0 max-w-full items-center gap-2 rounded-md px-2 py-1 text-left text-sm font-semibold leading-none outline-none hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none"
-            >
-              <span
-                className={cn(
-                  'size-1.5 shrink-0 rounded-full',
-                  activeBusy ? 'animate-pulse bg-cx-accent' : 'bg-muted-foreground/40',
-                )}
-              />
-              <span className="truncate leading-none">{activeChat?.title ?? 'Loading…'}</span>
-              <ChevronDownIcon className="size-3.5 shrink-0 text-muted-foreground opacity-70" />
-            </button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="start" className="w-64">
-            <DropdownMenuLabel className="text-xs text-muted-foreground">Chats</DropdownMenuLabel>
-            {chats.map((chat) => (
-              <DropdownMenuItem key={chat.id} onSelect={() => setActiveChatId(chat.id)}>
-                <MessageSquareIcon />
-                <span className="min-w-0 flex-1 truncate">{chat.title}</span>
-                {runningIds.includes(chat.id) && (
-                  <Spinner aria-label="Agent running" className="size-3 text-cx-accent" />
-                )}
-                {chat.id === activeChatId && <CheckIcon className="text-foreground" />}
+    <>
+      <Sidebar
+        variant="floating"
+        resizable
+        className="[&_[data-slot=sidebar-inner]]:overflow-hidden [&_[data-slot=sidebar-inner]]:rounded-2xl [&_[data-slot=sidebar-inner]]:shadow-sm"
+      >
+        <header className="flex items-center gap-2 border-b px-3 py-2.5">
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <button
+                type="button"
+                disabled={!activeChat}
+                className="inline-flex min-w-0 max-w-full items-center gap-2 rounded-md px-2 py-1 text-left text-sm font-semibold leading-none outline-none hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none"
+              >
+                <span
+                  className={cn(
+                    'size-1.5 shrink-0 rounded-full',
+                    activeBusy ? 'animate-pulse bg-cx-accent' : 'bg-muted-foreground/40',
+                  )}
+                />
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate leading-none">
+                    {activeChat?.title ?? 'Loading…'}
+                  </span>
+                  {activeChat ? (
+                    <span className="mt-1 block truncate text-[10px] font-normal leading-none text-muted-foreground">
+                      Working on {branchLabel(activeChat.draftId)}
+                    </span>
+                  ) : null}
+                </span>
+                <ChevronDownIcon className="size-3.5 shrink-0 text-muted-foreground opacity-70" />
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="start" className="w-64">
+              <DropdownMenuLabel className="text-xs text-muted-foreground">
+                Chats
+              </DropdownMenuLabel>
+              {chats.map((chat) => (
+                <DropdownMenuItem key={chat.id} onSelect={() => selectChat(chat)}>
+                  <MessageSquareIcon />
+                  <span className="min-w-0 flex-1 truncate">{chat.title}</span>
+                  <span className="max-w-20 truncate text-[10px] text-muted-foreground">
+                    {branchLabel(chat.draftId)}
+                  </span>
+                  {runningIds.includes(chat.id) && (
+                    <Spinner aria-label="Agent running" className="size-3 text-cx-accent" />
+                  )}
+                  {chat.id === activeChatId && <CheckIcon className="text-foreground" />}
+                </DropdownMenuItem>
+              ))}
+              <DropdownMenuSeparator />
+              <DropdownMenuItem
+                disabled={
+                  chats.some(
+                    (chat) =>
+                      runningIds.includes(chat.id) &&
+                      (chat.draftId ?? null) === draftId,
+                  ) || isTargetReadOnly?.(draftId)
+                }
+                onSelect={() => void createChat()}
+              >
+                <PlusIcon />
+                New chat here
               </DropdownMenuItem>
-            ))}
-            <DropdownMenuSeparator />
-            <DropdownMenuItem onSelect={() => void createChat()}>
-              <PlusIcon />
-              New chat
-            </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
-      </header>
+              {onCreateBranch ? (
+                <DropdownMenuItem onSelect={() => setBranchDialogOpen(true)}>
+                  <GitBranchPlusIcon />
+                  New chat in new branch…
+                </DropdownMenuItem>
+              ) : null}
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </header>
 
-      {mountedChats.map((chat) => (
-        <ChatSession
-          key={chat.id}
-          chatId={chat.id}
-          title={chat.title}
-          active={chat.id === activeChatId}
-          actions={actions}
-          shapesRef={shapesRef}
-          selectedIdsRef={selectedIdsRef}
-          docId={docId}
-          onTitleChange={onTitleChange}
-          onRunningChange={onRunningChange}
-          registerApi={registerApi}
-        />
-      ))}
-    </Sidebar>
+        {mountedChats.map((chat) => {
+          const bindings =
+            (chat.draftId ?? null) === draftId
+              ? { actions, shapesRef }
+              : getTargetBindings?.(chat.draftId ?? null) ?? { actions, shapesRef }
+          return (
+            <ChatSession
+              key={chat.id}
+              chatId={chat.id}
+              draftId={chat.draftId ?? null}
+              title={chat.title}
+              active={chat.id === activeChatId}
+              actions={bindings.actions}
+              shapesRef={bindings.shapesRef}
+              selectedIdsRef={
+                (chat.draftId ?? null) === draftId ? selectedIdsRef : undefined
+              }
+              docId={docId}
+              targetBlocked={targetBusy && chat.id === activeChatId}
+              targetReadOnly={Boolean(isTargetReadOnly?.(chat.draftId ?? null))}
+              targetName={branchLabel(chat.draftId)}
+              onCreateBranchChat={
+                onCreateBranch ? () => setBranchDialogOpen(true) : undefined
+              }
+              onTitleChange={onTitleChange}
+              onRunningChange={onRunningChange}
+              registerApi={registerApi}
+            />
+          )
+        })}
+      </Sidebar>
+
+      <Dialog
+        open={branchDialogOpen}
+        onOpenChange={(open) => {
+          setBranchDialogOpen(open)
+          if (!open) {
+            setBranchName('')
+            setBranchError(null)
+          }
+        }}
+      >
+        <DialogPopup className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>New branch and chat</DialogTitle>
+            <DialogDescription>
+              Starts from the latest Main canvas. Your current prompt and attachments stay here.
+            </DialogDescription>
+          </DialogHeader>
+          <Input
+            autoFocus
+            value={branchName}
+            maxLength={200}
+            placeholder="Pricing experiment"
+            aria-label="Branch name"
+            onChange={(event) => setBranchName(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter') void createBranchChat()
+            }}
+          />
+          {branchError ? (
+            <p className="text-sm text-destructive">{branchError}</p>
+          ) : null}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setBranchDialogOpen(false)}>
+              Cancel
+            </Button>
+            <Button
+              disabled={!branchName.trim() || creatingBranch}
+              onClick={() => void createBranchChat()}
+            >
+              {creatingBranch ? 'Creating…' : 'Create branch'}
+            </Button>
+          </DialogFooter>
+        </DialogPopup>
+      </Dialog>
+    </>
   )
 })
 
@@ -455,6 +661,11 @@ function ChatSession({
   shapesRef,
   selectedIdsRef,
   docId,
+  draftId = null,
+  targetBlocked = false,
+  targetReadOnly = false,
+  targetName,
+  onCreateBranchChat,
   onTitleChange,
   onRunningChange,
   registerApi,
@@ -462,6 +673,10 @@ function ChatSession({
   chatId: string
   title: string
   active: boolean
+  targetBlocked?: boolean
+  targetReadOnly?: boolean
+  targetName: string
+  onCreateBranchChat?: () => void
   onTitleChange: (chatId: string, title: string) => void
   onRunningChange: (chatId: string, running: boolean) => void
   registerApi: (chatId: string, api: ChatSessionApi | null) => void
@@ -543,8 +758,8 @@ function ChatSession({
   queuedRef.current = queuedMessages
   const dispatchPrompt = useRef<(text: string, files?: FileUIPart[]) => void>(() => {})
   const composerRef = useRef<HTMLTextAreaElement>(null)
-  // Executor shared by live onToolCall and reload recovery; the id set makes
-  // execution idempotent when a resumed stream replays calls recovery already ran.
+  // Executor shared by live onToolCall and reload recovery; the id set keeps
+  // repeated tool parts from running twice.
   const runToolCall = useRef<
     (toolCall: { toolName: string; toolCallId: string; input: unknown; dynamic?: boolean }) => void
   >(() => {})
@@ -553,15 +768,13 @@ function ChatSession({
   const { messages, setMessages, sendMessage, regenerate, addToolOutput, status, stop, error } =
     useChat({
       id: chatId,
-      // Reattach to an in-flight generation after a reload (GET
-      // /api/chat/:chatId/stream; 204 when there is nothing to resume).
-      resume: true,
       transport: new DefaultChatTransport({
         api: '/api/chat',
         body: () => ({
           shapes: shapesRef.current,
           selectedIds: selectedIdsRef?.current ?? [],
           designId: docId,
+          draftId,
           chatId,
           model: modelRef.current,
           reasoningEffort: reasoningEffortRef.current,
@@ -891,6 +1104,14 @@ function ChatSession({
   // One send path for composer submits, comment pins, and queue flushes:
   // chat title, history checkpoint, canvas snapshot, sendMessage.
   dispatchPrompt.current = (text, files = []) => {
+    if (targetBlocked || targetReadOnly) {
+      setStallError(
+        targetReadOnly
+          ? 'This branch is read-only. Choose Main or an active branch to make changes.'
+          : `Another agent is already working on ${targetName}. Start a new branch to work in parallel.`,
+      )
+      return
+    }
     setStallError(null)
     recoveryRetries.current = 0
     const promptLabel =
@@ -901,11 +1122,13 @@ function ChatSession({
       onTitleChange(chatId, titleFromPrompt(promptLabel))
     }
     // safety checkpoint: restorable from History if the agent goes wrong
-    commitIfChanged(docId, `Before: ${promptLabel.slice(0, 60)}`, shapesRef.current)
+    const historyId = draftId ? `${docId}:draft:${draftId}` : docId
+    commitIfChanged(historyId, `Before: ${promptLabel.slice(0, 60)}`, shapesRef.current)
     void orpc.history
       .commit({
         id: `c${nanoid()}`,
         designId: docId,
+        draftId,
         message: `Before: ${promptLabel.slice(0, 60)}`,
         shapes: shapesRef.current,
         skipIfUnchanged: true,
@@ -957,8 +1180,7 @@ function ChatSession({
   // outputs (the tab closed between the stream finishing and the tools
   // running). Execute them once the stored messages land — their outputs
   // re-arm sendAutomaticallyWhen, so the interrupted loop continues on its
-  // own. A live resumed stream takes priority; its calls arrive via onToolCall
-  // and the executed-id set keeps the two paths from double-running anything.
+  // own. The executed-id set keeps restored tool parts from running twice.
   const recoveredRef = useRef(false)
   useEffect(() => {
     if (!chatReady || recoveredRef.current) return
@@ -1316,6 +1538,30 @@ function ChatSession({
             ))}
           </div>
         )}
+        {targetBlocked ? (
+          <div
+            role="note"
+            className="mb-2 rounded-lg border border-cx-accent/20 bg-cx-accent/8 p-2.5"
+          >
+            <p className="text-xs font-medium">
+              Another agent is already working on {targetName}.
+            </p>
+            <p className="mt-0.5 text-xs text-muted-foreground">
+              Start from the latest Main canvas to keep both agents isolated.
+            </p>
+            {onCreateBranchChat ? (
+              <Button
+                size="xs"
+                variant="outline"
+                className="mt-2"
+                onClick={onCreateBranchChat}
+              >
+                <GitBranchPlusIcon />
+                Start in a new branch…
+              </Button>
+            ) : null}
+          </div>
+        ) : null}
         <PromptInput
           accept={
             imageInputsEnabled
@@ -1329,6 +1575,14 @@ function ChatSession({
           onSubmit={async ({ text, files }) => {
             const trimmed = text.trim()
             if ((!trimmed && files.length === 0) || !chatReady) return
+            if (targetBlocked || targetReadOnly) {
+              setStallError(
+                targetReadOnly
+                  ? 'This branch is read-only. Choose Main or an active branch to make changes.'
+                  : `Another agent is already working on ${targetName}. Start a new branch to work in parallel.`,
+              )
+              return
+            }
             if ((status === 'streaming' || status === 'submitted') && files.length > 0) {
               setStallError('Wait for the current run to finish before sending attachments.')
               throw new Error('Attachments cannot be queued during an active run.')
@@ -1383,11 +1637,15 @@ function ChatSession({
             placeholder={
               !chatReady
                 ? 'Loading chat…'
+                : targetReadOnly
+                  ? 'This branch is read-only…'
+                  : targetBlocked
+                  ? `Another agent is working on ${targetName}…`
                 : status === 'streaming' || status === 'submitted'
                   ? 'Steer the agent — Enter queues your message…'
                   : 'Describe a change… (@ to mention)'
             }
-            disabled={!chatReady}
+            disabled={!chatReady || targetBlocked || targetReadOnly}
             className="w-full"
           />
           <PromptInputFooter>

@@ -183,6 +183,13 @@
       "when": 1784849487096,
       "tag": "0025_whole_jigsaw",
       "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "7",
+      "when": 1784896771407,
+      "tag": "0026_slow_hellfire_club",
+      "breakpoints": true
     }
   ]
 }

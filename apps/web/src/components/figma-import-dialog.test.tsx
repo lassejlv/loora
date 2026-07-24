@@ -12,6 +12,7 @@ const { FigmaImportDialog } = await import('./figma-import-dialog')
 const currentDocument = {
   id: 'd-current',
   name: 'Current draft',
+  revision: 7,
   shapes: [
     { id: 'e-existing', name: 'Existing', x: 20, y: 30, w: 100, h: 80, code: '<div />' },
   ],

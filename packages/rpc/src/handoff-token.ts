@@ -4,6 +4,7 @@ const DEFAULT_TTL_SECONDS = 7 * 24 * 60 * 60
 
 interface HandoffClaims {
   designId: string
+  draftId?: string
   userId: string
   expiresAt: number
   nonce: string
@@ -29,9 +30,11 @@ export async function createHandoffToken(
   designId: string,
   userId: string,
   ttlSeconds = DEFAULT_TTL_SECONDS,
+  draftId?: string | null,
 ) {
   const claims: HandoffClaims = {
     designId,
+    ...(draftId ? { draftId } : {}),
     userId,
     expiresAt: Math.floor(Date.now() / 1000) + ttlSeconds,
     nonce: crypto.randomUUID(),
@@ -63,6 +66,10 @@ export async function readHandoffToken(token: string): Promise<HandoffClaims | n
       typeof claims.userId !== 'string' ||
       typeof claims.expiresAt !== 'number' ||
       typeof claims.nonce !== 'string' ||
+      (claims.draftId !== undefined &&
+        (typeof claims.draftId !== 'string' ||
+          claims.draftId.length === 0 ||
+          claims.draftId.length > 128)) ||
       claims.designId.length > 128 ||
       claims.userId.length > 128 ||
       claims.expiresAt <= Math.floor(Date.now() / 1000)

@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { Button } from '#/components/ui/button'
 import { Input } from '#/components/ui/input'
 import { orpc } from '#/lib/orpc-client'
-import { MAX_TOP_UP_CENTS, MIN_TOP_UP_CENTS } from '@loora/auth/top-up-policy'
+import { MAX_TOP_UP_CENTS, MIN_TOP_UP_CENTS } from '@loora/billing/top-up-policy'
 
 type BillingStatus = Awaited<ReturnType<typeof orpc.billing.status>>
 

@@ -15,6 +15,7 @@ const LEGACY_INTEGRATION_SETTINGS = new Set<string>(INTEGRATION_TABS)
 
 export const editorSearchParams = {
   d: parseAsString,
+  draft: parseAsString,
   settings: parseAsStringLiteral(SETTINGS_TABS),
   integration: parseAsStringLiteral(INTEGRATION_TABS),
   agent: parseAsBoolean.withDefault(true),
@@ -30,6 +31,7 @@ export const editorValidateSearch = createStandardSchemaV1(editorSearchParams, {
 
 export type EditorSearchParams = {
   d: string | null
+  draft: string | null
   settings: SettingsTab | null
   integration: IntegrationTab | null
   agent: boolean

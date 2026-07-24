@@ -13,6 +13,14 @@ const orpc = {
     save: mock(),
   },
   history: { commit: mock() },
+  draft: {
+    create: mock(),
+    compare: mock(),
+    apply: mock(),
+    rename: mock(),
+    close: mock(),
+    reopen: mock(),
+  },
   asset: {
     list: mock(),
   },
@@ -30,21 +38,12 @@ const orpc = {
 mock.module('#/lib/orpc-client', () => ({ orpc }))
 const snapshotCanvas = mock().mockResolvedValue('data:image/png;base64,test')
 mock.module('#/lib/snapshot', () => ({ snapshotCanvas }))
+mock.module('#/components/design-diff', () => ({ DesignDiff: () => null }))
 
 const { AgentPanel, ChatMessageRow } = await import('./agent-panel')
+const { BranchControls } = await import('./draft-controls')
 const originalFetch = globalThis.fetch
 const originalLocalStorage = Object.getOwnPropertyDescriptor(globalThis, 'localStorage')
-
-// resume: true fires a GET /api/chat/:id/stream on every session mount;
-// answer it with 204 (nothing to resume) so tests only count generation POSTs.
-function withResume204(handler: (...args: unknown[]) => unknown) {
-  return ((url: RequestInfo | URL, init?: RequestInit) => {
-    if (!init?.method || init.method === 'GET') {
-      return Promise.resolve(new Response(null, { status: 204 }))
-    }
-    return handler(url, init)
-  }) as unknown as typeof fetch
-}
 
 function stream(...chunks: object[]) {
   const body = [...chunks.map((chunk) => `data: ${JSON.stringify(chunk)}\n\n`), 'data: [DONE]\n\n'].join('')
@@ -69,6 +68,7 @@ describe('AgentPanel empty response recovery', () => {
     orpc.chat.get.mockResolvedValue({ messages: [] })
     orpc.chat.save.mockResolvedValue({})
     orpc.history.commit.mockResolvedValue({})
+    orpc.draft.create.mockResolvedValue({})
     orpc.asset.list.mockResolvedValue([])
     orpc.github.status.mockResolvedValue({
       enabled: false,
@@ -121,7 +121,7 @@ describe('AgentPanel empty response recovery', () => {
           { type: 'finish' },
         ),
       )
-    globalThis.fetch = withResume204(chatFetch)
+    globalThis.fetch = chatFetch as unknown as typeof fetch
 
     const shapesRef = { current: [] as CanvasElement[] }
     const actions: ElementActions = {
@@ -169,7 +169,7 @@ describe('AgentPanel empty response recovery', () => {
         { type: 'finish' },
       ),
     )
-    globalThis.fetch = withResume204(chatFetch)
+    globalThis.fetch = chatFetch as unknown as typeof fetch
 
     const shapesRef = { current: [] as CanvasElement[] }
     const actions: ElementActions = {
@@ -218,7 +218,7 @@ describe('AgentPanel empty response recovery', () => {
           { type: 'finish' },
         ),
       )
-    globalThis.fetch = withResume204(chatFetch)
+    globalThis.fetch = chatFetch as unknown as typeof fetch
 
     const shapesRef = { current: [] as CanvasElement[] }
     const actions: ElementActions = {
@@ -294,7 +294,7 @@ describe('AgentPanel empty response recovery', () => {
           { type: 'finish' },
         ),
       )
-    globalThis.fetch = withResume204(chatFetch)
+    globalThis.fetch = chatFetch as unknown as typeof fetch
 
     const shapesRef = { current: [] as CanvasElement[] }
     const actions: ElementActions = {
@@ -339,7 +339,7 @@ describe('AgentPanel empty response recovery', () => {
         { type: 'finish' },
       ),
     )
-    globalThis.fetch = withResume204(chatFetch)
+    globalThis.fetch = chatFetch as unknown as typeof fetch
 
     const shapesRef = {
       current: [
@@ -390,7 +390,7 @@ describe('AgentPanel empty response recovery', () => {
         { type: 'finish' },
       ),
     )
-    globalThis.fetch = withResume204(chatFetch)
+    globalThis.fetch = chatFetch as unknown as typeof fetch
 
     const shapesRef = { current: [] as CanvasElement[] }
     const actions: ElementActions = {
@@ -453,7 +453,7 @@ describe('AgentPanel empty response recovery', () => {
         { type: 'finish' },
       ),
     )
-    globalThis.fetch = withResume204(chatFetch)
+    globalThis.fetch = chatFetch as unknown as typeof fetch
 
     const shapesRef = {
       current: [
@@ -601,4 +601,38 @@ describe('AgentPanel empty response recovery', () => {
     expect(historicalRenders).toHaveBeenCalledTimes(1)
     expect(updateSamples.every((duration) => Number.isFinite(duration))).toBe(true)
   })
+
+  it('keeps the active branch name visible beside the document context', () => {
+    const branch = {
+      id: 'branch-pricing',
+      name: 'Pricing experiment',
+      description: '',
+      status: 'active' as const,
+      baseRevision: 1,
+      revision: 2,
+      proposedAt: null,
+      appliedAt: null,
+      closedAt: null,
+      createdAt: 1,
+      updatedAt: 2,
+    }
+
+    render(
+      <BranchControls
+        designId="test"
+        branches={[branch]}
+        activeBranchId={branch.id}
+        onSwitch={mock()}
+        onCreated={mock()}
+        onChanged={mock()}
+        onApplied={mock()}
+        flush={mock()}
+      />,
+    )
+
+    expect(screen.getByText('Pricing experiment')).toBeTruthy()
+    expect(screen.getByText('Isolated from Main')).toBeTruthy()
+    expect(screen.getByRole('button', { name: /Review & merge/ })).toBeTruthy()
+  })
+
 })

@@ -1,6 +1,7 @@
 import { Buffer } from 'node:buffer'
+import { and, eq } from 'drizzle-orm'
 import { db } from '@loora/db'
-import { asset, design, designVersion } from '@loora/db/schema'
+import { asset, design, designDraft, designVersion } from '@loora/db/schema'
 import type { CanvasElement } from '@loora/db/canvas'
 import {
   FigmaIntegrationError,
@@ -38,6 +39,8 @@ export interface FigmaImportTarget {
   id: string
   name: string
   shapes: CanvasElement[]
+  draftId?: string | null
+  revision: number
 }
 
 interface FigmaBounds {
@@ -768,46 +771,85 @@ export async function importFigmaDesign(
     }
 
     const now = new Date()
-    const insertDesign = db
-      .insert(design)
-      .values({
-        id: designId,
+    await db.transaction(async (tx) => {
+      if (storedAssets.length) await tx.insert(asset).values(storedAssets)
+
+      if (target?.draftId) {
+        const [updated] = await tx
+          .update(designDraft)
+          .set({ shapes, revision: target.revision + 1, updatedAt: now })
+          .where(
+            and(
+              eq(designDraft.id, target.draftId),
+              eq(designDraft.designId, target.id),
+              eq(designDraft.userId, userId),
+              eq(designDraft.status, 'active'),
+              eq(designDraft.revision, target.revision),
+            ),
+          )
+          .returning({ id: designDraft.id })
+        if (!updated) {
+          throw new FigmaIntegrationError(
+            'The target draft changed during import. Reload it and try again.',
+            'INVALID_FILE',
+          )
+        }
+      } else if (target) {
+        const [updated] = await tx
+          .update(design)
+          .set({
+            name: designName,
+            shapes,
+            revision: target.revision + 1,
+            updatedAt: now,
+          })
+          .where(
+            and(
+              eq(design.id, target.id),
+              eq(design.userId, userId),
+              eq(design.revision, target.revision),
+            ),
+          )
+          .returning({ id: design.id })
+        if (!updated) {
+          throw new FigmaIntegrationError(
+            'Main changed during import. Reload it and try again.',
+            'INVALID_FILE',
+          )
+        }
+      } else {
+        await tx.insert(design).values({
+          id: designId,
+          userId,
+          name: designName,
+          shapes,
+          createdAt: now,
+          updatedAt: now,
+        })
+      }
+
+      await tx.insert(designVersion).values({
+        id: versionId,
+        designId,
+        draftId: target?.draftId ?? null,
         userId,
-        name: designName,
+        message: 'Imported from Figma',
         shapes,
+        added: importedShapes.length,
+        removed: 0,
+        changed: 0,
         createdAt: now,
-        updatedAt: now,
       })
-      .onConflictDoUpdate({
-        target: [design.id, design.userId],
-        set: { name: designName, shapes, updatedAt: now },
-      })
-    const insertVersion = db.insert(designVersion).values({
-      id: versionId,
-      designId,
-      userId,
-      message: 'Imported from Figma',
-      shapes,
-      added: importedShapes.length,
-      removed: 0,
-      changed: 0,
-      createdAt: now,
     })
-    if (storedAssets.length) {
-      await db.batch([
-        db.insert(asset).values(storedAssets),
-        insertDesign,
-        insertVersion,
-      ])
-    } else {
-      await db.batch([
-        insertDesign,
-        insertVersion,
-      ])
-    }
 
     return {
-      design: { id: designId, name: designName, shapes, updatedAt: now.getTime() },
+      design: {
+        id: designId,
+        name: designName,
+        shapes,
+        revision: target ? target.revision + 1 : 0,
+        updatedAt: now.getTime(),
+      },
       summary: {
         pages: converted.pages,
         frames: importedShapes.length,

@@ -1,22 +1,29 @@
 // Tool surface of the Loora MCP server, bound to one user id. Elements are
-// boxes of HTML or JSX code (see @loora/db/canvas). Beware concurrent web
-// sessions: the app's debounced design.save writes whole shape arrays, so
-// edits made here while the design is open in a browser can be overwritten.
+// boxes of HTML or JSX code (see @loora/db/canvas). Element writes use
+// revision-checked retries so concurrent changes on the same target are
+// reconciled instead of silently replacing a stale shape array.
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { z } from 'zod'
 import type { CanvasElement } from '@loora/db/canvas'
 import {
   MAX_CODE_LENGTH,
   MAX_NAME_LENGTH,
+  applyDraft,
+  closeDraft,
+  compareDraft,
+  createDraft,
   createDesign,
   deleteDesign,
   getDesign,
   listAssets,
+  listDrafts,
   listDesigns,
   listVersions,
+  mutateShapes,
   newElementId,
   renameDesign,
-  saveShapes,
+  reopenDraft,
+  proposeDraft,
   searchElements,
   summarizeElement,
 } from './designs'
@@ -31,6 +38,7 @@ function fail(error: unknown) {
 }
 
 const designId = z.string().min(1).max(128).describe('Design id')
+const draftId = z.string().min(1).max(128).describe('Draft id')
 const elementCode = z
   .string()
   .max(MAX_CODE_LENGTH)
@@ -66,14 +74,19 @@ export function createLooraServer(userId: string) {
         'Read one design. Returns element summaries (geometry, code length, first code line) by default; set includeCode to get full element code.',
       inputSchema: {
         id: designId,
+        draftId: draftId.optional().describe('Draft target; omit for Main'),
         includeCode: z.boolean().default(false).describe('Include full code of every element'),
       },
     },
-    tool(async ({ id, includeCode }: { id: string; includeCode: boolean }) => {
-      const found = await getDesign(userId, id)
+    tool(async ({ id, draftId, includeCode }: { id: string; draftId?: string; includeCode: boolean }) => {
+      const found = await getDesign(userId, id, draftId)
       return {
         id: found.id,
         name: found.name,
+        draftId: found.draftId,
+        draftName: found.draftName,
+        status: found.status,
+        revision: found.revision,
         updatedAt: found.updatedAt.toISOString(),
         elements: includeCode ? found.shapes : found.shapes.map(summarizeElement),
       }
@@ -87,6 +100,111 @@ export function createLooraServer(userId: string) {
       inputSchema: { name: z.string().trim().min(1).max(MAX_NAME_LENGTH) },
     },
     tool(async ({ name }: { name: string }) => createDesign(userId, name)),
+  )
+
+  server.registerTool(
+    'list_drafts',
+    {
+      description: 'List active, proposed, applied, and closed drafts for a design.',
+      inputSchema: { designId },
+    },
+    tool(async ({ designId }: { designId: string }) => listDrafts(userId, designId)),
+  )
+
+  server.registerTool(
+    'create_draft',
+    {
+      description: 'Create an isolated draft from the current Main canvas.',
+      inputSchema: {
+        designId,
+        name: z.string().trim().min(1).max(MAX_NAME_LENGTH),
+      },
+    },
+    tool(async ({ designId, name }: { designId: string; name: string }) =>
+      createDraft(userId, designId, name),
+    ),
+  )
+
+  server.registerTool(
+    'propose_draft',
+    {
+      description: 'Freeze an active draft as a change proposal for review.',
+      inputSchema: {
+        designId,
+        draftId,
+        description: z.string().trim().max(2_000).default(''),
+      },
+    },
+    tool(
+      async (args: { designId: string; draftId: string; description: string }) =>
+        proposeDraft(userId, args.designId, args.draftId, args.description),
+    ),
+  )
+
+  server.registerTool(
+    'reopen_draft',
+    {
+      description: 'Return a proposed draft to editable active status.',
+      inputSchema: { designId, draftId },
+    },
+    tool(async (args: { designId: string; draftId: string }) =>
+      reopenDraft(userId, args.designId, args.draftId),
+    ),
+  )
+
+  server.registerTool(
+    'compare_draft',
+    {
+      description:
+        'Compare a draft with current Main. Returns revisions, change counts, and merge conflicts.',
+      inputSchema: { designId, draftId },
+    },
+    tool(async (args: { designId: string; draftId: string }) =>
+      compareDraft(userId, args.designId, args.draftId),
+    ),
+  )
+
+  server.registerTool(
+    'apply_draft',
+    {
+      description:
+        'Apply a reviewed draft to Main atomically. Every reported conflict needs a main or draft resolution.',
+      inputSchema: {
+        designId,
+        draftId,
+        expectedMainRevision: z.number().int().nonnegative(),
+        expectedDraftRevision: z.number().int().nonnegative(),
+        resolutions: z.record(z.string(), z.enum(['main', 'draft'])).default({}),
+      },
+    },
+    tool(
+      async (args: {
+        designId: string
+        draftId: string
+        expectedMainRevision: number
+        expectedDraftRevision: number
+        resolutions: Record<string, 'main' | 'draft'>
+      }) =>
+        applyDraft(
+          userId,
+          args.designId,
+          args.draftId,
+          args.expectedMainRevision,
+          args.expectedDraftRevision,
+          args.resolutions,
+        ),
+    ),
+  )
+
+  server.registerTool(
+    'close_draft',
+    {
+      description: 'Close an active or proposed draft without applying it.',
+      inputSchema: { designId, draftId },
+    },
+    tool(async (args: { designId: string; draftId: string }) =>
+      closeDraft(userId, args.designId, args.draftId),
+    ),
   )
 
   server.registerTool(
@@ -111,10 +229,14 @@ export function createLooraServer(userId: string) {
     'read_element',
     {
       description: 'Read one canvas element including its full code.',
-      inputSchema: { designId, elementId: z.string().min(1).max(128) },
+      inputSchema: {
+        designId,
+        draftId: draftId.optional().describe('Draft target; omit for Main'),
+        elementId: z.string().min(1).max(128),
+      },
     },
-    tool(async (args: { designId: string; elementId: string }) => {
-      const found = await getDesign(userId, args.designId)
+    tool(async (args: { designId: string; draftId?: string; elementId: string }) => {
+      const found = await getDesign(userId, args.designId, args.draftId)
       const element = found.shapes.find((shape) => shape.id === args.elementId)
       if (!element) {
         throw new Error(`Element "${args.elementId}" not found in design "${args.designId}"`)
@@ -130,6 +252,7 @@ export function createLooraServer(userId: string) {
         'Add a code element to a design canvas. x/y are canvas coordinates, w/h the box size in pixels.',
       inputSchema: {
         designId,
+        draftId: draftId.optional().describe('Draft target; omit for Main'),
         name: z.string().trim().min(1).max(MAX_NAME_LENGTH),
         x: z.number(),
         y: z.number(),
@@ -141,6 +264,7 @@ export function createLooraServer(userId: string) {
     tool(
       async (args: {
         designId: string
+        draftId?: string
         name: string
         x: number
         y: number
@@ -148,7 +272,6 @@ export function createLooraServer(userId: string) {
         h: number
         code: string
       }) => {
-        const found = await getDesign(userId, args.designId)
         const element: CanvasElement = {
           id: newElementId(),
           name: args.name,
@@ -158,8 +281,17 @@ export function createLooraServer(userId: string) {
           h: args.h,
           code: args.code,
         }
-        await saveShapes(userId, args.designId, [...found.shapes, element])
-        return { created: element.id }
+        const result = await mutateShapes(
+          userId,
+          args.designId,
+          args.draftId,
+          (shapes) => [...shapes, element],
+        )
+        return {
+          created: element.id,
+          target: { designId: args.designId, draftId: args.draftId ?? null },
+          revision: result.revision,
+        }
       },
     ),
   )
@@ -171,6 +303,7 @@ export function createLooraServer(userId: string) {
         'Update fields of an existing element. Only the provided fields change; omitted ones keep their value.',
       inputSchema: {
         designId,
+        draftId: draftId.optional().describe('Draft target; omit for Main'),
         elementId: z.string().min(1).max(128),
         name: z.string().trim().min(1).max(MAX_NAME_LENGTH).optional(),
         x: z.number().optional(),
@@ -183,6 +316,7 @@ export function createLooraServer(userId: string) {
     tool(
       async (args: {
         designId: string
+        draftId?: string
         elementId: string
         name?: string
         x?: number
@@ -191,19 +325,29 @@ export function createLooraServer(userId: string) {
         h?: number
         code?: string
       }) => {
-        const found = await getDesign(userId, args.designId)
-        const index = found.shapes.findIndex((shape) => shape.id === args.elementId)
-        if (index === -1) {
-          throw new Error(`Element "${args.elementId}" not found in design "${args.designId}"`)
+        const {
+          designId: _designId,
+          draftId: _draftId,
+          elementId: _elementId,
+          ...patch
+        } = args
+        const result = await mutateShapes(userId, args.designId, args.draftId, (shapes) => {
+          const index = shapes.findIndex((shape) => shape.id === args.elementId)
+          if (index === -1) {
+            throw new Error(`Element "${args.elementId}" not found in design "${args.designId}"`)
+          }
+          const next = [...shapes]
+          next[index] = {
+            ...next[index],
+            ...Object.fromEntries(Object.entries(patch).filter(([, value]) => value !== undefined)),
+          }
+          return next
+        })
+        return {
+          updated: args.elementId,
+          target: { designId: args.designId, draftId: args.draftId ?? null },
+          revision: result.revision,
         }
-        const { designId: _designId, elementId: _elementId, ...patch } = args
-        const next = [...found.shapes]
-        next[index] = {
-          ...next[index],
-          ...Object.fromEntries(Object.entries(patch).filter(([, value]) => value !== undefined)),
-        }
-        await saveShapes(userId, args.designId, next)
-        return { updated: args.elementId }
       },
     ),
   )
@@ -212,16 +356,25 @@ export function createLooraServer(userId: string) {
     'delete_element',
     {
       description: 'Remove an element from a design canvas.',
-      inputSchema: { designId, elementId: z.string().min(1).max(128) },
+      inputSchema: {
+        designId,
+        draftId: draftId.optional().describe('Draft target; omit for Main'),
+        elementId: z.string().min(1).max(128),
+      },
     },
-    tool(async (args: { designId: string; elementId: string }) => {
-      const found = await getDesign(userId, args.designId)
-      const next = found.shapes.filter((shape) => shape.id !== args.elementId)
-      if (next.length === found.shapes.length) {
-        throw new Error(`Element "${args.elementId}" not found in design "${args.designId}"`)
+    tool(async (args: { designId: string; draftId?: string; elementId: string }) => {
+      const result = await mutateShapes(userId, args.designId, args.draftId, (shapes) => {
+        const next = shapes.filter((shape) => shape.id !== args.elementId)
+        if (next.length === shapes.length) {
+          throw new Error(`Element "${args.elementId}" not found in design "${args.designId}"`)
+        }
+        return next
+      })
+      return {
+        deleted: args.elementId,
+        target: { designId: args.designId, draftId: args.draftId ?? null },
+        revision: result.revision,
       }
-      await saveShapes(userId, args.designId, next)
-      return { deleted: args.elementId }
     }),
   )
 
@@ -230,10 +383,14 @@ export function createLooraServer(userId: string) {
     {
       description:
         'Search element code in a design (case-insensitive substring, up to 50 matching lines).',
-      inputSchema: { designId, query: z.string().min(1).max(200) },
+      inputSchema: {
+        designId,
+        draftId: draftId.optional().describe('Draft target; omit for Main'),
+        query: z.string().min(1).max(200),
+      },
     },
-    tool(async (args: { designId: string; query: string }) => {
-      const found = await getDesign(userId, args.designId)
+    tool(async (args: { designId: string; draftId?: string; query: string }) => {
+      const found = await getDesign(userId, args.designId, args.draftId)
       return searchElements(found.shapes, args.query)
     }),
   )
@@ -242,10 +399,14 @@ export function createLooraServer(userId: string) {
     'list_versions',
     {
       description: 'List version history commits of a design (newest first).',
-      inputSchema: { designId, limit: z.number().int().min(1).max(50).default(20) },
+      inputSchema: {
+        designId,
+        draftId: draftId.optional().describe('Draft target; omit for Main'),
+        limit: z.number().int().min(1).max(50).default(20),
+      },
     },
-    tool(async (args: { designId: string; limit: number }) =>
-      listVersions(userId, args.designId, args.limit),
+    tool(async (args: { designId: string; draftId?: string; limit: number }) =>
+      listVersions(userId, args.designId, args.limit, args.draftId),
     ),
   )
 

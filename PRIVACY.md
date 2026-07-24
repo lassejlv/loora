@@ -116,7 +116,7 @@ We share personal data with service providers that process it on our behalf or a
 | Authentication | Better Auth (self-hosted in our stack); Google (sign-in) | Account/session; identity provider |
 | Payments | Polar | Subscriptions, checkouts, customer portal, meters, refunds |
 | Analytics | Databuddy | Product analytics |
-| AI (Loora-managed) | Wafer | Model inference for included AI credits |
+| AI (Loora-managed) | OpenCode Go | Model inference for included AI credits |
 | AI (user-connected) | OpenAI / ChatGPT | Inference on your connected ChatGPT account |
 | Integrations | GitHub, Figma | Optional repository / design import features |
 | Email / support | Your messages to support@loora.design | Support correspondence |
@@ -129,7 +129,7 @@ We may also disclose data if required by law, to protect rights and safety, or i
 
 Some providers may process data in the EU/EEA and/or other countries.
 
-TODO(confirm): exact primary hosting and subprocessors’ processing regions for Railway, S3-compatible asset storage, Wafer, Databuddy, Polar, and Google/GitHub/Figma/OpenAI, and the transfer safeguards relied on (for example EU Standard Contractual Clauses or adequacy decisions).
+TODO(confirm): exact primary hosting and subprocessors’ processing regions for Railway, S3-compatible asset storage, OpenCode Go, Databuddy, Polar, and Google/GitHub/Figma/OpenAI, and the transfer safeguards relied on (for example EU Standard Contractual Clauses or adequacy decisions).
 
 Where international transfers occur, we take steps appropriate to the provider relationship and applicable law. Contact us if you need current subprocessor transfer details.
 
@@ -176,12 +176,12 @@ The Service is not directed to children under 16. We do not knowingly collect pe
 
 Loora processes your prompts, design context, and (when enabled for the model) visual snapshots to generate or edit designs.
 
-- **Loora-managed models** are routed through our AI provider (currently Wafer). Provider credentials stay on our servers; they are not exposed to the browser.
+- **Loora-managed models** are routed through our AI provider (currently OpenCode Go). Provider credentials stay on our servers; they are not exposed to the browser.
 - **ChatGPT-backed models** run through your connected ChatGPT account. Those requests are subject to OpenAI / ChatGPT terms and privacy practices in addition to this policy.
 - Tool results and chat history are stored in your Loora design chats so you can continue work.
 - We use AI to provide the product features you request. We do not use your content to make solely automated legal or similarly significant decisions about you.
 
-TODO(confirm): whether Wafer and any upstream model hosts use customer content for training, and what retention they apply—do not assume “no training” until verified in provider terms/DPA.
+OpenCode states that providers used for OpenCode Go follow a zero-retention policy and do not use customer data for model training. Contractual terms and upstream provider details should still be confirmed before relying on that statement for compliance purposes.
 
 ## 13. Changes To This Policy
 

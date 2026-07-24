@@ -1,10 +1,10 @@
+import { createAnthropic } from '@ai-sdk/anthropic'
 import { createOpenAICompatible } from '@ai-sdk/openai-compatible'
 import { createChatGPTProxyProvider } from '@opencoredev/loginwithchatgpt-ai'
 import {
   convertToModelMessages,
   stepCountIs,
   streamText,
-  UI_MESSAGE_STREAM_HEADERS,
   type UIMessage,
 } from 'ai'
 import type { CanvasElement } from '@loora/db/canvas'
@@ -24,7 +24,7 @@ import {
   recordSubscriberUsage,
   recordUsage,
 } from './usage'
-import { flushPendingPolarUsage } from '@loora/auth/billing-usage'
+import { flushPendingPolarUsage } from '@loora/billing/billing-usage'
 import { requireSession } from '@loora/auth'
 import {
   acquireGenerationLease,
@@ -32,23 +32,17 @@ import {
   refreshEntitlement,
   releaseGenerationLease,
   subscriptionRequiredResponse,
-} from '@loora/auth/billing'
-import { remainingCredits, usesPolarCredits } from '@loora/auth/billing-policy'
-import { getTopUpCreditStatus } from '@loora/auth/credit-top-ups'
+} from '@loora/billing/billing'
+import { remainingCredits, usesPolarCredits } from '@loora/billing/billing-policy'
+import { getTopUpCreditStatus } from '@loora/billing/credit-top-ups'
 import { canUseApp, previewAccessRequiredResponse } from '@loora/auth/preview-access'
 import { buildAgentSystemPrompt } from './prompts'
 import { and, desc, eq } from 'drizzle-orm'
 import { db } from '@loora/db'
-import { asset, designChat, userPreferences } from '@loora/db/schema'
+import { asset, designChat, designDraft, userPreferences } from '@loora/db/schema'
 import { chatgptAuth } from './internal/chatgpt-auth'
 import { getGitHubStatus } from '@loora/auth/github'
 import { createGenerationUsageAccounting } from './internal/usage-accounting'
-import {
-  clearActiveStream,
-  getActiveStream,
-  getStreamContext,
-  setActiveStream,
-} from './internal/resume'
 
 export async function handleAgentChatGPTRequest(request: Request): Promise<Response> {
   const session = await requireSession(request)
@@ -84,6 +78,7 @@ export async function handleAgentChatRequest(request: Request): Promise<Response
     shapes,
     selectedIds,
     designId,
+    draftId,
     chatId,
     model: modelKey,
     reasoningEffort: requestedReasoningEffort,
@@ -93,6 +88,7 @@ export async function handleAgentChatRequest(request: Request): Promise<Response
     shapes: CanvasElement[]
     selectedIds?: string[]
     designId?: string
+    draftId?: string | null
     chatId?: string
     model?: string
     reasoningEffort?: string
@@ -100,6 +96,39 @@ export async function handleAgentChatRequest(request: Request): Promise<Response
   }
   if (!designId || !chatId) {
     return Response.json({ error: 'A design and chat are required.' }, { status: 400 })
+  }
+
+  const [chatTarget] = await db
+    .select({ designId: designChat.designId, draftId: designChat.draftId })
+    .from(designChat)
+    .where(and(eq(designChat.id, chatId), eq(designChat.userId, session.user.id)))
+    .limit(1)
+  if (
+    !chatTarget ||
+    chatTarget.designId !== designId ||
+    (chatTarget.draftId ?? null) !== (draftId ?? null)
+  ) {
+    return Response.json({ error: 'Chat target not found.' }, { status: 404 })
+  }
+  if (draftId) {
+    const [draft] = await db
+      .select({ status: designDraft.status })
+      .from(designDraft)
+      .where(
+        and(
+          eq(designDraft.id, draftId),
+          eq(designDraft.designId, designId),
+          eq(designDraft.userId, session.user.id),
+        ),
+      )
+      .limit(1)
+    if (!draft) return Response.json({ error: 'Draft not found.' }, { status: 404 })
+    if (draft.status !== 'active') {
+      return Response.json(
+        { error: 'This draft is read-only.', code: 'DRAFT_READ_ONLY' },
+        { status: 409 },
+      )
+    }
   }
 
   let githubConnected = false
@@ -155,13 +184,19 @@ export async function handleAgentChatRequest(request: Request): Promise<Response
         { status: 503 },
       )
     }
-    const provider = createOpenAICompatible({
-      name: modelConfig.provider,
-      baseURL: providerConfig.baseURL,
-      apiKey,
-      headers: providerConfig.headers,
-      includeUsage: providerConfig.includeUsage,
-    })
+    const provider = providerConfig.kind === 'anthropic-compatible'
+      ? createAnthropic({
+          baseURL: providerConfig.baseURL,
+          apiKey,
+          headers: providerConfig.headers,
+        })
+      : createOpenAICompatible({
+          name: modelConfig.provider,
+          baseURL: providerConfig.baseURL,
+          apiKey,
+          headers: providerConfig.headers,
+          includeUsage: providerConfig.includeUsage,
+        })
     model = provider(modelConfig.modelId)
   }
   const imageInputsEnabled = modelSupportsImageInput(key)
@@ -275,57 +310,10 @@ export async function handleAgentChatRequest(request: Request): Promise<Response
     onFinish: usageAccounting.onFinish,
   })
 
-  const streamContext = getStreamContext()
   return result.toUIMessageStreamResponse({
     onError: (error) =>
       error instanceof Error
         ? sanitizeModelNames(error.message)
         : 'The model request failed.',
-    // With Redis configured, mirror the SSE stream into a resumable buffer so
-    // a reloaded client can reattach via GET /api/chat/:chatId/stream. The
-    // key TTL covers cleanup; a new generation for the chat overwrites it.
-    ...(streamContext
-      ? {
-          consumeSseStream: async ({ stream }: { stream: ReadableStream<string> }) => {
-            const streamId = `str_${crypto.randomUUID()}`
-            try {
-              await streamContext.createNewResumableStream(streamId, () => stream)
-              await setActiveStream(chatId, streamId)
-            } catch (error) {
-              console.error('[resume] Failed to register resumable stream:', error)
-            }
-          },
-        }
-      : {}),
   })
-}
-
-// GET /api/chat/:chatId/stream — reattach to an in-flight generation after a
-// reload. 204 means "nothing to resume" and the client carries on normally.
-export async function handleAgentChatStreamResumeRequest(
-  request: Request,
-  chatId: string,
-): Promise<Response> {
-  const session = await requireSession(request)
-  if (!session) return Response.json({ error: 'Unauthorized' }, { status: 401 })
-  if (!canUseApp(session.user)) return previewAccessRequiredResponse()
-
-  const [chat] = await db
-    .select({ id: designChat.id })
-    .from(designChat)
-    .where(and(eq(designChat.id, chatId), eq(designChat.userId, session.user.id)))
-    .limit(1)
-  if (!chat) return Response.json({ error: 'Not found' }, { status: 404 })
-
-  const streamContext = getStreamContext()
-  if (!streamContext) return new Response(null, { status: 204 })
-  const streamId = await getActiveStream(chatId)
-  if (!streamId) return new Response(null, { status: 204 })
-
-  const stream = await streamContext.resumeExistingStream(streamId)
-  if (!stream) {
-    await clearActiveStream(chatId)
-    return new Response(null, { status: 204 })
-  }
-  return new Response(stream, { headers: UI_MESSAGE_STREAM_HEADERS })
 }

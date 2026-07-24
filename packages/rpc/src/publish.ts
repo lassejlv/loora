@@ -2,7 +2,7 @@ import { Buffer } from 'node:buffer'
 import { and, eq, gte, lt, sql } from 'drizzle-orm'
 import { db } from '@loora/db'
 import { design, publishEgress, publishLink, user } from '@loora/db/schema'
-import { authorizeBilling } from '@loora/auth/billing'
+import { authorizeBilling } from '@loora/billing/billing'
 import { canUseApp } from '@loora/auth/preview-access'
 
 export const PUBLISH_TTL_MS = 12 * 60 * 60 * 1000

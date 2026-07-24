@@ -11,15 +11,15 @@
     "./server": "./src/server.ts"
   },
   "dependencies": {
+    "@ai-sdk/anthropic": "^3.0.19",
     "@ai-sdk/openai-compatible": "^3.0.12",
     "@loora/auth": "workspace:*",
+    "@loora/billing": "workspace:*",
     "@loora/db": "workspace:*",
     "@opencoredev/loginwithchatgpt-ai": "^0.2.0",
     "@opencoredev/loginwithchatgpt-server": "^0.2.0",
     "ai": "catalog:",
     "drizzle-orm": "catalog:",
-    "redis": "^6.1.0",
-    "resumable-stream": "^2.2.12",
     "zod": "catalog:"
   },
   "devDependencies": {

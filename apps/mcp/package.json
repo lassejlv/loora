@@ -9,6 +9,7 @@
   },
   "dependencies": {
     "@loora/auth": "workspace:*",
+    "@loora/billing": "workspace:*",
     "@loora/db": "workspace:*",
     "@modelcontextprotocol/sdk": "^1.21.0",
     "drizzle-orm": "catalog:",

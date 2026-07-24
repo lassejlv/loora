@@ -20,7 +20,12 @@ import {
   replaceImageSource,
   type CanvasElement,
 } from '#/lib/canvas'
-import { hasStoredElements, loadElements, saveElements } from '#/lib/docs'
+import {
+  hasStoredTargetElements,
+  loadTargetElements,
+  saveTargetElements,
+} from '#/lib/docs'
+import { DRAFT_STATUSES, type DraftStatus } from '@loora/db/drafts'
 
 // Fullscreen preview of a single canvas element ("page"), outside the editor.
 // The element renders interactive at viewport size, so responsive page code
@@ -31,6 +36,7 @@ import { hasStoredElements, loadElements, saveElements } from '#/lib/docs'
 
 const blockPageSearchParams = {
   element: parseAsString,
+  draft: parseAsString,
 }
 
 export const Route = createFileRoute('/blockpage/$designId')({
@@ -42,7 +48,13 @@ export const Route = createFileRoute('/blockpage/$designId')({
 type LoadState =
   | { status: 'loading' }
   | { status: 'error'; message: string }
-  | { status: 'ready'; name: string | null; elements: CanvasElement[] }
+  | {
+      status: 'ready'
+      name: string | null
+      elements: CanvasElement[]
+      revision: number
+      draftStatus: DraftStatus | null
+    }
 
 type PreviewWidth = 'full' | 'desktop' | 'tablet' | 'phone'
 
@@ -60,10 +72,14 @@ const PREVIEW_LABELS: Record<PreviewWidth, string> = {
   phone: 'Phone',
 }
 
+function draftStatus(value: unknown): DraftStatus | null {
+  return DRAFT_STATUSES.find((status) => status === value) ?? null
+}
+
 function BlockPage() {
   const { designId } = Route.useParams()
   const { data: session, isPending } = authClient.useSession()
-  const [{ element: elementParam }, setSearch] = useQueryStates(blockPageSearchParams, {
+  const [{ element: elementParam, draft: draftId }, setSearch] = useQueryStates(blockPageSearchParams, {
     history: 'replace',
   })
   const [state, setState] = useState<LoadState>({ status: 'loading' })
@@ -95,6 +111,7 @@ function BlockPage() {
   const [copied, setCopied] = useState(false)
 
   const userId = session?.user.id ?? null
+  const target = { designId, draftId }
 
   useEffect(() => {
     if (!userId) return
@@ -102,16 +119,29 @@ function BlockPage() {
     // every mutation, while the server save lags behind a 1500ms debounce.
     const cacheOwner = localStorage.getItem('loora:cache-user')
     const cacheUsable = !cacheOwner || cacheOwner === userId
-    if (cacheUsable && hasStoredElements(designId)) {
-      setState({ status: 'ready', name: null, elements: loadElements(designId) })
-      return
+    if (cacheUsable && hasStoredTargetElements(target)) {
+      setState({
+        status: 'ready',
+        name: null,
+        elements: loadTargetElements(target),
+        revision: 0,
+        draftStatus: null,
+      })
     }
     let cancelled = false
-    orpc.design
-      .get({ id: designId })
+    const request = draftId
+      ? orpc.draft.get({ designId, id: draftId })
+      : orpc.design.get({ id: designId })
+    request
       .then((doc) => {
         if (cancelled) return
-        setState({ status: 'ready', name: doc.name, elements: onlyCodeElements(doc.shapes) })
+        setState({
+          status: 'ready',
+          name: doc.name,
+          elements: onlyCodeElements(doc.shapes),
+          revision: doc.revision,
+          draftStatus: 'status' in doc ? draftStatus(doc.status) : null,
+        })
       })
       .catch((error: unknown) => {
         if (cancelled) return
@@ -121,13 +151,15 @@ function BlockPage() {
     return () => {
       cancelled = true
     }
-  }, [userId, designId])
+  }, [userId, designId, draftId])
 
   const elements = state.status === 'ready' ? state.elements : []
   const active = useMemo(
     () => pickBlockPageElement(elements, elementParam),
     [elements, elementParam],
   )
+  const readOnly =
+    state.status === 'ready' && Boolean(draftId) && state.draftStatus !== 'active'
 
   useEffect(() => {
     const name = state.status === 'ready' ? state.name : null
@@ -140,7 +172,7 @@ function BlockPage() {
   // Pick up an existing live link for this element (e.g. published earlier or
   // from another tab) so the button reflects reality.
   useEffect(() => {
-    if (!userId || !activeId) return
+    if (!userId || !activeId || draftId) return
     let cancelled = false
     setPublish(null)
     setPublishOpen(false)
@@ -155,7 +187,7 @@ function BlockPage() {
     return () => {
       cancelled = true
     }
-  }, [userId, designId, activeId])
+  }, [userId, designId, draftId, activeId])
   useEffect(() => {
     setDraft(null)
     setRenderError(null)
@@ -184,24 +216,47 @@ function BlockPage() {
   }
 
   const applyCode = (code: string) => {
-    if (state.status !== 'ready' || !active) return
+    if (
+      state.status !== 'ready' ||
+      !active ||
+      (draftId && state.draftStatus !== 'active')
+    ) return
     const nextElements = state.elements.map((el) => (el.id === active.id ? { ...el, code } : el))
     setState({ ...state, elements: nextElements })
     if (draftTimer.current) window.clearTimeout(draftTimer.current)
     setDraft(null)
     // Same cache-ownership rule as the load path: never write another user's cache.
     const cacheOwner = localStorage.getItem('loora:cache-user')
-    if (!cacheOwner || cacheOwner === userId) saveElements(designId, nextElements)
+    if (!cacheOwner || cacheOwner === userId) saveTargetElements(target, nextElements)
     setSaveState('saving')
     void (async () => {
       try {
         // The localStorage load path doesn't know the design name and
         // design.save requires one; resolve it once from the server.
-        const name = state.name ?? (await orpc.design.get({ id: designId })).name
+        const name = state.name ?? (
+          draftId
+            ? await orpc.draft.get({ designId, id: draftId })
+            : await orpc.design.get({ id: designId })
+        ).name
         if (state.name === null) {
           setState((s) => (s.status === 'ready' ? { ...s, name } : s))
         }
-        await orpc.design.save({ id: designId, name, shapes: nextElements })
+        const saved = draftId
+          ? await orpc.draft.save({
+              id: draftId,
+              designId,
+              shapes: nextElements,
+              expectedRevision: state.revision,
+            })
+          : await orpc.design.save({
+              id: designId,
+              name,
+              shapes: nextElements,
+              expectedRevision: state.revision,
+            })
+        setState((current) =>
+          current.status === 'ready' ? { ...current, revision: saved.revision } : current,
+        )
         setSaveState('saved')
         if (savedTimer.current) window.clearTimeout(savedTimer.current)
         savedTimer.current = window.setTimeout(() => setSaveState('idle'), 2000)
@@ -278,7 +333,7 @@ function BlockPage() {
   }
 
   const publishPage = async () => {
-    if (!active || publishBusy) return
+    if (!active || publishBusy || draftId) return
     setPublishBusy(true)
     try {
       const created = await orpc.publish.create({ designId, elementId: active.id })
@@ -421,6 +476,7 @@ function BlockPage() {
           </div>
           <button
             type="button"
+            disabled={readOnly}
             aria-pressed={textEditing}
             title="Click text to edit it, click an image to swap it, right-click anything for styles"
             className={
@@ -434,6 +490,7 @@ function BlockPage() {
           </button>
           <button
             type="button"
+            disabled={readOnly}
             aria-pressed={editing}
             title="Edit this element's code"
             className={
@@ -445,22 +502,24 @@ function BlockPage() {
           >
             Code
           </button>
-          <button
-            type="button"
-            aria-pressed={publishOpen}
-            title={publish ? 'Live link active — manage it' : 'Create a public link (expires in 12h)'}
-            className={
-              publish
-                ? 'rounded-full bg-secondary px-2 py-0.5 text-[11px] font-medium'
-                : 'rounded-full px-2 py-0.5 text-[11px] text-muted-foreground hover:text-foreground'
-            }
-            onClick={() => {
-              if (publish) setPublishOpen((v) => !v)
-              else void publishPage()
-            }}
-          >
-            {publishBusy ? 'Publishing…' : publish ? 'Live' : 'Publish'}
-          </button>
+          {!draftId ? (
+            <button
+              type="button"
+              aria-pressed={publishOpen}
+              title={publish ? 'Live link active — manage it' : 'Create a public link (expires in 12h)'}
+              className={
+                publish
+                  ? 'rounded-full bg-secondary px-2 py-0.5 text-[11px] font-medium'
+                  : 'rounded-full px-2 py-0.5 text-[11px] text-muted-foreground hover:text-foreground'
+              }
+              onClick={() => {
+                if (publish) setPublishOpen((v) => !v)
+                else void publishPage()
+              }}
+            >
+              {publishBusy ? 'Publishing…' : publish ? 'Live' : 'Publish'}
+            </button>
+          ) : null}
           {saveState !== 'idle' && (
             <span
               className={

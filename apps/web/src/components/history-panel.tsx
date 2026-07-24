@@ -26,17 +26,24 @@ type ComparisonVersion = Pick<Commit, 'id' | 'message' | 'shapes' | 'at'>
 
 export function HistoryPopover({
   docId,
+  draftId,
+  storageId,
+  readOnly = false,
   open,
   onOpenChange,
   shapesRef,
   onRestore,
 }: {
   docId: string
+  draftId?: string | null
+  storageId?: string
+  readOnly?: boolean
   open: boolean
   onOpenChange: (open: boolean) => void
   shapesRef: React.RefObject<CanvasElement[]>
   onRestore: (elements: CanvasElement[]) => void
 }) {
+  const localHistoryId = storageId ?? docId
   const [history, setHistory] = useState<CommitSummary[]>([])
   const [message, setMessage] = useState('')
   const [saving, setSaving] = useState(false)
@@ -60,15 +67,16 @@ export function HistoryPopover({
     try {
       let page = await orpc.history.list({
         designId: docId,
+        draftId,
         limit: 20,
         cursor: append ? cursor ?? undefined : undefined,
       })
 
       if (!append && page.items.length === 0) {
-        const local = [...loadHistory(docId)].reverse()
+        const local = [...loadHistory(localHistoryId)].reverse()
         if (local.length > 0) {
-          await orpc.history.import({ designId: docId, commits: local })
-          page = await orpc.history.list({ designId: docId, limit: 20 })
+          await orpc.history.import({ designId: docId, draftId, commits: local })
+          page = await orpc.history.list({ designId: docId, draftId, limit: 20 })
         }
       }
 
@@ -78,7 +86,7 @@ export function HistoryPopover({
     } catch (error) {
       console.error('[history] Failed to load versions:', error)
       if (!append) {
-        const local = loadHistory(docId)
+        const local = loadHistory(localHistoryId)
         setLocalVersions(local)
         setHistory(local.map(({ shapes: _shapes, ...summary }) => summary))
         setCursor(null)
@@ -93,7 +101,7 @@ export function HistoryPopover({
     if (open) void loadVersions(false)
     // Reload when the drawer opens or the document changes while open.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, docId])
+  }, [open, docId, draftId, localHistoryId])
 
   const openDrawer = (next: boolean) => {
     onOpenChange(next)
@@ -114,7 +122,7 @@ export function HistoryPopover({
     }
 
     try {
-      setComparison(await orpc.history.compare({ designId: docId, id }))
+      setComparison(await orpc.history.compare({ designId: docId, draftId, id }))
     } catch (error) {
       console.error('[history] Failed to load comparison:', error)
       setViewError('Could not load this version.')
@@ -151,12 +159,13 @@ export function HistoryPopover({
               onSubmit={async (e) => {
                 e.preventDefault()
                 const msg = message.trim()
-                if (!msg) return
+                if (!msg || readOnly) return
                 setSaving(true)
                 try {
                   const commit = await orpc.history.commit({
                     id: `c${nanoid()}`,
                     designId: docId,
+                    draftId,
                     message: msg,
                     shapes: shapesRef.current,
                   })
@@ -176,9 +185,10 @@ export function HistoryPopover({
                 size="sm"
                 placeholder="Describe this version…"
                 value={message}
+                disabled={readOnly}
                 onChange={(e) => setMessage(e.target.value)}
               />
-              <Button type="submit" size="sm" disabled={!message.trim() || saving}>
+              <Button type="submit" size="sm" disabled={readOnly || !message.trim() || saving}>
                 {saving ? 'Saving…' : 'Commit'}
               </Button>
             </form>
@@ -294,7 +304,7 @@ export function HistoryPopover({
                 setViewingId(null)
                 setComparison(null)
               }}
-              disabled={!comparison}
+              disabled={!comparison || readOnly}
             >
               Restore this version
             </Button>

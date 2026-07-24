@@ -64,10 +64,14 @@ import {
   deleteDocStorage,
   docId,
   hasStoredElements,
+  hasStoredTargetElements,
   loadDocs,
   loadElements,
+  loadTargetElements,
   saveDocs,
   saveElements,
+  saveTargetElements,
+  targetKey,
   type DocMeta,
 } from '#/lib/docs'
 import {
@@ -86,6 +90,7 @@ import { PublishButton } from '#/components/publish-button'
 import { deleteHistory } from '@loora/rpc/history'
 import { snapshotCanvas } from '#/lib/snapshot'
 import { AgentPanel } from '#/components/agent-panel'
+import { BranchControls, type BranchSummary } from '#/components/draft-controls'
 import { ExportDialog } from '#/components/export-dialog'
 import {
   FigmaImportDialog,
@@ -118,8 +123,22 @@ import { PreviewAccessScreen } from '#/components/preview-access-screen'
 import { authClient } from '@loora/auth/client'
 import { SidebarProvider } from '#/components/ui/sidebar'
 import { orpc } from '#/lib/orpc-client'
+import {
+  DRAFT_STATUSES,
+  mergeCanvas,
+  type CanvasMergeConflict,
+  type CanvasTarget,
+  type MergeChoice,
+} from '@loora/db/drafts'
 import { Drawer, DrawerPopup } from '#/components/ui/drawer'
-import { Dialog, DialogPopup } from '#/components/ui/dialog'
+import {
+  Dialog,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogPopup,
+  DialogTitle,
+} from '#/components/ui/dialog'
 import { useIsMobile } from '#/hooks/use-media-query'
 import {
   AlertDialog,
@@ -312,6 +331,9 @@ const TOOLS: { tool: Tool; icon: ElementType; key: string; label: string }[] = [
 function Editor({ preview = false, userId }: { preview?: boolean; userId?: string }) {
   const cacheOwner = preview ? null : localStorage.getItem('loora:cache-user')
   const cacheOwnedByAnotherUser = Boolean(userId && cacheOwner && cacheOwner !== userId)
+  const initialDraftId = preview
+    ? null
+    : new URLSearchParams(window.location.search).get('draft')
   const [{ docs, activeId }, setDocState] = useState(() => {
     if (preview) return { docs: [{ id: 'preview', name: 'Untitled' }], activeId: 'preview' }
     if (cacheOwnedByAnotherUser) {
@@ -325,14 +347,54 @@ function Editor({ preview = false, userId }: { preview?: boolean; userId?: strin
     }
     return loaded
   })
-  const [shapes, setShapes] = useState<CanvasElement[]>(() =>
-    preview || cacheOwnedByAnotherUser ? [] : loadElements(activeId),
+  const [activeDraftId, setActiveDraftId] = useState<string | null>(initialDraftId)
+  const [drafts, setDrafts] = useState<BranchSummary[]>([])
+  const [runningTargets, setRunningTargets] = useState<Array<string | null>>([])
+  const [branchNotice, setBranchNotice] = useState<string | null>(null)
+  const branchNoticeTimer = useRef<number | null>(null)
+  const announceBranch = useCallback((message: string) => {
+    if (branchNoticeTimer.current !== null) {
+      window.clearTimeout(branchNoticeTimer.current)
+    }
+    setBranchNotice(message)
+    branchNoticeTimer.current = window.setTimeout(() => {
+      setBranchNotice(null)
+      branchNoticeTimer.current = null
+    }, 3200)
+  }, [])
+
+  useEffect(
+    () => () => {
+      if (branchNoticeTimer.current !== null) {
+        window.clearTimeout(branchNoticeTimer.current)
+      }
+    },
+    [],
   )
+  const activeTarget: CanvasTarget = { designId: activeId, draftId: activeDraftId }
+  const activeTargetKey = targetKey(activeTarget)
+  const [shapes, setShapes] = useState<CanvasElement[]>(() =>
+    preview || cacheOwnedByAnotherUser ? [] : loadTargetElements(activeTarget),
+  )
+  const [targetRevision, setTargetRevision] = useState(0)
+  const targetRevisionRef = useRef(0)
+  targetRevisionRef.current = targetRevision
+  const lastSyncedShapes = useRef<CanvasElement[]>(shapes)
+  const [syncConflict, setSyncConflict] = useState<{
+    base: CanvasElement[]
+    remote: CanvasElement[]
+    local: CanvasElement[]
+    remoteRevision: number
+    conflicts: CanvasMergeConflict[]
+  } | null>(null)
+  const [syncResolutions, setSyncResolutions] = useState<Record<string, MergeChoice>>({})
   const [selectedIds, setSelectedIds] = useState<string[]>([])
   const [tool, setTool] = useState<Tool>('select')
   const [databaseReady, setDatabaseReady] = useState(false)
   const [loadedDocId, setLoadedDocId] = useState<string | null>(() =>
-    preview || (!cacheOwnedByAnotherUser && hasStoredElements(activeId)) ? activeId : null,
+    preview || (!cacheOwnedByAnotherUser && hasStoredTargetElements(activeTarget))
+      ? activeTargetKey
+      : null,
   )
   const [docLoading, setDocLoading] = useState(false)
   const [docLoadError, setDocLoadError] = useState<string | null>(null)
@@ -482,34 +544,125 @@ function Editor({ preview = false, userId }: { preview?: boolean; userId?: strin
   selectedIdsRef.current = selectedIds
   const activeIdRef = useRef(activeId)
   activeIdRef.current = activeId
+  const activeDraftIdRef = useRef(activeDraftId)
+  activeDraftIdRef.current = activeDraftId
+  const activeTargetKeyRef = useRef(activeTargetKey)
+  activeTargetKeyRef.current = activeTargetKey
   const documentRequest = useRef(0)
   const documentMutationVersions = useRef(new Map<string, number>())
   const mutationsBlockedRef = useRef(false)
-  mutationsBlockedRef.current = !preview && loadedDocId !== activeId
+  mutationsBlockedRef.current =
+    !preview &&
+    (loadedDocId !== activeTargetKey ||
+      syncConflict !== null ||
+      (activeDraftId !== null &&
+        drafts.find((draft) => draft.id === activeDraftId)?.status !== 'active'))
   const canvasControls = useRef<CanvasControls | null>(null)
   const [zoomPct, setZoomPct] = useState(100)
   // Bridge: canvas comment pins push messages straight into the agent chat.
   const agentSend = useRef<((text: string) => boolean) | null>(null)
+  const targetShapeRefs = useRef(
+    new Map<string, { current: CanvasElement[] }>(),
+  )
+  const targetRevisions = useRef(new Map<string, number>())
+  const targetLastSynced = useRef(new Map<string, CanvasElement[]>())
+  const targetSaveChains = useRef(new Map<string, Promise<void>>())
+  const targetActions = useRef(new Map<string, ElementActions>())
+  const activeShapeRef = targetShapeRefs.current.get(activeTargetKey) ?? { current: shapes }
+  activeShapeRef.current = shapes
+  targetShapeRefs.current.set(activeTargetKey, activeShapeRef)
+  targetRevisions.current.set(activeTargetKey, targetRevision)
+  targetLastSynced.current.set(activeTargetKey, lastSyncedShapes.current)
 
-  const fetchDocument = useCallback(async (id: string, cached: boolean) => {
+  const fetchDocument = useCallback(async (
+    target: CanvasTarget,
+    cached: boolean,
+    discardLocal = false,
+  ) => {
+    const key = targetKey(target)
     const request = ++documentRequest.current
-    const mutationVersion = documentMutationVersions.current.get(id) ?? 0
+    const mutationVersion = documentMutationVersions.current.get(key) ?? 0
     setDocLoading(true)
     setDocLoadError(null)
     if (!cached) setLoadedDocId(null)
     try {
-      const remote = await orpc.design.get({ id })
-      const changedWhileLoading = (documentMutationVersions.current.get(id) ?? 0) !== mutationVersion
-      if (!changedWhileLoading) saveElements(id, remote.shapes)
-      if (request !== documentRequest.current || activeIdRef.current !== id) return false
-      if (!changedWhileLoading) setShapes(remote.shapes)
-      setLoadedDocId(id)
+      const remote = target.draftId
+        ? await orpc.draft.get({ designId: target.designId, id: target.draftId })
+        : await orpc.design.get({ id: target.designId })
+      const remoteDraftStatus =
+        target.draftId && 'status' in remote
+          ? DRAFT_STATUSES.find((candidate) => candidate === remote.status) ?? null
+          : null
+      if (target.draftId && remoteDraftStatus) {
+          setDrafts((current) =>
+            current.map((draft) =>
+              draft.id === target.draftId
+                ? {
+                    ...draft,
+                    status: remoteDraftStatus,
+                    revision: remote.revision,
+                    updatedAt: remote.updatedAt,
+                  }
+                : draft,
+            ),
+          )
+      }
+      const changedWhileLoading =
+        (documentMutationVersions.current.get(key) ?? 0) !== mutationVersion
+      if (request !== documentRequest.current || activeTargetKeyRef.current !== key) return false
+
+      const knownBase = targetLastSynced.current.get(key)
+      const localShapes = targetShapeRefs.current.get(key)?.current ?? shapesRef.current
+      const hasUnsyncedLocal =
+        !discardLocal &&
+        (!remoteDraftStatus || remoteDraftStatus === 'active') &&
+        knownBase !== undefined &&
+        JSON.stringify(knownBase) !== JSON.stringify(localShapes)
+      const shouldReconcile = changedWhileLoading || hasUnsyncedLocal
+      if (shouldReconcile && knownBase) {
+        const reconciled = mergeCanvas(knownBase, remote.shapes, localShapes)
+        if (reconciled.unresolved.length > 0) {
+          setShapes(localShapes)
+          shapesRef.current = localShapes
+          setTargetRevision(remote.revision)
+          targetRevisionRef.current = remote.revision
+          lastSyncedShapes.current = remote.shapes
+          targetRevisions.current.set(key, remote.revision)
+          targetLastSynced.current.set(key, remote.shapes)
+          setSyncConflict({
+            base: knownBase,
+            remote: remote.shapes,
+            local: localShapes,
+            remoteRevision: remote.revision,
+            conflicts: reconciled.conflicts,
+          })
+          setSyncResolutions({})
+          setLoadedDocId(key)
+          setDocLoading(false)
+          return true
+        }
+        setShapes(reconciled.shapes)
+        shapesRef.current = reconciled.shapes
+        saveTargetElements(target, reconciled.shapes)
+      } else {
+        setShapes(remote.shapes)
+        shapesRef.current = remote.shapes
+        saveTargetElements(target, remote.shapes)
+      }
+      setTargetRevision(remote.revision)
+      targetRevisionRef.current = remote.revision
+      targetRevisions.current.set(key, remote.revision)
+      setSyncConflict(null)
+      setSyncResolutions({})
+      lastSyncedShapes.current = remote.shapes
+      targetLastSynced.current.set(key, remote.shapes)
+      setLoadedDocId(key)
       setDocLoading(false)
       return true
     } catch (error) {
       console.error('[designs] Failed to load design:', error)
-      if (request !== documentRequest.current || activeIdRef.current !== id) return false
-      if (cached) setLoadedDocId(id)
+      if (request !== documentRequest.current || activeTargetKeyRef.current !== key) return false
+      if (cached) setLoadedDocId(key)
       setDocLoading(false)
       setDocLoadError(
         cached
@@ -530,7 +683,7 @@ function Editor({ preview = false, userId }: { preview?: boolean; userId?: strin
         if (cancelled) return
 
         if (remote.length === 0) {
-          await Promise.all(
+          const created = await Promise.all(
             docs.map((doc) =>
               orpc.design.save({
                 id: doc.id,
@@ -541,25 +694,53 @@ function Editor({ preview = false, userId }: { preview?: boolean; userId?: strin
           )
           if (!hasStoredElements(activeId)) saveElements(activeId, shapesRef.current)
           saveDocs(docs, activeId)
-          setLoadedDocId(activeId)
+          setActiveDraftId(null)
+          activeDraftIdRef.current = null
+          setDrafts([])
+          const mainTarget = { designId: activeId, draftId: null }
+          const key = targetKey(mainTarget)
+          activeTargetKeyRef.current = key
+          setLoadedDocId(key)
+          const activeCreated = created.find((item) => item.id === activeId)
+          setTargetRevision(activeCreated?.revision ?? 0)
+          targetRevisionRef.current = activeCreated?.revision ?? 0
+          lastSyncedShapes.current = shapesRef.current
         } else {
           const remoteDocs = remote.map(({ id, name }) => ({ id, name }))
           const urlD = readUrlDesignId()
           const nextActive =
             (urlD && remote.some((doc) => doc.id === urlD) && urlD) ||
             (remote.some((doc) => doc.id === activeId) ? activeId : remote[0].id)
-          const cached = hasStoredElements(nextActive)
+          const remoteDrafts = await orpc.draft.list({
+            designId: nextActive,
+            includeArchived: true,
+          })
+          if (cancelled) return
+          const requestedDraft = new URLSearchParams(window.location.search).get('draft')
+          const nextDraft =
+            requestedDraft && remoteDrafts.some((draft) => draft.id === requestedDraft)
+              ? requestedDraft
+              : null
+          const nextTarget = { designId: nextActive, draftId: nextDraft }
+          const nextKey = targetKey(nextTarget)
+          const cached = hasStoredTargetElements(nextTarget)
           saveDocs(remoteDocs, nextActive)
           activeIdRef.current = nextActive
+          activeDraftIdRef.current = nextDraft
+          activeTargetKeyRef.current = nextKey
           setDocState({ docs: remoteDocs, activeId: nextActive })
+          setActiveDraftId(nextDraft)
+          setDrafts(remoteDrafts)
           if (!preview) {
             localDesignRef.current = nextActive
-            void setUrlState({ d: nextActive })
+            void setUrlState({ d: nextActive, draft: nextDraft })
           }
-          setShapes(cached ? loadElements(nextActive) : [])
-          setLoadedDocId(cached ? nextActive : null)
+          const cachedShapes = cached ? loadTargetElements(nextTarget) : []
+          setShapes(cachedShapes)
+          lastSyncedShapes.current = cachedShapes
+          setLoadedDocId(cached ? nextKey : null)
           setSelectedIds([])
-          await fetchDocument(nextActive, cached)
+          await fetchDocument(nextTarget, cached)
         }
 
         if (!cancelled) {
@@ -589,25 +770,136 @@ function Editor({ preview = false, userId }: { preview?: boolean; userId?: strin
   const future = useRef<HistoryEntry[]>([])
   const lastMutation = useRef(0)
   const [, bumpHistory] = useState(0)
+  const targetSelections = useRef(new Map<string, string[]>())
+  const targetHistories = useRef(
+    new Map<
+      string,
+      {
+        past: HistoryEntry[]
+        future: HistoryEntry[]
+        lastMutation: number
+      }
+    >(),
+  )
 
   useEffect(() => {
-    if (preview || loadedDocId !== activeId || docLoading) return
-    saveElements(activeId, shapes)
-  }, [shapes, activeId, preview, loadedDocId, docLoading])
+    if (preview || loadedDocId !== activeTargetKey || docLoading) return
+    saveTargetElements(activeTarget, shapes)
+  }, [shapes, activeTargetKey, preview, loadedDocId, docLoading])
 
   useEffect(() => {
-    if (preview || !databaseReady || loadedDocId !== activeId || docLoadError) return
+    if (
+      preview ||
+      !databaseReady ||
+      loadedDocId !== activeTargetKey ||
+      docLoadError ||
+      syncConflict
+    ) return
     const active = docs.find((doc) => doc.id === activeId)
     if (!active) return
+    const draft = activeDraftId
+      ? drafts.find((candidate) => candidate.id === activeDraftId)
+      : null
+    if (draft && draft.status !== 'active') return
 
     const timeout = window.setTimeout(() => {
-      void orpc.design
-        .save({ id: active.id, name: active.name, shapes })
-        .catch((error) => console.error('[designs] Failed to save design:', error))
+      const save = activeDraftId
+        ? orpc.draft.save({
+            id: activeDraftId,
+            designId: active.id,
+            shapes,
+            expectedRevision: targetRevisionRef.current,
+          })
+        : orpc.design.save({
+            id: active.id,
+            name: active.name,
+            shapes,
+            expectedRevision: targetRevisionRef.current,
+          })
+      void save
+        .then((saved) => {
+          if (activeTargetKeyRef.current !== activeTargetKey) return
+          setTargetRevision(saved.revision)
+          targetRevisionRef.current = saved.revision
+          lastSyncedShapes.current = shapes
+          if (activeDraftId) {
+            setDrafts((current) =>
+              current.map((candidate) =>
+                candidate.id === activeDraftId
+                  ? { ...candidate, revision: saved.revision, updatedAt: saved.updatedAt }
+                  : candidate,
+              ),
+            )
+          }
+        })
+        .catch(async (error) => {
+          console.error('[designs] Failed to save target:', error)
+          try {
+            const remote = activeDraftId
+              ? await orpc.draft.get({ designId: active.id, id: activeDraftId })
+              : await orpc.design.get({ id: active.id })
+            if (activeTargetKeyRef.current !== activeTargetKey) return
+            const reconciled = mergeCanvas(lastSyncedShapes.current, remote.shapes, shapes)
+            if (reconciled.unresolved.length > 0) {
+              setSyncConflict({
+                base: lastSyncedShapes.current,
+                remote: remote.shapes,
+                local: shapes,
+                remoteRevision: remote.revision,
+                conflicts: reconciled.conflicts,
+              })
+              setSyncResolutions({})
+              return
+            }
+            setTargetRevision(remote.revision)
+            targetRevisionRef.current = remote.revision
+            lastSyncedShapes.current = remote.shapes
+            setShapes(reconciled.shapes)
+          } catch (refreshError) {
+            console.error('[designs] Failed to reconcile target:', refreshError)
+          }
+        })
     }, 1500)
 
     return () => window.clearTimeout(timeout)
-  }, [activeId, databaseReady, docs, preview, shapes, loadedDocId, docLoadError])
+  }, [
+    activeId,
+    activeDraftId,
+    activeTargetKey,
+    databaseReady,
+    docs,
+    drafts,
+    preview,
+    shapes,
+    loadedDocId,
+    docLoadError,
+    syncConflict,
+  ])
+
+  const resolveSyncConflict = () => {
+    if (!syncConflict) return
+    const reconciled = mergeCanvas(
+      syncConflict.base,
+      syncConflict.remote,
+      syncConflict.local,
+      syncResolutions,
+    )
+    if (reconciled.unresolved.length > 0) return
+    setTargetRevision(syncConflict.remoteRevision)
+    targetRevisionRef.current = syncConflict.remoteRevision
+    lastSyncedShapes.current = syncConflict.remote
+    setShapes(reconciled.shapes)
+    shapesRef.current = reconciled.shapes
+    saveTargetElements(activeTarget, reconciled.shapes)
+    setSyncConflict(null)
+    setSyncResolutions({})
+  }
+
+  const reloadAfterSyncConflict = () => {
+    setSyncConflict(null)
+    setSyncResolutions({})
+    void fetchDocument(activeTarget, hasStoredTargetElements(activeTarget), true)
+  }
 
   // Dev-only hook for end-to-end tests to seed and inspect canvas state.
   useEffect(() => {
@@ -619,50 +911,160 @@ function Editor({ preview = false, userId }: { preview?: boolean; userId?: strin
     }
   })
 
-  const resetHistory = () => {
-    past.current = []
-    future.current = []
-    lastMutation.current = 0
+  const stashTargetEditorState = (key: string) => {
+    targetSelections.current.set(key, selectedIdsRef.current)
+    targetHistories.current.set(key, {
+      past: past.current,
+      future: future.current,
+      lastMutation: lastMutation.current,
+    })
   }
 
-  const flushActiveDoc = () => {
+  const restoreTargetEditorState = (key: string, elements: CanvasElement[]) => {
+    const elementIds = new Set(elements.map((element) => element.id))
+    setSelectedIds(
+      (targetSelections.current.get(key) ?? []).filter((id) => elementIds.has(id)),
+    )
+    const history = targetHistories.current.get(key)
+    past.current = history?.past ?? []
+    future.current = history?.future ?? []
+    lastMutation.current = history?.lastMutation ?? 0
+    bumpHistory((version) => version + 1)
+  }
+
+  const flushActiveDoc = async () => {
     const active = docs.find((doc) => doc.id === activeId)
-    if (databaseReady && active && loadedDocId === activeId && !docLoadError) {
-      void orpc.design
-        .save({
+    const draft = activeDraftId
+      ? drafts.find((candidate) => candidate.id === activeDraftId)
+      : null
+    if (
+      !databaseReady ||
+      !active ||
+      loadedDocId !== activeTargetKey ||
+      docLoadError ||
+      syncConflict ||
+      (draft && draft.status !== 'active')
+    ) return
+    try {
+      const saved = activeDraftId
+        ? await orpc.draft.save({
+            id: activeDraftId,
+            designId: active.id,
+            shapes: shapesRef.current,
+            expectedRevision: targetRevisionRef.current,
+          })
+        : await orpc.design.save({
           id: active.id,
           name: active.name,
           shapes: shapesRef.current,
+          expectedRevision: targetRevisionRef.current,
         })
-        .catch((error) => console.error('[designs] Failed to save design:', error))
+      setTargetRevision(saved.revision)
+      targetRevisionRef.current = saved.revision
+      lastSyncedShapes.current = shapesRef.current
+      if (activeDraftId) {
+        setDrafts((current) =>
+          current.map((candidate) =>
+            candidate.id === activeDraftId
+              ? { ...candidate, revision: saved.revision, updatedAt: saved.updatedAt }
+              : candidate,
+          ),
+        )
+      }
+    } catch (error) {
+      console.error('[designs] Failed to flush target:', error)
+      throw error
     }
   }
 
   const applyDoc = (id: string) => {
-    if (id === activeIdRef.current) return
-    flushActiveDoc()
+    if (id === activeIdRef.current && activeDraftIdRef.current === null) return
+    void flushActiveDoc()
+    stashTargetEditorState(activeTargetKeyRef.current)
     activeIdRef.current = id
+    activeDraftIdRef.current = null
+    setActiveDraftId(null)
+    setDrafts([])
     setDocState((s) => {
       saveDocs(s.docs, id)
       return { ...s, activeId: id }
     })
-    const cached = hasStoredElements(id)
-    setShapes(cached ? loadElements(id) : [])
-    setLoadedDocId(cached ? id : null)
+    const target = { designId: id, draftId: null }
+    const key = targetKey(target)
+    activeTargetKeyRef.current = key
+    const cached = hasStoredTargetElements(target)
+    const cachedShapes = cached ? loadTargetElements(target) : []
+    const cachedRevision = targetRevisions.current.get(key) ?? 0
+    setShapes(cachedShapes)
+    shapesRef.current = cachedShapes
+    lastSyncedShapes.current = targetLastSynced.current.get(key) ?? cachedShapes
+    setTargetRevision(cachedRevision)
+    targetRevisionRef.current = cachedRevision
+    setLoadedDocId(cached ? key : null)
     setDocLoadError(null)
-    setSelectedIds([])
-    resetHistory()
-    if (databaseReady) void fetchDocument(id, cached)
+    setSyncConflict(null)
+    restoreTargetEditorState(key, cachedShapes)
+    if (databaseReady) {
+      void Promise.all([
+        fetchDocument(target, cached),
+        orpc.draft
+          .list({ designId: id, includeArchived: true })
+          .then(setDrafts)
+          .catch((error) => console.error('[drafts] Failed to list drafts:', error)),
+      ])
+    }
   }
 
   const switchDoc = (id: string) => {
     if (id === activeId) return
     if (!preview) {
       localDesignRef.current = id
-      void setUrlState({ d: id })
+      void setUrlState({ d: id, draft: null })
     }
     applyDoc(id)
   }
+
+  const switchDraft = (draftId: string | null, skipFlush = false) => {
+    if (draftId === activeDraftIdRef.current) return
+    if (!skipFlush) void flushActiveDoc()
+    stashTargetEditorState(activeTargetKeyRef.current)
+    const target = { designId: activeIdRef.current, draftId }
+    const key = targetKey(target)
+    activeDraftIdRef.current = draftId
+    activeTargetKeyRef.current = key
+    setActiveDraftId(draftId)
+    if (!preview) void setUrlState({ draft: draftId })
+    const cached = hasStoredTargetElements(target)
+    const cachedShapes = cached ? loadTargetElements(target) : []
+    const cachedRevision =
+      targetRevisions.current.get(key) ??
+      (draftId ? drafts.find((draft) => draft.id === draftId)?.revision ?? 0 : 0)
+    setShapes(cachedShapes)
+    shapesRef.current = cachedShapes
+    lastSyncedShapes.current = targetLastSynced.current.get(key) ?? cachedShapes
+    setTargetRevision(cachedRevision)
+    targetRevisionRef.current = cachedRevision
+    setLoadedDocId(cached ? key : null)
+    setDocLoadError(null)
+    setSyncConflict(null)
+    restoreTargetEditorState(key, cachedShapes)
+    if (databaseReady) void fetchDocument(target, cached)
+  }
+
+  const switchBranchWithNotice = (draftId: string | null, skipFlush = false) => {
+    if (draftId === activeDraftIdRef.current) return
+    switchDraft(draftId, skipFlush)
+    const branchName = draftId
+      ? drafts.find((draft) => draft.id === draftId)?.name ?? 'branch'
+      : 'Main'
+    announceBranch(`Switched canvas to ${branchName}`)
+  }
+
+  const refreshDrafts = useCallback(async () => {
+    if (preview) return
+    const rows = await orpc.draft.list({ designId: activeIdRef.current, includeArchived: true })
+    setDrafts(rows)
+  }, [preview])
 
   // Browser back/forward: URL design id drives the active doc when it points at a known one.
   useEffect(() => {
@@ -679,24 +1081,41 @@ function Editor({ preview = false, userId }: { preview?: boolean; userId?: strin
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [preview, urlState.d, activeId, docs])
 
+  useEffect(() => {
+    if (preview || urlState.d !== activeId || urlState.draft === activeDraftId) return
+    if (urlState.draft && !drafts.some((draft) => draft.id === urlState.draft)) return
+    switchDraft(urlState.draft)
+    // switchDraft closes over the latest target state.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [preview, urlState.d, urlState.draft, activeId, activeDraftId, drafts])
+
   const newDoc = () => {
-    flushActiveDoc()
+    void flushActiveDoc()
+    stashTargetEditorState(activeTargetKeyRef.current)
     const doc: DocMeta = { id: docId(), name: `Untitled ${docs.length + 1}` }
     const next = [...docs, doc]
     saveElements(doc.id, [])
     saveDocs(next, doc.id)
     if (!preview) {
       localDesignRef.current = doc.id
-      void setUrlState({ d: doc.id })
+      void setUrlState({ d: doc.id, draft: null })
     }
     activeIdRef.current = doc.id
+    activeDraftIdRef.current = null
+    const key = targetKey({ designId: doc.id, draftId: null })
+    activeTargetKeyRef.current = key
     setDocState({ docs: next, activeId: doc.id })
+    setActiveDraftId(null)
+    setDrafts([])
     setShapes([])
-    setLoadedDocId(doc.id)
+    lastSyncedShapes.current = []
+    setTargetRevision(0)
+    targetRevisionRef.current = 0
+    setLoadedDocId(key)
     setDocLoading(false)
     setDocLoadError(null)
-    setSelectedIds([])
-    resetHistory()
+    setSyncConflict(null)
+    restoreTargetEditorState(key, [])
   }
 
   const activateFigmaImport = (
@@ -707,6 +1126,19 @@ function Editor({ preview = false, userId }: { preview?: boolean; userId?: strin
     if (destination === 'current') {
       const previousIds = new Set(shapesRef.current.map((shape) => shape.id))
       mutate(() => imported.shapes)
+      saveTargetElements(activeTarget, imported.shapes)
+      lastSyncedShapes.current = imported.shapes
+      setTargetRevision(imported.revision)
+      targetRevisionRef.current = imported.revision
+      if (activeDraftId) {
+        setDrafts((current) =>
+          current.map((draft) =>
+            draft.id === activeDraftId
+              ? { ...draft, revision: imported.revision, updatedAt: imported.updatedAt }
+              : draft,
+          ),
+        )
+      }
       setSelectedIds(
         imported.shapes
           .filter((shape) => !previousIds.has(shape.id))
@@ -718,22 +1150,31 @@ function Editor({ preview = false, userId }: { preview?: boolean; userId?: strin
       return
     }
 
-    flushActiveDoc()
+    void flushActiveDoc()
+    stashTargetEditorState(activeTargetKeyRef.current)
     documentRequest.current += 1
     const doc: DocMeta = { id: imported.id, name: imported.name }
     const next = [...docs.filter((candidate) => candidate.id !== doc.id), doc]
     saveElements(doc.id, imported.shapes)
     saveDocs(next, doc.id)
     localDesignRef.current = doc.id
-    void setUrlState({ d: doc.id })
+    void setUrlState({ d: doc.id, draft: null })
     activeIdRef.current = doc.id
+    activeDraftIdRef.current = null
+    const key = targetKey({ designId: doc.id, draftId: null })
+    activeTargetKeyRef.current = key
     setDocState({ docs: next, activeId: doc.id })
+    setActiveDraftId(null)
+    setDrafts([])
     setShapes(imported.shapes)
-    setLoadedDocId(doc.id)
+    lastSyncedShapes.current = imported.shapes
+    setLoadedDocId(key)
     setDocLoading(false)
     setDocLoadError(null)
-    setSelectedIds([])
-    resetHistory()
+    targetSelections.current.delete(key)
+    targetHistories.current.delete(key)
+    restoreTargetEditorState(key, imported.shapes)
+    if (databaseReady) void fetchDocument({ designId: doc.id, draftId: null }, true)
     window.requestAnimationFrame(() => {
       window.requestAnimationFrame(() => canvasControls.current?.zoomToFit())
     })
@@ -782,19 +1223,41 @@ function Editor({ preview = false, userId }: { preview?: boolean; userId?: strin
     }
     saveDocs(next, next[0].id)
     const nextId = next[0].id
+    for (const key of targetSelections.current.keys()) {
+      if (key.startsWith(`${activeId}:`)) targetSelections.current.delete(key)
+    }
+    for (const key of targetHistories.current.keys()) {
+      if (key.startsWith(`${activeId}:`)) targetHistories.current.delete(key)
+    }
     if (!preview) {
       localDesignRef.current = nextId
-      void setUrlState({ d: nextId })
+      void setUrlState({ d: nextId, draft: null })
     }
     activeIdRef.current = nextId
-    const cached = hasStoredElements(nextId)
+    activeDraftIdRef.current = null
+    const target = { designId: nextId, draftId: null }
+    const key = targetKey(target)
+    activeTargetKeyRef.current = key
+    const cached = hasStoredTargetElements(target)
+    const cachedShapes = cached ? loadTargetElements(target) : []
     setDocState({ docs: next, activeId: nextId })
-    setShapes(cached ? loadElements(nextId) : [])
-    setLoadedDocId(cached ? nextId : null)
+    setActiveDraftId(null)
+    setDrafts([])
+    setShapes(cachedShapes)
+    lastSyncedShapes.current = cachedShapes
+    setLoadedDocId(cached ? key : null)
     setDocLoadError(null)
-    setSelectedIds([])
-    resetHistory()
-    if (databaseReady) void fetchDocument(nextId, cached)
+    setSyncConflict(null)
+    restoreTargetEditorState(key, cachedShapes)
+    if (databaseReady) {
+      void Promise.all([
+        fetchDocument(target, cached),
+        orpc.draft
+          .list({ designId: nextId, includeArchived: true })
+          .then(setDrafts)
+          .catch((error) => console.error('[drafts] Failed to list drafts:', error)),
+      ])
+    }
   }
 
   const mutate = useCallback((fn: (prev: CanvasElement[]) => CanvasElement[]) => {
@@ -809,7 +1272,7 @@ function Editor({ preview = false, userId }: { preview?: boolean; userId?: strin
       lastMutation.current = now
       const next = fn(prev)
       if (next !== prev) {
-        const id = activeIdRef.current
+        const id = activeTargetKeyRef.current
         documentMutationVersions.current.set(
           id,
           (documentMutationVersions.current.get(id) ?? 0) + 1,
@@ -1049,6 +1512,173 @@ function Editor({ preview = false, userId }: { preview?: boolean; userId?: strin
       ungroupElements: ungroupForAgent,
     }),
     [createElement, createElements, updateElement, deleteElement, reorderForAgent, groupForAgent, ungroupForAgent],
+  )
+
+  const queueHiddenTargetSave = useCallback(
+    (target: CanvasTarget, ref: { current: CanvasElement[] }) => {
+      const key = targetKey(target)
+      const previous = targetSaveChains.current.get(key) ?? Promise.resolve()
+      const next = previous
+        .catch(() => {})
+        .then(async () => {
+          if (activeTargetKeyRef.current === key) return
+          const revision = targetRevisions.current.get(key) ?? 0
+          const currentShapes = ref.current
+          const doc = docs.find((candidate) => candidate.id === target.designId)
+          if (!doc) return
+          try {
+            const saved = target.draftId
+              ? await orpc.draft.save({
+                  id: target.draftId,
+                  designId: target.designId,
+                  shapes: currentShapes,
+                  expectedRevision: revision,
+                })
+              : await orpc.design.save({
+                  id: target.designId,
+                  name: doc.name,
+                  shapes: currentShapes,
+                  expectedRevision: revision,
+                })
+            targetRevisions.current.set(key, saved.revision)
+            targetLastSynced.current.set(key, currentShapes)
+            if (target.draftId) {
+              setDrafts((all) =>
+                all.map((draft) =>
+                  draft.id === target.draftId
+                    ? { ...draft, revision: saved.revision, updatedAt: saved.updatedAt }
+                    : draft,
+                ),
+              )
+            }
+          } catch (error) {
+            console.error('[designs] Hidden target save conflicted:', error)
+            const remote = target.draftId
+              ? await orpc.draft.get({ designId: target.designId, id: target.draftId })
+              : await orpc.design.get({ id: target.designId })
+            const base = targetLastSynced.current.get(key) ?? remote.shapes
+            const reconciled = mergeCanvas(base, remote.shapes, ref.current)
+            if (reconciled.unresolved.length > 0) {
+              console.error(
+                `[designs] Hidden target has ${reconciled.unresolved.length} unresolved conflicts.`,
+              )
+              return
+            }
+            ref.current = reconciled.shapes
+            saveTargetElements(target, reconciled.shapes)
+            targetRevisions.current.set(key, remote.revision)
+            targetLastSynced.current.set(key, remote.shapes)
+            const saved = target.draftId
+              ? await orpc.draft.save({
+                  id: target.draftId,
+                  designId: target.designId,
+                  shapes: reconciled.shapes,
+                  expectedRevision: remote.revision,
+                })
+              : await orpc.design.save({
+                  id: target.designId,
+                  name: doc.name,
+                  shapes: reconciled.shapes,
+                  expectedRevision: remote.revision,
+                })
+            targetRevisions.current.set(key, saved.revision)
+            targetLastSynced.current.set(key, reconciled.shapes)
+          }
+        })
+      targetSaveChains.current.set(key, next)
+    },
+    [docs],
+  )
+
+  const getTargetBindings = useCallback(
+    (draftId: string | null) => {
+      if (draftId === activeDraftIdRef.current) {
+        return { actions, shapesRef }
+      }
+
+      const target = { designId: activeIdRef.current, draftId }
+      const key = targetKey(target)
+      let ref = targetShapeRefs.current.get(key)
+      if (!ref) {
+        ref = { current: loadTargetElements(target) }
+        targetShapeRefs.current.set(key, ref)
+        const draft = draftId
+          ? drafts.find((candidate) => candidate.id === draftId)
+          : null
+        targetRevisions.current.set(key, draft?.revision ?? 0)
+        targetLastSynced.current.set(key, ref.current)
+      }
+
+      let hiddenActions = targetActions.current.get(key)
+      if (!hiddenActions) {
+        const mutateHidden = (fn: (elements: CanvasElement[]) => CanvasElement[]) => {
+          const next = fn(ref!.current)
+          ref!.current = next
+          saveTargetElements(target, next)
+          queueHiddenTargetSave(target, ref!)
+          return next
+        }
+        hiddenActions = {
+          createElement(element) {
+            const full = { ...element, id: element.id ?? elementId() }
+            mutateHidden((current) => [...current, full])
+            return full
+          },
+          createElements(batch) {
+            const full = batch.map((element) => ({ ...element, id: elementId() }))
+            mutateHidden((current) => [...current, ...full])
+            return full
+          },
+          updateElement(id, patch) {
+            let updated: CanvasElement | null = null
+            mutateHidden((current) =>
+              current.map((element) => {
+                if (element.id !== id) return element
+                updated = { ...element, ...patch }
+                return updated
+              }),
+            )
+            return updated ?? ref!.current.find((element) => element.id === id) ?? null
+          },
+          deleteElement(id) {
+            const exists = ref!.current.some((element) => element.id === id)
+            mutateHidden((current) => current.filter((element) => element.id !== id))
+            return exists
+          },
+          reorderElements(orderedIds) {
+            const next = mutateHidden((current) => reorderElements(current, orderedIds))
+            return next.map((element) => element.id)
+          },
+          groupElements(ids) {
+            const wanted = new Set(ids)
+            const targets = ref!.current.filter((element) => wanted.has(element.id))
+            if (targets.length < 2) return null
+            const groupId = `g${elementId()}`
+            mutateHidden((current) =>
+              current.map((element) =>
+                wanted.has(element.id) ? { ...element, groupId } : element,
+              ),
+            )
+            return { groupId, ids: targets.map((element) => element.id) }
+          },
+          ungroupElements(ids) {
+            const wanted = new Set(ids)
+            const count = ref!.current.filter(
+              (element) => wanted.has(element.id) && element.groupId,
+            ).length
+            mutateHidden((current) =>
+              current.map((element) =>
+                wanted.has(element.id) ? { ...element, groupId: undefined } : element,
+              ),
+            )
+            return count
+          },
+        }
+        targetActions.current.set(key, hiddenActions)
+      }
+      return { actions: hiddenActions, shapesRef: ref }
+    },
+    [actions, drafts, queueHiddenTargetSave],
   )
 
   const reorder = useCallback(
@@ -1444,7 +2074,33 @@ function Editor({ preview = false, userId }: { preview?: boolean; userId?: strin
         shapesRef={shapesRef}
         selectedIdsRef={selectedIdsRef}
         docId={activeId}
-        ready={databaseReady && loadedDocId === activeId && !docLoadError}
+        draftId={activeDraftId}
+        getTargetBindings={getTargetBindings}
+        isTargetReadOnly={(draftId) =>
+          Boolean(
+            draftId &&
+              drafts.find((draft) => draft.id === draftId)?.status !== 'active',
+          )
+        }
+        branches={drafts}
+        onTargetChange={(draftId, options) => {
+          if (options?.announce) switchBranchWithNotice(draftId)
+          else switchDraft(draftId)
+        }}
+        onCreateBranch={async (name) => {
+          await flushActiveDoc()
+          const created = await orpc.draft.create({
+            id: `dr${crypto.randomUUID().replaceAll('-', '')}`,
+            designId: activeIdRef.current,
+            name,
+          })
+          setDrafts((current) => [created, ...current])
+          switchDraft(created.id, true)
+          announceBranch(`Created branch ${created.name}`)
+          return created
+        }}
+        onRunningTargetsChange={setRunningTargets}
+        ready={databaseReady}
         sendRef={agentSend}
       />
 
@@ -1625,7 +2281,7 @@ function Editor({ preview = false, userId }: { preview?: boolean; userId?: strin
                     <ContextMenuItem
                       onClick={() =>
                         window.open(
-                          `/blockpage/${encodeURIComponent(activeId)}?element=${encodeURIComponent(contextMenuIds[0])}`,
+                          `/blockpage/${encodeURIComponent(activeId)}?${activeDraftId ? `draft=${encodeURIComponent(activeDraftId)}&` : ''}element=${encodeURIComponent(contextMenuIds[0])}`,
                           '_blank',
                           'noopener',
                         )
@@ -1646,7 +2302,7 @@ function Editor({ preview = false, userId }: { preview?: boolean; userId?: strin
           </ContextMenuPopup>
         </ContextMenu>
 
-        {loadedDocId !== activeId && (
+        {loadedDocId !== activeTargetKey && (
           <div className="absolute inset-0 z-20 grid place-items-center bg-cx-canvas/80 backdrop-blur-[1px]">
             <div
               className={cn(
@@ -1668,7 +2324,7 @@ function Editor({ preview = false, userId }: { preview?: boolean; userId?: strin
                 <Button
                   size="sm"
                   variant="outline"
-                  onClick={() => void fetchDocument(activeId, hasStoredElements(activeId))}
+                  onClick={() => void fetchDocument(activeTarget, hasStoredTargetElements(activeTarget))}
                 >
                   Retry
                 </Button>
@@ -1676,7 +2332,7 @@ function Editor({ preview = false, userId }: { preview?: boolean; userId?: strin
             </div>
           </div>
         )}
-        {!docLoading && loadedDocId === activeId && docLoadError && (
+        {!docLoading && loadedDocId === activeTargetKey && docLoadError && (
           <div className="absolute inset-x-0 bottom-4 z-20 flex justify-center px-4">
             <div
               role="alert"
@@ -1686,7 +2342,7 @@ function Editor({ preview = false, userId }: { preview?: boolean; userId?: strin
               <Button
                 size="xs"
                 variant="outline"
-                onClick={() => void fetchDocument(activeId, hasStoredElements(activeId))}
+                onClick={() => void fetchDocument(activeTarget, hasStoredTargetElements(activeTarget))}
               >
                 Retry
               </Button>
@@ -1771,6 +2427,12 @@ function Editor({ preview = false, userId }: { preview?: boolean; userId?: strin
           </Button>
           <HistoryPopover
             docId={activeId}
+            draftId={activeDraftId}
+            storageId={activeTargetKey}
+            readOnly={
+              activeDraftId !== null &&
+              drafts.find((draft) => draft.id === activeDraftId)?.status !== 'active'
+            }
             open={historyOpen}
             onOpenChange={toggleHistory}
             shapesRef={shapesRef}
@@ -1804,6 +2466,21 @@ function Editor({ preview = false, userId }: { preview?: boolean; userId?: strin
           </DropdownMenu>
         </div>
 
+        <AnimatePresence>
+          {branchNotice ? (
+            <motion.div
+              role="status"
+              aria-live="polite"
+              initial={{ opacity: 0, y: -4 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -4 }}
+              className="pointer-events-none absolute left-1/2 top-14 z-30 -translate-x-1/2 rounded-full border bg-popover/95 px-3 py-1.5 text-xs font-medium text-popover-foreground shadow-sm backdrop-blur"
+            >
+              {branchNotice}
+            </motion.div>
+          ) : null}
+        </AnimatePresence>
+
         <div className="pointer-events-none absolute inset-x-0 top-4 flex items-center justify-center gap-2">
           <span className="text-sm font-semibold tracking-tight">
             loora<span className="text-cx-accent">.</span>
@@ -1818,7 +2495,130 @@ function Editor({ preview = false, userId }: { preview?: boolean; userId?: strin
             onRename={renameDoc}
             onDelete={deleteDoc}
           />
+          {!preview ? (
+            <>
+              <span className="text-muted-foreground/50">/</span>
+              <BranchControls
+                designId={activeId}
+                branches={drafts}
+                activeBranchId={activeDraftId}
+                runningBranchIds={runningTargets.filter(
+                  (draftId): draftId is string => draftId !== null,
+                )}
+                onSwitch={switchBranchWithNotice}
+                onCreated={(branch) => {
+                  setDrafts((current) => [branch, ...current])
+                  switchDraft(branch.id, true)
+                  announceBranch(`Created branch ${branch.name}`)
+                }}
+                onChanged={refreshDrafts}
+                onApplied={(nextShapes, revision, branchName) => {
+                  stashTargetEditorState(activeTargetKeyRef.current)
+                  const mainTarget = { designId: activeId, draftId: null }
+                  const key = targetKey(mainTarget)
+                  saveTargetElements(mainTarget, nextShapes)
+                  targetSelections.current.delete(key)
+                  targetHistories.current.delete(key)
+                  activeDraftIdRef.current = null
+                  activeTargetKeyRef.current = key
+                  setActiveDraftId(null)
+                  setShapes(nextShapes)
+                  shapesRef.current = nextShapes
+                  lastSyncedShapes.current = nextShapes
+                  setTargetRevision(revision)
+                  targetRevisionRef.current = revision
+                  setLoadedDocId(key)
+                  setSyncConflict(null)
+                  restoreTargetEditorState(key, nextShapes)
+                  void setUrlState({ draft: null })
+                  announceBranch(`Merged ${branchName} into Main`)
+                }}
+                flush={flushActiveDoc}
+              />
+            </>
+          ) : null}
         </div>
+
+        <Dialog open={syncConflict !== null} onOpenChange={() => {}}>
+          <DialogPopup className="max-w-xl" showCloseButton={false}>
+            <DialogHeader>
+              <DialogTitle>Resolve concurrent changes</DialogTitle>
+              <DialogDescription>
+                This target changed somewhere else while you were editing. Choose which version
+                to keep for each conflict, or reload to discard your local changes.
+              </DialogDescription>
+            </DialogHeader>
+            {syncConflict ? (
+              <div className="min-h-0 space-y-2 overflow-y-auto px-6 py-2">
+                {syncConflict.conflicts.map((conflict) => (
+                  <div
+                    key={conflict.id}
+                    className="flex items-center justify-between gap-3 rounded-lg border p-3"
+                  >
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-medium">
+                        {conflict.kind === 'order'
+                          ? 'Layer order'
+                          : `Element ${conflict.elementId}`}
+                      </p>
+                      <p className="text-xs text-muted-foreground">
+                        {conflict.kind === 'order'
+                          ? 'Both versions reordered the same layers differently.'
+                          : 'Both versions changed or removed this element differently.'}
+                      </p>
+                    </div>
+                    <div className="flex shrink-0 gap-1">
+                      <Button
+                        size="sm"
+                        variant={
+                          syncResolutions[conflict.id] === 'main' ? 'default' : 'outline'
+                        }
+                        onClick={() =>
+                          setSyncResolutions((current) => ({
+                            ...current,
+                            [conflict.id]: 'main',
+                          }))
+                        }
+                      >
+                        Remote
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant={
+                          syncResolutions[conflict.id] === 'draft' ? 'default' : 'outline'
+                        }
+                        onClick={() =>
+                          setSyncResolutions((current) => ({
+                            ...current,
+                            [conflict.id]: 'draft',
+                          }))
+                        }
+                      >
+                        Mine
+                      </Button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : null}
+            <DialogFooter>
+              <Button variant="outline" onClick={reloadAfterSyncConflict}>
+                Reload target
+              </Button>
+              <Button
+                disabled={
+                  !syncConflict ||
+                  syncConflict.conflicts.some(
+                    (conflict) => !syncResolutions[conflict.id],
+                  )
+                }
+                onClick={resolveSyncConflict}
+              >
+                Merge and save
+              </Button>
+            </DialogFooter>
+          </DialogPopup>
+        </Dialog>
 
         <div className="absolute top-1/2 right-4 flex -translate-y-1/2 flex-col gap-1 rounded-xl border bg-card p-1 shadow-sm">
           {TOOLS.map(({ tool: t, icon: Icon, label }) => {
@@ -2054,7 +2854,7 @@ function Editor({ preview = false, userId }: { preview?: boolean; userId?: strin
                   title="Open as page"
                   onClick={() =>
                     window.open(
-                      `/blockpage/${encodeURIComponent(activeId)}?element=${encodeURIComponent(selectedShapes[0].id)}`,
+                      `/blockpage/${encodeURIComponent(activeId)}?${activeDraftId ? `draft=${encodeURIComponent(activeDraftId)}&` : ''}element=${encodeURIComponent(selectedShapes[0].id)}`,
                       '_blank',
                       'noopener',
                     )
@@ -2062,11 +2862,13 @@ function Editor({ preview = false, userId }: { preview?: boolean; userId?: strin
                 >
                   <MaximizeIcon data-slot="icon" />
                 </Button>
-                <PublishButton
-                  key={selectedShapes[0].id}
-                  designId={activeId}
-                  elementId={selectedShapes[0].id}
-                />
+                {!activeDraftId ? (
+                  <PublishButton
+                    key={selectedShapes[0].id}
+                    designId={activeId}
+                    elementId={selectedShapes[0].id}
+                  />
+                ) : null}
               </>
             )}
             <Button
@@ -2101,13 +2903,15 @@ function Editor({ preview = false, userId }: { preview?: boolean; userId?: strin
         </Drawer>
 
         <ExportDialog
-          key={activeId}
+          key={activeTargetKey}
           open={exportOpen}
           onOpenChange={setExportOpen}
           doc={docs.find((doc) => doc.id === activeId) ?? { id: activeId, name: 'Untitled' }}
           shapes={shapes}
           selectedIds={selectedIds}
           databaseReady={databaseReady}
+          draftId={activeDraftId}
+          flush={flushActiveDoc}
         />
 
         <FigmaImportDialog
@@ -2119,6 +2923,8 @@ function Editor({ preview = false, userId }: { preview?: boolean; userId?: strin
             id: activeId,
             name: docs.find((doc) => doc.id === activeId)?.name ?? 'Untitled',
             shapes,
+            draftId: activeDraftId,
+            revision: targetRevision,
           }}
         />
 

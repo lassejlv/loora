@@ -8,18 +8,32 @@ export type ProviderDefinition =
       headers?: Record<string, string>
     }
   | {
+      kind: 'anthropic-compatible'
+      label: string
+      baseURL: string
+      apiKeyEnv: string
+      headers?: Record<string, string>
+    }
+  | {
       kind: 'chatgpt'
       label: string
     }
 
-// OpenAI-compatible providers declare only the environment variable name. Keys are read from the named
-// environment variable on the server and are never included in this config.
+// Managed providers declare only the environment variable name. Keys are read from the named
+// environment variable on the server and are never included in this config. OpenCode Go uses
+// different wire protocols for its models, so both adapters share the same label and API key.
 export const PROVIDERS = {
-  wafer: {
+  opencodeGoAnthropic: {
+    kind: 'anthropic-compatible',
+    label: 'OpenCode Go',
+    baseURL: 'https://opencode.ai/zen/go/v1',
+    apiKeyEnv: 'OPENCODE_GO_API_KEY',
+  },
+  opencodeGoOpenAI: {
     kind: 'openai-compatible',
-    label: 'Wafer',
-    baseURL: 'https://pass.wafer.ai/v1',
-    apiKeyEnv: 'WAFER_API_KEY',
+    label: 'OpenCode Go',
+    baseURL: 'https://opencode.ai/zen/go/v1',
+    apiKeyEnv: 'OPENCODE_GO_API_KEY',
   },
   chatgpt: {
     kind: 'chatgpt',
@@ -64,18 +78,18 @@ export const MODELS = [
   {
     id: 'mini',
     label: 'Mini',
-    provider: 'wafer',
-    modelId: 'MiniMax-M3',
+    provider: 'opencodeGoAnthropic',
+    modelId: 'minimax-m3',
     supportsImageInput: true,
-    price: { input: 1.2, output: 4.9 },
+    price: { input: 0.3, output: 1.2 },
   },
   {
     id: 'max',
     label: 'Max',
-    provider: 'wafer',
-    modelId: 'GLM-5.2',
+    provider: 'opencodeGoOpenAI',
+    modelId: 'glm-5.2',
     supportsImageInput: false,
-    price: { input: 1.5, output: 4.2 },
+    price: { input: 1.4, output: 4.4 },
   },
   {
     id: 'gpt-5.6-sol',

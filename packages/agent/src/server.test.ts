@@ -11,17 +11,28 @@ let meterBalance = 100
 let topUpRemaining = 0
 let chatgptModels: string[] | null = ['gpt-5.6-sol']
 let releaseCalls: Array<[string, string]> = []
+let chatTarget: { designId: string; draftId: string | null } | null = {
+  designId: 'design-one',
+  draftId: null,
+}
+let draftStatus: 'active' | 'proposed' | 'applied' | 'closed' | null = 'active'
 
-const originalWaferApiKey = process.env.WAFER_API_KEY
+const originalOpenCodeGoApiKey = process.env.OPENCODE_GO_API_KEY
 
 mock.module('@loora/db', () => ({
   db: {
-    select: () => {
+    select: (fields: Record<string, unknown>) => {
+      const rows =
+        'designId' in fields && 'draftId' in fields
+          ? chatTarget ? [chatTarget] : []
+          : 'status' in fields
+            ? draftStatus ? [{ status: draftStatus }] : []
+            : []
       const query = {
         from: () => query,
         where: () => query,
         orderBy: () => query,
-        limit: async () => [],
+        limit: async () => rows,
       }
       return query
     },
@@ -40,7 +51,7 @@ mock.module('@loora/auth/preview-access', () => ({
   ),
 }))
 
-mock.module('@loora/auth/billing', () => ({
+mock.module('@loora/billing/billing', () => ({
   acquireGenerationLease: async () => generationLease,
   authorizeBilling: async () => ({
     access: billingAllowed,
@@ -57,12 +68,12 @@ mock.module('@loora/auth/billing', () => ({
   ),
 }))
 
-mock.module('@loora/auth/billing-usage', () => ({
+mock.module('@loora/billing/billing-usage', () => ({
   flushPendingPolarUsage: async () => flushAllowed,
   reportPolarUsage: async () => true,
 }))
 
-mock.module('@loora/auth/credit-top-ups', () => ({
+mock.module('@loora/billing/credit-top-ups', () => ({
   getTopUpCreditStatus: async () => ({ remaining: topUpRemaining }),
 }))
 
@@ -109,8 +120,8 @@ function chatRequest(model = 'mini') {
 }
 
 afterAll(() => {
-  if (originalWaferApiKey === undefined) delete process.env.WAFER_API_KEY
-  else process.env.WAFER_API_KEY = originalWaferApiKey
+  if (originalOpenCodeGoApiKey === undefined) delete process.env.OPENCODE_GO_API_KEY
+  else process.env.OPENCODE_GO_API_KEY = originalOpenCodeGoApiKey
   mock.restore()
 })
 
@@ -127,7 +138,9 @@ describe('agent server HTTP contract', () => {
     topUpRemaining = 0
     chatgptModels = ['gpt-5.6-sol']
     releaseCalls = []
-    process.env.WAFER_API_KEY = 'test-wafer-key'
+    chatTarget = { designId: 'design-one', draftId: null }
+    draftStatus = 'active'
+    process.env.OPENCODE_GO_API_KEY = 'test-opencode-go-key'
   })
 
   it('keeps unauthenticated chat requests at 401', async () => {
@@ -160,6 +173,31 @@ describe('agent server HTTP contract', () => {
     expect(await billing.json()).toMatchObject({ code: 'SUBSCRIPTION_REQUIRED' })
   })
 
+  it('rejects mismatched and read-only draft targets', async () => {
+    signedIn = true
+    chatTarget = { designId: 'design-one', draftId: 'draft-one' }
+
+    const mismatch = await handleAgentChatRequest(chatRequest())
+    expect(mismatch.status).toBe(404)
+
+    const request = new Request('http://localhost/api/chat', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        messages: [],
+        shapes: [],
+        designId: 'design-one',
+        draftId: 'draft-one',
+        chatId: 'chat-one',
+        model: 'mini',
+      }),
+    })
+    draftStatus = 'proposed'
+    const readOnly = await handleAgentChatRequest(request)
+    expect(readOnly.status).toBe(409)
+    expect(await readOnly.json()).toMatchObject({ code: 'DRAFT_READ_ONLY' })
+  })
+
   it('preserves the managed-AI trial gate', async () => {
     signedIn = true
     managedAiAccess = false
@@ -172,11 +210,11 @@ describe('agent server HTTP contract', () => {
 
   it('preserves provider configuration and ChatGPT availability errors', async () => {
     signedIn = true
-    delete process.env.WAFER_API_KEY
+    delete process.env.OPENCODE_GO_API_KEY
     const missingKey = await handleAgentChatRequest(chatRequest())
     expect(missingKey.status).toBe(503)
     expect(await missingKey.json()).toEqual({
-      error: 'Wafer is not configured. Set WAFER_API_KEY on the server.',
+      error: 'OpenCode Go is not configured. Set OPENCODE_GO_API_KEY on the server.',
     })
 
     chatgptModels = null
