@@ -15,11 +15,13 @@ import { ImagePickerDialog } from '#/components/image-picker-dialog'
 import { StyleEditorPanel } from '#/components/style-editor-panel'
 import {
   insertNodeMarkup,
+  interactiveElements,
   moveNodeMarkup,
   NEW_SECTION_MARKUP,
   removeNodeMarkup,
   replaceClassValue,
   replaceImageSource,
+  visibleElements,
 } from '#/lib/canvas'
 import { collectSnapLines, elementAABB, snapBox, snapPoint, type SnapLines } from '#/lib/snap'
 
@@ -80,6 +82,8 @@ interface CanvasProps {
   // comment popover stays open instead of losing the user's text.
   onComment?: (text: string) => boolean | void
   onCanvasContextMenu?: (info: CanvasContextMenuInfo) => void
+  /** Ids hovered in the layers rail — outlined here so the two views stay linked. */
+  hoveredIds?: string[]
 }
 
 type Drag =
@@ -191,6 +195,7 @@ export function Canvas({
   onUpdateMany,
   onComment,
   onCanvasContextMenu,
+  hoveredIds,
 }: CanvasProps) {
   const rootRef = useRef<HTMLDivElement>(null)
   const [view, setView] = useState<View>(() => loadView(docId) ?? DEFAULT_VIEW)
@@ -236,6 +241,12 @@ export function Canvas({
   const skipViewSave = useRef(false)
   const activeTool: Tool = spaceHeld ? 'hand' : tool
   const selectedIdSet = useMemo(() => new Set(selectedIds), [selectedIds])
+  const hoveredIdSet = useMemo(() => new Set(hoveredIds ?? []), [hoveredIds])
+  // Hidden elements leave the scene entirely; locked ones stay on screen but
+  // are invisible to hit-testing, marquee and every drag.
+  const shownElements = useMemo(() => visibleElements(elements), [elements])
+  const hitElements = useMemo(() => interactiveElements(elements), [elements])
+  const isLocked = (id: string) => elements.find((el) => el.id === id)?.locked === true
 
   const toScene = (clientX: number, clientY: number) => {
     const rect = rootRef.current!.getBoundingClientRect()
@@ -496,11 +507,14 @@ export function Canvas({
 
     if (activeTool === 'select') {
       const target = (e.target as Element).closest('[data-element-id]')
-      const id = target?.getAttribute('data-element-id') ?? null
+      const hitId = target?.getAttribute('data-element-id') ?? null
+      // A locked element is scenery: the click falls through to the marquee.
+      const id = hitId && !isLocked(hitId) ? hitId : null
       if (id) {
-        // Clicking a grouped element acts on the whole group.
+        // Clicking a grouped element acts on the whole group (locked members
+        // stay out of it — they cannot be dragged along).
         const gid = elements.find((el) => el.id === id)?.groupId
-        const member = gid ? elements.filter((el) => el.groupId === gid).map((el) => el.id) : [id]
+        const member = gid ? hitElements.filter((el) => el.groupId === gid).map((el) => el.id) : [id]
         const memberSet = new Set(member)
         if (e.shiftKey) {
           onSelect(
@@ -513,7 +527,10 @@ export function Canvas({
         const ids = selectedIdSet.has(id) ? selectedIds : member
         if (ids !== selectedIds) onSelect(ids)
         const idSet = new Set(ids)
-        const targets = elements.filter((el) => idSet.has(el.id))
+        // Selecting a locked element from the layers rail is allowed; dragging
+        // it is not, so the drag only ever carries the unlocked part.
+        const targets = hitElements.filter((el) => idSet.has(el.id))
+        if (targets.length === 0) return
         const origins = targets.map((el) => ({ id: el.id, ox: el.x, oy: el.y, w: el.w, h: el.h }))
         const bounds = targets.reduce(
           (box, el) => {
@@ -532,7 +549,7 @@ export function Canvas({
           startX: pt.x,
           startY: pt.y,
           origins,
-          movingIds: idSet,
+          movingIds: new Set(targets.map((el) => el.id)),
           bounds,
           lines: collectSnapLines(elements, idSet),
         })
@@ -567,7 +584,7 @@ export function Canvas({
 
   const startResize = (e: React.PointerEvent, handle: number) => {
     e.stopPropagation()
-    const targets = elements.filter((c) => selectedIdSet.has(c.id))
+    const targets = hitElements.filter((c) => selectedIdSet.has(c.id))
     if (targets.length === 0) return
     // A single element resizes in its own (possibly rotated) local space;
     // multi-selections scale their axis-aligned bounding box.
@@ -597,7 +614,7 @@ export function Canvas({
 
   const startRotate = (e: React.PointerEvent) => {
     e.stopPropagation()
-    const targets = elements.filter((c) => selectedIdSet.has(c.id))
+    const targets = hitElements.filter((c) => selectedIdSet.has(c.id))
     if (targets.length !== 1) return
     const el = targets[0]
     const center = { x: el.x + el.w / 2, y: el.y + el.h / 2 }
@@ -794,7 +811,7 @@ export function Canvas({
       onToolChange('select')
     }
     if (d?.mode === 'marquee') {
-      const hits = elements
+      const hits = hitElements
         .filter((el) => {
           const b = elementAABB(el)
           return b.left < d.x + d.w && b.right > d.x && b.top < d.y + d.h && b.bottom > d.y
@@ -802,11 +819,11 @@ export function Canvas({
         .map((el) => el.id)
       // A marquee touching any group member catches the whole group.
       const hitSet = new Set(hits)
-      const groups = new Set(elements.filter((el) => hitSet.has(el.id) && el.groupId).map((el) => el.groupId))
+      const groups = new Set(hitElements.filter((el) => hitSet.has(el.id) && el.groupId).map((el) => el.groupId))
       const expanded = [
         ...new Set([
           ...hits,
-          ...elements.filter((el) => el.groupId && groups.has(el.groupId)).map((el) => el.id),
+          ...hitElements.filter((el) => el.groupId && groups.has(el.groupId)).map((el) => el.id),
         ]),
       ]
       onSelect(d.additive ? [...new Set([...selectedIds, ...expanded])] : expanded)
@@ -987,7 +1004,14 @@ export function Canvas({
     right: ((rootRect?.width ?? 2000) - view.x) / view.scale,
     bottom: ((rootRect?.height ?? 2000) - view.y) / view.scale,
   }
-  const selectedElements = elements.filter((el) => selectedIdSet.has(el.id))
+  // Chrome follows what is on screen: a hidden element draws no outline even
+  // while selected, and an all-locked selection gets an outline but no handles.
+  const selectedElements = shownElements.filter((el) => selectedIdSet.has(el.id))
+  const selectionLocked =
+    selectedElements.length > 0 && selectedElements.every((el) => el.locked === true)
+  const hoveredElements = shownElements.filter(
+    (el) => hoveredIdSet.has(el.id) && !selectedIdSet.has(el.id),
+  )
   // A single selection keeps its own (possibly rotated) box so the handles
   // rotate with it; multi-selections use the axis-aligned union.
   const singleSelected = selectedElements.length === 1 ? selectedElements[0] : null
@@ -1044,7 +1068,7 @@ export function Canvas({
         if (activeTool !== 'select') return
         const target = (e.target as Element).closest('[data-element-id]')
         const id = target?.getAttribute('data-element-id')
-        const el = elements.find((c) => c.id === id)
+        const el = hitElements.find((c) => c.id === id)
         if (el) {
           // Double-click means "edit the content": enter interact mode with
           // text/image editing on. The interact tool (i) stays pure play mode,
@@ -1063,7 +1087,7 @@ export function Canvas({
           transformOrigin: '0 0',
         }}
       >
-        {elements.map((el) => {
+        {shownElements.map((el) => {
           const b = elementAABB(el)
           const offscreen =
             b.right < scene.left - cullMargin ||
@@ -1106,6 +1130,25 @@ export function Canvas({
             />
           )}
 
+          {hoveredElements.map((el) => (
+            <rect
+              key={`hover-${el.id}`}
+              x={el.x}
+              y={el.y}
+              width={el.w}
+              height={el.h}
+              fill="none"
+              stroke="var(--cx-accent)"
+              strokeOpacity={0.5}
+              strokeWidth={1.5 / view.scale}
+              transform={
+                (el.r ?? 0) % 360 !== 0
+                  ? `rotate(${el.r} ${el.x + el.w / 2} ${el.y + el.h / 2})`
+                  : undefined
+              }
+            />
+          ))}
+
           {selectedElements.map((el) => (
             <rect
               key={el.id}
@@ -1116,6 +1159,8 @@ export function Canvas({
               fill="none"
               stroke="var(--cx-accent)"
               strokeWidth={1.5 / view.scale}
+              // A locked element reads as pinned, not grabbable.
+              strokeDasharray={el.locked ? `${5 / view.scale} ${4 / view.scale}` : undefined}
               transform={
                 (el.r ?? 0) % 360 !== 0
                   ? `rotate(${el.r} ${el.x + el.w / 2} ${el.y + el.h / 2})`
@@ -1171,6 +1216,7 @@ export function Canvas({
                 {/* Rotate zones: invisible circles just outside each corner
                     (drawn first so the resize handles win where they overlap). */}
                 {singleSelected &&
+                  !selectionLocked &&
                   RESIZE_HANDLES.slice(0, 4).map(([cx, cy], i) => (
                     <circle
                       key={`rot${i}`}
@@ -1182,7 +1228,7 @@ export function Canvas({
                       onPointerDown={startRotate}
                     />
                   ))}
-                {RESIZE_HANDLES.map(([cx, cy], i) => (
+                {!selectionLocked && RESIZE_HANDLES.map(([cx, cy], i) => (
                   <rect
                     key={i}
                     x={selBounds.x + cx * selBounds.w - 4 / view.scale}

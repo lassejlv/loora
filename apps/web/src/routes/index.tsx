@@ -320,6 +320,14 @@ function DocSwitcher({
   )
 }
 
+// The layers rail is docked, not floating: it takes width from the canvas, so
+// it needs a floor that still fits a name and a ceiling that leaves the canvas
+// usable.
+const LAYERS_MIN_WIDTH = 200
+const LAYERS_MAX_WIDTH = 420
+const clampLayersWidth = (width: number) =>
+  Math.round(Math.min(LAYERS_MAX_WIDTH, Math.max(LAYERS_MIN_WIDTH, width)))
+
 const TOOLS: { tool: Tool; icon: ElementType; key: string; label: string }[] = [
   { tool: 'select', icon: MousePointer2Icon, key: 'v', label: 'Select' },
   { tool: 'interact', icon: MousePointerClickIcon, key: 'i', label: 'Interact' },
@@ -484,6 +492,14 @@ function Editor({ preview = false, userId }: { preview?: boolean; userId?: strin
     const raw = Number(window.localStorage.getItem('loora:agent-width'))
     return Number.isFinite(raw) ? Math.min(640, Math.max(280, Math.round(raw))) : 340
   })
+  const [layersWidth, setLayersWidth] = useState(() => {
+    if (preview || typeof window === 'undefined') return 260
+    const raw = Number(window.localStorage.getItem('loora:layers-width'))
+    return Number.isFinite(raw) && raw > 0 ? clampLayersWidth(raw) : 260
+  })
+  const [resizingLayers, setResizingLayers] = useState(false)
+  // Ids hovered in the layers rail, mirrored onto the canvas as an outline.
+  const [hoveredLayerIds, setHoveredLayerIds] = useState<string[]>([])
   const [shortcutConfig, setShortcutConfig] = useState<ShortcutConfig>(() =>
     preview ? { overrides: {}, custom: [] } : loadCachedShortcuts(),
   )
@@ -1379,15 +1395,19 @@ function Editor({ preview = false, userId }: { preview?: boolean; userId?: strin
     [mutate],
   )
 
+  const deleteIds = useCallback(
+    (ids: string[]) => {
+      if (ids.length === 0) return
+      const target = new Set(ids)
+      mutate((prev) => prev.filter((s) => !target.has(s.id)))
+      setSelectedIds((sel) => sel.filter((id) => !target.has(id)))
+    },
+    [mutate],
+  )
+
   const deleteSelected = useCallback(() => {
-    setSelectedIds((sel) => {
-      if (sel.length > 0) {
-        const selected = new Set(sel)
-        mutate((prev) => prev.filter((s) => !selected.has(s.id)))
-      }
-      return []
-    })
-  }, [mutate])
+    deleteIds(selectedIdsRef.current)
+  }, [deleteIds])
 
   // Copies must not stay grouped with their originals: give each source
   // group a fresh id, preserving grouping within the copied set.
@@ -1400,14 +1420,26 @@ function Editor({ preview = false, userId }: { preview?: boolean; userId?: strin
     })
   }
 
+  const duplicateIds = useCallback(
+    (ids: string[]) => {
+      const wanted = new Set(ids)
+      const targets = shapesRef.current.filter((s) => wanted.has(s.id))
+      if (targets.length === 0) return
+      const copies = remapGroups(targets).map((s) => ({
+        ...s,
+        id: elementId(),
+        x: s.x + 16,
+        y: s.y + 16,
+      }))
+      mutate((prev) => [...prev, ...copies])
+      setSelectedIds(copies.map((c) => c.id))
+    },
+    [mutate],
+  )
+
   const duplicateSelected = useCallback(() => {
-    const selected = new Set(selectedIds)
-    const targets = shapesRef.current.filter((s) => selected.has(s.id))
-    if (targets.length === 0) return
-    const copies = remapGroups(targets).map((s) => ({ ...s, id: elementId(), x: s.x + 16, y: s.y + 16 }))
-    mutate((prev) => [...prev, ...copies])
-    setSelectedIds(copies.map((c) => c.id))
-  }, [mutate, selectedIds])
+    duplicateIds(selectedIdsRef.current)
+  }, [duplicateIds])
 
   // In-memory clipboard; repeated pastes cascade by +16 each.
   const clipboard = useRef<{ elements: CanvasElement[]; pastes: number }>({ elements: [], pastes: 0 })
@@ -1467,19 +1499,53 @@ function Editor({ preview = false, userId }: { preview?: boolean; userId?: strin
     deleteSelected()
   }, [copySelected, deleteSelected])
 
+  const groupIds = useCallback(
+    (ids: string[]) => {
+      if (ids.length < 2) return
+      const target = new Set(ids)
+      const gid = `g${elementId()}`
+      mutate((prev) => prev.map((s) => (target.has(s.id) ? { ...s, groupId: gid } : s)))
+    },
+    [mutate],
+  )
+
+  const ungroupIds = useCallback(
+    (ids: string[]) => {
+      const target = new Set(ids)
+      mutate((prev) => prev.map((s) => (target.has(s.id) ? { ...s, groupId: undefined } : s)))
+    },
+    [mutate],
+  )
+
   const groupSelected = useCallback(() => {
-    const sel = selectedIdsRef.current
-    if (sel.length < 2) return
-    const selected = new Set(sel)
-    const gid = `g${elementId()}`
-    mutate((prev) => prev.map((s) => (selected.has(s.id) ? { ...s, groupId: gid } : s)))
-  }, [mutate])
+    groupIds(selectedIdsRef.current)
+  }, [groupIds])
 
   const ungroupSelected = useCallback(() => {
-    const sel = selectedIdsRef.current
-    const selected = new Set(sel)
-    mutate((prev) => prev.map((s) => (selected.has(s.id) ? { ...s, groupId: undefined } : s)))
-  }, [mutate])
+    ungroupIds(selectedIdsRef.current)
+  }, [ungroupIds])
+
+  // Hiding drops the element from the selection: canvas chrome for something
+  // that is not on screen is a dead end.
+  const setLayerFlags = useCallback(
+    (ids: string[], patch: { hidden?: boolean; locked?: boolean }) => {
+      if (ids.length === 0) return
+      const target = new Set(ids)
+      mutate((prev) =>
+        prev.map((s) =>
+          target.has(s.id)
+            ? {
+                ...s,
+                ...(patch.hidden === undefined ? {} : { hidden: patch.hidden || undefined }),
+                ...(patch.locked === undefined ? {} : { locked: patch.locked || undefined }),
+              }
+            : s,
+        ),
+      )
+      if (patch.hidden === true) setSelectedIds((sel) => sel.filter((id) => !target.has(id)))
+    },
+    [mutate],
+  )
 
   const align = useCallback(
     (edge: AlignEdge) => mutate((prev) => alignElements(prev, selectedIdsRef.current, edge)),
@@ -1707,8 +1773,8 @@ function Editor({ preview = false, userId }: { preview?: boolean; userId?: strin
   )
 
   const reorder = useCallback(
-    (dir: 'forward' | 'backward' | 'front' | 'back') => {
-      const sel = new Set(selectedIds)
+    (dir: 'forward' | 'backward' | 'front' | 'back', ids?: string[]) => {
+      const sel = new Set(ids ?? selectedIdsRef.current)
       if (sel.size === 0) return
       mutate((prev) => {
         const arr = [...prev]
@@ -1733,7 +1799,7 @@ function Editor({ preview = false, userId }: { preview?: boolean; userId?: strin
         return arr
       })
     },
-    [mutate, selectedIds],
+    [mutate],
   )
 
   useEffect(() => {
@@ -1914,6 +1980,41 @@ function Editor({ preview = false, userId }: { preview?: boolean; userId?: strin
   const reduceMotion = useReducedMotion()
   const barMotion = fadeUp(reduceMotion)
   const barTransition = uiTransition(reduceMotion)
+  // Memoised so the memo() on LayersPanel survives unrelated Editor renders —
+  // the rail re-renders on every canvas drag frame otherwise.
+  const layersPanelProps = useMemo(
+    () => ({
+      elements: shapes,
+      selectedIds,
+      onSelect: setSelectedIds,
+      onReorderList: (orderedIds: string[]) =>
+        mutate((prev) => reorderElements(prev, orderedIds)),
+      onRename: (id: string, name: string) => {
+        updateElement(id, { name })
+      },
+      onSetFlags: setLayerFlags,
+      onDuplicate: duplicateIds,
+      onDelete: deleteIds,
+      onGroup: groupIds,
+      onUngroup: ungroupIds,
+      onRaise: (ids: string[]) => reorder('forward', ids),
+      onLower: (ids: string[]) => reorder('backward', ids),
+      onHover: setHoveredLayerIds,
+    }),
+    [
+      shapes,
+      selectedIds,
+      mutate,
+      updateElement,
+      setLayerFlags,
+      duplicateIds,
+      deleteIds,
+      groupIds,
+      ungroupIds,
+      reorder,
+    ],
+  )
+
   const commandGroups: EditorCommandGroup[] = [
     {
       label: 'Figma',
@@ -2143,6 +2244,7 @@ function Editor({ preview = false, userId }: { preview?: boolean; userId?: strin
               onToolChange={setTool}
               onCreate={(s) => mutate((prev) => [...prev, s])}
               onUpdateMany={updateElements}
+              hoveredIds={hoveredLayerIds}
               onComment={(text) => {
                 toggleAgent(true)
                 return agentSend.current?.(text) ?? false
@@ -2375,22 +2477,18 @@ function Editor({ preview = false, userId }: { preview?: boolean; userId?: strin
           </div>
         )}
 
-        <Drawer open={layersOpen} onOpenChange={toggleLayers} position="bottom">
-          <DrawerPopup
-            position="bottom"
-            variant="inset"
-            className="mx-auto h-[min(50svh,28rem)] w-full max-w-sm overflow-hidden rounded-2xl border"
-          >
-            <LayersPanel
-              elements={shapes}
-              selectedIds={selectedIds}
-              onSelect={setSelectedIds}
-              onReorderList={(orderedIds) => mutate((prev) => reorderElements(prev, orderedIds))}
-              onRename={(id, name) => updateElement(id, { name })}
-              onClose={() => toggleLayers(false)}
-            />
-          </DrawerPopup>
-        </Drawer>
+        {/* Below md a docked rail would eat the canvas, so it stays a drawer. */}
+        {isMobile ? (
+          <Drawer open={layersOpen} onOpenChange={toggleLayers} position="bottom">
+            <DrawerPopup
+              position="bottom"
+              variant="inset"
+              className="mx-auto h-[min(50svh,28rem)] w-full max-w-sm overflow-hidden rounded-2xl border"
+            >
+              <LayersPanel {...layersPanelProps} onClose={() => toggleLayers(false)} />
+            </DrawerPopup>
+          </Drawer>
+        ) : null}
 
         <Drawer open={assetsOpen} onOpenChange={toggleAssets} position="bottom">
           <DrawerPopup
@@ -2963,6 +3061,41 @@ function Editor({ preview = false, userId }: { preview?: boolean; userId?: strin
         ) : null}
 
       </main>
+
+      {/* Docked layers rail: takes width from the canvas rather than covering
+          it, so nothing you are arranging can hide behind the panel. */}
+      {!isMobile && layersOpen ? (
+        <div
+          className="relative flex shrink-0 py-2 pe-2"
+          style={{ width: layersWidth }}
+        >
+          <div
+            role="separator"
+            aria-label="Resize layers panel"
+            aria-orientation="vertical"
+            className="absolute inset-y-0 -start-1 z-20 w-2 cursor-col-resize touch-none after:absolute after:inset-y-0 after:start-1/2 after:w-px after:-translate-x-1/2 after:bg-transparent hover:after:bg-cx-accent/40"
+            onPointerDown={(event) => {
+              event.currentTarget.setPointerCapture(event.pointerId)
+              setResizingLayers(true)
+            }}
+            onPointerMove={(event) => {
+              if (!resizingLayers) return
+              setLayersWidth(clampLayersWidth(window.innerWidth - event.clientX))
+            }}
+            onPointerUp={(event) => {
+              if (!resizingLayers) return
+              event.currentTarget.releasePointerCapture(event.pointerId)
+              setResizingLayers(false)
+              if (!preview) {
+                window.localStorage.setItem('loora:layers-width', String(layersWidth))
+              }
+            }}
+          />
+          <div className="flex min-h-0 w-full overflow-hidden rounded-2xl border bg-card shadow-sm">
+            <LayersPanel {...layersPanelProps} onClose={() => toggleLayers(false)} />
+          </div>
+        </div>
+      ) : null}
 
     </SidebarProvider>
   )

@@ -1,4 +1,5 @@
 import type { CanvasElement } from './canvas'
+import { visibleElements } from './canvas'
 import {
   captureElement,
   getElementCaptureRevision,
@@ -68,6 +69,9 @@ export async function snapshotCanvas(
     freshness = 'reuse-clean',
   }: { pixelRatio?: number; freshness?: 'reuse-clean' | 'fresh' } = {},
 ): Promise<string | null> {
+  // Hidden elements have no frame to capture and are not what the user sees,
+  // so they must not reach the agent's snapshot either.
+  elements = visibleElements(elements)
   if (elements.length === 0) return null
 
   const pad = 40

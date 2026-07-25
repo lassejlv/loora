@@ -265,6 +265,26 @@ export function reorderElements(elements: CanvasElement[], orderedIds: string[])
   return ordered
 }
 
+// Hidden elements are not rendered, captured or exported; locked ones render
+// but ignore every canvas interaction. Both are per-element flags the layers
+// rail toggles — nothing else in the pipeline may special-case them, so these
+// two predicates are the single definition.
+export function isVisible(element: CanvasElement) {
+  return element.hidden !== true
+}
+
+export function isInteractive(element: CanvasElement) {
+  return element.hidden !== true && element.locked !== true
+}
+
+export function visibleElements(elements: CanvasElement[]) {
+  return elements.filter(isVisible)
+}
+
+export function interactiveElements(elements: CanvasElement[]) {
+  return elements.filter(isInteractive)
+}
+
 let counter = 0
 export function elementId() {
   counter += 1

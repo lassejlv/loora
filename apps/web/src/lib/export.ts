@@ -1,4 +1,5 @@
 import type { CanvasElement } from '#/lib/canvas'
+import { visibleElements } from '#/lib/canvas'
 import { classifyCode } from '#/components/element-frame'
 import { sanitizeHtml } from '#/lib/sanitize'
 
@@ -55,7 +56,9 @@ function elementMarkup(el: CanvasElement, offsetX: number, offsetY: number) {
   return `<iframe title="${escapeHtml(el.name || 'Element')}" sandbox="" srcdoc="${escapeHtml(source)}" style="${base}border:0;overflow:hidden"></iframe>`
 }
 
-export function buildSafeHtml(name: string, elements: CanvasElement[]) {
+export function buildSafeHtml(name: string, allElements: CanvasElement[]) {
+  // A hidden layer is not part of the design you are exporting.
+  const elements = visibleElements(allElements)
   const minX = elements.length ? Math.min(...elements.map((el) => el.x)) : 0
   const minY = elements.length ? Math.min(...elements.map((el) => el.y)) : 0
   const maxX = elements.length ? Math.max(...elements.map((el) => el.x + el.w)) : 800

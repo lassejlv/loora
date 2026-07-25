@@ -850,11 +850,22 @@ function ChatSession({
             state: 'output-error',
             errorText: message,
           } as Parameters<typeof addToolOutput>[0])
+        // A locked layer is the user saying "leave this alone"; the agent gets
+        // told rather than silently overruled.
+        const isElementLocked = (id: string) =>
+          shapesRef.current.find((element) => element.id === id)?.locked === true
+        const lockedMessage = (id: string) =>
+          `Element ${id} is locked. Ask the user to unlock it before editing.`
         // Tool outputs echo geometry but never code (the model just wrote it —
         // echoing would double the tokens) plus the live render outcome so
         // broken code comes back as actionable feedback instead of a silent
         // stale frame.
         const ackWithRender = async (el: CanvasElement) => {
+          // A hidden element has no mounted frame, so waiting for a render
+          // result would just burn the timeout and report a phantom error.
+          if (el.hidden) {
+            return { id: el.id, name: el.name, x: el.x, y: el.y, w: el.w, h: el.h, render: 'hidden' }
+          }
           let render = await awaitRenderResult(el.id)
           // The ok ack races async crashes (effects, timers) that land after
           // the grace period. The frame's log buffer was cleared when this
@@ -934,6 +945,10 @@ function ChatSession({
             }
             case 'updateElement': {
               const { id, ...patch } = input as { id: string } & Partial<CanvasElement>
+              if (isElementLocked(id)) {
+                respond({ error: lockedMessage(id) })
+                break
+              }
               const updated = actions.updateElement(id, patch)
               if (!updated) {
                 respond({ error: `No element with id ${id}` })
@@ -949,6 +964,10 @@ function ChatSession({
               const el = shapesRef.current.find((s) => s.id === id)
               if (!el) {
                 respond({ error: `No element with id ${id}` })
+                break
+              }
+              if (el.locked) {
+                respond({ error: lockedMessage(id) })
                 break
               }
               const result = applyCodeEdits(el.code, edits ?? [])
@@ -969,12 +988,23 @@ function ChatSession({
                 (input as { changes?: ({ id: string } & Partial<CanvasElement>)[] }).changes ?? []
               const updated: Pick<CanvasElement, 'id' | 'name' | 'x' | 'y' | 'w' | 'h'>[] = []
               const missing: string[] = []
+              const locked: string[] = []
               for (const { id, ...patch } of changes) {
+                if (isElementLocked(id)) {
+                  locked.push(id)
+                  continue
+                }
                 const el = actions.updateElement(id, patch)
                 if (el) updated.push({ id: el.id, name: el.name, x: el.x, y: el.y, w: el.w, h: el.h })
                 else missing.push(id)
               }
-              respond(missing.length > 0 ? { updated, missing } : { updated })
+              respond({
+                updated,
+                ...(missing.length > 0 ? { missing } : {}),
+                ...(locked.length > 0
+                  ? { locked, note: 'Locked elements were skipped. Ask the user to unlock them.' }
+                  : {}),
+              })
               break
             }
             case 'searchCanvas': {

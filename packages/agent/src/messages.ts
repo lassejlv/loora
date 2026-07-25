@@ -179,6 +179,10 @@ export function canvasForPrompt(shapes: CanvasElement[]) {
     w: element.w,
     h: element.h,
     ...(element.r ? { r: element.r } : {}),
+    // Surfaced so the model knows why an element is missing from the snapshot
+    // (hidden) or why an edit will be refused (locked).
+    ...(element.hidden ? { hidden: true } : {}),
+    ...(element.locked ? { locked: true } : {}),
     code:
       element.code.length <= 1200
         ? element.code
