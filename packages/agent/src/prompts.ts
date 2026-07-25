@@ -1,4 +1,4 @@
-import type { CanvasElement } from '@loora/db/canvas'
+import type { CanvasElement, CanvasPage } from '@loora/db/canvas'
 import agentPromptTemplate from './agent-prompt.txt' with { type: 'text' }
 import { canvasForPrompt } from './messages'
 import { DESIGN_SKILL_PROMPT } from './design-skill'
@@ -45,7 +45,9 @@ export function buildAgentSystemPrompt({
   githubConnected,
   assets,
   shapes,
+  pages,
   selectedIds,
+  selectedPageId,
 }: {
   customInstructions: string
   forceCanvasAction?: boolean
@@ -53,8 +55,21 @@ export function buildAgentSystemPrompt({
   githubConnected: boolean
   assets: { id: string; name: string; mediaType: string }[]
   shapes?: CanvasElement[]
+  pages?: CanvasPage[]
   selectedIds?: string[]
+  selectedPageId?: string | null
 }) {
+  const selectionContext = [
+    selectedIds?.length
+      ? `The user currently has these element ids selected: ${JSON.stringify(selectedIds)}. When the request says "this", "these", or "the selected", it refers to those elements.`
+      : '',
+    selectedPageId
+      ? `The user currently has Page id ${JSON.stringify(selectedPageId)} selected. When the request refers to "this Page" or "the selected Page", use that Page.`
+      : '',
+  ]
+    .filter(Boolean)
+    .join('\n')
+
   const basePrompt = renderPromptTemplate(agentPromptTemplate, {
     forceCanvasAction: forceCanvasAction
       ? 'Your previous response promised a canvas change but stopped without making one. Call the appropriate canvas mutation tool now; do not reply with another promise.'
@@ -74,9 +89,8 @@ export function buildAgentSystemPrompt({
       ? 'Verify loop: after finishing the edits for a design task, call viewCanvas to see the actual result. If you spot problems (overlap, misalignment, cramped spacing, poor contrast), fix them and check again. Also check the restraint limits mechanically: a headline wrapping past 2 lines, oversized display type, or a wall of text is a defect — shrink and cut before finishing. Use viewElement for a sharp closeup of one element when the full-canvas image is too small to judge text or details. Skip verification for trivial single-shape edits.'
       : 'Canvas image verification is temporarily disabled. Do not call viewCanvas.',
     canvas: JSON.stringify(canvasForPrompt(shapes ?? [])),
-    selected: selectedIds?.length
-      ? `The user currently has these element ids selected: ${JSON.stringify(selectedIds)}. When the request says "this", "these", or "the selected", it refers to those elements.`
-      : '',
+    pages: JSON.stringify(pages ?? []),
+    selected: selectionContext,
   })
 
   return composeAgentSystemPrompt(basePrompt, customInstructions)

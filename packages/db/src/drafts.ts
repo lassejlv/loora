@@ -1,4 +1,4 @@
-import type { CanvasElement } from './canvas'
+import type { CanvasElement, CanvasPage } from './canvas'
 
 export const DRAFT_STATUSES = ['active', 'proposed', 'applied', 'closed'] as const
 
@@ -27,7 +27,27 @@ export type OrderMergeConflict = {
   draftOrder: string[]
 }
 
-export type CanvasMergeConflict = ElementMergeConflict | OrderMergeConflict
+export type PageMergeConflict = {
+  id: `page:${string}`
+  kind: 'page'
+  pageId: string
+  base: CanvasPage | null
+  main: CanvasPage | null
+  draft: CanvasPage | null
+}
+
+export type PageOrderMergeConflict = {
+  id: 'page-order'
+  kind: 'page-order'
+  mainOrder: string[]
+  draftOrder: string[]
+}
+
+export type CanvasMergeConflict =
+  | ElementMergeConflict
+  | OrderMergeConflict
+  | PageMergeConflict
+  | PageOrderMergeConflict
 
 export interface CanvasDiffSummary {
   added: number
@@ -37,38 +57,42 @@ export interface CanvasDiffSummary {
 
 export interface CanvasMergeResult {
   shapes: CanvasElement[]
+  pages: CanvasPage[]
   conflicts: CanvasMergeConflict[]
   unresolved: string[]
   summary: CanvasDiffSummary
 }
 
-function same(left: CanvasElement | undefined, right: CanvasElement | undefined) {
+type Identified = { id: string }
+
+function same<T>(left: T | undefined, right: T | undefined) {
   return JSON.stringify(left) === JSON.stringify(right)
 }
 
-export function canvasDiff(base: CanvasElement[], next: CanvasElement[]): CanvasDiffSummary {
-  const baseById = new Map(base.map((shape) => [shape.id, shape]))
-  const nextIds = new Set(next.map((shape) => shape.id))
+function collectionDiff<T extends Identified>(base: T[], next: T[]): CanvasDiffSummary {
+  const baseById = new Map(base.map((item) => [item.id, item]))
+  const nextIds = new Set(next.map((item) => item.id))
   let added = 0
   let changed = 0
 
-  for (const shape of next) {
-    const previous = baseById.get(shape.id)
+  for (const item of next) {
+    const previous = baseById.get(item.id)
     if (!previous) added += 1
-    else if (!same(previous, shape)) changed += 1
+    else if (!same(previous, item)) changed += 1
   }
 
   return {
     added,
-    removed: base.filter((shape) => !nextIds.has(shape.id)).length,
+    removed: base.filter((item) => !nextIds.has(item.id)).length,
     changed,
   }
 }
 
-function sourceChanged(
-  base: CanvasElement | undefined,
-  source: CanvasElement | undefined,
-) {
+export function canvasDiff(base: CanvasElement[], next: CanvasElement[]): CanvasDiffSummary {
+  return collectionDiff(base, next)
+}
+
+function sourceChanged<T>(base: T | undefined, source: T | undefined) {
   return !same(base, source)
 }
 
@@ -79,12 +103,13 @@ function appendMissing(order: string[], source: string[], included: Set<string>)
   }
 }
 
-function mergeOrder(
-  base: CanvasElement[],
-  main: CanvasElement[],
-  draft: CanvasElement[],
+function mergeOrder<T extends Identified>(
+  base: T[],
+  main: T[],
+  draft: T[],
   included: Set<string>,
   resolution: MergeChoice | undefined,
+  conflictId: 'order' | 'page-order' = 'order',
 ) {
   const baseIds = base.map((shape) => shape.id).filter((id) => included.has(id))
   const baseIdSet = new Set(baseIds)
@@ -113,12 +138,76 @@ function mergeOrder(
     order,
     conflict: conflict
       ? ({
-          id: 'order',
-          kind: 'order',
+          id: conflictId,
+          kind: conflictId,
           mainOrder: mainIds,
           draftOrder: draftIds,
-        } satisfies OrderMergeConflict)
+        } as OrderMergeConflict | PageOrderMergeConflict)
       : null,
+  }
+}
+
+function mergePages(
+  base: CanvasPage[],
+  main: CanvasPage[],
+  draft: CanvasPage[],
+  resolutions: Readonly<Record<string, MergeChoice>>,
+) {
+  const baseById = new Map(base.map((page) => [page.id, page]))
+  const mainById = new Map(main.map((page) => [page.id, page]))
+  const draftById = new Map(draft.map((page) => [page.id, page]))
+  const ids = new Set([...baseById.keys(), ...mainById.keys(), ...draftById.keys()])
+  const selected = new Map<string, CanvasPage>()
+  const conflicts: CanvasMergeConflict[] = []
+  const unresolved: string[] = []
+
+  for (const id of ids) {
+    const basePage = baseById.get(id)
+    const mainPage = mainById.get(id)
+    const draftPage = draftById.get(id)
+    const mainChanged = JSON.stringify(basePage) !== JSON.stringify(mainPage)
+    const draftChanged = JSON.stringify(basePage) !== JSON.stringify(draftPage)
+    let result: CanvasPage | undefined
+
+    if (!mainChanged && !draftChanged) result = basePage
+    else if (mainChanged && !draftChanged) result = mainPage
+    else if (!mainChanged && draftChanged) result = draftPage
+    else if (JSON.stringify(mainPage) === JSON.stringify(draftPage)) result = mainPage
+    else {
+      const conflictId = `page:${id}` as const
+      const choice = resolutions[conflictId]
+      conflicts.push({
+        id: conflictId,
+        kind: 'page',
+        pageId: id,
+        base: basePage ?? null,
+        main: mainPage ?? null,
+        draft: draftPage ?? null,
+      })
+      if (!choice) unresolved.push(conflictId)
+      result = choice === 'draft' ? draftPage : mainPage
+    }
+
+    if (result) selected.set(id, result)
+  }
+
+  const order = mergeOrder(
+    base,
+    main,
+    draft,
+    new Set(selected.keys()),
+    resolutions['page-order'],
+    'page-order',
+  )
+  if (order.conflict) {
+    conflicts.push(order.conflict)
+    if (!resolutions['page-order']) unresolved.push('page-order')
+  }
+
+  return {
+    pages: order.order.map((id) => selected.get(id)).filter((page): page is CanvasPage => !!page),
+    conflicts,
+    unresolved,
   }
 }
 
@@ -134,6 +223,9 @@ export function mergeCanvas(
   main: CanvasElement[],
   draft: CanvasElement[],
   resolutions: Readonly<Record<string, MergeChoice>> = {},
+  basePages: CanvasPage[] = [],
+  mainPages: CanvasPage[] = [],
+  draftPages: CanvasPage[] = [],
 ): CanvasMergeResult {
   const baseById = new Map(base.map((shape) => [shape.id, shape]))
   const mainById = new Map(main.map((shape) => [shape.id, shape]))
@@ -179,10 +271,19 @@ export function mergeCanvas(
     if (!resolutions.order) unresolved.push('order')
   }
 
+  const pageMerge = mergePages(basePages, mainPages, draftPages, resolutions)
+  const shapeSummary = collectionDiff(base, draft)
+  const pageSummary = collectionDiff(basePages, draftPages)
+
   return {
     shapes: order.order.map((id) => selected.get(id)).filter((shape): shape is CanvasElement => !!shape),
-    conflicts,
-    unresolved,
-    summary: canvasDiff(base, draft),
+    pages: pageMerge.pages,
+    conflicts: [...conflicts, ...pageMerge.conflicts],
+    unresolved: [...unresolved, ...pageMerge.unresolved],
+    summary: {
+      added: shapeSummary.added + pageSummary.added,
+      removed: shapeSummary.removed + pageSummary.removed,
+      changed: shapeSummary.changed + pageSummary.changed,
+    },
   }
 }

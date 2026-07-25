@@ -2,9 +2,9 @@
 // in a sandboxed iframe (see element-frame.tsx). The element shape itself
 // lives in @loora/db — it is the persisted JSONB schema — and is re-exported
 // here so app code keeps importing it from #/lib/canvas.
-import type { CanvasElement } from '@loora/db/canvas'
+import type { CanvasElement, CanvasPage, CanvasPageItem } from '@loora/db/canvas'
 
-export type { CanvasElement }
+export type { CanvasElement, CanvasPage, CanvasPageItem }
 
 export interface ElementActions {
   createElement: (el: Omit<CanvasElement, 'id'> & { id?: string }) => CanvasElement
@@ -17,6 +17,18 @@ export interface ElementActions {
   groupElements: (ids: string[]) => { groupId: string; ids: string[] } | null
   // Clears groupId on the given ids; returns how many were actually grouped.
   ungroupElements: (ids: string[]) => number
+}
+
+export interface PageActions {
+  createPage: (name: string, elementIds: string[]) => CanvasPage | null
+  updatePage: (
+    id: string,
+    patch: Partial<Pick<CanvasPage, 'name' | 'x' | 'y' | 'w' | 'items'>>,
+  ) => CanvasPage | null
+  duplicatePage: (id: string, name?: string) => CanvasPage | null
+  // Returns the resulting Page order.
+  reorderPages: (orderedIds: string[]) => string[]
+  deletePage: (id: string) => boolean
 }
 
 export type ElementPatch = Partial<Omit<CanvasElement, 'id'>>

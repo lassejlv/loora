@@ -30,7 +30,16 @@ describe('agent prompt builders', () => {
       githubConnected: true,
       assets: [{ id: 'asset-one', name: 'Logo', mediaType: 'image/png' }],
       shapes: [{ id: 'one', name: 'Page', x: 0, y: 0, w: 1200, h: 800, code: '<main />' }],
+      pages: [{
+        id: 'home',
+        name: 'Home',
+        x: 1400,
+        y: 0,
+        w: 1200,
+        items: [{ id: 'hero', elementId: 'one', height: 800 }],
+      }],
       selectedIds: ['one'],
+      selectedPageId: 'home',
     })
 
     expect(result).toContain('Your previous response promised a canvas change')
@@ -38,6 +47,8 @@ describe('agent prompt builders', () => {
     expect(result).toContain('GitHub is connected')
     expect(result).toContain('/api/asset/asset-one')
     expect(result).toContain('The user currently has these element ids selected: ["one"]')
+    expect(result).toContain('The user currently has Page id "home" selected')
+    expect(result).toContain('"elementId":"one"')
     expect(result.match(/Prefer concise replies\./g)).toHaveLength(1)
     expect(result).toContain('You are the design agent inside loora')
     expect(result).not.toContain('{{')

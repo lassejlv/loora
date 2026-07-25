@@ -14,7 +14,23 @@ export const Route = createFileRoute('/p/$linkId')({
 type LoadState =
   | { status: 'loading' }
   | { status: 'error'; message: string }
-  | { status: 'ready'; name: string; code: string }
+  | {
+      status: 'ready'
+      payload:
+        | { kind: 'element'; name: string; code: string }
+        | {
+            kind: 'page'
+            name: string
+            width: number
+            items: Array<{
+              id: string
+              elementId: string
+              name: string
+              height: number
+              code: string
+            }>
+          }
+    }
 
 function PublishedPage() {
   const { linkId } = Route.useParams()
@@ -24,13 +40,37 @@ function PublishedPage() {
     let cancelled = false
     fetch(`/api/p/${encodeURIComponent(linkId)}`)
       .then(async (response) => {
-        const body = (await response.json()) as { name?: string; code?: string; error?: string }
+        const body = (await response.json()) as {
+          kind?: 'element' | 'page'
+          name?: string
+          code?: string
+          width?: number
+          items?: Array<{
+            id: string
+            elementId: string
+            name: string
+            height: number
+            code: string
+          }>
+          error?: string
+        }
         if (cancelled) return
-        if (!response.ok || typeof body.code !== 'string') {
+        const payload =
+          body.kind === 'page' && Array.isArray(body.items) && typeof body.width === 'number'
+            ? {
+                kind: 'page' as const,
+                name: body.name ?? 'Page',
+                width: body.width,
+                items: body.items,
+              }
+            : typeof body.code === 'string'
+              ? { kind: 'element' as const, name: body.name ?? 'Page', code: body.code }
+              : null
+        if (!response.ok || !payload) {
           setState({ status: 'error', message: body.error ?? 'This link has expired or was removed.' })
           return
         }
-        setState({ status: 'ready', name: body.name ?? 'Page', code: body.code })
+        setState({ status: 'ready', payload })
       })
       .catch(() => {
         if (!cancelled) setState({ status: 'error', message: 'Could not load this page.' })
@@ -41,7 +81,7 @@ function PublishedPage() {
   }, [linkId])
 
   useEffect(() => {
-    document.title = state.status === 'ready' ? state.name : 'loora'
+    document.title = state.status === 'ready' ? state.payload.name : 'loora'
   }, [state])
 
   if (state.status === 'loading') {
@@ -65,14 +105,42 @@ function PublishedPage() {
     )
   }
 
+  const payload = state.payload
+
   return (
-    <main className="fixed inset-0 bg-white">
-      <ElementFrame elementId={`published:${linkId}`} code={state.code} interactive />
+    <main className="min-h-screen bg-white">
+      {payload.kind === 'element' ? (
+        <div className="fixed inset-0">
+          <ElementFrame
+            elementId={`published:${linkId}`}
+            code={payload.code}
+            interactive
+          />
+        </div>
+      ) : (
+        <div className="w-full">
+          {payload.items.map((item) => (
+            <section
+              key={item.id}
+              aria-label={item.name}
+              className="w-full overflow-hidden"
+              style={{ height: item.height }}
+            >
+              <ElementFrame
+                elementId={item.elementId}
+                frameId={`published:${linkId}:${item.id}`}
+                code={item.code}
+                interactive
+              />
+            </section>
+          ))}
+        </div>
+      )}
       <Link
         to="/"
         target="_blank"
         rel="noreferrer"
-        className="absolute right-3 bottom-3 z-10 rounded-full border bg-card/85 px-2.5 py-1 text-[11px] text-muted-foreground opacity-60 shadow-sm backdrop-blur transition-opacity hover:opacity-100"
+        className="fixed right-3 bottom-3 z-10 rounded-full border bg-card/85 px-2.5 py-1 text-[11px] text-muted-foreground opacity-60 shadow-sm backdrop-blur transition-opacity hover:opacity-100"
       >
         Made with loora
       </Link>

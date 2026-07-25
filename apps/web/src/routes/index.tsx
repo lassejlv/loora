@@ -34,6 +34,7 @@ import {
   HistoryIcon,
   MousePointer2Icon,
   MousePointerClickIcon,
+  PanelsTopLeftIcon,
   ImageIcon,
   FigmaIcon,
   Redo2Icon,
@@ -68,11 +69,15 @@ import {
   loadActiveDraft,
   loadDocs,
   loadElements,
+  loadPages,
   loadTargetElements,
+  loadTargetPages,
   saveActiveDraft,
   saveDocs,
   saveElements,
+  savePages,
   saveTargetElements,
+  saveTargetPages,
   targetKey,
   type DocMeta,
 } from '#/lib/docs'
@@ -84,7 +89,10 @@ import {
   DropdownMenuTrigger,
 } from '#/components/ui/dropdown-menu'
 import { LayersPanel } from '#/components/layers-panel'
+import { PagesPanel } from '#/components/pages-panel'
 import { AssetsPanel, type AssetMeta } from '#/components/assets-panel'
+import { CanvasToolbar } from '#/components/canvas-toolbar'
+import { LayersIcon as AnimatedLayersIcon } from '#/components/ui/layers'
 import { SettingsPanel } from '#/components/settings-panel'
 import { HistoryPopover } from '#/components/history-panel'
 import { CodeEditorPanel } from '#/components/code-editor-panel'
@@ -112,9 +120,17 @@ import {
   elementId,
   reorderElements,
   type CanvasElement,
+  type CanvasPage,
   type ElementActions,
   type ElementPatch,
+  type PageActions,
 } from '#/lib/canvas'
+import {
+  createPageFromElements,
+  duplicateCanvasPage,
+  removeElementReferences,
+  reorderCanvasPages,
+} from '#/lib/pages'
 import { alignElements, distributeElements, type AlignEdge } from '#/lib/align'
 import { imageTemplate } from '#/lib/element-templates'
 import { Button } from '#/components/ui/button'
@@ -386,19 +402,27 @@ function Editor({ preview = false, userId }: { preview?: boolean; userId?: strin
   const [shapes, setShapes] = useState<CanvasElement[]>(() =>
     preview || cacheOwnedByAnotherUser ? [] : loadTargetElements(activeTarget),
   )
+  const [pages, setPages] = useState<CanvasPage[]>(() =>
+    preview || cacheOwnedByAnotherUser ? [] : loadTargetPages(activeTarget),
+  )
   const [targetRevision, setTargetRevision] = useState(0)
   const targetRevisionRef = useRef(0)
   targetRevisionRef.current = targetRevision
   const lastSyncedShapes = useRef<CanvasElement[]>(shapes)
+  const lastSyncedPages = useRef<CanvasPage[]>(pages)
   const [syncConflict, setSyncConflict] = useState<{
     base: CanvasElement[]
     remote: CanvasElement[]
     local: CanvasElement[]
+    basePages: CanvasPage[]
+    remotePages: CanvasPage[]
+    localPages: CanvasPage[]
     remoteRevision: number
     conflicts: CanvasMergeConflict[]
   } | null>(null)
   const [syncResolutions, setSyncResolutions] = useState<Record<string, MergeChoice>>({})
   const [selectedIds, setSelectedIds] = useState<string[]>([])
+  const [selectedPageId, setSelectedPageId] = useState<string | null>(null)
   const [tool, setTool] = useState<Tool>('select')
   const [databaseReady, setDatabaseReady] = useState(false)
   const [loadedDocId, setLoadedDocId] = useState<string | null>(() =>
@@ -431,6 +455,7 @@ function Editor({ preview = false, userId }: { preview?: boolean; userId?: strin
   const settingsOpen = settingsTab != null
 
   const toggleLayers = (open: boolean) => {
+    if (open) setPagesOpen(false)
     if (preview) {
       setPreviewChrome((s) => ({ ...s, layers: open, assets: open ? false : s.assets }))
       return
@@ -439,12 +464,19 @@ function Editor({ preview = false, userId }: { preview?: boolean; userId?: strin
     localStorage.setItem('loora:layers', open ? '1' : '0')
   }
   const toggleAssets = (open: boolean) => {
+    if (open) setPagesOpen(false)
     if (preview) {
       setPreviewChrome((s) => ({ ...s, assets: open, layers: open ? false : s.layers }))
       return
     }
     void setUrlState(open ? { assets: true, layers: false } : { assets: false })
     if (open) localStorage.setItem('loora:layers', '0')
+  }
+  const togglePages = (open: boolean) => {
+    setPagesOpen(open)
+    if (!open) return
+    toggleLayers(false)
+    toggleAssets(false)
   }
   const toggleAgent = (open: boolean) => {
     if (preview) {
@@ -477,6 +509,7 @@ function Editor({ preview = false, userId }: { preview?: boolean; userId?: strin
     else void setUrlState({ settings: null, integration: null })
   }
   const [exportOpen, setExportOpen] = useState(false)
+  const [pagesOpen, setPagesOpen] = useState(false)
   const [figmaImportOpen, setFigmaImportOpen] = useState(() =>
     !preview && new URLSearchParams(window.location.search).get('figmaImport') === 'true',
   )
@@ -558,8 +591,17 @@ function Editor({ preview = false, userId }: { preview?: boolean; userId?: strin
 
   const shapesRef = useRef(shapes)
   shapesRef.current = shapes
+  const pagesRef = useRef(pages)
+  pagesRef.current = pages
   const selectedIdsRef = useRef(selectedIds)
   selectedIdsRef.current = selectedIds
+  const selectedPageIdRef = useRef(selectedPageId)
+  selectedPageIdRef.current = selectedPageId
+  useEffect(() => {
+    if (selectedPageId && !pages.some((page) => page.id === selectedPageId)) {
+      setSelectedPageId(null)
+    }
+  }, [pages, selectedPageId])
   const activeIdRef = useRef(activeId)
   activeIdRef.current = activeId
   const activeDraftIdRef = useRef(activeDraftId)
@@ -582,15 +624,22 @@ function Editor({ preview = false, userId }: { preview?: boolean; userId?: strin
   const targetShapeRefs = useRef(
     new Map<string, { current: CanvasElement[] }>(),
   )
+  const targetPageRefs = useRef(new Map<string, { current: CanvasPage[] }>())
   const targetRevisions = useRef(new Map<string, number>())
   const targetLastSynced = useRef(new Map<string, CanvasElement[]>())
+  const targetLastSyncedPages = useRef(new Map<string, CanvasPage[]>())
   const targetSaveChains = useRef(new Map<string, Promise<void>>())
   const targetActions = useRef(new Map<string, ElementActions>())
+  const targetPageActions = useRef(new Map<string, PageActions>())
   const activeShapeRef = targetShapeRefs.current.get(activeTargetKey) ?? { current: shapes }
   activeShapeRef.current = shapes
   targetShapeRefs.current.set(activeTargetKey, activeShapeRef)
+  const activePageRef = targetPageRefs.current.get(activeTargetKey) ?? { current: pages }
+  activePageRef.current = pages
+  targetPageRefs.current.set(activeTargetKey, activePageRef)
   targetRevisions.current.set(activeTargetKey, targetRevision)
   targetLastSynced.current.set(activeTargetKey, lastSyncedShapes.current)
+  targetLastSyncedPages.current.set(activeTargetKey, lastSyncedPages.current)
 
   const fetchDocument = useCallback(async (
     target: CanvasTarget,
@@ -630,27 +679,44 @@ function Editor({ preview = false, userId }: { preview?: boolean; userId?: strin
       if (request !== documentRequest.current || activeTargetKeyRef.current !== key) return false
 
       const knownBase = targetLastSynced.current.get(key)
+      const knownBasePages = targetLastSyncedPages.current.get(key)
       const localShapes = targetShapeRefs.current.get(key)?.current ?? shapesRef.current
+      const localPages = targetPageRefs.current.get(key)?.current ?? pagesRef.current
       const hasUnsyncedLocal =
         !discardLocal &&
         (!remoteDraftStatus || remoteDraftStatus === 'active') &&
         knownBase !== undefined &&
-        JSON.stringify(knownBase) !== JSON.stringify(localShapes)
+        (JSON.stringify(knownBase) !== JSON.stringify(localShapes) ||
+          JSON.stringify(knownBasePages ?? []) !== JSON.stringify(localPages))
       const shouldReconcile = changedWhileLoading || hasUnsyncedLocal
       if (shouldReconcile && knownBase) {
-        const reconciled = mergeCanvas(knownBase, remote.shapes, localShapes)
+        const reconciled = mergeCanvas(
+          knownBase,
+          remote.shapes,
+          localShapes,
+          {},
+          knownBasePages ?? [],
+          remote.pages,
+          localPages,
+        )
         if (reconciled.unresolved.length > 0) {
           setShapes(localShapes)
           shapesRef.current = localShapes
+          setPages(localPages)
+          pagesRef.current = localPages
           setTargetRevision(remote.revision)
           targetRevisionRef.current = remote.revision
           lastSyncedShapes.current = remote.shapes
           targetRevisions.current.set(key, remote.revision)
           targetLastSynced.current.set(key, remote.shapes)
+          targetLastSyncedPages.current.set(key, remote.pages)
           setSyncConflict({
             base: knownBase,
             remote: remote.shapes,
             local: localShapes,
+            basePages: knownBasePages ?? [],
+            remotePages: remote.pages,
+            localPages,
             remoteRevision: remote.revision,
             conflicts: reconciled.conflicts,
           })
@@ -661,11 +727,17 @@ function Editor({ preview = false, userId }: { preview?: boolean; userId?: strin
         }
         setShapes(reconciled.shapes)
         shapesRef.current = reconciled.shapes
+        setPages(reconciled.pages)
+        pagesRef.current = reconciled.pages
         saveTargetElements(target, reconciled.shapes)
+        saveTargetPages(target, reconciled.pages)
       } else {
         setShapes(remote.shapes)
         shapesRef.current = remote.shapes
+        setPages(remote.pages)
+        pagesRef.current = remote.pages
         saveTargetElements(target, remote.shapes)
+        saveTargetPages(target, remote.pages)
       }
       setTargetRevision(remote.revision)
       targetRevisionRef.current = remote.revision
@@ -673,7 +745,9 @@ function Editor({ preview = false, userId }: { preview?: boolean; userId?: strin
       setSyncConflict(null)
       setSyncResolutions({})
       lastSyncedShapes.current = remote.shapes
+      lastSyncedPages.current = remote.pages
       targetLastSynced.current.set(key, remote.shapes)
+      targetLastSyncedPages.current.set(key, remote.pages)
       setLoadedDocId(key)
       setDocLoading(false)
       return true
@@ -707,6 +781,7 @@ function Editor({ preview = false, userId }: { preview?: boolean; userId?: strin
                 id: doc.id,
                 name: doc.name,
                 shapes: loadElements(doc.id),
+                pages: loadPages(doc.id),
               }),
             ),
           )
@@ -723,6 +798,7 @@ function Editor({ preview = false, userId }: { preview?: boolean; userId?: strin
           setTargetRevision(activeCreated?.revision ?? 0)
           targetRevisionRef.current = activeCreated?.revision ?? 0
           lastSyncedShapes.current = shapesRef.current
+          lastSyncedPages.current = pagesRef.current
         } else {
           const remoteDocs = remote.map(({ id, name }) => ({ id, name }))
           const urlD = readUrlDesignId()
@@ -761,10 +837,14 @@ function Editor({ preview = false, userId }: { preview?: boolean; userId?: strin
             void setUrlState({ d: nextActive, draft: nextDraft })
           }
           const cachedShapes = cached ? loadTargetElements(nextTarget) : []
+          const cachedPages = cached ? loadTargetPages(nextTarget) : []
           setShapes(cachedShapes)
+          setPages(cachedPages)
           lastSyncedShapes.current = cachedShapes
+          lastSyncedPages.current = cachedPages
           setLoadedDocId(cached ? nextKey : null)
           setSelectedIds([])
+          setSelectedPageId(null)
           await fetchDocument(nextTarget, cached)
         }
 
@@ -789,7 +869,9 @@ function Editor({ preview = false, userId }: { preview?: boolean; userId?: strin
   // restores what was selected at the time.
   interface HistoryEntry {
     shapes: CanvasElement[]
+    pages: CanvasPage[]
     selection: string[]
+    pageSelection: string | null
   }
   const past = useRef<HistoryEntry[]>([])
   const future = useRef<HistoryEntry[]>([])
@@ -810,7 +892,8 @@ function Editor({ preview = false, userId }: { preview?: boolean; userId?: strin
   useEffect(() => {
     if (preview || loadedDocId !== activeTargetKey || docLoading) return
     saveTargetElements(activeTarget, shapes)
-  }, [shapes, activeTargetKey, preview, loadedDocId, docLoading])
+    saveTargetPages(activeTarget, pages)
+  }, [shapes, pages, activeTargetKey, preview, loadedDocId, docLoading])
 
   useEffect(() => {
     if (
@@ -833,12 +916,14 @@ function Editor({ preview = false, userId }: { preview?: boolean; userId?: strin
             id: activeDraftId,
             designId: active.id,
             shapes,
+            pages,
             expectedRevision: targetRevisionRef.current,
           })
         : orpc.design.save({
             id: active.id,
             name: active.name,
             shapes,
+            pages,
             expectedRevision: targetRevisionRef.current,
           })
       void save
@@ -847,6 +932,7 @@ function Editor({ preview = false, userId }: { preview?: boolean; userId?: strin
           setTargetRevision(saved.revision)
           targetRevisionRef.current = saved.revision
           lastSyncedShapes.current = shapes
+          lastSyncedPages.current = pages
           if (activeDraftId) {
             setDrafts((current) =>
               current.map((candidate) =>
@@ -864,12 +950,23 @@ function Editor({ preview = false, userId }: { preview?: boolean; userId?: strin
               ? await orpc.draft.get({ designId: active.id, id: activeDraftId })
               : await orpc.design.get({ id: active.id })
             if (activeTargetKeyRef.current !== activeTargetKey) return
-            const reconciled = mergeCanvas(lastSyncedShapes.current, remote.shapes, shapes)
+            const reconciled = mergeCanvas(
+              lastSyncedShapes.current,
+              remote.shapes,
+              shapes,
+              {},
+              lastSyncedPages.current,
+              remote.pages,
+              pages,
+            )
             if (reconciled.unresolved.length > 0) {
               setSyncConflict({
                 base: lastSyncedShapes.current,
                 remote: remote.shapes,
                 local: shapes,
+                basePages: lastSyncedPages.current,
+                remotePages: remote.pages,
+                localPages: pages,
                 remoteRevision: remote.revision,
                 conflicts: reconciled.conflicts,
               })
@@ -879,7 +976,9 @@ function Editor({ preview = false, userId }: { preview?: boolean; userId?: strin
             setTargetRevision(remote.revision)
             targetRevisionRef.current = remote.revision
             lastSyncedShapes.current = remote.shapes
+            lastSyncedPages.current = remote.pages
             setShapes(reconciled.shapes)
+            setPages(reconciled.pages)
           } catch (refreshError) {
             console.error('[designs] Failed to reconcile target:', refreshError)
           }
@@ -896,6 +995,7 @@ function Editor({ preview = false, userId }: { preview?: boolean; userId?: strin
     drafts,
     preview,
     shapes,
+    pages,
     loadedDocId,
     docLoadError,
     syncConflict,
@@ -908,14 +1008,21 @@ function Editor({ preview = false, userId }: { preview?: boolean; userId?: strin
       syncConflict.remote,
       syncConflict.local,
       syncResolutions,
+      syncConflict.basePages,
+      syncConflict.remotePages,
+      syncConflict.localPages,
     )
     if (reconciled.unresolved.length > 0) return
     setTargetRevision(syncConflict.remoteRevision)
     targetRevisionRef.current = syncConflict.remoteRevision
     lastSyncedShapes.current = syncConflict.remote
+    lastSyncedPages.current = syncConflict.remotePages
     setShapes(reconciled.shapes)
     shapesRef.current = reconciled.shapes
+    setPages(reconciled.pages)
+    pagesRef.current = reconciled.pages
     saveTargetElements(activeTarget, reconciled.shapes)
+    saveTargetPages(activeTarget, reconciled.pages)
     setSyncConflict(null)
     setSyncResolutions({})
   }
@@ -932,7 +1039,7 @@ function Editor({ preview = false, userId }: { preview?: boolean; userId?: strin
     ;(window as unknown as Record<string, unknown>).__loora = {
       setElements: (next: CanvasElement[]) => mutate(() => next),
       getElements: () => shapesRef.current,
-      snapshot: () => snapshotCanvas(shapesRef.current),
+      snapshot: () => snapshotCanvas(shapesRef.current, { pages: pagesRef.current }),
     }
   })
 
@@ -976,17 +1083,20 @@ function Editor({ preview = false, userId }: { preview?: boolean; userId?: strin
             id: activeDraftId,
             designId: active.id,
             shapes: shapesRef.current,
+            pages: pagesRef.current,
             expectedRevision: targetRevisionRef.current,
           })
         : await orpc.design.save({
           id: active.id,
           name: active.name,
           shapes: shapesRef.current,
+          pages: pagesRef.current,
           expectedRevision: targetRevisionRef.current,
         })
       setTargetRevision(saved.revision)
       targetRevisionRef.current = saved.revision
       lastSyncedShapes.current = shapesRef.current
+      lastSyncedPages.current = pagesRef.current
       if (activeDraftId) {
         setDrafts((current) =>
           current.map((candidate) =>
@@ -1019,16 +1129,21 @@ function Editor({ preview = false, userId }: { preview?: boolean; userId?: strin
     activeTargetKeyRef.current = key
     const cached = hasStoredTargetElements(target)
     const cachedShapes = cached ? loadTargetElements(target) : []
+    const cachedPages = cached ? loadTargetPages(target) : []
     const cachedRevision = targetRevisions.current.get(key) ?? 0
     setShapes(cachedShapes)
     shapesRef.current = cachedShapes
+    setPages(cachedPages)
+    pagesRef.current = cachedPages
     lastSyncedShapes.current = targetLastSynced.current.get(key) ?? cachedShapes
+    lastSyncedPages.current = targetLastSyncedPages.current.get(key) ?? cachedPages
     setTargetRevision(cachedRevision)
     targetRevisionRef.current = cachedRevision
     setLoadedDocId(cached ? key : null)
     setDocLoadError(null)
     setSyncConflict(null)
     restoreTargetEditorState(key, cachedShapes)
+    setSelectedPageId(null)
     if (databaseReady) {
       void Promise.all([
         fetchDocument(target, cached),
@@ -1077,18 +1192,23 @@ function Editor({ preview = false, userId }: { preview?: boolean; userId?: strin
     }
     const cached = hasStoredTargetElements(target)
     const cachedShapes = cached ? loadTargetElements(target) : []
+    const cachedPages = cached ? loadTargetPages(target) : []
     const cachedRevision =
       targetRevisions.current.get(key) ??
       (draftId ? drafts.find((draft) => draft.id === draftId)?.revision ?? 0 : 0)
     setShapes(cachedShapes)
     shapesRef.current = cachedShapes
+    setPages(cachedPages)
+    pagesRef.current = cachedPages
     lastSyncedShapes.current = targetLastSynced.current.get(key) ?? cachedShapes
+    lastSyncedPages.current = targetLastSyncedPages.current.get(key) ?? cachedPages
     setTargetRevision(cachedRevision)
     targetRevisionRef.current = cachedRevision
     setLoadedDocId(cached ? key : null)
     setDocLoadError(null)
     setSyncConflict(null)
     restoreTargetEditorState(key, cachedShapes)
+    setSelectedPageId(null)
     if (databaseReady) void fetchDocument(target, cached)
   }
 
@@ -1136,6 +1256,7 @@ function Editor({ preview = false, userId }: { preview?: boolean; userId?: strin
     const doc: DocMeta = { id: docId(), name: `Untitled ${docs.length + 1}` }
     const next = [...docs, doc]
     saveElements(doc.id, [])
+    savePages(doc.id, [])
     saveDocs(next, doc.id)
     if (!preview) {
       localDesignRef.current = doc.id
@@ -1149,7 +1270,9 @@ function Editor({ preview = false, userId }: { preview?: boolean; userId?: strin
     setActiveDraftId(null)
     setDrafts([])
     setShapes([])
+    setPages([])
     lastSyncedShapes.current = []
+    lastSyncedPages.current = []
     setTargetRevision(0)
     targetRevisionRef.current = 0
     setLoadedDocId(key)
@@ -1168,7 +1291,11 @@ function Editor({ preview = false, userId }: { preview?: boolean; userId?: strin
       const previousIds = new Set(shapesRef.current.map((shape) => shape.id))
       mutate(() => imported.shapes)
       saveTargetElements(activeTarget, imported.shapes)
+      saveTargetPages(activeTarget, imported.pages)
+      setPages(imported.pages)
+      pagesRef.current = imported.pages
       lastSyncedShapes.current = imported.shapes
+      lastSyncedPages.current = imported.pages
       setTargetRevision(imported.revision)
       targetRevisionRef.current = imported.revision
       if (activeDraftId) {
@@ -1185,6 +1312,7 @@ function Editor({ preview = false, userId }: { preview?: boolean; userId?: strin
           .filter((shape) => !previousIds.has(shape.id))
           .map((shape) => shape.id),
       )
+      setSelectedPageId(null)
       window.requestAnimationFrame(() => {
         window.requestAnimationFrame(() => canvasControls.current?.zoomToFit())
       })
@@ -1197,6 +1325,7 @@ function Editor({ preview = false, userId }: { preview?: boolean; userId?: strin
     const doc: DocMeta = { id: imported.id, name: imported.name }
     const next = [...docs.filter((candidate) => candidate.id !== doc.id), doc]
     saveElements(doc.id, imported.shapes)
+    savePages(doc.id, imported.pages)
     saveDocs(next, doc.id)
     localDesignRef.current = doc.id
     void setUrlState({ d: doc.id, draft: null })
@@ -1208,7 +1337,10 @@ function Editor({ preview = false, userId }: { preview?: boolean; userId?: strin
     setActiveDraftId(null)
     setDrafts([])
     setShapes(imported.shapes)
+    setPages(imported.pages)
+    setSelectedPageId(null)
     lastSyncedShapes.current = imported.shapes
+    lastSyncedPages.current = imported.pages
     setLoadedDocId(key)
     setDocLoading(false)
     setDocLoadError(null)
@@ -1261,6 +1393,7 @@ function Editor({ preview = false, userId }: { preview?: boolean; userId?: strin
     if (next.length === 0) {
       next = [{ id: docId(), name: 'Untitled' }]
       saveElements(next[0].id, [])
+      savePages(next[0].id, [])
     }
     saveDocs(next, next[0].id)
     const nextId = next[0].id
@@ -1281,15 +1414,19 @@ function Editor({ preview = false, userId }: { preview?: boolean; userId?: strin
     activeTargetKeyRef.current = key
     const cached = hasStoredTargetElements(target)
     const cachedShapes = cached ? loadTargetElements(target) : []
+    const cachedPages = cached ? loadTargetPages(target) : []
     setDocState({ docs: next, activeId: nextId })
     setActiveDraftId(null)
     setDrafts([])
     setShapes(cachedShapes)
+    setPages(cachedPages)
     lastSyncedShapes.current = cachedShapes
+    lastSyncedPages.current = cachedPages
     setLoadedDocId(cached ? key : null)
     setDocLoadError(null)
     setSyncConflict(null)
     restoreTargetEditorState(key, cachedShapes)
+    setSelectedPageId(null)
     if (databaseReady) {
       void Promise.all([
         fetchDocument(target, cached),
@@ -1306,7 +1443,12 @@ function Editor({ preview = false, userId }: { preview?: boolean; userId?: strin
       if (mutationsBlockedRef.current) return prev
       const now = Date.now()
       if (now - lastMutation.current > 800) {
-        past.current.push({ shapes: prev, selection: selectedIdsRef.current })
+        past.current.push({
+          shapes: prev,
+          pages: pagesRef.current,
+          selection: selectedIdsRef.current,
+          pageSelection: selectedPageIdRef.current,
+        })
         if (past.current.length > 100) past.current.shift()
         future.current = []
       }
@@ -1323,15 +1465,52 @@ function Editor({ preview = false, userId }: { preview?: boolean; userId?: strin
     })
   }, [])
 
+  const mutatePages = useCallback(
+    (fn: (current: CanvasPage[]) => CanvasPage[]) => {
+      setPages((current) => {
+        if (mutationsBlockedRef.current) return current
+        const now = Date.now()
+        if (now - lastMutation.current > 800) {
+          past.current.push({
+            shapes: shapesRef.current,
+            pages: current,
+            selection: selectedIdsRef.current,
+            pageSelection: selectedPageIdRef.current,
+          })
+          if (past.current.length > 100) past.current.shift()
+          future.current = []
+        }
+        lastMutation.current = now
+        const next = fn(current)
+        if (next !== current) {
+          const key = activeTargetKeyRef.current
+          documentMutationVersions.current.set(
+            key,
+            (documentMutationVersions.current.get(key) ?? 0) + 1,
+          )
+        }
+        return next
+      })
+    },
+    [],
+  )
+
   const undo = useCallback(() => {
     if (mutationsBlockedRef.current) return
     const prev = past.current.pop()
     if (!prev) return
-    future.current.push({ shapes: shapesRef.current, selection: selectedIdsRef.current })
+    future.current.push({
+      shapes: shapesRef.current,
+      pages: pagesRef.current,
+      selection: selectedIdsRef.current,
+      pageSelection: selectedPageIdRef.current,
+    })
     lastMutation.current = 0
     setShapes(prev.shapes)
+    setPages(prev.pages)
     const ids = new Set(prev.shapes.map((s) => s.id))
     setSelectedIds(prev.selection.filter((id) => ids.has(id)))
+    setSelectedPageId(prev.pageSelection)
     bumpHistory((n) => n + 1)
   }, [])
 
@@ -1339,11 +1518,18 @@ function Editor({ preview = false, userId }: { preview?: boolean; userId?: strin
     if (mutationsBlockedRef.current) return
     const next = future.current.pop()
     if (!next) return
-    past.current.push({ shapes: shapesRef.current, selection: selectedIdsRef.current })
+    past.current.push({
+      shapes: shapesRef.current,
+      pages: pagesRef.current,
+      selection: selectedIdsRef.current,
+      pageSelection: selectedPageIdRef.current,
+    })
     lastMutation.current = 0
     setShapes(next.shapes)
+    setPages(next.pages)
     const ids = new Set(next.shapes.map((s) => s.id))
     setSelectedIds(next.selection.filter((id) => ids.has(id)))
+    setSelectedPageId(next.pageSelection)
     bumpHistory((n) => n + 1)
   }, [])
 
@@ -1389,10 +1575,11 @@ function Editor({ preview = false, userId }: { preview?: boolean; userId?: strin
     (id: string) => {
       const exists = shapesRef.current.some((s) => s.id === id)
       mutate((prev) => prev.filter((s) => s.id !== id))
+      mutatePages((current) => removeElementReferences(current, new Set([id])))
       setSelectedIds((sel) => sel.filter((i) => i !== id))
       return exists
     },
-    [mutate],
+    [mutate, mutatePages],
   )
 
   const deleteIds = useCallback(
@@ -1400,14 +1587,87 @@ function Editor({ preview = false, userId }: { preview?: boolean; userId?: strin
       if (ids.length === 0) return
       const target = new Set(ids)
       mutate((prev) => prev.filter((s) => !target.has(s.id)))
+      mutatePages((current) => removeElementReferences(current, target))
       setSelectedIds((sel) => sel.filter((id) => !target.has(id)))
     },
-    [mutate],
+    [mutate, mutatePages],
   )
 
   const deleteSelected = useCallback(() => {
     deleteIds(selectedIdsRef.current)
   }, [deleteIds])
+
+  const createPage = useCallback(() => {
+    const selected = shapesRef.current.filter((shape) =>
+      selectedIdsRef.current.includes(shape.id),
+    )
+    const page = createPageFromElements(selected, pagesRef.current)
+    if (!page) return null
+    mutatePages((current) => [...current, page])
+    setSelectedIds([])
+    setSelectedPageId(page.id)
+    togglePages(true)
+    return page
+  }, [mutatePages])
+
+  const updatePage = useCallback(
+    (id: string, patch: Partial<Omit<CanvasPage, 'id'>>) => {
+      let updated: CanvasPage | null = null
+      mutatePages((current) =>
+        current.map((page) => {
+          if (page.id !== id) return page
+          updated = { ...page, ...patch }
+          return updated
+        }),
+      )
+      return updated ?? pagesRef.current.find((page) => page.id === id) ?? null
+    },
+    [mutatePages],
+  )
+
+  const deletePage = useCallback(
+    (id: string) => {
+      mutatePages((current) => current.filter((page) => page.id !== id))
+      setSelectedPageId((current) => (current === id ? null : current))
+    },
+    [mutatePages],
+  )
+
+  const duplicatePage = useCallback(
+    (id: string, name?: string) => {
+      const source = pagesRef.current.find((page) => page.id === id)
+      if (!source) return null
+      const copy = duplicateCanvasPage(source, pagesRef.current, name)
+      mutatePages((current) => [...current, copy])
+      setSelectedPageId(copy.id)
+      return copy
+    },
+    [mutatePages],
+  )
+
+  const reorderPagesForAgent = useCallback(
+    (orderedIds: string[]) => {
+      let order = pagesRef.current.map((page) => page.id)
+      mutatePages((current) => {
+        const next = reorderCanvasPages(current, orderedIds)
+        order = next.map((page) => page.id)
+        return next
+      })
+      return order
+    },
+    [mutatePages],
+  )
+
+  const openPage = useCallback(
+    (id: string) => {
+      window.open(
+        `/blockpage/${encodeURIComponent(activeIdRef.current)}?${activeDraftIdRef.current ? `draft=${encodeURIComponent(activeDraftIdRef.current)}&` : ''}page=${encodeURIComponent(id)}`,
+        '_blank',
+        'noopener',
+      )
+    },
+    [],
+  )
 
   // Copies must not stay grouped with their originals: give each source
   // group a fresh id, preserving grouping within the copied set.
@@ -1605,8 +1865,37 @@ function Editor({ preview = false, userId }: { preview?: boolean; userId?: strin
     [createElement, createElements, updateElement, deleteElement, reorderForAgent, groupForAgent, ungroupForAgent],
   )
 
+  const pageActions = useMemo<PageActions>(
+    () => ({
+      createPage(name, elementIds) {
+        const byId = new Map(shapesRef.current.map((shape) => [shape.id, shape]))
+        const selected = elementIds
+          .map((id) => byId.get(id))
+          .filter((shape): shape is CanvasElement => !!shape)
+        const page = createPageFromElements(selected, pagesRef.current, true)
+        if (!page) return null
+        const named = { ...page, name: name.trim() || page.name }
+        mutatePages((current) => [...current, named])
+        return named
+      },
+      updatePage,
+      duplicatePage,
+      reorderPages: reorderPagesForAgent,
+      deletePage(id) {
+        const exists = pagesRef.current.some((page) => page.id === id)
+        deletePage(id)
+        return exists
+      },
+    }),
+    [deletePage, duplicatePage, mutatePages, reorderPagesForAgent, updatePage],
+  )
+
   const queueHiddenTargetSave = useCallback(
-    (target: CanvasTarget, ref: { current: CanvasElement[] }) => {
+    (
+      target: CanvasTarget,
+      ref: { current: CanvasElement[] },
+      pageRef: { current: CanvasPage[] },
+    ) => {
       const key = targetKey(target)
       const previous = targetSaveChains.current.get(key) ?? Promise.resolve()
       const next = previous
@@ -1615,6 +1904,7 @@ function Editor({ preview = false, userId }: { preview?: boolean; userId?: strin
           if (activeTargetKeyRef.current === key) return
           const revision = targetRevisions.current.get(key) ?? 0
           const currentShapes = ref.current
+          const currentPages = pageRef.current
           const doc = docs.find((candidate) => candidate.id === target.designId)
           if (!doc) return
           try {
@@ -1623,16 +1913,19 @@ function Editor({ preview = false, userId }: { preview?: boolean; userId?: strin
                   id: target.draftId,
                   designId: target.designId,
                   shapes: currentShapes,
+                  pages: currentPages,
                   expectedRevision: revision,
                 })
               : await orpc.design.save({
                   id: target.designId,
                   name: doc.name,
                   shapes: currentShapes,
+                  pages: currentPages,
                   expectedRevision: revision,
                 })
             targetRevisions.current.set(key, saved.revision)
             targetLastSynced.current.set(key, currentShapes)
+            targetLastSyncedPages.current.set(key, currentPages)
             if (target.draftId) {
               setDrafts((all) =>
                 all.map((draft) =>
@@ -1648,7 +1941,16 @@ function Editor({ preview = false, userId }: { preview?: boolean; userId?: strin
               ? await orpc.draft.get({ designId: target.designId, id: target.draftId })
               : await orpc.design.get({ id: target.designId })
             const base = targetLastSynced.current.get(key) ?? remote.shapes
-            const reconciled = mergeCanvas(base, remote.shapes, ref.current)
+            const basePages = targetLastSyncedPages.current.get(key) ?? remote.pages
+            const reconciled = mergeCanvas(
+              base,
+              remote.shapes,
+              ref.current,
+              {},
+              basePages,
+              remote.pages,
+              pageRef.current,
+            )
             if (reconciled.unresolved.length > 0) {
               console.error(
                 `[designs] Hidden target has ${reconciled.unresolved.length} unresolved conflicts.`,
@@ -1656,24 +1958,30 @@ function Editor({ preview = false, userId }: { preview?: boolean; userId?: strin
               return
             }
             ref.current = reconciled.shapes
+            pageRef.current = reconciled.pages
             saveTargetElements(target, reconciled.shapes)
+            saveTargetPages(target, reconciled.pages)
             targetRevisions.current.set(key, remote.revision)
             targetLastSynced.current.set(key, remote.shapes)
+            targetLastSyncedPages.current.set(key, remote.pages)
             const saved = target.draftId
               ? await orpc.draft.save({
                   id: target.draftId,
                   designId: target.designId,
                   shapes: reconciled.shapes,
+                  pages: reconciled.pages,
                   expectedRevision: remote.revision,
                 })
               : await orpc.design.save({
                   id: target.designId,
                   name: doc.name,
                   shapes: reconciled.shapes,
+                  pages: reconciled.pages,
                   expectedRevision: remote.revision,
                 })
             targetRevisions.current.set(key, saved.revision)
             targetLastSynced.current.set(key, reconciled.shapes)
+            targetLastSyncedPages.current.set(key, reconciled.pages)
           }
         })
       targetSaveChains.current.set(key, next)
@@ -1684,20 +1992,28 @@ function Editor({ preview = false, userId }: { preview?: boolean; userId?: strin
   const getTargetBindings = useCallback(
     (draftId: string | null) => {
       if (draftId === activeDraftIdRef.current) {
-        return { actions, shapesRef }
+        return { actions, shapesRef, pageActions, pagesRef }
       }
 
       const target = { designId: activeIdRef.current, draftId }
       const key = targetKey(target)
       let ref = targetShapeRefs.current.get(key)
+      let pageRef = targetPageRefs.current.get(key)
       if (!ref) {
         ref = { current: loadTargetElements(target) }
         targetShapeRefs.current.set(key, ref)
+        pageRef = { current: loadTargetPages(target) }
+        targetPageRefs.current.set(key, pageRef)
         const draft = draftId
           ? drafts.find((candidate) => candidate.id === draftId)
           : null
         targetRevisions.current.set(key, draft?.revision ?? 0)
         targetLastSynced.current.set(key, ref.current)
+        targetLastSyncedPages.current.set(key, pageRef.current)
+      }
+      if (!pageRef) {
+        pageRef = { current: loadTargetPages(target) }
+        targetPageRefs.current.set(key, pageRef)
       }
 
       let hiddenActions = targetActions.current.get(key)
@@ -1706,7 +2022,14 @@ function Editor({ preview = false, userId }: { preview?: boolean; userId?: strin
           const next = fn(ref!.current)
           ref!.current = next
           saveTargetElements(target, next)
-          queueHiddenTargetSave(target, ref!)
+          queueHiddenTargetSave(target, ref!, pageRef!)
+          return next
+        }
+        const mutateHiddenPages = (fn: (pages: CanvasPage[]) => CanvasPage[]) => {
+          const next = fn(pageRef!.current)
+          pageRef!.current = next
+          saveTargetPages(target, next)
+          queueHiddenTargetSave(target, ref!, pageRef!)
           return next
         }
         hiddenActions = {
@@ -1734,6 +2057,7 @@ function Editor({ preview = false, userId }: { preview?: boolean; userId?: strin
           deleteElement(id) {
             const exists = ref!.current.some((element) => element.id === id)
             mutateHidden((current) => current.filter((element) => element.id !== id))
+            mutateHiddenPages((current) => removeElementReferences(current, new Set([id])))
             return exists
           },
           reorderElements(orderedIds) {
@@ -1767,9 +2091,67 @@ function Editor({ preview = false, userId }: { preview?: boolean; userId?: strin
         }
         targetActions.current.set(key, hiddenActions)
       }
-      return { actions: hiddenActions, shapesRef: ref }
+      let hiddenPageActions = targetPageActions.current.get(key)
+      if (!hiddenPageActions) {
+        const mutateHiddenPages = (fn: (pages: CanvasPage[]) => CanvasPage[]) => {
+          const next = fn(pageRef!.current)
+          pageRef!.current = next
+          saveTargetPages(target, next)
+          queueHiddenTargetSave(target, ref!, pageRef!)
+          return next
+        }
+        hiddenPageActions = {
+          createPage(name, elementIds) {
+            const byId = new Map(ref!.current.map((element) => [element.id, element]))
+            const selected = elementIds
+              .map((id) => byId.get(id))
+              .filter((element): element is CanvasElement => !!element)
+            const page = createPageFromElements(selected, pageRef!.current, true)
+            if (!page) return null
+            const named = { ...page, name: name.trim() || page.name }
+            mutateHiddenPages((current) => [...current, named])
+            return named
+          },
+          updatePage(id, patch) {
+            let updated: CanvasPage | null = null
+            mutateHiddenPages((current) =>
+              current.map((page) => {
+                if (page.id !== id) return page
+                updated = { ...page, ...patch }
+                return updated
+              }),
+            )
+            return updated ?? pageRef!.current.find((page) => page.id === id) ?? null
+          },
+          duplicatePage(id, name) {
+            const source = pageRef!.current.find((page) => page.id === id)
+            if (!source) return null
+            const copy = duplicateCanvasPage(source, pageRef!.current, name)
+            mutateHiddenPages((current) => [...current, copy])
+            return copy
+          },
+          reorderPages(orderedIds) {
+            const next = mutateHiddenPages((current) =>
+              reorderCanvasPages(current, orderedIds),
+            )
+            return next.map((page) => page.id)
+          },
+          deletePage(id) {
+            const exists = pageRef!.current.some((page) => page.id === id)
+            mutateHiddenPages((current) => current.filter((page) => page.id !== id))
+            return exists
+          },
+        }
+        targetPageActions.current.set(key, hiddenPageActions)
+      }
+      return {
+        actions: hiddenActions,
+        shapesRef: ref,
+        pageActions: hiddenPageActions,
+        pagesRef: pageRef,
+      }
     },
-    [actions, drafts, queueHiddenTargetSave],
+    [actions, drafts, pageActions, queueHiddenTargetSave],
   )
 
   const reorder = useCallback(
@@ -1986,7 +2368,10 @@ function Editor({ preview = false, userId }: { preview?: boolean; userId?: strin
     () => ({
       elements: shapes,
       selectedIds,
-      onSelect: setSelectedIds,
+      onSelect: (ids: string[]) => {
+        setSelectedIds(ids)
+        setSelectedPageId(null)
+      },
       onReorderList: (orderedIds: string[]) =>
         mutate((prev) => reorderElements(prev, orderedIds)),
       onRename: (id: string, name: string) => {
@@ -2012,6 +2397,39 @@ function Editor({ preview = false, userId }: { preview?: boolean; userId?: strin
       groupIds,
       ungroupIds,
       reorder,
+    ],
+  )
+
+  const pagesPanelProps = useMemo(
+    () => ({
+      pages,
+      elements: shapes,
+      selectedPageId,
+      selectedElementIds: selectedIds,
+      designId: activeId,
+      draftId: activeDraftId,
+      onSelectPage: (id: string) => {
+        setSelectedPageId(id)
+        setSelectedIds([])
+      },
+      onCreatePage: createPage,
+      onUpdatePage: updatePage,
+      onDeletePage: deletePage,
+      onDuplicatePage: duplicatePage,
+      onOpenPage: openPage,
+    }),
+    [
+      pages,
+      shapes,
+      selectedPageId,
+      selectedIds,
+      activeId,
+      activeDraftId,
+      createPage,
+      updatePage,
+      deletePage,
+      duplicatePage,
+      openPage,
     ],
   )
 
@@ -2198,7 +2616,10 @@ function Editor({ preview = false, userId }: { preview?: boolean; userId?: strin
         key={activeId}
         actions={actions}
         shapesRef={shapesRef}
+        pageActions={pageActions}
+        pagesRef={pagesRef}
         selectedIdsRef={selectedIdsRef}
+        selectedPageIdRef={selectedPageIdRef}
         docId={activeId}
         draftId={activeDraftId}
         getTargetBindings={getTargetBindings}
@@ -2235,15 +2656,22 @@ function Editor({ preview = false, userId }: { preview?: boolean; userId?: strin
           <ContextMenuTrigger className="block h-full w-full">
             <Canvas
               elements={shapes}
+              pages={pages}
               selectedIds={selectedIds}
+              selectedPageId={selectedPageId}
               tool={tool}
               docId={preview ? undefined : activeId}
               controlsRef={canvasControls}
               onScaleChange={setZoomPct}
-              onSelect={setSelectedIds}
+              onSelect={(ids) => {
+                setSelectedIds(ids)
+                if (ids.length > 0) setSelectedPageId(null)
+              }}
+              onSelectPage={setSelectedPageId}
               onToolChange={setTool}
               onCreate={(s) => mutate((prev) => [...prev, s])}
               onUpdateMany={updateElements}
+              onUpdatePage={updatePage}
               hoveredIds={hoveredLayerIds}
               onComment={(text) => {
                 toggleAgent(true)
@@ -2489,6 +2917,17 @@ function Editor({ preview = false, userId }: { preview?: boolean; userId?: strin
             </DrawerPopup>
           </Drawer>
         ) : null}
+        {isMobile ? (
+          <Drawer open={pagesOpen} onOpenChange={togglePages} position="bottom">
+            <DrawerPopup
+              position="bottom"
+              variant="inset"
+              className="mx-auto h-[min(60svh,34rem)] w-full max-w-sm overflow-hidden rounded-2xl border"
+            >
+              <PagesPanel {...pagesPanelProps} onClose={() => togglePages(false)} />
+            </DrawerPopup>
+          </Drawer>
+        ) : null}
 
         <Drawer open={assetsOpen} onOpenChange={toggleAssets} position="bottom">
           <DrawerPopup
@@ -2516,53 +2955,102 @@ function Editor({ preview = false, userId }: { preview?: boolean; userId?: strin
         </Dialog>
 
         <div className="absolute top-4 right-4 flex items-center gap-1">
-          {!preview ? (
-            <Button
-              variant={commandMenuOpen ? 'secondary' : 'ghost'}
-              size="icon"
-              aria-label={`Commands (${shortcutLabel('openCommandMenu')})`}
-              title={`Commands (${shortcutLabel('openCommandMenu')})`}
-              aria-pressed={commandMenuOpen}
-              onClick={() => setCommandMenuOpen(true)}
-            >
-              <CommandIcon data-slot="icon" />
-            </Button>
-          ) : null}
-          <Button
-            variant={layersOpen ? 'secondary' : 'ghost'}
-            size="icon"
-            aria-label="Layers"
-            title="Layers"
-            aria-pressed={layersOpen}
-            onClick={() => toggleLayers(!layersOpen)}
-          >
-            <LayersIcon data-slot="icon" />
-          </Button>
-          <Button
-            variant={assetsOpen ? 'secondary' : 'ghost'}
-            size="icon"
-            aria-label="Assets"
-            title="Assets"
-            aria-pressed={assetsOpen}
-            onClick={() => toggleAssets(!assetsOpen)}
-          >
-            <ImageIcon data-slot="icon" />
-          </Button>
-          <HistoryPopover
-            docId={activeId}
-            draftId={activeDraftId}
-            storageId={activeTargetKey}
-            readOnly={
-              activeDraftId !== null &&
-              drafts.find((draft) => draft.id === activeDraftId)?.status !== 'active'
-            }
-            open={historyOpen}
-            onOpenChange={toggleHistory}
-            shapesRef={shapesRef}
-            onRestore={(restored) => {
-              mutate(() => restored)
-              setSelectedIds([])
-            }}
+          <CanvasToolbar
+            items={[
+              ...(preview
+                ? []
+                : [
+                    {
+                      key: 'commands',
+                      active: commandMenuOpen,
+                      node: (
+                        <Button
+                          variant={commandMenuOpen ? 'secondary' : 'ghost'}
+                          size="icon"
+                          aria-label={`Commands (${shortcutLabel('openCommandMenu')})`}
+                          title={`Commands (${shortcutLabel('openCommandMenu')})`}
+                          aria-pressed={commandMenuOpen}
+                          onClick={() => setCommandMenuOpen(true)}
+                        >
+                          <CommandIcon data-slot="icon" />
+                        </Button>
+                      ),
+                    },
+                  ]),
+              {
+                key: 'pages',
+                active: pagesOpen,
+                node: (
+                  <Button
+                    variant={pagesOpen ? 'secondary' : 'ghost'}
+                    size="icon"
+                    aria-label="Pages"
+                    title="Pages"
+                    aria-pressed={pagesOpen}
+                    onClick={() => togglePages(!pagesOpen)}
+                  >
+                    <PanelsTopLeftIcon data-slot="icon" />
+                  </Button>
+                ),
+              },
+              {
+                key: 'layers',
+                active: layersOpen,
+                node: (
+                  <Button
+                    variant={layersOpen ? 'secondary' : 'ghost'}
+                    size="icon"
+                    aria-label="Layers"
+                    title="Layers"
+                    aria-pressed={layersOpen}
+                    onClick={() => toggleLayers(!layersOpen)}
+                  >
+                    <AnimatedLayersIcon size={16} className="flex items-center justify-center" />
+                  </Button>
+                ),
+              },
+              {
+                key: 'assets',
+                active: assetsOpen,
+                node: (
+                  <Button
+                    variant={assetsOpen ? 'secondary' : 'ghost'}
+                    size="icon"
+                    aria-label="Assets"
+                    title="Assets"
+                    aria-pressed={assetsOpen}
+                    onClick={() => toggleAssets(!assetsOpen)}
+                  >
+                    <ImageIcon data-slot="icon" />
+                  </Button>
+                ),
+              },
+              {
+                key: 'history',
+                active: historyOpen,
+                node: (
+                  <HistoryPopover
+                    docId={activeId}
+                    draftId={activeDraftId}
+                    storageId={activeTargetKey}
+                    readOnly={
+                      activeDraftId !== null &&
+                      drafts.find((draft) => draft.id === activeDraftId)?.status !== 'active'
+                    }
+                    open={historyOpen}
+                    onOpenChange={toggleHistory}
+                    shapesRef={shapesRef}
+                    pagesRef={pagesRef}
+                    onRestore={(restored, restoredPages) => {
+                      mutate(() => restored)
+                      mutatePages(() => restoredPages)
+                      setSelectedIds([])
+                      setSelectedPageId(null)
+                    }}
+                  />
+                ),
+              },
+            ]}
           />
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
@@ -2635,11 +3123,12 @@ function Editor({ preview = false, userId }: { preview?: boolean; userId?: strin
                   announceBranch(`Created branch ${branch.name}`)
                 }}
                 onChanged={refreshDrafts}
-                onApplied={(nextShapes, revision, branchName) => {
+                onApplied={(nextShapes, nextPages, revision, branchName) => {
                   stashTargetEditorState(activeTargetKeyRef.current)
                   const mainTarget = { designId: activeId, draftId: null }
                   const key = targetKey(mainTarget)
                   saveTargetElements(mainTarget, nextShapes)
+                  saveTargetPages(mainTarget, nextPages)
                   targetSelections.current.delete(key)
                   targetHistories.current.delete(key)
                   activeDraftIdRef.current = null
@@ -2647,7 +3136,11 @@ function Editor({ preview = false, userId }: { preview?: boolean; userId?: strin
                   setActiveDraftId(null)
                   setShapes(nextShapes)
                   shapesRef.current = nextShapes
+                  setPages(nextPages)
+                  pagesRef.current = nextPages
+                  setSelectedPageId(null)
                   lastSyncedShapes.current = nextShapes
+                  lastSyncedPages.current = nextPages
                   setTargetRevision(revision)
                   targetRevisionRef.current = revision
                   setLoadedDocId(key)
@@ -2683,12 +3176,20 @@ function Editor({ preview = false, userId }: { preview?: boolean; userId?: strin
                       <p className="truncate text-sm font-medium">
                         {conflict.kind === 'order'
                           ? 'Layer order'
-                          : `Element ${conflict.elementId}`}
+                          : conflict.kind === 'page-order'
+                            ? 'Page order'
+                            : conflict.kind === 'page'
+                              ? `Page ${conflict.pageId}`
+                              : `Element ${conflict.elementId}`}
                       </p>
                       <p className="text-xs text-muted-foreground">
                         {conflict.kind === 'order'
                           ? 'Both versions reordered the same layers differently.'
-                          : 'Both versions changed or removed this element differently.'}
+                          : conflict.kind === 'page-order'
+                            ? 'Both versions reordered Pages differently.'
+                            : conflict.kind === 'page'
+                              ? 'Both versions changed or removed this Page differently.'
+                              : 'Both versions changed or removed this element differently.'}
                       </p>
                     </div>
                     <div className="flex shrink-0 gap-1">
@@ -2929,6 +3430,17 @@ function Editor({ preview = false, userId }: { preview?: boolean; userId?: strin
                 </DropdownMenuContent>
               </DropdownMenu>
             )}
+            {selectedShapes.length > 0 && (
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                aria-label="Create Page from selection"
+                title="Create Page from selection"
+                onClick={createPage}
+              >
+                <PanelsTopLeftIcon data-slot="icon" />
+              </Button>
+            )}
             {selectedShapes.length > 1 && (
               <Button
                 variant="ghost"
@@ -3032,7 +3544,9 @@ function Editor({ preview = false, userId }: { preview?: boolean; userId?: strin
           onOpenChange={setExportOpen}
           doc={docs.find((doc) => doc.id === activeId) ?? { id: activeId, name: 'Untitled' }}
           shapes={shapes}
+          pages={pages}
           selectedIds={selectedIds}
+          selectedPageId={selectedPageId}
           databaseReady={databaseReady}
           draftId={activeDraftId}
           flush={flushActiveDoc}
@@ -3047,6 +3561,7 @@ function Editor({ preview = false, userId }: { preview?: boolean; userId?: strin
             id: activeId,
             name: docs.find((doc) => doc.id === activeId)?.name ?? 'Untitled',
             shapes,
+            pages,
             draftId: activeDraftId,
             revision: targetRevision,
           }}
@@ -3064,14 +3579,14 @@ function Editor({ preview = false, userId }: { preview?: boolean; userId?: strin
 
       {/* Docked layers rail: takes width from the canvas rather than covering
           it, so nothing you are arranging can hide behind the panel. */}
-      {!isMobile && layersOpen ? (
+      {!isMobile && (layersOpen || pagesOpen) ? (
         <div
           className="relative flex shrink-0 py-2 pe-2"
           style={{ width: layersWidth }}
         >
           <div
             role="separator"
-            aria-label="Resize layers panel"
+            aria-label={`Resize ${pagesOpen ? 'Pages' : 'Layers'} panel`}
             aria-orientation="vertical"
             className="absolute inset-y-0 -start-1 z-20 w-2 cursor-col-resize touch-none after:absolute after:inset-y-0 after:start-1/2 after:w-px after:-translate-x-1/2 after:bg-transparent hover:after:bg-cx-accent/40"
             onPointerDown={(event) => {
@@ -3092,7 +3607,11 @@ function Editor({ preview = false, userId }: { preview?: boolean; userId?: strin
             }}
           />
           <div className="flex min-h-0 w-full overflow-hidden rounded-2xl border bg-card shadow-sm">
-            <LayersPanel {...layersPanelProps} onClose={() => toggleLayers(false)} />
+            {pagesOpen ? (
+              <PagesPanel {...pagesPanelProps} onClose={() => togglePages(false)} />
+            ) : (
+              <LayersPanel {...layersPanelProps} onClose={() => toggleLayers(false)} />
+            )}
           </div>
         </div>
       ) : null}

@@ -184,6 +184,93 @@ export function createAgentBaseTools({
         description: 'Remove the given elements from their groups so they move independently again.',
         inputSchema: z.object({ ids: z.array(z.string()).min(1).max(40) }),
       },
+      createPage: {
+        description:
+          'Create a reusable vertical Page composition from existing canvas element ids. Elements are referenced, not copied, so later element edits update every Page using them. The ids are ordered from top to bottom.',
+        inputSchema: z.object({
+          name: z.string().trim().min(1).max(200),
+          elementIds: z.array(z.string()).min(1).max(100),
+        }),
+      },
+      readPage: {
+        description:
+          'Read one Page\'s current name, canvas geometry, and complete ordered item list. Use this before reconstructing items with updatePage when the Page may have changed earlier in the turn.',
+        inputSchema: z.object({ id: z.string() }),
+      },
+      updatePage: {
+        description:
+          'Update a Page name, canvas position, width, or complete ordered item list. Each item needs its existing unique id (or a new unique id), source elementId, and fixed pixel height.',
+        inputSchema: z.object({
+          id: z.string(),
+          name: z.string().trim().min(1).max(200).optional(),
+          x: z.number().finite().optional(),
+          y: z.number().finite().optional(),
+          w: z.number().finite().min(1).optional(),
+          items: z
+            .array(
+              z.object({
+                id: z.string().min(1).max(128),
+                elementId: z.string().min(1).max(128),
+                height: z.number().finite().min(1).max(100_000),
+              }),
+            )
+            .max(10_000)
+            .optional(),
+        }),
+      },
+      editPageItems: {
+        description:
+          'Atomically add, remove, reorder, or resize blocks inside a Page without reconstructing its complete item list. Added element ids continue to reference their reusable canvas elements and are appended unless insertAfterItemId is provided.',
+        inputSchema: z.object({
+          id: z.string(),
+          add: z
+            .array(
+              z.object({
+                elementId: z.string().min(1).max(128),
+                height: z.number().finite().min(1).max(100_000).optional(),
+              }),
+            )
+            .max(100)
+            .optional(),
+          removeItemIds: z.array(z.string().min(1).max(128)).max(100).optional(),
+          orderedItemIds: z.array(z.string().min(1).max(128)).max(10_000).optional(),
+          heights: z
+            .array(
+              z.object({
+                itemId: z.string().min(1).max(128),
+                height: z.number().finite().min(1).max(100_000),
+              }),
+            )
+            .max(100)
+            .optional(),
+          insertAfterItemId: z
+            .string()
+            .min(1)
+            .max(128)
+            .optional()
+            .describe('insert added blocks after this existing Page item; omit to append'),
+        }),
+      },
+      duplicatePage: {
+        description:
+          'Duplicate a Page composition while continuing to reference the same reusable source elements. Every copied Page item receives a fresh id. Optionally choose the copy name.',
+        inputSchema: z.object({
+          id: z.string(),
+          name: z.string().trim().min(1).max(200).optional(),
+        }),
+      },
+      reorderPages: {
+        description:
+          'Change Page order in the Pages rail and canvas stacking. Pass ids in the desired order. Unknown or duplicate ids are ignored; omitted Pages retain their relative order after the listed Pages.',
+        inputSchema: z.object({
+          orderedIds: z.array(z.string()).min(1).max(100),
+        }),
+      },
+      deletePage: {
+        description:
+          'Delete a Page composition without deleting any of its reusable source elements. The user is asked to confirm.',
+        inputSchema: z.object({ id: z.string() }),
+      },
       readElement: {
         description:
           'Read the full current code of one element. Call this before updateElement whenever you do not already have that element\'s complete code in this conversation — canvas listings truncate long code.',
@@ -213,6 +300,16 @@ export function createAgentBaseTools({
           focus: z.string().optional().describe('what you are checking, e.g. "button alignment"'),
         }),
         toModelOutput: imageToolOutput('The element produced no image.'),
+      },
+      viewPage: {
+        description: imageInputsEnabled
+          ? 'Render one composed Page to an image. Use this after changing Page order, item heights, or source blocks to verify the complete vertical result.'
+          : 'Page image viewing is temporarily unavailable. Use readPage and readElement instead.',
+        inputSchema: z.object({
+          id: z.string(),
+          focus: z.string().optional().describe('what you are checking, e.g. "section order and seams"'),
+        }),
+        toModelOutput: imageToolOutput('The Page produced no image.'),
       },
       readElementLogs: {
         description:

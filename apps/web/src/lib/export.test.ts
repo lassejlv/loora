@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test'
-import { buildDesignJson, buildSafeHtml, safeExportName } from './export'
-import type { CanvasElement } from './canvas'
+import { buildDesignJson, buildSafeHtml, buildSafePageHtml, safeExportName } from './export'
+import type { CanvasElement, CanvasPage } from './canvas'
 
 const elements: CanvasElement[] = [
   {
@@ -23,13 +23,33 @@ const elements: CanvasElement[] = [
   },
 ]
 
+const page: CanvasPage = {
+  id: 'page-1',
+  name: 'Home',
+  x: 700,
+  y: 20,
+  w: 320,
+  items: [{ id: 'page-item-1', elementId: 'section-1', height: 240 }],
+}
+
 describe('safe design exports', () => {
   it('keeps complete element source in the JSON export', () => {
-    const exported = JSON.parse(buildDesignJson('design-1', 'Landing', elements))
+    const exported = JSON.parse(buildDesignJson('design-1', 'Landing', elements, [page]))
     expect(exported.schema).toBe('loora.design')
-    expect(exported.version).toBe(2)
+    expect(exported.version).toBe(3)
     expect(exported.design.elements[0].code).toContain('<h1')
     expect(exported.design.elements[1].code).toContain('function App()')
+    expect(exported.design.pages).toEqual([page])
+  })
+
+  it('builds a static page from reusable source blocks', () => {
+    const exported = buildSafePageHtml('Home', page, elements)
+    expect(exported).toContain('width:320px')
+    expect(exported).toContain('height:240px')
+    expect(exported).not.toContain('onclick=')
+    expect(() =>
+      buildSafePageHtml('Broken', { ...page, items: [{ ...page.items[0], elementId: 'missing' }] }, elements),
+    ).toThrow()
   })
 
   it('builds a sandboxed static HTML document without executable source', () => {

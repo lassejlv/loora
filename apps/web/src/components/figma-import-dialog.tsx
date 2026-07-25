@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { FigmaIcon, ImportIcon } from 'lucide-react'
-import type { CanvasElement } from '@loora/db/canvas'
+import type { CanvasElement, CanvasPage } from '@loora/db/canvas'
 import { Button } from '#/components/ui/button'
 import {
   Dialog,
@@ -39,6 +39,7 @@ export function FigmaImportDialog({
     id: string
     name: string
     shapes: CanvasElement[]
+    pages: CanvasPage[]
     draftId?: string | null
     revision?: number
   }

@@ -5,7 +5,7 @@ import {
   streamText,
   type UIMessage,
 } from 'ai'
-import type { CanvasElement } from '@loora/db/canvas'
+import type { CanvasElement, CanvasPage } from '@loora/db/canvas'
 import {
   getChatGPTReasoningEffort,
   getModel,
@@ -76,7 +76,9 @@ export async function handleAgentChatRequest(request: Request): Promise<Response
   const {
     messages,
     shapes,
+    pages,
     selectedIds,
+    selectedPageId,
     designId,
     draftId,
     chatId,
@@ -86,7 +88,9 @@ export async function handleAgentChatRequest(request: Request): Promise<Response
   } = (await request.json()) as {
     messages: UIMessage[]
     shapes: CanvasElement[]
+    pages?: CanvasPage[]
     selectedIds?: string[]
+    selectedPageId?: string | null
     designId?: string
     draftId?: string | null
     chatId?: string
@@ -276,7 +280,9 @@ export async function handleAgentChatRequest(request: Request): Promise<Response
     githubConnected,
     assets,
     shapes,
+    pages,
     selectedIds,
+    selectedPageId,
   })
   const preparedMessages = messagesForModel(messages, imageInputsEnabled)
   const modelMessages = await convertToModelMessages(

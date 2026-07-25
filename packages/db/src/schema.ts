@@ -1,7 +1,8 @@
-import { relations } from 'drizzle-orm'
+import { relations, sql } from 'drizzle-orm'
 import {
   bigint,
   boolean,
+  check,
   foreignKey,
   index,
   integer,
@@ -12,7 +13,7 @@ import {
   timestamp,
 } from 'drizzle-orm/pg-core'
 import type { UIMessage } from 'ai'
-import type { CanvasElement } from './canvas'
+import type { CanvasElement, CanvasPage } from './canvas'
 import type { DraftStatus } from './drafts'
 import type { ShortcutConfig } from './shortcuts'
 import { EMPTY_SHORTCUT_CONFIG } from './shortcuts'
@@ -104,6 +105,7 @@ export const design = pgTable(
       .references(() => user.id, { onDelete: 'cascade' }),
     name: text('name').notNull(),
     shapes: jsonb('shapes').$type<CanvasElement[]>().default([]).notNull(),
+    pages: jsonb('pages').$type<CanvasPage[]>().default([]).notNull(),
     revision: integer('revision').default(0).notNull(),
     createdAt: timestamp('created_at').defaultNow().notNull(),
     updatedAt: timestamp('updated_at')
@@ -128,6 +130,8 @@ export const designDraft = pgTable(
     status: text('status').$type<DraftStatus>().default('active').notNull(),
     baseShapes: jsonb('base_shapes').$type<CanvasElement[]>().notNull(),
     shapes: jsonb('shapes').$type<CanvasElement[]>().notNull(),
+    basePages: jsonb('base_pages').$type<CanvasPage[]>().default([]).notNull(),
+    pages: jsonb('pages').$type<CanvasPage[]>().default([]).notNull(),
     baseRevision: integer('base_revision').notNull(),
     revision: integer('revision').default(0).notNull(),
     appliedVersionId: text('applied_version_id'),
@@ -160,6 +164,7 @@ export const designVersion = pgTable(
     userId: text('user_id').notNull(),
     message: text('message').notNull(),
     shapes: jsonb('shapes').$type<CanvasElement[]>().notNull(),
+    pages: jsonb('pages').$type<CanvasPage[]>().default([]).notNull(),
     added: integer('added').notNull(),
     removed: integer('removed').notNull(),
     changed: integer('changed').notNull(),
@@ -224,7 +229,7 @@ export const designChat = pgTable(
   ],
 )
 
-// Short-lived public links to a single element ("publish this page"). The row
+// Short-lived public links to a single element or composed Page. The row
 // id doubles as the URL capability token, so deleting the row revokes the link
 // instantly; content stays live (served from the design at request time).
 export const publishLink = pgTable(
@@ -233,7 +238,8 @@ export const publishLink = pgTable(
     id: text('id').primaryKey(),
     designId: text('design_id').notNull(),
     userId: text('user_id').notNull(),
-    elementId: text('element_id').notNull(),
+    elementId: text('element_id'),
+    pageId: text('page_id'),
     createdAt: timestamp('created_at').defaultNow().notNull(),
     expiresAt: timestamp('expires_at').notNull(),
   },
@@ -244,6 +250,10 @@ export const publishLink = pgTable(
       name: 'publish_link_design_fk',
     }).onDelete('cascade'),
     index('publish_link_design_idx').on(table.userId, table.designId),
+    check(
+      'publish_link_one_target',
+      sql`(${table.elementId} is not null) <> (${table.pageId} is not null)`,
+    ),
   ],
 )
 

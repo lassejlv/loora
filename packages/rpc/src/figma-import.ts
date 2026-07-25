@@ -2,7 +2,7 @@ import { Buffer } from 'node:buffer'
 import { and, eq } from 'drizzle-orm'
 import { db } from '@loora/db'
 import { asset, design, designDraft, designVersion } from '@loora/db/schema'
-import type { CanvasElement } from '@loora/db/canvas'
+import type { CanvasElement, CanvasPage } from '@loora/db/canvas'
 import {
   FigmaIntegrationError,
   getFigmaAccessToken,
@@ -39,6 +39,7 @@ export interface FigmaImportTarget {
   id: string
   name: string
   shapes: CanvasElement[]
+  pages: CanvasPage[]
   draftId?: string | null
   revision: number
 }
@@ -733,6 +734,7 @@ export async function importFigmaDesign(
   }
 
   const designId = target?.id ?? `d${crypto.randomUUID().replaceAll('-', '')}`
+  const pages = target?.pages ?? []
   const versionId = `v${crypto.randomUUID().replaceAll('-', '')}`
   const fileName = payload.name.trim() || 'Figma import'
   const designName = target?.name ?? (
@@ -835,6 +837,7 @@ export async function importFigmaDesign(
         userId,
         message: 'Imported from Figma',
         shapes,
+        pages,
         added: importedShapes.length,
         removed: 0,
         changed: 0,
@@ -847,6 +850,7 @@ export async function importFigmaDesign(
         id: designId,
         name: designName,
         shapes,
+        pages,
         revision: target ? target.revision + 1 : 0,
         updatedAt: now.getTime(),
       },

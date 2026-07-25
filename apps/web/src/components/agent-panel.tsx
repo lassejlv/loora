@@ -64,9 +64,17 @@ import {
   PromptInputTextarea,
   usePromptInputAttachments,
 } from '#/components/ai-elements/prompt-input'
-import { applyCodeEdits, type CanvasElement, type CodeEdit, type ElementActions } from '#/lib/canvas'
+import {
+  applyCodeEdits,
+  type CanvasElement,
+  type CanvasPage,
+  type CodeEdit,
+  type ElementActions,
+  type PageActions,
+} from '#/lib/canvas'
+import { pageId } from '#/lib/pages'
 import { awaitRenderResult, captureElement, measureElement, readElementLogs } from '#/components/element-frame'
-import { snapshotCanvas } from '#/lib/snapshot'
+import { snapshotCanvas, snapshotPage } from '#/lib/snapshot'
 import { commitIfChanged } from '@loora/rpc/history'
 import { sanitizeChatMessagesForStorage } from '@loora/rpc/chat-storage'
 import { Sidebar } from '#/components/ui/sidebar'
@@ -161,9 +169,17 @@ const TOOL_META = {
   reorderElements: { icon: LayersIcon, label: 'Reorder' },
   groupElements: { icon: GroupIcon, label: 'Group' },
   ungroupElements: { icon: UngroupIcon, label: 'Ungroup' },
+  createPage: { icon: LayersIcon, label: 'Create Page' },
+  readPage: { icon: BookOpenIcon, label: 'Read Page' },
+  updatePage: { icon: PenLineIcon, label: 'Update Page' },
+  editPageItems: { icon: PenLineIcon, label: 'Edit Page blocks' },
+  duplicatePage: { icon: PlusIcon, label: 'Duplicate Page' },
+  reorderPages: { icon: LayersIcon, label: 'Reorder Pages' },
+  deletePage: { icon: Trash2Icon, label: 'Delete Page' },
   searchCanvas: { icon: SearchIcon, label: 'Search' },
   readElementLogs: { icon: ScrollTextIcon, label: 'Logs' },
   viewElement: { icon: EyeIcon, label: 'Inspect' },
+  viewPage: { icon: EyeIcon, label: 'Inspect Page' },
   deleteElement: { icon: Trash2Icon, label: 'Delete' },
   readElement: { icon: BookOpenIcon, label: 'Read' },
   loadSkill: { icon: BookOpenIcon, label: 'Skill' },
@@ -252,6 +268,12 @@ function hasCanvasMutation(message: UIMessage) {
       'tool-reorderElements',
       'tool-groupElements',
       'tool-ungroupElements',
+      'tool-createPage',
+      'tool-updatePage',
+      'tool-editPageItems',
+      'tool-duplicatePage',
+      'tool-reorderPages',
+      'tool-deletePage',
       'tool-deleteElement',
     ].includes(part.type),
   )
@@ -289,9 +311,17 @@ type ChatSessionApi = {
 type SharedSessionProps = {
   actions: ElementActions
   shapesRef: React.RefObject<CanvasElement[]>
+  pageActions?: PageActions
+  pagesRef?: React.RefObject<CanvasPage[]>
   selectedIdsRef?: React.RefObject<string[]>
+  selectedPageIdRef?: React.RefObject<string | null>
   docId: string
   draftId?: string | null
+}
+
+type BoundSessionProps = Omit<SharedSessionProps, 'pageActions' | 'pagesRef'> & {
+  pageActions: PageActions
+  pagesRef: React.RefObject<CanvasPage[]>
 }
 
 /**
@@ -303,7 +333,10 @@ type SharedSessionProps = {
 export const AgentPanel = memo(function AgentPanel({
   actions,
   shapesRef,
+  pageActions: suppliedPageActions,
+  pagesRef: suppliedPagesRef,
   selectedIdsRef,
+  selectedPageIdRef,
   docId,
   draftId = null,
   getTargetBindings,
@@ -318,6 +351,8 @@ export const AgentPanel = memo(function AgentPanel({
   getTargetBindings?: (draftId: string | null) => {
     actions: ElementActions
     shapesRef: React.RefObject<CanvasElement[]>
+    pageActions: PageActions
+    pagesRef: React.RefObject<CanvasPage[]>
   }
   isTargetReadOnly?: (draftId: string | null) => boolean
   onTargetChange?: (
@@ -340,6 +375,19 @@ export const AgentPanel = memo(function AgentPanel({
   const [creatingBranch, setCreatingBranch] = useState(false)
   const sessionApis = useRef(new Map<string, ChatSessionApi>())
   const creatingTarget = useRef<string | null>(null)
+  const fallbackPagesRef = useRef<CanvasPage[]>([])
+  const fallbackPageActions = useMemo<PageActions>(
+    () => ({
+      createPage: () => null,
+      updatePage: () => null,
+      duplicatePage: () => null,
+      reorderPages: () => [],
+      deletePage: () => false,
+    }),
+    [],
+  )
+  const pageActions = suppliedPageActions ?? fallbackPageActions
+  const pagesRef = suppliedPagesRef ?? fallbackPagesRef
 
   useEffect(() => {
     let cancelled = false
@@ -577,8 +625,13 @@ export const AgentPanel = memo(function AgentPanel({
         {mountedChats.map((chat) => {
           const bindings =
             (chat.draftId ?? null) === draftId
-              ? { actions, shapesRef }
-              : getTargetBindings?.(chat.draftId ?? null) ?? { actions, shapesRef }
+              ? { actions, shapesRef, pageActions, pagesRef }
+              : getTargetBindings?.(chat.draftId ?? null) ?? {
+                  actions,
+                  shapesRef,
+                  pageActions,
+                  pagesRef,
+                }
           return (
             <ChatSession
               key={chat.id}
@@ -588,8 +641,13 @@ export const AgentPanel = memo(function AgentPanel({
               active={chat.id === activeChatId}
               actions={bindings.actions}
               shapesRef={bindings.shapesRef}
+              pageActions={bindings.pageActions}
+              pagesRef={bindings.pagesRef}
               selectedIdsRef={
                 (chat.draftId ?? null) === draftId ? selectedIdsRef : undefined
+              }
+              selectedPageIdRef={
+                (chat.draftId ?? null) === draftId ? selectedPageIdRef : undefined
               }
               docId={docId}
               targetBlocked={targetBusy && chat.id === activeChatId}
@@ -660,7 +718,10 @@ function ChatSession({
   active,
   actions,
   shapesRef,
+  pageActions,
+  pagesRef,
   selectedIdsRef,
+  selectedPageIdRef,
   docId,
   draftId = null,
   targetBlocked = false,
@@ -670,7 +731,7 @@ function ChatSession({
   onTitleChange,
   onRunningChange,
   registerApi,
-}: SharedSessionProps & {
+}: BoundSessionProps & {
   chatId: string
   title: string
   active: boolean
@@ -773,7 +834,9 @@ function ChatSession({
         api: '/api/chat',
         body: () => ({
           shapes: shapesRef.current,
+          pages: pagesRef.current,
           selectedIds: selectedIdsRef?.current ?? [],
+          selectedPageId: selectedPageIdRef?.current ?? null,
           designId: docId,
           draftId,
           chatId,
@@ -856,6 +919,19 @@ function ChatSession({
           shapesRef.current.find((element) => element.id === id)?.locked === true
         const lockedMessage = (id: string) =>
           `Element ${id} is locked. Ask the user to unlock it before editing.`
+        const pageOutput = (page: CanvasPage) => ({
+          id: page.id,
+          name: page.name,
+          x: page.x,
+          y: page.y,
+          w: page.w,
+          items: page.items.map((item) => ({
+            ...item,
+            elementName:
+              shapesRef.current.find((element) => element.id === item.elementId)?.name ??
+              'Missing block',
+          })),
+        })
         // Tool outputs echo geometry but never code (the model just wrote it —
         // echoing would double the tokens) plus the live render outcome so
         // broken code comes back as actionable feedback instead of a silent
@@ -1051,6 +1127,177 @@ function ChatSession({
               respond({ ungrouped: actions.ungroupElements(ids) })
               break
             }
+            case 'createPage': {
+              const { name, elementIds } = input as { name?: string; elementIds?: string[] }
+              const page = pageActions.createPage(name ?? 'Page', elementIds ?? [])
+              respond(
+                page
+                  ? pageOutput(page)
+                  : { error: 'None of the requested element ids exist.' },
+              )
+              break
+            }
+            case 'readPage': {
+              const id = (input as { id?: string }).id
+              const page = pagesRef.current.find((candidate) => candidate.id === id)
+              respond(page ? pageOutput(page) : { error: `No Page with id ${String(id)}` })
+              break
+            }
+            case 'updatePage': {
+              const { id, ...patch } = input as { id: string } & Partial<CanvasPage>
+              const missing = patch.items
+                ?.map((item) => item.elementId)
+                .filter(
+                  (elementId) => !shapesRef.current.some((element) => element.id === elementId),
+                )
+              if (missing?.length) {
+                respond({ error: `Unknown element ids: ${[...new Set(missing)].join(', ')}` })
+                break
+              }
+              const page = pageActions.updatePage(id, patch)
+              respond(
+                page
+                  ? pageOutput(page)
+                  : { error: `No Page with id ${id}` },
+              )
+              break
+            }
+            case 'editPageItems': {
+              const {
+                id,
+                add = [],
+                removeItemIds = [],
+                orderedItemIds,
+                heights = [],
+                insertAfterItemId,
+              } = input as {
+                id: string
+                add?: Array<{ elementId: string; height?: number }>
+                removeItemIds?: string[]
+                orderedItemIds?: string[]
+                heights?: Array<{ itemId: string; height: number }>
+                insertAfterItemId?: string
+              }
+              const page = pagesRef.current.find((candidate) => candidate.id === id)
+              if (!page) {
+                respond({ error: `No Page with id ${id}` })
+                break
+              }
+              if (
+                add.length === 0 &&
+                removeItemIds.length === 0 &&
+                (orderedItemIds?.length ?? 0) === 0 &&
+                heights.length === 0
+              ) {
+                respond({ error: 'No Page item changes were provided.' })
+                break
+              }
+
+              const knownItemIds = new Set(page.items.map((item) => item.id))
+              const referencedItemIds = [
+                ...removeItemIds,
+                ...(orderedItemIds ?? []),
+                ...heights.map((entry) => entry.itemId),
+                ...(insertAfterItemId ? [insertAfterItemId] : []),
+              ]
+              const unknownItemIds = [
+                ...new Set(referencedItemIds.filter((itemId) => !knownItemIds.has(itemId))),
+              ]
+              if (unknownItemIds.length > 0) {
+                respond({ error: `Unknown Page item ids: ${unknownItemIds.join(', ')}` })
+                break
+              }
+              const removed = new Set(removeItemIds)
+              const changedAfterRemoval = [
+                ...(orderedItemIds ?? []),
+                ...heights.map((entry) => entry.itemId),
+                ...(insertAfterItemId ? [insertAfterItemId] : []),
+              ].filter((itemId) => removed.has(itemId))
+              if (changedAfterRemoval.length > 0) {
+                respond({
+                  error: `Removed Page items cannot also be reordered, resized, or used as an insertion point: ${[
+                    ...new Set(changedAfterRemoval),
+                  ].join(', ')}`,
+                })
+                break
+              }
+
+              const elementsById = new Map(
+                shapesRef.current.map((element) => [element.id, element]),
+              )
+              const unknownElementIds = [
+                ...new Set(
+                  add
+                    .map((entry) => entry.elementId)
+                    .filter((elementId) => !elementsById.has(elementId)),
+                ),
+              ]
+              if (unknownElementIds.length > 0) {
+                respond({ error: `Unknown element ids: ${unknownElementIds.join(', ')}` })
+                break
+              }
+
+              const heightByItemId = new Map(
+                heights.map((entry) => [entry.itemId, entry.height]),
+              )
+              let items = page.items
+                .filter((item) => !removed.has(item.id))
+                .map((item) => ({
+                  ...item,
+                  height: heightByItemId.get(item.id) ?? item.height,
+                }))
+              if (orderedItemIds) {
+                const byId = new Map(items.map((item) => [item.id, item]))
+                const seen = new Set<string>()
+                const ordered = orderedItemIds.flatMap((itemId) => {
+                  if (seen.has(itemId)) return []
+                  const item = byId.get(itemId)
+                  if (!item) return []
+                  seen.add(itemId)
+                  return [item]
+                })
+                items = [...ordered, ...items.filter((item) => !seen.has(item.id))]
+              }
+
+              const additions = add.map((entry) => {
+                const element = elementsById.get(entry.elementId)!
+                return {
+                  id: pageId('pi'),
+                  elementId: entry.elementId,
+                  height:
+                    entry.height ??
+                    Math.max(1, Math.round(element.h * (page.w / element.w))),
+                }
+              })
+              if (additions.length > 0) {
+                const insertAt = insertAfterItemId
+                  ? items.findIndex((item) => item.id === insertAfterItemId) + 1
+                  : items.length
+                items.splice(insertAt, 0, ...additions)
+              }
+
+              const updated = pageActions.updatePage(id, { items })
+              respond(
+                updated
+                  ? {
+                      ...pageOutput(updated),
+                      addedItemIds: additions.map((item) => item.id),
+                    }
+                  : { error: `No Page with id ${id}` },
+              )
+              break
+            }
+            case 'duplicatePage': {
+              const { id, name } = input as { id: string; name?: string }
+              const page = pageActions.duplicatePage(id, name)
+              respond(page ? pageOutput(page) : { error: `No Page with id ${id}` })
+              break
+            }
+            case 'reorderPages': {
+              const orderedIds = (input as { orderedIds?: string[] }).orderedIds ?? []
+              respond({ order: pageActions.reorderPages(orderedIds) })
+              break
+            }
             case 'readElementLogs': {
               const id = (input as { id?: string }).id
               if (!id || !shapesRef.current.some((s) => s.id === id)) {
@@ -1094,6 +1341,31 @@ function ChatSession({
                 .catch(() => fail('Could not capture the element.'))
               break
             }
+            case 'viewPage': {
+              if (!modelSupportsImageInput(modelRef.current)) {
+                respond({ unavailable: true })
+                break
+              }
+              const id = (input as { id?: string }).id
+              const page = pagesRef.current.find((candidate) => candidate.id === id)
+              if (!page) {
+                respond({ error: `No Page with id ${String(id)}` })
+                break
+              }
+              void snapshotPage(page, shapesRef.current)
+                .then((image) =>
+                  respond(
+                    image
+                      ? { image }
+                      : {
+                          error:
+                            'Could not capture the Page. It may contain a missing or hidden block.',
+                        },
+                  ),
+                )
+                .catch(() => fail('Could not capture the Page.'))
+              break
+            }
             case 'readElement': {
               const id = (input as { id?: string }).id
               const el = shapesRef.current.find((s) => s.id === id)
@@ -1109,11 +1381,15 @@ function ChatSession({
                 respond({ unavailable: true })
                 break
               }
-              void snapshotCanvas(shapesRef.current, { freshness: 'fresh' })
+              void snapshotCanvas(shapesRef.current, {
+                freshness: 'fresh',
+                pages: pagesRef.current,
+              })
                 .then((image) => respond(image ? { image } : { empty: true }))
                 .catch(() => fail('Could not capture the canvas.'))
               break
             case 'deleteElement':
+            case 'deletePage':
             case 'askQuestion':
               // These tools wait for the user in their inline controls.
               break
@@ -1154,7 +1430,12 @@ function ChatSession({
     }
     // safety checkpoint: restorable from History if the agent goes wrong
     const historyId = draftId ? `${docId}:draft:${draftId}` : docId
-    commitIfChanged(historyId, `Before: ${promptLabel.slice(0, 60)}`, shapesRef.current)
+    commitIfChanged(
+      historyId,
+      `Before: ${promptLabel.slice(0, 60)}`,
+      shapesRef.current,
+      pagesRef.current,
+    )
     void orpc.history
       .commit({
         id: `c${nanoid()}`,
@@ -1162,11 +1443,14 @@ function ChatSession({
         draftId,
         message: `Before: ${promptLabel.slice(0, 60)}`,
         shapes: shapesRef.current,
+        pages: pagesRef.current,
         skipIfUnchanged: true,
       })
       .catch((error) => console.error('[history] Failed to save checkpoint:', error))
     void (async () => {
-      const snapshot = imageInputsEnabled ? await snapshotCanvas(shapesRef.current) : null
+      const snapshot = imageInputsEnabled
+        ? await snapshotCanvas(shapesRef.current, { pages: pagesRef.current })
+        : null
       const uploadedFiles = imageInputsEnabled
         ? files
         : files.filter((file) => !file.mediaType.startsWith('image/'))
@@ -1225,7 +1509,11 @@ function ChatSession({
       if (p.state !== 'input-available') continue
       const toolName = p.type.slice(5)
       // Approval tools park for the user's inline answer — never auto-run.
-      if (toolName === 'askQuestion' || toolName === 'deleteElement') continue
+      if (
+        toolName === 'askQuestion' ||
+        toolName === 'deleteElement' ||
+        toolName === 'deletePage'
+      ) continue
       runToolCall.current({ toolName, toolCallId: p.toolCallId, input: p.input })
     }
   }, [chatReady, status])
@@ -1484,18 +1772,23 @@ function ChatSession({
   const resolveDelete = useCallback((toolCallId: string, allow: boolean, id: string) => {
     let output: unknown
     const target = shapesRef.current.find((s) => s.id === id)
+    const page = pagesRef.current.find((candidate) => candidate.id === id)
+    const tool = page && !target ? 'deletePage' : 'deleteElement'
     if (!allow) {
       output = { deleted: false, reason: 'User declined the deletion' }
+    } else if (tool === 'deletePage') {
+      const ok = pageActions.deletePage(id)
+      output = ok ? { deleted: true, id, name: page?.name } : { error: 'No such Page' }
     } else {
       const ok = actions.deleteElement(id)
       output = ok ? { deleted: true, id, name: target?.name } : { error: 'No such element' }
     }
     addToolOutputRef.current({
-      tool: 'deleteElement',
+      tool,
       toolCallId,
       output,
     } as Parameters<typeof addToolOutput>[0])
-  }, [actions, shapesRef])
+  }, [actions, pageActions, pagesRef, shapesRef])
 
   // Hidden sessions keep every hook (the useChat loop, tool execution,
   // persistence) alive; only the visible chrome is skipped.
@@ -2034,6 +2327,19 @@ function toolSummary(name: string, part: ToolPart, elements: CanvasElement[]) {
     // after deletion the element is gone from state; fall back to the tool output
     return describeElement(target ?? (part.output as Partial<CanvasElement>)) || String(input.id ?? '')
   }
+  if (
+    name === 'createPage' ||
+    name === 'readPage' ||
+    name === 'updatePage' ||
+    name === 'editPageItems' ||
+    name === 'duplicatePage' ||
+    name === 'reorderPages' ||
+    name === 'deletePage' ||
+    name === 'viewPage'
+  ) {
+    const output = part.output as { id?: string; name?: string } | undefined
+    return String(output?.name ?? input.name ?? output?.id ?? input.id ?? '')
+  }
   if (name === 'loadSkill') {
     return String(input.name ?? '')
   }
@@ -2260,9 +2566,17 @@ const PAST_TENSE = {
   readElementLogs: 'Read logs from',
   viewElement: 'Inspected',
   deleteElement: 'Deleted',
+  createPage: 'Created Page',
+  readPage: 'Read Page',
+  updatePage: 'Updated Page',
+  editPageItems: 'Edited Page blocks',
+  duplicatePage: 'Duplicated Page',
+  reorderPages: 'Reordered Pages',
+  deletePage: 'Deleted Page',
   readElement: 'Read',
   loadSkill: 'Loaded skill',
   viewCanvas: 'Verified',
+  viewPage: 'Inspected Page',
   listGitHubRepositories: 'Listed',
   listRepositoryTree: 'Browsed',
   searchRepositoryCode: 'Searched',
@@ -2299,11 +2613,17 @@ function ToolGroup({
   }
   const summary = [...counts.entries()].map(([verb, n]) => `${verb} ${n}`).join(' · ')
   const busy = parts.some(
-    (p) => p.state === 'input-streaming' || (p.state === 'input-available' && p.type !== 'tool-deleteElement'),
+    (p) =>
+      p.state === 'input-streaming' ||
+      (p.state === 'input-available' &&
+        p.type !== 'tool-deleteElement' &&
+        p.type !== 'tool-deletePage'),
   )
   const failed = parts.some((p) => p.state === 'output-error' || (p.output as { error?: string })?.error)
   const pendingDeletes = parts.filter(
-    (p) => p.type === 'tool-deleteElement' && p.state === 'input-available',
+    (p) =>
+      (p.type === 'tool-deleteElement' || p.type === 'tool-deletePage') &&
+      p.state === 'input-available',
   )
 
   return (
@@ -2464,7 +2784,9 @@ function ToolRow({
 
   const denied = (part.output as { deleted?: boolean; reason?: string } | undefined)?.reason
   const failed = part.state === 'output-error' || Boolean((part.output as { error?: string })?.error)
-  const awaitingConfirm = name === 'deleteElement' && part.state === 'input-available'
+  const awaitingConfirm =
+    (name === 'deleteElement' || name === 'deletePage') &&
+    part.state === 'input-available'
   const done = part.state === 'output-available'
   const reduceMotion = useReducedMotion()
   const enter = interruptIn(reduceMotion)
@@ -2475,7 +2797,9 @@ function ToolRow({
         <meta.icon
           className={cn(
             'size-3.5 shrink-0',
-            name === 'deleteElement' ? 'text-destructive-foreground/70' : 'text-muted-foreground',
+            name === 'deleteElement' || name === 'deletePage'
+              ? 'text-destructive-foreground/70'
+              : 'text-muted-foreground',
           )}
         />
         <span className="font-medium">{meta.label}</span>

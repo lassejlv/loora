@@ -1,4 +1,4 @@
-import type { CanvasElement } from './canvas'
+import type { CanvasElement, CanvasPage } from './canvas'
 import { visibleElements } from './canvas'
 import {
   captureElement,
@@ -7,6 +7,7 @@ import {
 } from '#/components/element-frame'
 import { CaptureCache, shouldReuseCapture } from './snapshot-cache'
 import { elementAABB } from './snap'
+import { pageElements, pageHeight } from './pages'
 
 // Cache the latest successful capture per element, keyed by its code and
 // size, so snapshots reuse PNGs for unchanged elements and have a fallback
@@ -67,15 +68,28 @@ export async function snapshotCanvas(
   {
     pixelRatio = 1,
     freshness = 'reuse-clean',
-  }: { pixelRatio?: number; freshness?: 'reuse-clean' | 'fresh' } = {},
+    pages = [],
+  }: {
+    pixelRatio?: number
+    freshness?: 'reuse-clean' | 'fresh'
+    pages?: CanvasPage[]
+  } = {},
 ): Promise<string | null> {
   // Hidden elements have no frame to capture and are not what the user sees,
   // so they must not reach the agent's snapshot either.
   elements = visibleElements(elements)
-  if (elements.length === 0) return null
+  if (elements.length === 0 && pages.length === 0) return null
 
   const pad = 40
-  const boxes = elements.map(elementAABB)
+  const boxes = [
+    ...elements.map(elementAABB),
+    ...pages.map((page) => ({
+      left: page.x,
+      top: page.y,
+      right: page.x + page.w,
+      bottom: page.y + Math.max(192, pageHeight(page)),
+    })),
+  ]
   const minX = Math.min(...boxes.map((b) => b.left)) - pad
   const minY = Math.min(...boxes.map((b) => b.top)) - pad
   const maxX = Math.max(...boxes.map((b) => b.right)) + pad
@@ -88,6 +102,12 @@ export async function snapshotCanvas(
     elements.map(async (el) => {
       const img = await elementShot(el, freshness)
       return { el, img }
+    }),
+  )
+  const pageShots = await Promise.all(
+    pages.map(async (page) => {
+      const png = await snapshotPage(page, elements)
+      return { page, image: png ? await loadImage(png) : null }
     }),
   )
 
@@ -123,6 +143,70 @@ export async function snapshotCanvas(
         ctx.fillText(el.name || 'Element', x + 8, y + 18, Math.max(20, ew - 16))
       }
       if (rotated) ctx.restore()
+    }
+    for (const { page, image } of pageShots) {
+      const x = (page.x - minX) * scale
+      const y = (page.y - minY) * scale
+      const pageWidth = page.w * scale
+      const pageCanvasHeight = Math.max(192, pageHeight(page)) * scale
+      if (image) {
+        ctx.fillStyle = '#fff'
+        ctx.fillRect(x, y, pageWidth, pageCanvasHeight)
+        ctx.drawImage(
+          image,
+          x,
+          y,
+          pageWidth,
+          pageHeight(page) * scale,
+        )
+      } else {
+        ctx.fillStyle = '#e5e3dc'
+        ctx.fillRect(x, y, pageWidth, pageCanvasHeight)
+        ctx.fillStyle = '#75726b'
+        ctx.font = `${Math.max(10, 12 * scale)}px monospace`
+        ctx.fillText(page.name || 'Page', x + 8, y + 18, Math.max(20, pageWidth - 16))
+      }
+    }
+    return canvas.toDataURL('image/png')
+  } catch {
+    return null
+  }
+}
+
+export async function snapshotPage(
+  page: CanvasPage,
+  elements: CanvasElement[],
+  { pixelRatio = 1 }: { pixelRatio?: number } = {},
+): Promise<string | null> {
+  const resolved = pageElements(page, elements)
+  if (resolved.some(({ element }) => !element || element.hidden)) return null
+  const height = pageHeight(page)
+  const scale = Math.min(1, 1600 / Math.max(page.w, height)) * pixelRatio
+  const captures = await Promise.all(
+    resolved.map(async ({ item, element }) => {
+      const capture =
+        (await captureElement(`canvas-page:${page.id}:${item.id}`)) ??
+        (await captureElement(element!.id))
+      return { item, image: capture ? await loadImage(capture.png) : null }
+    }),
+  )
+
+  try {
+    const canvas = document.createElement('canvas')
+    canvas.width = Math.max(1, Math.round(page.w * scale))
+    canvas.height = Math.max(1, Math.round(height * scale))
+    const context = canvas.getContext('2d')!
+    context.fillStyle = '#fff'
+    context.fillRect(0, 0, canvas.width, canvas.height)
+    let top = 0
+    for (const { item, image } of captures) {
+      const itemHeight = item.height * scale
+      if (image) context.drawImage(image, 0, top, canvas.width, itemHeight)
+      else {
+        context.fillStyle = '#e5e3dc'
+        context.fillRect(0, top, canvas.width, itemHeight)
+      }
+      top += itemHeight
     }
     return canvas.toDataURL('image/png')
   } catch {

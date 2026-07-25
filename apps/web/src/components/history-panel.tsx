@@ -1,7 +1,7 @@
 import { lazy, Suspense, useEffect, useState } from 'react'
 import { HistoryIcon } from '#/components/icons'
 import { nanoid } from 'nanoid'
-import type { CanvasElement } from '#/lib/canvas'
+import type { CanvasElement, CanvasPage } from '#/lib/canvas'
 import { loadHistory, relativeTime, type Commit, type CommitSummary } from '@loora/rpc/history'
 import { PanelEmpty, PanelShell } from '#/components/panel-shell'
 import { Button } from '#/components/ui/button'
@@ -22,7 +22,22 @@ const DesignDiff = lazy(() =>
   import('#/components/design-diff').then((module) => ({ default: module.DesignDiff })),
 )
 
-type ComparisonVersion = Pick<Commit, 'id' | 'message' | 'shapes' | 'at'>
+type ComparisonVersion = Pick<Commit, 'id' | 'message' | 'shapes' | 'pages' | 'at'>
+
+function changedPages(previous: CanvasPage[], current: CanvasPage[]) {
+  const previousById = new Map(previous.map((page) => [page.id, page]))
+  const currentIds = new Set(current.map((page) => page.id))
+  return {
+    added: current.filter((page) => !previousById.has(page.id)).map((page) => page.name),
+    removed: previous.filter((page) => !currentIds.has(page.id)).map((page) => page.name),
+    changed: current
+      .filter((page) => {
+        const before = previousById.get(page.id)
+        return before && JSON.stringify(before) !== JSON.stringify(page)
+      })
+      .map((page) => page.name),
+  }
+}
 
 export function HistoryPopover({
   docId,
@@ -32,6 +47,7 @@ export function HistoryPopover({
   open,
   onOpenChange,
   shapesRef,
+  pagesRef,
   onRestore,
 }: {
   docId: string
@@ -41,7 +57,8 @@ export function HistoryPopover({
   open: boolean
   onOpenChange: (open: boolean) => void
   shapesRef: React.RefObject<CanvasElement[]>
-  onRestore: (elements: CanvasElement[]) => void
+  pagesRef: React.RefObject<CanvasPage[]>
+  onRestore: (elements: CanvasElement[], pages: CanvasPage[]) => void
 }) {
   const localHistoryId = storageId ?? docId
   const [history, setHistory] = useState<CommitSummary[]>([])
@@ -59,6 +76,12 @@ export function HistoryPopover({
   const [viewError, setViewError] = useState<string | null>(null)
 
   const viewingSummary = viewingId ? history.find((commit) => commit.id === viewingId) : null
+  const pageChanges = comparison
+    ? changedPages(comparison.previous?.pages ?? [], comparison.current.pages ?? [])
+    : null
+  const hasPageChanges =
+    pageChanges &&
+    pageChanges.added.length + pageChanges.removed.length + pageChanges.changed.length > 0
 
   const loadVersions = async (append = false) => {
     if (historyLoading) return
@@ -88,7 +111,7 @@ export function HistoryPopover({
       if (!append) {
         const local = loadHistory(localHistoryId)
         setLocalVersions(local)
-        setHistory(local.map(({ shapes: _shapes, ...summary }) => summary))
+        setHistory(local.map(({ shapes: _shapes, pages: _pages, ...summary }) => summary))
         setCursor(null)
       }
       setHistoryError('Could not load saved versions.')
@@ -168,6 +191,7 @@ export function HistoryPopover({
                     draftId,
                     message: msg,
                     shapes: shapesRef.current,
+                    pages: pagesRef.current,
                   })
                   if (commit) {
                     setLocalVersions(null)
@@ -273,38 +297,55 @@ export function HistoryPopover({
               {comparison ? ` · ${relativeTime(comparison.current.at)}` : ''}
             </DialogDescription>
           </DialogHeader>
-          <div className="min-h-0 flex-1 border-y">
-            {viewError ? (
-              <div className="grid h-full place-items-center text-sm text-destructive-foreground">
-                {viewError}
+          <div className="flex min-h-0 flex-1 flex-col border-y">
+            {hasPageChanges ? (
+              <div className="flex flex-wrap gap-x-4 gap-y-1 border-b px-4 py-2 text-xs">
+                {pageChanges.added.length > 0 ? (
+                  <span className="text-success">Pages added: {pageChanges.added.join(', ')}</span>
+                ) : null}
+                {pageChanges.removed.length > 0 ? (
+                  <span className="text-destructive-foreground">
+                    Pages removed: {pageChanges.removed.join(', ')}
+                  </span>
+                ) : null}
+                {pageChanges.changed.length > 0 ? (
+                  <span>Pages changed: {pageChanges.changed.join(', ')}</span>
+                ) : null}
               </div>
-            ) : comparison ? (
-              <Suspense
-                fallback={
-                  <div className="grid h-full place-items-center text-sm text-muted-foreground">
-                    Loading changes…
-                  </div>
-                }
-              >
-                <DesignDiff
-                  oldShapes={comparison.previous?.shapes ?? []}
-                  newShapes={comparison.current.shapes}
-                  oldKey={comparison.previous?.id ?? `${comparison.current.id}:empty`}
-                  newKey={comparison.current.id}
-                />
-              </Suspense>
-            ) : (
-              <div className="grid h-full place-items-center text-sm text-muted-foreground">
-                Loading changes…
-              </div>
-            )}
+            ) : null}
+            <div className="min-h-0 flex-1">
+              {viewError ? (
+                <div className="grid h-full place-items-center text-sm text-destructive-foreground">
+                  {viewError}
+                </div>
+              ) : comparison ? (
+                <Suspense
+                  fallback={
+                    <div className="grid h-full place-items-center text-sm text-muted-foreground">
+                      Loading changes…
+                    </div>
+                  }
+                >
+                  <DesignDiff
+                    oldShapes={comparison.previous?.shapes ?? []}
+                    newShapes={comparison.current.shapes}
+                    oldKey={comparison.previous?.id ?? `${comparison.current.id}:empty`}
+                    newKey={comparison.current.id}
+                  />
+                </Suspense>
+              ) : (
+                <div className="grid h-full place-items-center text-sm text-muted-foreground">
+                  Loading changes…
+                </div>
+              )}
+            </div>
           </div>
           <DialogFooter className="shrink-0">
             <DialogClose render={<Button variant="outline" />}>Close</DialogClose>
             <Button
               onClick={() => {
                 if (!comparison) return
-                onRestore(comparison.current.shapes)
+                onRestore(comparison.current.shapes, comparison.current.pages ?? [])
                 setViewingId(null)
                 setComparison(null)
               }}

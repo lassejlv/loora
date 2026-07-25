@@ -1,5 +1,5 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import type { CanvasElement, ElementPatch } from '#/lib/canvas'
+import type { CanvasElement, CanvasPage, ElementPatch } from '#/lib/canvas'
 import { applyTextEdits, elementId } from '#/lib/canvas'
 import { TEMPLATE_DEFAULTS, type InsertTool } from '#/lib/element-templates'
 import {
@@ -24,6 +24,9 @@ import {
   visibleElements,
 } from '#/lib/canvas'
 import { collectSnapLines, elementAABB, snapBox, snapPoint, type SnapLines } from '#/lib/snap'
+import { PageFrame } from '#/components/page-frame'
+import { pageHeight } from '#/lib/pages'
+import { cn } from '#/lib/utils'
 
 export type Tool = 'select' | 'hand' | 'interact' | 'comment' | InsertTool
 
@@ -69,15 +72,19 @@ export interface CanvasContextMenuInfo {
 
 interface CanvasProps {
   elements: CanvasElement[]
+  pages?: CanvasPage[]
   selectedIds: string[]
+  selectedPageId?: string | null
   tool: Tool
   docId?: string
   controlsRef?: React.RefObject<CanvasControls | null>
   onScaleChange?: (pct: number) => void
   onSelect: (ids: string[]) => void
+  onSelectPage?: (id: string | null) => void
   onToolChange: (tool: Tool) => void
   onCreate: (element: CanvasElement) => void
   onUpdateMany: (patches: ReadonlyMap<string, ElementPatch>) => void
+  onUpdatePage?: (id: string, patch: Partial<Omit<CanvasPage, 'id'>>) => void
   // Returns false when the message could not be sent (agent busy) so the
   // comment popover stays open instead of losing the user's text.
   onComment?: (text: string) => boolean | void
@@ -184,15 +191,19 @@ function loadView(docId?: string): View | null {
 
 export function Canvas({
   elements,
+  pages = [],
   selectedIds,
+  selectedPageId = null,
   tool,
   docId,
   controlsRef,
   onScaleChange,
   onSelect,
+  onSelectPage,
   onToolChange,
   onCreate,
   onUpdateMany,
+  onUpdatePage,
   onComment,
   onCanvasContextMenu,
   hoveredIds,
@@ -511,6 +522,7 @@ export function Canvas({
       // A locked element is scenery: the click falls through to the marquee.
       const id = hitId && !isLocked(hitId) ? hitId : null
       if (id) {
+        onSelectPage?.(null)
         // Clicking a grouped element acts on the whole group (locked members
         // stay out of it — they cannot be dragged along).
         const gid = elements.find((el) => el.id === id)?.groupId
@@ -554,6 +566,7 @@ export function Canvas({
           lines: collectSnapLines(elements, idSet),
         })
       } else {
+        onSelectPage?.(null)
         setDragBoth({
           mode: 'marquee',
           additive: e.shiftKey,
@@ -1112,6 +1125,20 @@ export function Canvas({
             />
           )
         })}
+        {pages.map((page) => (
+          <PageCanvasView
+            key={page.id}
+            page={page}
+            elements={elements}
+            selected={page.id === selectedPageId}
+            scale={view.scale}
+            onSelect={() => {
+              onSelect([])
+              onSelectPage?.(page.id)
+            }}
+            onUpdate={(patch) => onUpdatePage?.(page.id, patch)}
+          />
+        ))}
       </div>
 
       {/* Overlay chrome: selection, guides, marquee, handles. */}
@@ -1387,6 +1414,106 @@ export function Canvas({
     </div>
   )
 }
+
+const PageCanvasView = memo(function PageCanvasView({
+  page,
+  elements,
+  selected,
+  scale,
+  onSelect,
+  onUpdate,
+}: {
+  page: CanvasPage
+  elements: CanvasElement[]
+  selected: boolean
+  scale: number
+  onSelect: () => void
+  onUpdate: (patch: Partial<Omit<CanvasPage, 'id'>>) => void
+}) {
+  const drag = useRef<
+    | {
+        mode: 'move' | 'resize'
+        clientX: number
+        clientY: number
+        x: number
+        y: number
+        w: number
+      }
+    | undefined
+  >(undefined)
+  const height = Math.max(192, pageHeight(page))
+
+  const start = (event: React.PointerEvent, mode: 'move' | 'resize') => {
+    event.stopPropagation()
+    event.currentTarget.setPointerCapture(event.pointerId)
+    drag.current = {
+      mode,
+      clientX: event.clientX,
+      clientY: event.clientY,
+      x: page.x,
+      y: page.y,
+      w: page.w,
+    }
+    onSelect()
+  }
+
+  const move = (event: React.PointerEvent) => {
+    const active = drag.current
+    if (!active) return
+    event.stopPropagation()
+    const dx = (event.clientX - active.clientX) / scale
+    const dy = (event.clientY - active.clientY) / scale
+    if (active.mode === 'move') onUpdate({ x: active.x + dx, y: active.y + dy })
+    else onUpdate({ w: Math.max(240, active.w + dx) })
+  }
+
+  const stop = (event: React.PointerEvent) => {
+    if (!drag.current) return
+    event.stopPropagation()
+    drag.current = undefined
+    event.currentTarget.releasePointerCapture(event.pointerId)
+  }
+
+  return (
+    <div
+      data-page-id={page.id}
+      className={cn(
+        'absolute bg-white shadow-sm',
+        selected ? 'ring-2 ring-cx-accent' : 'ring-1 ring-black/10',
+      )}
+      style={{ left: page.x, top: page.y, width: page.w, height }}
+      onPointerDown={(event) => start(event, 'move')}
+      onPointerMove={move}
+      onPointerUp={stop}
+      onPointerCancel={stop}
+    >
+      <div
+        className="pointer-events-none absolute left-0 flex items-center gap-1.5 font-mono text-muted-foreground"
+        style={{ top: -20, fontSize: 12, whiteSpace: 'nowrap' }}
+      >
+        {page.name} · Page
+      </div>
+      <PageFrame
+        page={page}
+        elements={elements}
+        framePrefix={`canvas-page:${page.id}`}
+      />
+      {selected ? (
+        <button
+          type="button"
+          aria-label="Resize Page width"
+          className="absolute top-1/2 right-0 h-12 w-2 -translate-y-1/2 translate-x-1/2 cursor-ew-resize rounded-full bg-cx-accent"
+          onPointerDown={(event) => start(event, 'resize')}
+          onPointerMove={move}
+          onPointerUp={stop}
+          onPointerCancel={stop}
+        />
+      ) : (
+        <div className="absolute inset-0" />
+      )}
+    </div>
+  )
+})
 
 const ElementView = memo(function ElementView({
   element: el,

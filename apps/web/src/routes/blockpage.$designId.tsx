@@ -6,6 +6,7 @@ import { orpc } from '#/lib/orpc-client'
 import { Button } from '#/components/ui/button'
 import { CodeEditorPanel } from '#/components/code-editor-panel'
 import { classifyCode, ElementFrame, type FrameTextEdit } from '#/components/element-frame'
+import { PageFrame } from '#/components/page-frame'
 import { ImagePickerDialog } from '#/components/image-picker-dialog'
 import { pickBlockPageElement } from '#/lib/block-page'
 import { StyleEditorPanel } from '#/components/style-editor-panel'
@@ -19,10 +20,12 @@ import {
   replaceClassValue,
   replaceImageSource,
   type CanvasElement,
+  type CanvasPage,
 } from '#/lib/canvas'
 import {
   hasStoredTargetElements,
   loadTargetElements,
+  loadTargetPages,
   saveTargetElements,
 } from '#/lib/docs'
 import { DRAFT_STATUSES, type DraftStatus } from '@loora/db/drafts'
@@ -36,6 +39,7 @@ import { DRAFT_STATUSES, type DraftStatus } from '@loora/db/drafts'
 
 const blockPageSearchParams = {
   element: parseAsString,
+  page: parseAsString,
   draft: parseAsString,
 }
 
@@ -52,6 +56,7 @@ type LoadState =
       status: 'ready'
       name: string | null
       elements: CanvasElement[]
+      pages: CanvasPage[]
       revision: number
       draftStatus: DraftStatus | null
     }
@@ -79,7 +84,7 @@ function draftStatus(value: unknown): DraftStatus | null {
 function BlockPage() {
   const { designId } = Route.useParams()
   const { data: session, isPending } = authClient.useSession()
-  const [{ element: elementParam, draft: draftId }, setSearch] = useQueryStates(blockPageSearchParams, {
+  const [{ element: elementParam, page: pageParam, draft: draftId }, setSearch] = useQueryStates(blockPageSearchParams, {
     history: 'replace',
   })
   const [state, setState] = useState<LoadState>({ status: 'loading' })
@@ -124,6 +129,7 @@ function BlockPage() {
         status: 'ready',
         name: null,
         elements: loadTargetElements(target),
+        pages: loadTargetPages(target),
         revision: 0,
         draftStatus: null,
       })
@@ -139,6 +145,7 @@ function BlockPage() {
           status: 'ready',
           name: doc.name,
           elements: onlyCodeElements(doc.shapes),
+          pages: doc.pages,
           revision: doc.revision,
           draftStatus: 'status' in doc ? draftStatus(doc.status) : null,
         })
@@ -154,20 +161,23 @@ function BlockPage() {
   }, [userId, designId, draftId])
 
   const elements = state.status === 'ready' ? state.elements : []
+  const pages = state.status === 'ready' ? state.pages : []
+  const activePage = pages.find((page) => page.id === pageParam) ?? null
   const active = useMemo(
-    () => pickBlockPageElement(elements, elementParam),
-    [elements, elementParam],
+    () => (activePage ? null : pickBlockPageElement(elements, elementParam)),
+    [activePage, elements, elementParam],
   )
   const readOnly =
     state.status === 'ready' && Boolean(draftId) && state.draftStatus !== 'active'
 
   useEffect(() => {
     const name = state.status === 'ready' ? state.name : null
-    document.title = active ? `${active.name || name || 'Page'} — loora` : 'loora'
-  }, [active, state])
+    const targetName = activePage?.name ?? active?.name ?? name
+    document.title = targetName ? `${targetName} — loora` : 'loora'
+  }, [active, activePage, state])
 
   // Switching element (or leaving edit mode) drops any unapplied draft.
-  const activeId = active?.id ?? null
+  const activeId = activePage?.id ?? active?.id ?? null
 
   // Pick up an existing live link for this element (e.g. published earlier or
   // from another tab) so the button reflects reality.
@@ -180,14 +190,16 @@ function BlockPage() {
       .list({ designId })
       .then((links) => {
         if (cancelled) return
-        const found = links.find((link) => link.elementId === activeId)
+        const found = links.find((link) =>
+          activePage ? link.pageId === activeId : link.elementId === activeId,
+        )
         setPublish(found ? { id: found.id, expiresAt: found.expiresAt } : null)
       })
       .catch(() => {})
     return () => {
       cancelled = true
     }
-  }, [userId, designId, draftId, activeId])
+  }, [userId, designId, draftId, activeId, activePage])
   useEffect(() => {
     setDraft(null)
     setRenderError(null)
@@ -246,12 +258,14 @@ function BlockPage() {
               id: draftId,
               designId,
               shapes: nextElements,
+              pages: state.pages,
               expectedRevision: state.revision,
             })
           : await orpc.design.save({
               id: designId,
               name,
               shapes: nextElements,
+              pages: state.pages,
               expectedRevision: state.revision,
             })
         setState((current) =>
@@ -333,10 +347,14 @@ function BlockPage() {
   }
 
   const publishPage = async () => {
-    if (!active || publishBusy || draftId) return
+    if ((!active && !activePage) || publishBusy || draftId) return
     setPublishBusy(true)
     try {
-      const created = await orpc.publish.create({ designId, elementId: active.id })
+      const created = await orpc.publish.create({
+        designId,
+        elementId: active?.id,
+        pageId: activePage?.id,
+      })
       setPublish(created)
       setPublishOpen(true)
     } catch {
@@ -403,17 +421,25 @@ function BlockPage() {
   if (state.status === 'error') {
     return (
       <CenteredNotice message={state.message}>
-        <Button variant="outline" size="sm" render={<Link to="/" search={{ d: designId }} />}>
+        <Button
+          variant="outline"
+          size="sm"
+          render={<Link to="/" search={{ d: designId, draft: draftId }} />}
+        >
           Open in editor
         </Button>
       </CenteredNotice>
     )
   }
 
-  if (!active) {
+  if (!active && !activePage) {
     return (
       <CenteredNotice message="Nothing on this canvas yet.">
-        <Button variant="outline" size="sm" render={<Link to="/" search={{ d: designId }} />}>
+        <Button
+          variant="outline"
+          size="sm"
+          render={<Link to="/" search={{ d: designId, draft: draftId }} />}
+        >
           Open in editor
         </Button>
       </CenteredNotice>
@@ -424,7 +450,7 @@ function BlockPage() {
 
   return (
     <main className="fixed inset-0 flex flex-col bg-white sm:flex-row">
-      {editing && (
+      {editing && active && (
         <div className="flex h-1/2 w-full min-w-0 flex-col border-b sm:h-full sm:w-[min(560px,45vw)] sm:border-r sm:border-b-0">
           <CodeEditorPanel
             key={active.id}
@@ -435,23 +461,34 @@ function BlockPage() {
           />
         </div>
       )}
-      <div className="relative flex min-h-0 min-w-0 flex-1 justify-center overflow-hidden">
+      <div className="relative flex min-h-0 min-w-0 flex-1 justify-center overflow-auto">
         <div
-          className={width ? 'h-full border-x bg-white shadow-sm' : 'h-full w-full'}
+          className={width ? 'min-h-full border-x bg-white shadow-sm' : 'min-h-full w-full'}
           style={width ? { width, maxWidth: '100%' } : undefined}
         >
-          <ElementFrame
-            key={`${active.id}:${frameNonce}`}
-            elementId={active.id}
-            code={draft ?? active.code}
-            interactive
-            textEditable={textEditing}
-            onError={setRenderError}
-            onTextEdit={onTextEdit}
-            onImagePick={setImagePickSrc}
-            onStylePick={onStylePick}
-            onNodeMove={onNodeMove}
-          />
+          {activePage ? (
+            <PageFrame
+              page={activePage}
+              elements={elements}
+              framePrefix={`preview-page:${activePage.id}`}
+              interactive
+            />
+          ) : active ? (
+            <div className="h-screen">
+              <ElementFrame
+                key={`${active.id}:${frameNonce}`}
+                elementId={active.id}
+                code={draft ?? active.code}
+                interactive
+                textEditable={textEditing}
+                onError={setRenderError}
+                onTextEdit={onTextEdit}
+                onImagePick={setImagePickSrc}
+                onStylePick={onStylePick}
+                onNodeMove={onNodeMove}
+              />
+            </div>
+          ) : null}
         </div>
         <div className="absolute top-3 right-3 z-10 flex items-center gap-2 rounded-full border bg-card/85 py-1.5 pr-1.5 pl-3 shadow-sm backdrop-blur transition-opacity hover:opacity-100 sm:opacity-60">
           <div className="flex items-center gap-0.5" role="group" aria-label="Preview width">
@@ -474,34 +511,38 @@ function BlockPage() {
               </button>
             ))}
           </div>
-          <button
-            type="button"
-            disabled={readOnly}
-            aria-pressed={textEditing}
-            title="Click text to edit it, click an image to swap it, right-click anything for styles"
-            className={
-              textEditing
-                ? 'rounded-full bg-secondary px-2 py-0.5 text-[11px] font-medium'
-                : 'rounded-full px-2 py-0.5 text-[11px] text-muted-foreground hover:text-foreground'
-            }
-            onClick={() => setTextEditing((v) => !v)}
-          >
-            Edit text
-          </button>
-          <button
-            type="button"
-            disabled={readOnly}
-            aria-pressed={editing}
-            title="Edit this element's code"
-            className={
-              editing
-                ? 'rounded-full bg-secondary px-2 py-0.5 text-[11px] font-medium'
-                : 'rounded-full px-2 py-0.5 text-[11px] text-muted-foreground hover:text-foreground'
-            }
-            onClick={() => setEditing((v) => !v)}
-          >
-            Code
-          </button>
+          {active ? (
+            <>
+              <button
+                type="button"
+                disabled={readOnly}
+                aria-pressed={textEditing}
+                title="Click text to edit it, click an image to swap it, right-click anything for styles"
+                className={
+                  textEditing
+                    ? 'rounded-full bg-secondary px-2 py-0.5 text-[11px] font-medium'
+                    : 'rounded-full px-2 py-0.5 text-[11px] text-muted-foreground hover:text-foreground'
+                }
+                onClick={() => setTextEditing((v) => !v)}
+              >
+                Edit text
+              </button>
+              <button
+                type="button"
+                disabled={readOnly}
+                aria-pressed={editing}
+                title="Edit this element's code"
+                className={
+                  editing
+                    ? 'rounded-full bg-secondary px-2 py-0.5 text-[11px] font-medium'
+                    : 'rounded-full px-2 py-0.5 text-[11px] text-muted-foreground hover:text-foreground'
+                }
+                onClick={() => setEditing((v) => !v)}
+              >
+                Code
+              </button>
+            </>
+          ) : null}
           {!draftId ? (
             <button
               type="button"
@@ -532,12 +573,12 @@ function BlockPage() {
               {saveState === 'saving' ? 'Saving…' : saveState === 'saved' ? 'Saved' : 'Save failed'}
             </span>
           )}
-          {elements.length > 1 ? (
+          {active && elements.length > 1 ? (
             <select
               aria-label="Element"
               className="max-w-40 truncate bg-transparent text-xs font-medium outline-none"
               value={active.id}
-              onChange={(e) => void setSearch({ element: e.target.value })}
+              onChange={(e) => void setSearch({ element: e.target.value, page: null })}
             >
               {elements.map((el) => (
                 <option key={el.id} value={el.id}>
@@ -546,13 +587,15 @@ function BlockPage() {
               ))}
             </select>
           ) : (
-            <span className="max-w-40 truncate text-xs font-medium">{active.name || 'Page'}</span>
+            <span className="max-w-40 truncate text-xs font-medium">
+              {activePage?.name ?? active?.name ?? 'Page'}
+            </span>
           )}
           <Button
             variant="outline"
             size="sm"
             className="h-6 rounded-full px-2.5 text-xs"
-            render={<Link to="/" search={{ d: designId }} />}
+            render={<Link to="/" search={{ d: designId, draft: draftId }} />}
           >
             Editor
           </Button>

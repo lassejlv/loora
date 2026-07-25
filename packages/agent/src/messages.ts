@@ -102,7 +102,9 @@ function compactOldToolPart(part: UIMessage['parts'][number]): UIMessage['parts'
   }
   if (value.state === 'output-available' && value.output && typeof value.output === 'object') {
     next.output =
-      part.type === 'tool-viewCanvas' || part.type === 'tool-viewElement'
+      part.type === 'tool-viewCanvas' ||
+      part.type === 'tool-viewElement' ||
+      part.type === 'tool-viewPage'
         ? { viewed: true }
         : compactRecord(value.output as Record<string, unknown>)
   }

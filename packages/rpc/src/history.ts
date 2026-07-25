@@ -1,17 +1,18 @@
-import type { CanvasElement } from '@loora/db/canvas'
+import type { CanvasElement, CanvasPage } from '@loora/db/canvas'
 
 export interface Commit {
   id: string
   message: string
   at: number
   shapes: CanvasElement[]
+  pages?: CanvasPage[]
   // diff vs the previous commit, computed at commit time
   added: number
   removed: number
   changed: number
 }
 
-export type CommitSummary = Omit<Commit, 'shapes'>
+export type CommitSummary = Omit<Commit, 'shapes' | 'pages'>
 
 export interface StoredHistorySummary {
   id: string
@@ -61,29 +62,40 @@ export function loadHistory(docId: string): Commit[] {
   }
 }
 
-function diff(prev: CanvasElement[], next: CanvasElement[]) {
-  const prevById = new Map(prev.map((s) => [s.id, s]))
-  const nextIds = new Set(next.map((s) => s.id))
+function diff<T extends { id: string }>(prev: T[], next: T[]) {
+  const prevById = new Map(prev.map((item) => [item.id, item]))
+  const nextIds = new Set(next.map((item) => item.id))
   let added = 0
   let changed = 0
-  for (const s of next) {
-    const old = prevById.get(s.id)
+  for (const item of next) {
+    const old = prevById.get(item.id)
     if (!old) added += 1
-    else if (JSON.stringify(old) !== JSON.stringify(s)) changed += 1
+    else if (JSON.stringify(old) !== JSON.stringify(item)) changed += 1
   }
-  const removed = prev.filter((s) => !nextIds.has(s.id)).length
+  const removed = prev.filter((item) => !nextIds.has(item.id)).length
   return { added, removed, changed }
 }
 
-export function commitDoc(docId: string, message: string, shapes: CanvasElement[]): Commit[] {
+export function commitDoc(
+  docId: string,
+  message: string,
+  shapes: CanvasElement[],
+  pages: CanvasPage[] = [],
+): Commit[] {
   const history = loadHistory(docId)
   const parent = history[0]?.shapes ?? []
+  const parentPages = history[0]?.pages ?? []
+  const shapeChanges = diff(parent, shapes)
+  const pageChanges = diff(parentPages, pages)
   const commit: Commit = {
     id: `c${Date.now().toString(36)}${Math.floor(Math.random() * 1e4)}`,
     message,
     at: Date.now(),
     shapes,
-    ...diff(parent, shapes),
+    pages,
+    added: shapeChanges.added + pageChanges.added,
+    removed: shapeChanges.removed + pageChanges.removed,
+    changed: shapeChanges.changed + pageChanges.changed,
   }
   const next = [commit, ...history].slice(0, MAX_COMMITS)
   localStorage.setItem(key(docId), JSON.stringify(next))
@@ -91,11 +103,20 @@ export function commitDoc(docId: string, message: string, shapes: CanvasElement[
 }
 
 // Auto-checkpoint: skip when the canvas is empty or identical to the latest commit.
-export function commitIfChanged(docId: string, message: string, shapes: CanvasElement[]) {
-  if (shapes.length === 0) return
+export function commitIfChanged(
+  docId: string,
+  message: string,
+  shapes: CanvasElement[],
+  pages: CanvasPage[] = [],
+) {
+  if (shapes.length === 0 && pages.length === 0) return
   const latest = loadHistory(docId)[0]
-  if (latest && JSON.stringify(latest.shapes) === JSON.stringify(shapes)) return
-  commitDoc(docId, message, shapes)
+  if (
+    latest &&
+    JSON.stringify(latest.shapes) === JSON.stringify(shapes) &&
+    JSON.stringify(latest.pages ?? []) === JSON.stringify(pages)
+  ) return
+  commitDoc(docId, message, shapes, pages)
 }
 
 export function deleteHistory(docId: string) {

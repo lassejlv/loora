@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import type { CanvasElement } from './canvas'
+import type { CanvasElement, CanvasPage } from './canvas'
 import { canvasDiff, mergeCanvas } from './drafts'
 
 const shape = (id: string, patch: Partial<CanvasElement> = {}): CanvasElement => ({
@@ -10,6 +10,16 @@ const shape = (id: string, patch: Partial<CanvasElement> = {}): CanvasElement =>
   w: 100,
   h: 100,
   code: `<div>${id}</div>`,
+  ...patch,
+})
+
+const page = (id: string, patch: Partial<CanvasPage> = {}): CanvasPage => ({
+  id,
+  name: id,
+  x: 200,
+  y: 0,
+  w: 100,
+  items: [{ id: `${id}-item`, elementId: 'a', height: 100 }],
   ...patch,
 })
 
@@ -95,5 +105,51 @@ describe('canvas drafts', () => {
 
     expect(result.unresolved).toEqual([])
     expect(result.shapes.map(({ id }) => id)).toEqual(['b', 'a'])
+  })
+
+  test('merges independent Page changes with element changes', () => {
+    const result = mergeCanvas(
+      [shape('a')],
+      [shape('a', { x: 10 })],
+      [shape('a')],
+      {},
+      [page('home')],
+      [page('home')],
+      [page('home', { name: 'Landing' })],
+    )
+
+    expect(result.unresolved).toEqual([])
+    expect(result.shapes[0].x).toBe(10)
+    expect(result.pages).toEqual([page('home', { name: 'Landing' })])
+    expect(result.summary).toEqual({ added: 0, removed: 0, changed: 1 })
+  })
+
+  test('requires a choice for divergent Page edits and ordering', () => {
+    const basePages = [page('home'), page('pricing'), page('about')]
+    const mainPages = [
+      page('pricing'),
+      page('home', { name: 'Main home' }),
+      page('about'),
+    ]
+    const draftPages = [
+      page('home', { name: 'Draft home' }),
+      page('about'),
+      page('pricing'),
+    ]
+    const result = mergeCanvas([], [], [], {}, basePages, mainPages, draftPages)
+
+    expect(result.unresolved).toEqual(['page:home', 'page-order'])
+    const resolved = mergeCanvas(
+      [],
+      [],
+      [],
+      { 'page:home': 'draft', 'page-order': 'draft' },
+      basePages,
+      mainPages,
+      draftPages,
+    )
+    expect(resolved.unresolved).toEqual([])
+    expect(resolved.pages.map(({ id }) => id)).toEqual(['home', 'about', 'pricing'])
+    expect(resolved.pages[0].name).toBe('Draft home')
   })
 })

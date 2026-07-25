@@ -16,6 +16,7 @@ const currentDocument = {
   shapes: [
     { id: 'e-existing', name: 'Existing', x: 20, y: 30, w: 100, h: 80, code: '<div />' },
   ],
+  pages: [],
 }
 
 describe('FigmaImportDialog', () => {
@@ -23,7 +24,7 @@ describe('FigmaImportDialog', () => {
     window.sessionStorage.clear()
     status.mockReset().mockResolvedValue({ enabled: true, connected: true, account: {} })
     importFile.mockReset().mockResolvedValue({
-      design: { id: 'd1', name: 'Landing', shapes: [], updatedAt: Date.now() },
+      design: { id: 'd1', name: 'Landing', shapes: [], pages: [], updatedAt: Date.now() },
       summary: { pages: 1, frames: 2, fallbacks: 1, missingFonts: [] },
     })
   })
@@ -63,6 +64,7 @@ describe('FigmaImportDialog', () => {
         id: currentDocument.id,
         name: currentDocument.name,
         shapes: currentDocument.shapes,
+        pages: currentDocument.pages,
         updatedAt: Date.now(),
       },
       summary: { pages: 1, frames: 1, fallbacks: 0, missingFonts: [] },

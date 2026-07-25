@@ -1,5 +1,6 @@
-import type { CanvasElement } from './canvas'
+import type { CanvasElement, CanvasPage } from './canvas'
 import { onlyCodeElements } from './canvas'
+import { onlyCanvasPages } from './pages'
 import type { CanvasTarget } from '@loora/db/drafts'
 
 export interface DocMeta {
@@ -12,6 +13,9 @@ const ACTIVE_KEY = 'loora:active-doc'
 const ACTIVE_DRAFT_KEY = 'loora:active-drafts'
 const docKey = (id: string) => `loora:doc:${id}`
 const draftKey = (designId: string, draftId: string) => `loora:doc:${designId}:draft:${draftId}`
+const pagesKey = (id: string) => `loora:pages:${id}`
+const draftPagesKey = (designId: string, draftId: string) =>
+  `loora:pages:${designId}:draft:${draftId}`
 
 export function docId() {
   return `d${Date.now().toString(36)}${Math.floor(Math.random() * 1e4)}`
@@ -53,6 +57,14 @@ export function saveElements(id: string, elements: CanvasElement[]) {
   localStorage.setItem(docKey(id), JSON.stringify(elements))
 }
 
+export function loadPages(id: string): CanvasPage[] {
+  return onlyCanvasPages(readJson<unknown>(pagesKey(id), []))
+}
+
+export function savePages(id: string, pages: CanvasPage[]) {
+  localStorage.setItem(pagesKey(id), JSON.stringify(pages))
+}
+
 export function targetKey(target: CanvasTarget) {
   return target.draftId ? `${target.designId}:draft:${target.draftId}` : `${target.designId}:main`
 }
@@ -76,9 +88,29 @@ export function saveTargetElements(target: CanvasTarget, elements: CanvasElement
   )
 }
 
+export function loadTargetPages(target: CanvasTarget): CanvasPage[] {
+  return target.draftId
+    ? onlyCanvasPages(readJson<unknown>(draftPagesKey(target.designId, target.draftId), []))
+    : loadPages(target.designId)
+}
+
+export function saveTargetPages(target: CanvasTarget, pages: CanvasPage[]) {
+  localStorage.setItem(
+    target.draftId
+      ? draftPagesKey(target.designId, target.draftId)
+      : pagesKey(target.designId),
+    JSON.stringify(pages),
+  )
+}
+
 export function deleteTargetStorage(target: CanvasTarget) {
   localStorage.removeItem(
     target.draftId ? draftKey(target.designId, target.draftId) : docKey(target.designId),
+  )
+  localStorage.removeItem(
+    target.draftId
+      ? draftPagesKey(target.designId, target.draftId)
+      : pagesKey(target.designId),
   )
 }
 
@@ -105,9 +137,11 @@ export function saveActiveDraft(designId: string, draftId: string | null) {
 export function deleteDocStorage(id: string) {
   saveActiveDraft(id, null)
   localStorage.removeItem(docKey(id))
+  localStorage.removeItem(pagesKey(id))
   const draftPrefix = `${docKey(id)}:draft:`
   for (let index = localStorage.length - 1; index >= 0; index -= 1) {
     const key = localStorage.key(index)
     if (key?.startsWith(draftPrefix)) localStorage.removeItem(key)
+    if (key?.startsWith(`loora:pages:${id}:draft:`)) localStorage.removeItem(key)
   }
 }

@@ -14,7 +14,19 @@ type LinkState =
   | { status: 'ready'; link: { id: string; expiresAt: number } | null }
   | { status: 'error' }
 
-export function PublishButton({ designId, elementId }: { designId: string; elementId: string }) {
+export function PublishButton({
+  designId,
+  elementId,
+  pageId,
+  compact = true,
+  disabled = false,
+}: {
+  designId: string
+  elementId?: string
+  pageId?: string
+  compact?: boolean
+  disabled?: boolean
+}) {
   const [open, setOpen] = useState(false)
   const [state, setState] = useState<LinkState>({ status: 'idle' })
   const [busy, setBusy] = useState(false)
@@ -27,7 +39,9 @@ export function PublishButton({ designId, elementId }: { designId: string; eleme
     orpc.publish
       .list({ designId })
       .then((links) => {
-        const found = links.find((link) => link.elementId === elementId)
+        const found = links.find((link) =>
+          elementId ? link.elementId === elementId : link.pageId === pageId,
+        )
         setState({ status: 'ready', link: found ? { id: found.id, expiresAt: found.expiresAt } : null })
       })
       .catch(() => setState({ status: 'error' }))
@@ -37,7 +51,7 @@ export function PublishButton({ designId, elementId }: { designId: string; eleme
     if (busy) return
     setBusy(true)
     try {
-      const created = await orpc.publish.create({ designId, elementId })
+      const created = await orpc.publish.create({ designId, elementId, pageId })
       setState({ status: 'ready', link: created })
     } catch {
       setState({ status: 'error' })
@@ -78,13 +92,15 @@ export function PublishButton({ designId, elementId }: { designId: string; eleme
         render={
           <Button
             variant="ghost"
-            size="icon-sm"
+            size={compact ? 'icon-sm' : 'sm'}
             aria-label="Publish as public link"
             title="Publish (public link, expires in 12h)"
+            disabled={disabled}
           />
         }
       >
         <GlobeIcon data-slot="icon" />
+        {!compact ? 'Publish Page' : null}
       </PopoverTrigger>
       <PopoverContent side="top" align="center" sideOffset={10} className="w-80 p-3">
         {state.status === 'loading' || state.status === 'idle' ? (
@@ -132,7 +148,7 @@ export function PublishButton({ designId, elementId }: { designId: string; eleme
           </div>
         ) : (
           <div className="flex flex-col gap-2">
-            <p className="text-xs font-medium">Publish this element</p>
+            <p className="text-xs font-medium">Publish this {pageId ? 'Page' : 'element'}</p>
             <p className="text-[11px] text-muted-foreground">
               Creates a public link anyone can view. Content stays live and the link expires after
               12 hours — or delete it here anytime.

@@ -66,16 +66,18 @@ export function rewriteAssetUrls(code: string, linkId: string) {
   return code.split('/api/asset/').join(`/api/p/${encodeURIComponent(linkId)}/asset/`)
 }
 
-export async function getPublishedElement(linkId: string) {
+export async function getPublishedTarget(linkId: string) {
   if (!linkId || linkId.length > 64) return null
 
   const [found] = await db
     .select({
       elementId: publishLink.elementId,
+      pageId: publishLink.pageId,
       expiresAt: publishLink.expiresAt,
       userId: publishLink.userId,
       designName: design.name,
       shapes: design.shapes,
+      pages: design.pages,
       isAdmin: user.isAdmin,
       previewAccess: user.previewAccess,
     })
@@ -102,27 +104,71 @@ export async function getPublishedElement(linkId: string) {
     return null
   }
 
-  const element = found.shapes.find(
-    (shape) => shape.id === found.elementId && typeof shape.code === 'string' && shape.code,
-  )
-  if (!element) return null
-
-  return {
-    element,
+  const common = {
     userId: found.userId,
     isAdmin: found.isAdmin,
     designName: found.designName,
     expiresAt: found.expiresAt.getTime(),
   }
+
+  if (found.elementId) {
+    const element = found.shapes.find(
+      (shape) =>
+        shape.id === found.elementId &&
+        !shape.hidden &&
+        typeof shape.code === 'string' &&
+        shape.code,
+    )
+    return element ? { ...common, kind: 'element' as const, element } : null
+  }
+
+  const page = found.pages.find((candidate) => candidate.id === found.pageId)
+  if (!page) return null
+  const shapes = new Map(found.shapes.map((shape) => [shape.id, shape]))
+  const items = page.items.map((item) => ({ item, element: shapes.get(item.elementId) }))
+  if (
+    items.some(
+      ({ element }) =>
+        !element || element.hidden || typeof element.code !== 'string' || !element.code,
+    )
+  ) {
+    return null
+  }
+  return {
+    ...common,
+    kind: 'page' as const,
+    page,
+    items: items.map(({ item, element }) => ({ item, element: element! })),
+  }
 }
 
 export async function buildPublishPayload(linkId: string) {
-  const found = await getPublishedElement(linkId)
+  const found = await getPublishedTarget(linkId)
   if (!found) return null
+  if (found.kind === 'page') {
+    return {
+      userId: found.userId,
+      isAdmin: found.isAdmin,
+      payload: {
+        kind: 'page' as const,
+        name: found.page.name || found.designName,
+        width: found.page.w,
+        items: found.items.map(({ item, element }) => ({
+          id: item.id,
+          elementId: element.id,
+          name: element.name,
+          height: item.height,
+          code: rewriteAssetUrls(element.code, linkId),
+        })),
+        expiresAt: found.expiresAt,
+      },
+    }
+  }
   return {
     userId: found.userId,
     isAdmin: found.isAdmin,
     payload: {
+      kind: 'element' as const,
       name: found.element.name || found.designName,
       code: rewriteAssetUrls(found.element.code, linkId),
       expiresAt: found.expiresAt,

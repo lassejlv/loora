@@ -5,7 +5,7 @@ import { db } from '@loora/db'
 import { asset } from '@loora/db/schema'
 import { referencedAssetIds } from '@loora/rpc/handoff'
 import {
-  getPublishedElement,
+  getPublishedTarget,
   publishEgressExceeded,
   recordPublishEgress,
 } from '@loora/rpc/publish'
@@ -15,10 +15,14 @@ export const Route = createFileRoute('/api/p/$linkId/asset/$id')({
   server: {
     handlers: {
       GET: async ({ params }) => {
-        const published = await getPublishedElement(params.linkId)
-        // Only assets the published element actually references are servable —
+        const published = await getPublishedTarget(params.linkId)
+        // Only assets the published element or composed Page actually references are servable —
         // the link is not a key to the owner's whole asset library.
-        if (!published || !referencedAssetIds([published.element]).has(params.id)) {
+        const publishedElements =
+          published?.kind === 'element'
+            ? [published.element]
+            : published?.items.map(({ element }) => element) ?? []
+        if (!published || !referencedAssetIds(publishedElements).has(params.id)) {
           return new Response('Not found', { status: 404 })
         }
         // Egress check before touching the asset, so an over-limit page never

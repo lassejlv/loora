@@ -21,9 +21,8 @@ import { EMPTY_SHORTCUT_CONFIG } from '@loora/db/shortcuts'
 import { parseShortcutConfig, shortcutConfigSchema } from './shortcuts'
 import { agentSystemPromptSchema } from './agent-prompt'
 import { googleOAuthEnabled, type getSession } from '@loora/auth'
-import type { CanvasElement } from '@loora/db/canvas'
+import type { CanvasElement, CanvasPage } from '@loora/db/canvas'
 import {
-  canvasDiff,
   mergeCanvas,
   type MergeChoice,
 } from '@loora/db/drafts'
@@ -90,6 +89,23 @@ const shapeSchema = z.object({
   r: z.number().finite().optional(),
   code: z.string().max(200_000),
   groupId: z.string().max(128).optional(),
+  hidden: z.boolean().optional(),
+  locked: z.boolean().optional(),
+})
+
+const pageItemSchema = z.object({
+  id: z.string().min(1).max(128),
+  elementId: z.string().min(1).max(128),
+  height: z.number().finite().min(1).max(100_000),
+})
+
+const pageSchema = z.object({
+  id: z.string().min(1).max(128),
+  name: z.string().trim().min(1).max(200),
+  x: z.number().finite(),
+  y: z.number().finite(),
+  w: z.number().finite().min(1).max(100_000),
+  items: z.array(pageItemSchema).max(10_000),
 })
 
 const draftIdSchema = z.string().min(1).max(128)
@@ -135,20 +151,35 @@ const requireAdmin = os.$context<ORPCContext>().middleware(async ({ context, nex
 
 const adminProcedure = os.$context<ORPCContext>().use(requireAdmin)
 
-function shapeDiff(previous: CanvasElement[], next: CanvasElement[]) {
-  const previousById = new Map(previous.map((shape) => [shape.id, shape]))
-  const nextIds = new Set(next.map((shape) => shape.id))
+function collectionDiff<T extends { id: string }>(previous: T[], next: T[]) {
+  const previousById = new Map(previous.map((item) => [item.id, item]))
+  const nextIds = new Set(next.map((item) => item.id))
   let added = 0
   let changed = 0
-  for (const shape of next) {
-    const old = previousById.get(shape.id)
+  for (const item of next) {
+    const old = previousById.get(item.id)
     if (!old) added += 1
-    else if (JSON.stringify(old) !== JSON.stringify(shape)) changed += 1
+    else if (JSON.stringify(old) !== JSON.stringify(item)) changed += 1
   }
   return {
     added,
-    removed: previous.filter((shape) => !nextIds.has(shape.id)).length,
+    removed: previous.filter((item) => !nextIds.has(item.id)).length,
     changed,
+  }
+}
+
+function documentDiff(
+  previousShapes: CanvasElement[],
+  nextShapes: CanvasElement[],
+  previousPages: CanvasPage[],
+  nextPages: CanvasPage[],
+) {
+  const shapes = collectionDiff(previousShapes, nextShapes)
+  const pages = collectionDiff(previousPages, nextPages)
+  return {
+    added: shapes.added + pages.added,
+    removed: shapes.removed + pages.removed,
+    changed: shapes.changed + pages.changed,
   }
 }
 
@@ -157,7 +188,7 @@ function shapeDiff(previous: CanvasElement[], next: CanvasElement[]) {
 async function ensureDesign(designId: string, userId: string) {
   await db
     .insert(design)
-    .values({ id: designId, userId, name: 'Untitled', shapes: [] })
+    .values({ id: designId, userId, name: 'Untitled', shapes: [], pages: [] })
     .onConflictDoNothing({ target: [design.id, design.userId] })
 }
 
@@ -183,6 +214,7 @@ const getDesign = protectedProcedure
         id: design.id,
         name: design.name,
         shapes: design.shapes,
+        pages: design.pages,
         revision: design.revision,
         updatedAt: design.updatedAt,
       })
@@ -200,6 +232,7 @@ const saveDesign = protectedProcedure
       id: z.string().min(1).max(128),
       name: z.string().trim().min(1).max(200),
       shapes: z.array(shapeSchema).max(10_000),
+      pages: z.array(pageSchema).max(1_000).default([]),
       expectedRevision: z.number().int().nonnegative().optional(),
     }),
   )
@@ -232,6 +265,7 @@ const saveDesign = protectedProcedure
       .set({
         name: input.name,
         shapes: input.shapes,
+        pages: input.pages,
         revision: existing.revision + 1,
         updatedAt: new Date(),
       })
@@ -284,6 +318,7 @@ async function getDraftComparison(userId: string, designId: string, draftId: str
     db
       .select({
         shapes: design.shapes,
+        pages: design.pages,
         revision: design.revision,
       })
       .from(design)
@@ -293,7 +328,15 @@ async function getDraftComparison(userId: string, designId: string, draftId: str
     getOwnedDraft(userId, designId, draftId),
   ])
   if (!main) throw new ORPCError('NOT_FOUND')
-  const merge = mergeCanvas(draft.baseShapes, main.shapes, draft.shapes)
+  const merge = mergeCanvas(
+    draft.baseShapes,
+    main.shapes,
+    draft.shapes,
+    {},
+    draft.basePages,
+    main.pages,
+    draft.pages,
+  )
   return {
     draft: {
       id: draft.id,
@@ -310,6 +353,9 @@ async function getDraftComparison(userId: string, designId: string, draftId: str
     mainShapes: main.shapes,
     draftShapes: draft.shapes,
     baseShapes: draft.baseShapes,
+    mainPages: main.pages,
+    draftPages: draft.pages,
+    basePages: draft.basePages,
     summary: merge.summary,
     conflicts: merge.conflicts,
     unresolved: merge.unresolved,
@@ -371,7 +417,7 @@ const createDraft = protectedProcedure
   )
   .handler(async ({ context, input }) => {
     const [main] = await db
-      .select({ shapes: design.shapes, revision: design.revision })
+      .select({ shapes: design.shapes, pages: design.pages, revision: design.revision })
       .from(design)
       .where(and(eq(design.id, input.designId), eq(design.userId, context.user.id)))
       .limit(1)
@@ -384,6 +430,8 @@ const createDraft = protectedProcedure
         userId: context.user.id,
         baseShapes: main.shapes,
         shapes: main.shapes,
+        basePages: main.pages,
+        pages: main.pages,
         baseRevision: main.revision,
       })
       .returning()
@@ -418,6 +466,7 @@ const saveDraft = protectedProcedure
       designId: z.string().min(1).max(128),
       id: draftIdSchema,
       shapes: z.array(shapeSchema).max(10_000),
+      pages: z.array(pageSchema).max(1_000).default([]),
       expectedRevision: z.number().int().nonnegative(),
     }),
   )
@@ -426,6 +475,7 @@ const saveDraft = protectedProcedure
       .update(designDraft)
       .set({
         shapes: input.shapes,
+        pages: input.pages,
         revision: input.expectedRevision + 1,
         updatedAt: new Date(),
       })
@@ -576,6 +626,9 @@ const applyDraft = protectedProcedure
       comparison.mainShapes,
       comparison.draftShapes,
       input.resolutions as Record<string, MergeChoice>,
+      comparison.basePages,
+      comparison.mainPages,
+      comparison.draftPages,
     )
     if (merge.unresolved.length > 0) {
       return {
@@ -593,6 +646,7 @@ const applyDraft = protectedProcedure
         .update(design)
         .set({
           shapes: merge.shapes,
+          pages: merge.pages,
           revision: input.expectedMainRevision + 1,
           updatedAt: now,
         })
@@ -615,7 +669,8 @@ const applyDraft = protectedProcedure
           userId: context.user.id,
           message: `Before applying: ${comparison.draft.name}`,
           shapes: comparison.mainShapes,
-          ...canvasDiff([], comparison.mainShapes),
+          pages: comparison.mainPages,
+          ...documentDiff([], comparison.mainShapes, [], comparison.mainPages),
         },
         {
           id: appliedId,
@@ -623,7 +678,13 @@ const applyDraft = protectedProcedure
           userId: context.user.id,
           message: `Applied draft: ${comparison.draft.name}`,
           shapes: merge.shapes,
-          ...canvasDiff(comparison.mainShapes, merge.shapes),
+          pages: merge.pages,
+          ...documentDiff(
+            comparison.mainShapes,
+            merge.shapes,
+            comparison.mainPages,
+            merge.pages,
+          ),
         },
       ])
 
@@ -655,6 +716,7 @@ const applyDraft = protectedProcedure
       revision: input.expectedMainRevision + 1,
       versionId: appliedId,
       shapes: merge.shapes,
+      pages: merge.pages,
       unresolved: [] as string[],
     }
   })
@@ -679,23 +741,47 @@ const createDesignHandoff = protectedProcedure
     return createHandoffToken(input.designId, context.user.id, undefined, input.draftId)
   })
 
-// Live public link to one element: the row id is the URL capability, deleting
+// Live public link to one element or Page: the row id is the URL capability, deleting
 // the row revokes it. Content stays live — the public route reads the design
 // at request time.
 const createPublishLink = protectedProcedure
   .input(
-    z.object({
-      designId: z.string().min(1).max(128),
-      elementId: z.string().min(1).max(128),
-    }),
+    z
+      .object({
+        designId: z.string().min(1).max(128),
+        elementId: z.string().min(1).max(128).optional(),
+        pageId: z.string().min(1).max(128).optional(),
+      })
+      .refine((value) => Boolean(value.elementId) !== Boolean(value.pageId), {
+        message: 'Choose exactly one publish target.',
+      }),
   )
   .handler(async ({ context, input }) => {
     const [found] = await db
-      .select({ shapes: design.shapes })
+      .select({ shapes: design.shapes, pages: design.pages })
       .from(design)
       .where(and(eq(design.id, input.designId), eq(design.userId, context.user.id)))
       .limit(1)
-    if (!found || !found.shapes.some((shape) => shape.id === input.elementId)) {
+    const shapesById = new Map(found?.shapes.map((shape) => [shape.id, shape]) ?? [])
+    const targetExists = found && (
+      input.elementId
+        ? (() => {
+            const shape = shapesById.get(input.elementId)
+            return Boolean(shape && !shape.hidden && shape.code)
+          })()
+        : (() => {
+            const page = found.pages.find((candidate) => candidate.id === input.pageId)
+            return Boolean(
+              page &&
+                page.items.length > 0 &&
+                page.items.every(({ elementId }) => {
+                  const shape = shapesById.get(elementId)
+                  return shape && !shape.hidden && shape.code
+                }),
+            )
+          })()
+    )
+    if (!targetExists) {
       throw new ORPCError('NOT_FOUND')
     }
 
@@ -712,7 +798,8 @@ const createPublishLink = protectedProcedure
       id,
       designId: input.designId,
       userId: context.user.id,
-      elementId: input.elementId,
+      elementId: input.elementId ?? null,
+      pageId: input.pageId ?? null,
       expiresAt,
     })
     return { id, expiresAt: expiresAt.getTime() }
@@ -735,6 +822,7 @@ const listPublishLinks = protectedProcedure
       .select({
         id: publishLink.id,
         elementId: publishLink.elementId,
+        pageId: publishLink.pageId,
         expiresAt: publishLink.expiresAt,
       })
       .from(publishLink)
@@ -765,11 +853,16 @@ const listAllPublishLinks = protectedProcedure.handler(async ({ context }) => {
       id: publishLink.id,
       designId: publishLink.designId,
       elementId: publishLink.elementId,
+      pageId: publishLink.pageId,
       expiresAt: publishLink.expiresAt,
       designName: design.name,
       elementName: sql<string | null>`(
         select elem->>'name' from jsonb_array_elements(${design.shapes}) elem
         where elem->>'id' = ${publishLink.elementId} limit 1
+      )`,
+      pageName: sql<string | null>`(
+        select page->>'name' from jsonb_array_elements(${design.pages}) page
+        where page->>'id' = ${publishLink.pageId} limit 1
       )`,
     })
     .from(publishLink)
@@ -841,6 +934,7 @@ const compareVersion = protectedProcedure
         id: designVersion.id,
         message: designVersion.message,
         shapes: designVersion.shapes,
+        pages: designVersion.pages,
         createdAt: designVersion.createdAt,
       })
       .from(designVersion)
@@ -860,6 +954,7 @@ const compareVersion = protectedProcedure
         id: designVersion.id,
         message: designVersion.message,
         shapes: designVersion.shapes,
+        pages: designVersion.pages,
         createdAt: designVersion.createdAt,
       })
       .from(designVersion)
@@ -881,6 +976,7 @@ const compareVersion = protectedProcedure
       id: version.id,
       message: version.message,
       shapes: version.shapes,
+      pages: version.pages,
       at: version.createdAt.getTime(),
     })
     return { current: detail(current), previous: previous ? detail(previous) : null }
@@ -898,6 +994,7 @@ const importVersions = protectedProcedure
             message: z.string().trim().min(1).max(200),
             at: z.number().int().min(0).max(8_640_000_000_000_000),
             shapes: z.array(shapeSchema).max(10_000),
+            pages: z.array(pageSchema).max(1_000).default([]),
             added: z.number().int().nonnegative(),
             removed: z.number().int().nonnegative(),
             changed: z.number().int().nonnegative(),
@@ -943,6 +1040,7 @@ const commitVersion = protectedProcedure
       draftId: optionalDraftIdSchema,
       message: z.string().trim().min(1).max(200),
       shapes: z.array(shapeSchema).max(10_000),
+      pages: z.array(pageSchema).max(1_000).default([]),
       skipIfUnchanged: z.boolean().optional(),
     }),
   )
@@ -954,7 +1052,7 @@ const commitVersion = protectedProcedure
       }
     }
     const [latest] = await db
-      .select({ shapes: designVersion.shapes })
+      .select({ shapes: designVersion.shapes, pages: designVersion.pages })
       .from(designVersion)
       .where(
         and(
@@ -968,12 +1066,19 @@ const commitVersion = protectedProcedure
 
     if (
       input.skipIfUnchanged &&
-      (input.shapes.length === 0 || JSON.stringify(latest?.shapes) === JSON.stringify(input.shapes))
+      (input.shapes.length === 0 && input.pages.length === 0 ||
+        (JSON.stringify(latest?.shapes) === JSON.stringify(input.shapes) &&
+          JSON.stringify(latest?.pages) === JSON.stringify(input.pages)))
     ) {
       return null
     }
 
-    const changes = shapeDiff(latest?.shapes ?? [], input.shapes)
+    const changes = documentDiff(
+      latest?.shapes ?? [],
+      input.shapes,
+      latest?.pages ?? [],
+      input.pages,
+    )
     await ensureDesign(input.designId, context.user.id)
     const [version] = await db
       .insert(designVersion)
@@ -984,6 +1089,7 @@ const commitVersion = protectedProcedure
         userId: context.user.id,
         message: input.message,
         shapes: input.shapes,
+        pages: input.pages,
         ...changes,
       })
       .returning()
@@ -1267,6 +1373,7 @@ const importFigma = protectedProcedure
           id: z.string().min(1).max(128),
           name: z.string().trim().min(1).max(200),
           shapes: z.array(shapeSchema).max(10_000),
+          pages: z.array(pageSchema).max(1_000).default([]),
           draftId: optionalDraftIdSchema,
           revision: z.number().int().nonnegative(),
         })

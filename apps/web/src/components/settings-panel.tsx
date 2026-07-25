@@ -544,10 +544,12 @@ const THEME_OPTIONS: { value: ThemePreference; label: string }[] = [
 interface PublishedLink {
   id: string
   designId: string
-  elementId: string
+  elementId: string | null
+  pageId: string | null
   expiresAt: number
   designName: string
   elementName: string | null
+  pageName: string | null
 }
 
 interface PublishEgress {
@@ -679,7 +681,7 @@ function PublishedLinksSection() {
                   rel="noreferrer"
                   className="block truncate text-xs font-medium hover:underline"
                 >
-                  {link.elementName || link.designName}
+                  {link.pageName || link.elementName || link.designName}
                 </a>
                 <p className="truncate text-[11px] text-muted-foreground">
                   {link.designName} · expires in{' '}

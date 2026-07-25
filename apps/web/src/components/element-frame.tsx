@@ -1075,6 +1075,7 @@ export interface FrameTextEdit {
 
 export function ElementFrame({
   elementId,
+  frameId = elementId,
   code,
   interactive,
   suspended = false,
@@ -1085,7 +1086,10 @@ export function ElementFrame({
   onStylePick,
   onNodeMove,
 }: {
+  // Source element identity. Composed Page instances may share this.
   elementId: string
+  // Runtime identity for capture, logs and iframe messages.
+  frameId?: string
   code: string
   interactive: boolean
   // Offscreen: the frame pauses animations and queues rAF work (state kept).
@@ -1107,6 +1111,7 @@ export function ElementFrame({
   // outerHTML plus which side to insert on.
   onNodeMove?: (move: { node: string; anchor: string; position: 'before' | 'after' }) => void
 }) {
+  const runtimeId = frameId
   const iframeRef = useRef<HTMLIFrameElement>(null)
   const readyRef = useRef(false)
   const codeRef = useRef(code)
@@ -1139,14 +1144,14 @@ export function ElementFrame({
         const result = await compileForFrame(source, babel)
         if (seq !== seqRef.current) return
         if (!result.ok) {
-          reportRender(elementId, result.error)
+          reportRender(runtimeId, result.error)
           onErrorRef.current?.(result.error)
           return
         }
         payload = result.payload
       } catch {
         const message = 'The JSX compiler failed to load — check the connection and retry.'
-        reportRender(elementId, message)
+        reportRender(runtimeId, message)
         onErrorRef.current?.(message)
         return
       }
@@ -1155,7 +1160,7 @@ export function ElementFrame({
       if (seq !== seqRef.current) return
       const win = iframeRef.current?.contentWindow
       if (!win) return
-      noteFrameRevision(elementId)
+      noteFrameRevision(runtimeId)
       // sandbox iframes have an opaque origin: '*' required.
       win.postMessage(
         { type: 'loora:code', code: inlined, mode: payload.mode, seq, needsEntry: payload.needsEntry },
@@ -1218,7 +1223,7 @@ export function ElementFrame({
         return
       }
       if (msg?.type === 'loora:dirty') {
-        noteFrameRevision(elementId, msg.revision)
+        noteFrameRevision(runtimeId, msg.revision)
         return
       }
       // Cross-element bus: fan a frame's loora.send out to every other frame.
@@ -1226,25 +1231,25 @@ export function ElementFrame({
         const data = (msg as { data?: unknown }).data
         for (const frame of document.querySelectorAll<HTMLIFrameElement>('iframe[data-element-frame]')) {
           if (frame === iframeRef.current) continue
-          frame.contentWindow?.postMessage({ type: 'loora:bus-deliver', data, from: elementId }, '*')
+          frame.contentWindow?.postMessage({ type: 'loora:bus-deliver', data, from: runtimeId }, '*')
         }
         return
       }
       // Stale replies (an old payload settling after a newer send) are ignored.
       if (msg?.type === 'loora:ok' && msg.seq === seqRef.current) {
-        reportRender(elementId, null)
+        reportRender(runtimeId, null)
         onErrorRef.current?.(null)
       }
       if (msg?.type === 'loora:error' && msg.seq === seqRef.current) {
         const message = msg.message ?? 'Element failed to render'
-        reportRender(elementId, message)
+        reportRender(runtimeId, message)
         onErrorRef.current?.(message)
       }
     }
     window.addEventListener('message', onMessage)
     return () => {
       window.removeEventListener('message', onMessage)
-      frameRevisions.delete(elementId)
+      frameRevisions.delete(runtimeId)
     }
   }, [])
 
@@ -1271,7 +1276,8 @@ export function ElementFrame({
       title="Element"
       sandbox="allow-scripts allow-forms allow-modals"
       srcDoc={ELEMENT_DOC}
-      data-element-frame={elementId}
+      data-element-frame={runtimeId}
+      data-source-element={elementId}
       className="h-full w-full border-0"
       style={{ pointerEvents: interactive ? 'auto' : 'none' }}
     />

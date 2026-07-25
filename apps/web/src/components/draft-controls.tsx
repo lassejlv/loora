@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import type { CanvasElement } from '#/lib/canvas'
+import type { CanvasElement, CanvasPage } from '#/lib/canvas'
 import {
   mergeCanvas,
   type CanvasMergeConflict,
@@ -66,6 +66,25 @@ const branchStatusLabel = (status: DraftStatus) => {
   return 'Active'
 }
 
+function pageChangeLabels(previous: CanvasPage[], current: CanvasPage[]) {
+  const previousById = new Map(previous.map((page) => [page.id, page]))
+  const currentIds = new Set(current.map((page) => page.id))
+  return [
+    ...current
+      .filter((page) => !previousById.has(page.id))
+      .map((page) => `Added ${page.name}`),
+    ...previous
+      .filter((page) => !currentIds.has(page.id))
+      .map((page) => `Removed ${page.name}`),
+    ...current
+      .filter((page) => {
+        const before = previousById.get(page.id)
+        return before && JSON.stringify(before) !== JSON.stringify(page)
+      })
+      .map((page) => `Changed ${page.name}`),
+  ]
+}
+
 export function BranchControls({
   designId,
   branches,
@@ -84,7 +103,12 @@ export function BranchControls({
   onSwitch: (branchId: string | null, skipFlush?: boolean) => void
   onCreated: (branch: BranchSummary) => void
   onChanged: () => Promise<void> | void
-  onApplied: (shapes: CanvasElement[], revision: number, branchName: string) => void
+  onApplied: (
+    shapes: CanvasElement[],
+    pages: CanvasPage[],
+    revision: number,
+    branchName: string,
+  ) => void
   flush: () => Promise<void>
 }) {
   const [createOpen, setCreateOpen] = useState(false)
@@ -106,13 +130,20 @@ export function BranchControls({
   const running = new Set(runningBranchIds)
   const activeBusy = active ? running.has(active.id) : false
   const unresolved = comparison?.conflicts.filter((conflict) => !resolutions[conflict.id]) ?? []
-  const mergedPreview = comparison
+  const mergedDocument = comparison
     ? mergeCanvas(
         comparison.baseShapes,
         comparison.mainShapes,
         comparison.draftShapes,
         resolutions,
-      ).shapes
+        comparison.basePages,
+        comparison.mainPages,
+        comparison.draftPages,
+      )
+    : null
+  const mergedPreview = mergedDocument?.shapes ?? []
+  const pageChanges = comparison
+    ? pageChangeLabels(comparison.mainPages, mergedDocument?.pages ?? [])
     : []
   const hasChanges = comparison
     ? comparison.summary.added + comparison.summary.removed + comparison.summary.changed > 0
@@ -173,7 +204,7 @@ export function BranchControls({
         setReviewError('Resolve every conflict before merging this branch.')
         return
       }
-      onApplied(result.shapes, result.revision, comparison.draft.name)
+      onApplied(result.shapes, result.pages, result.revision, comparison.draft.name)
       await onChanged()
       setReviewOpen(false)
       setComparison(null)
@@ -533,6 +564,18 @@ export function BranchControls({
               </div>
               <div className="min-h-0 overflow-y-auto rounded-lg border p-3">
                 <h3 className="text-sm font-medium">Merge checks</h3>
+                {pageChanges.length > 0 ? (
+                  <div className="mt-2 rounded-md bg-secondary/60 px-2.5 py-2">
+                    <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                      Pages
+                    </p>
+                    <ul className="mt-1 space-y-0.5 text-xs">
+                      {pageChanges.map((label, index) => (
+                        <li key={`${index}:${label}`}>{label}</li>
+                      ))}
+                    </ul>
+                  </div>
+                ) : null}
                 {!hasChanges ? (
                   <p className="mt-2 text-xs text-muted-foreground">No changes to merge.</p>
                 ) : comparison.conflicts.length === 0 ? (
@@ -700,7 +743,11 @@ function ConflictChoice({
   const label =
     conflict.kind === 'order'
       ? 'Layer order changed in both'
-      : `"${conflict.draft?.name ?? conflict.main?.name ?? conflict.elementId}" changed in both`
+      : conflict.kind === 'page-order'
+        ? 'Page order changed in both'
+        : conflict.kind === 'page'
+          ? `"${conflict.draft?.name ?? conflict.main?.name ?? conflict.pageId}" changed in both`
+          : `"${conflict.draft?.name ?? conflict.main?.name ?? conflict.elementId}" changed in both`
   return (
     <li className="rounded-md border p-2">
       <p className="text-xs font-medium">{label}</p>

@@ -3,7 +3,12 @@ import { afterEach, beforeEach, describe, expect, it, mock } from 'bun:test'
 import { Profiler } from 'react'
 import type { UIMessage } from 'ai'
 import { SidebarProvider } from '#/components/ui/sidebar'
-import type { CanvasElement, ElementActions } from '#/lib/canvas'
+import type {
+  CanvasElement,
+  CanvasPage,
+  ElementActions,
+  PageActions,
+} from '#/lib/canvas'
 
 const orpc = {
   chat: {
@@ -37,7 +42,8 @@ const orpc = {
 
 mock.module('#/lib/orpc-client', () => ({ orpc }))
 const snapshotCanvas = mock().mockResolvedValue('data:image/png;base64,test')
-mock.module('#/lib/snapshot', () => ({ snapshotCanvas }))
+const snapshotPage = mock().mockResolvedValue('data:image/png;base64,page')
+mock.module('#/lib/snapshot', () => ({ snapshotCanvas, snapshotPage }))
 mock.module('#/components/design-diff', () => ({ DesignDiff: () => null }))
 
 const { AgentPanel, ChatMessageRow } = await import('./agent-panel')
@@ -58,6 +64,7 @@ describe('AgentPanel empty response recovery', () => {
     })
     localStorage.clear()
     snapshotCanvas.mockClear()
+    snapshotPage.mockClear()
     orpc.chat.list.mockResolvedValue([{
       id: 'chat:test',
       title: 'New chat',
@@ -327,6 +334,190 @@ describe('AgentPanel empty response recovery', () => {
     const secondBody = JSON.parse((chatFetch.mock.calls[1]?.[1] as RequestInit)?.body as string)
     expect(secondBody.trigger).toBe('regenerate-message')
     expect(secondBody.forceCanvasAction).toBe(true)
+  })
+
+  it('executes Page composition tools on the client and continues the agent turn', async () => {
+    const chatFetch = mock()
+      .mockResolvedValueOnce(
+        stream(
+          { type: 'start' },
+          {
+            type: 'tool-input-start',
+            toolCallId: 'create-home',
+            toolName: 'createPage',
+          },
+          {
+            type: 'tool-input-available',
+            toolCallId: 'create-home',
+            toolName: 'createPage',
+            input: {
+              name: 'Home',
+              elementIds: ['hero', 'footer'],
+            },
+          },
+          {
+            type: 'tool-input-start',
+            toolCallId: 'read-home',
+            toolName: 'readPage',
+          },
+          {
+            type: 'tool-input-available',
+            toolCallId: 'read-home',
+            toolName: 'readPage',
+            input: { id: 'home' },
+          },
+          {
+            type: 'tool-input-start',
+            toolCallId: 'update-home',
+            toolName: 'updatePage',
+          },
+          {
+            type: 'tool-input-available',
+            toolCallId: 'update-home',
+            toolName: 'updatePage',
+            input: { id: 'home', name: 'Homepage' },
+          },
+          {
+            type: 'tool-input-start',
+            toolCallId: 'edit-home-items',
+            toolName: 'editPageItems',
+          },
+          {
+            type: 'tool-input-available',
+            toolCallId: 'edit-home-items',
+            toolName: 'editPageItems',
+            input: {
+              id: 'home',
+              orderedItemIds: ['footer-item', 'hero-item'],
+              heights: [{ itemId: 'hero-item', height: 640 }],
+            },
+          },
+          {
+            type: 'tool-input-start',
+            toolCallId: 'duplicate-home',
+            toolName: 'duplicatePage',
+          },
+          {
+            type: 'tool-input-available',
+            toolCallId: 'duplicate-home',
+            toolName: 'duplicatePage',
+            input: { id: 'home', name: 'Landing variant' },
+          },
+          {
+            type: 'tool-input-start',
+            toolCallId: 'reorder-pages',
+            toolName: 'reorderPages',
+          },
+          {
+            type: 'tool-input-available',
+            toolCallId: 'reorder-pages',
+            toolName: 'reorderPages',
+            input: { orderedIds: ['variant', 'home'] },
+          },
+          {
+            type: 'tool-input-start',
+            toolCallId: 'view-home',
+            toolName: 'viewPage',
+          },
+          {
+            type: 'tool-input-available',
+            toolCallId: 'view-home',
+            toolName: 'viewPage',
+            input: { id: 'home', focus: 'section order' },
+          },
+          { type: 'finish' },
+        ),
+      )
+      .mockResolvedValueOnce(
+        stream(
+          { type: 'start' },
+          { type: 'text-start', id: 'answer' },
+          { type: 'text-delta', id: 'answer', delta: 'Combined.' },
+          { type: 'text-end', id: 'answer' },
+          { type: 'finish' },
+        ),
+      )
+    globalThis.fetch = chatFetch as unknown as typeof fetch
+
+    const shapesRef = {
+      current: [
+        { id: 'hero', name: 'Hero', x: 0, y: 0, w: 1200, h: 600, code: '<main />' },
+        { id: 'footer', name: 'Footer', x: 0, y: 700, w: 1200, h: 200, code: '<footer />' },
+      ] as CanvasElement[],
+    }
+    const pagesRef = { current: [] as CanvasPage[] }
+    const actions: ElementActions = {
+      createElement: mock(),
+      createElements: mock(),
+      updateElement: mock(),
+      deleteElement: mock(),
+      reorderElements: mock(),
+      groupElements: mock(),
+      ungroupElements: mock(),
+    }
+    const created: CanvasPage = {
+      id: 'home',
+      name: 'Home',
+      x: 1320,
+      y: 0,
+      w: 1200,
+      items: [
+        { id: 'hero-item', elementId: 'hero', height: 600 },
+        { id: 'footer-item', elementId: 'footer', height: 200 },
+      ],
+    }
+    const variant: CanvasPage = {
+      ...created,
+      id: 'variant',
+      name: 'Landing variant',
+      items: created.items.map((item) => ({ ...item, id: `${item.id}-copy` })),
+    }
+    const pageActions: PageActions = {
+      createPage: mock().mockImplementation(() => {
+        pagesRef.current = [created]
+        return created
+      }),
+      updatePage: mock().mockReturnValue({ ...created, name: 'Homepage' }),
+      duplicatePage: mock().mockReturnValue(variant),
+      reorderPages: mock().mockReturnValue(['variant', 'home']),
+      deletePage: mock(),
+    }
+
+    render(
+      <SidebarProvider>
+        <AgentPanel
+          actions={actions}
+          shapesRef={shapesRef}
+          pageActions={pageActions}
+          pagesRef={pagesRef}
+          selectedPageIdRef={{ current: 'home' }}
+          docId="test"
+        />
+      </SidebarProvider>,
+    )
+
+    const input = await screen.findByPlaceholderText('Describe a change… (@ to mention)')
+    await waitFor(() => expect((input as HTMLTextAreaElement).disabled).toBe(false))
+    fireEvent.change(input, { target: { value: 'Combine the hero and footer' } })
+    fireEvent.submit(input.closest('form')!)
+
+    await waitFor(() => expect(chatFetch).toHaveBeenCalledTimes(2), { timeout: 4000 })
+    expect(pageActions.createPage).toHaveBeenCalledWith('Home', ['hero', 'footer'])
+    expect(pageActions.updatePage).toHaveBeenCalledWith('home', { name: 'Homepage' })
+    expect(pageActions.updatePage).toHaveBeenCalledWith('home', {
+      items: [
+        { id: 'footer-item', elementId: 'footer', height: 200 },
+        { id: 'hero-item', elementId: 'hero', height: 640 },
+      ],
+    })
+    expect(pageActions.duplicatePage).toHaveBeenCalledWith('home', 'Landing variant')
+    expect(pageActions.reorderPages).toHaveBeenCalledWith(['variant', 'home'])
+    expect(snapshotPage).toHaveBeenCalledWith(created, shapesRef.current)
+    expect(await screen.findByText('Combined.')).toBeTruthy()
+
+    const firstBody = JSON.parse((chatFetch.mock.calls[0]?.[1] as RequestInit)?.body as string)
+    expect(firstBody.pages).toEqual([])
+    expect(firstBody.selectedPageId).toBe('home')
   })
 
   it('captures and sends canvas images with Gemini 3.5 Flash', async () => {

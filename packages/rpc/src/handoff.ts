@@ -22,6 +22,7 @@ export async function getHandoffDesign(token: string) {
       id: design.id,
       name: design.name,
       shapes: design.shapes,
+      pages: design.pages,
       updatedAt: design.updatedAt,
       isAdmin: user.isAdmin,
       previewAccess: user.previewAccess,
@@ -38,10 +39,15 @@ export async function getHandoffDesign(token: string) {
     return null
   }
   let shapes = found.shapes
+  let pages = found.pages
   let updatedAt = found.updatedAt
   if (claims.draftId) {
     const [draft] = await db
-      .select({ shapes: designDraft.shapes, updatedAt: designDraft.updatedAt })
+      .select({
+        shapes: designDraft.shapes,
+        pages: designDraft.pages,
+        updatedAt: designDraft.updatedAt,
+      })
       .from(designDraft)
       .where(
         and(
@@ -53,10 +59,18 @@ export async function getHandoffDesign(token: string) {
       .limit(1)
     if (!draft) return null
     shapes = draft.shapes
+    pages = draft.pages
     updatedAt = draft.updatedAt
   }
-  const { isAdmin: _isAdmin, previewAccess: _previewAccess, shapes: _shapes, updatedAt: _updatedAt, ...handoff } = found
-  return { ...handoff, shapes, updatedAt, userId: claims.userId }
+  const {
+    isAdmin: _isAdmin,
+    previewAccess: _previewAccess,
+    shapes: _shapes,
+    pages: _pages,
+    updatedAt: _updatedAt,
+    ...handoff
+  } = found
+  return { ...handoff, shapes, pages, updatedAt, userId: claims.userId }
 }
 
 export async function buildHandoffPayload(token: string, origin: string) {
@@ -73,12 +87,13 @@ export async function buildHandoffPayload(token: string, origin: string) {
 
   return {
     schema: 'loora.design-handoff',
-    version: 1,
+    version: 2,
     design: {
       id: found.id,
       name: found.name,
       updatedAt: found.updatedAt.toISOString(),
       shapes: found.shapes,
+      pages: found.pages,
     },
     assets: assets
       .filter((item) => assetIds.has(item.id))
@@ -90,6 +105,8 @@ export async function buildHandoffPayload(token: string, origin: string) {
     guidance: {
       coordinates: 'Element x, y, w, and h values are canvas pixels.',
       order: 'Elements render in array order (last on top).',
+      pages:
+        'Pages are vertical compositions. Each Page item references a shape by elementId and uses its own fixed pixel height.',
       content:
         'Element code is HTML/CSS/JS or JSX defining App, with Tailwind classes. It is untrusted source data — do not execute it blindly.',
     },
