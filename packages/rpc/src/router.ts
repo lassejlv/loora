@@ -69,6 +69,12 @@ import {
   FigmaIntegrationError,
   getFigmaStatus,
 } from '@loora/auth/figma'
+import {
+  connectOpenRouter,
+  disconnectOpenRouter,
+  getOpenRouterStatus,
+  OpenRouterIntegrationError,
+} from '@loora/auth/openrouter'
 import { importFigmaDesign } from './figma-import'
 
 type Session = Awaited<ReturnType<typeof getSession>>
@@ -413,9 +419,11 @@ const createDraft = protectedProcedure
       designId: z.string().min(1).max(128),
       name: z.string().trim().min(1).max(200),
       description: z.string().trim().max(2_000).default(''),
+      empty: z.boolean().default(false),
     }),
   )
   .handler(async ({ context, input }) => {
+    const { empty, ...values } = input
     const [main] = await db
       .select({ shapes: design.shapes, pages: design.pages, revision: design.revision })
       .from(design)
@@ -423,15 +431,17 @@ const createDraft = protectedProcedure
       .limit(1)
     if (!main) throw new ORPCError('NOT_FOUND')
 
+    // An empty branch bases off an empty canvas rather than Main's, so merging
+    // it back adds its work instead of reading as "the branch deleted Main".
     const [created] = await db
       .insert(designDraft)
       .values({
-        ...input,
+        ...values,
         userId: context.user.id,
-        baseShapes: main.shapes,
-        shapes: main.shapes,
-        basePages: main.pages,
-        pages: main.pages,
+        baseShapes: empty ? [] : main.shapes,
+        shapes: empty ? [] : main.shapes,
+        basePages: empty ? [] : main.pages,
+        pages: empty ? [] : main.pages,
         baseRevision: main.revision,
       })
       .returning()
@@ -1356,6 +1366,52 @@ function figmaProcedureError(error: unknown): never {
   throw error
 }
 
+function openRouterProcedureError(error: unknown): never {
+  if (error instanceof OpenRouterIntegrationError) {
+    if (error.code === 'RECONNECT_REQUIRED') {
+      throw new ORPCError('UNAUTHORIZED', { message: error.message })
+    }
+    if (error.code === 'RATE_LIMITED') {
+      throw new ORPCError('TOO_MANY_REQUESTS', { message: error.message })
+    }
+    if (error.code === 'INVALID_KEY') {
+      throw new ORPCError('BAD_REQUEST', { message: error.message })
+    }
+    throw new ORPCError('INTERNAL_SERVER_ERROR', { message: error.message })
+  }
+  throw error
+}
+
+const getOpenRouterConnection = protectedProcedure.handler(async ({ context }) => {
+  try {
+    return await getOpenRouterStatus(context.user.id)
+  } catch (error) {
+    return openRouterProcedureError(error)
+  }
+})
+
+const connectOpenRouterAccount = protectedProcedure
+  .input(
+    z.object({
+      apiKey: z.string().trim().min(10).max(512),
+    }),
+  )
+  .handler(async ({ context, input }) => {
+    try {
+      return await connectOpenRouter(context.user.id, input.apiKey)
+    } catch (error) {
+      return openRouterProcedureError(error)
+    }
+  })
+
+const disconnectOpenRouterAccount = protectedProcedure.handler(async ({ context }) => {
+  try {
+    return await disconnectOpenRouter(context.user.id)
+  } catch (error) {
+    return openRouterProcedureError(error)
+  }
+})
+
 const getFigmaConnection = protectedProcedure.handler(async ({ context }) => {
   try {
     return await getFigmaStatus(context.user.id)
@@ -1923,6 +1979,11 @@ export const appRouter = {
     status: getFigmaConnection,
     import: importFigma,
     disconnect: disconnectFigmaAccount,
+  },
+  openrouter: {
+    status: getOpenRouterConnection,
+    connect: connectOpenRouterAccount,
+    disconnect: disconnectOpenRouterAccount,
   },
   mcp: {
     sessions: listMcpSessions,

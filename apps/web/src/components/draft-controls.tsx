@@ -10,6 +10,7 @@ import { CheckIcon, ChevronDownIcon } from '#/components/icons'
 import { EllipsisIcon, GitBranchIcon, PlusIcon } from 'lucide-react'
 import { orpc } from '#/lib/orpc-client'
 import { Button } from '#/components/ui/button'
+import { Checkbox } from '#/components/ui/checkbox'
 import { Input } from '#/components/ui/input'
 import {
   DropdownMenu,
@@ -113,6 +114,7 @@ export function BranchControls({
 }) {
   const [createOpen, setCreateOpen] = useState(false)
   const [createName, setCreateName] = useState('')
+  const [createEmpty, setCreateEmpty] = useState(false)
   const [manageOpen, setManageOpen] = useState(false)
   const [working, setWorking] = useState(false)
   const [reviewOpen, setReviewOpen] = useState(false)
@@ -159,10 +161,12 @@ export function BranchControls({
         id: `dr${crypto.randomUUID().replaceAll('-', '')}`,
         designId,
         name,
+        empty: createEmpty,
       })
       onCreated(created)
       setCreateOpen(false)
       setCreateName('')
+      setCreateEmpty(false)
     } finally {
       setWorking(false)
     }
@@ -376,15 +380,23 @@ export function BranchControls({
         ) : null}
       </div>
 
-      <Dialog open={createOpen} onOpenChange={setCreateOpen}>
+      <Dialog
+        open={createOpen}
+        onOpenChange={(open) => {
+          setCreateOpen(open)
+          if (!open) setCreateEmpty(false)
+        }}
+      >
         <DialogPopup className="max-w-sm">
           <DialogHeader>
             <DialogTitle>New branch</DialogTitle>
             <DialogDescription>
-              Starts from the latest Main canvas and stays isolated until you merge it.
+              {createEmpty
+                ? 'Starts from a blank canvas. Merging adds its work to Main.'
+                : 'Starts from the latest Main canvas and stays isolated until you merge it.'}
             </DialogDescription>
           </DialogHeader>
-          <DialogPanel>
+          <DialogPanel className="space-y-3">
             <Input
               autoFocus
               value={createName}
@@ -396,6 +408,13 @@ export function BranchControls({
                 if (event.key === 'Enter') void create()
               }}
             />
+            <label className="flex cursor-pointer items-center gap-2 text-sm">
+              <Checkbox
+                checked={createEmpty}
+                onCheckedChange={(checked) => setCreateEmpty(checked === true)}
+              />
+              Start from an empty canvas
+            </label>
           </DialogPanel>
           <DialogFooter>
             <Button variant="outline" onClick={() => setCreateOpen(false)}>
