@@ -2623,12 +2623,14 @@ function Editor({ preview = false, userId }: { preview?: boolean; userId?: strin
         docId={activeId}
         draftId={activeDraftId}
         getTargetBindings={getTargetBindings}
-        isTargetReadOnly={(draftId) =>
-          Boolean(
-            draftId &&
-              drafts.find((draft) => draft.id === draftId)?.status !== 'active',
-          )
-        }
+        isTargetReadOnly={(draftId) => {
+          // A branch under review stays editable — pushing more commits to an
+          // open pull request is the point. Only archived branches are frozen.
+          const status = draftId
+            ? drafts.find((draft) => draft.id === draftId)?.status
+            : undefined
+          return status === 'applied' || status === 'closed'
+        }}
         branches={drafts}
         onTargetChange={(draftId, options) => {
           if (options?.announce) switchBranchWithNotice(draftId)

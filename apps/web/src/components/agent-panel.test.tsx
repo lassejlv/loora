@@ -26,6 +26,13 @@ const orpc = {
     close: mock(),
     reopen: mock(),
   },
+  pullRequest: {
+    open: mock(),
+    get: mock(),
+    comment: mock(),
+    deleteComment: mock(),
+    close: mock(),
+  },
   asset: {
     list: mock(),
   },
@@ -82,6 +89,7 @@ describe('AgentPanel empty response recovery', () => {
     orpc.chat.save.mockResolvedValue({})
     orpc.history.commit.mockResolvedValue({})
     orpc.draft.create.mockResolvedValue({})
+    orpc.pullRequest.get.mockResolvedValue(null)
     orpc.asset.list.mockResolvedValue([])
     orpc.github.status.mockResolvedValue({
       enabled: false,

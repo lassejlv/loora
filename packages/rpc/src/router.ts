@@ -8,6 +8,8 @@ import {
   designChat,
   designDraft,
   designGithubRepository,
+  designPullRequest,
+  designPullRequestComment,
   designVersion,
   oauthAccessToken,
   oauthApplication,
@@ -28,6 +30,17 @@ import {
 } from '@loora/db/drafts'
 import { assetKey, s3 } from './storage'
 import { createHandoffToken } from './handoff-token'
+import {
+  PULL_REQUEST_BODY_MAX,
+  PULL_REQUEST_COMMENT_MAX,
+  PULL_REQUEST_TITLE_MAX,
+} from '@loora/db/pull-requests'
+import {
+  addReviewComment,
+  listReviewCommits,
+  listReviewComments,
+  pullRequestId,
+} from './pull-requests'
 import {
   egressWindowCutoff,
   PUBLISH_EGRESS_LIMIT_BYTES,
@@ -727,6 +740,19 @@ const applyDraft = protectedProcedure
       if (!updatedDraft) {
         throw new ORPCError('CONFLICT', { message: 'The draft changed while it was applying.' })
       }
+
+      // A branch merged from anywhere (review dialog, PR view) closes its
+      // review as merged, so the public link stops inviting comments.
+      await tx
+        .update(designPullRequest)
+        .set({ status: 'merged', mergedAt: now, updatedAt: now })
+        .where(
+          and(
+            eq(designPullRequest.draftId, input.id),
+            eq(designPullRequest.userId, context.user.id),
+            eq(designPullRequest.status, 'open'),
+          ),
+        )
     })
 
     return {
@@ -737,6 +763,188 @@ const applyDraft = protectedProcedure
       pages: merge.pages,
       unresolved: [] as string[],
     }
+  })
+
+const pullRequestSelection = {
+  id: designPullRequest.id,
+  designId: designPullRequest.designId,
+  draftId: designPullRequest.draftId,
+  title: designPullRequest.title,
+  body: designPullRequest.body,
+  status: designPullRequest.status,
+  createdAt: designPullRequest.createdAt,
+  updatedAt: designPullRequest.updatedAt,
+  mergedAt: designPullRequest.mergedAt,
+  closedAt: designPullRequest.closedAt,
+}
+
+const serializePullRequest = <
+  T extends { createdAt: Date; updatedAt: Date; mergedAt: Date | null; closedAt: Date | null },
+>(
+  row: T,
+) => ({
+  ...row,
+  createdAt: row.createdAt.getTime(),
+  updatedAt: row.updatedAt.getTime(),
+  mergedAt: row.mergedAt?.getTime() ?? null,
+  closedAt: row.closedAt?.getTime() ?? null,
+})
+
+async function getOwnedPullRequest(userId: string, id: string) {
+  const [found] = await db
+    .select(pullRequestSelection)
+    .from(designPullRequest)
+    .where(and(eq(designPullRequest.id, id), eq(designPullRequest.userId, userId)))
+    .limit(1)
+  if (!found) throw new ORPCError('NOT_FOUND')
+  return found
+}
+
+// Opening a review parks the branch in 'proposed'. It stays editable — pushing
+// more commits to an open pull request is the point.
+const openPullRequest = protectedProcedure
+  .input(
+    z.object({
+      designId: z.string().min(1).max(128),
+      draftId: draftIdSchema,
+      title: z.string().trim().min(1).max(PULL_REQUEST_TITLE_MAX),
+      body: z.string().trim().max(PULL_REQUEST_BODY_MAX).default(''),
+    }),
+  )
+  .handler(async ({ context, input }) => {
+    const draft = await getOwnedDraft(context.user.id, input.designId, input.draftId)
+    if (draft.status !== 'active' && draft.status !== 'proposed') {
+      throw new ORPCError('CONFLICT', { message: 'This branch is already archived.' })
+    }
+
+    const [open] = await db
+      .select(pullRequestSelection)
+      .from(designPullRequest)
+      .where(
+        and(
+          eq(designPullRequest.userId, context.user.id),
+          eq(designPullRequest.draftId, input.draftId),
+          eq(designPullRequest.status, 'open'),
+        ),
+      )
+      .limit(1)
+    if (open) return serializePullRequest(open)
+
+    const now = new Date()
+    const [created] = await db
+      .insert(designPullRequest)
+      .values({
+        id: pullRequestId(),
+        designId: input.designId,
+        draftId: input.draftId,
+        userId: context.user.id,
+        title: input.title,
+        body: input.body,
+      })
+      .returning(pullRequestSelection)
+
+    await db
+      .update(designDraft)
+      .set({ status: 'proposed', proposedAt: now, updatedAt: now })
+      .where(
+        and(
+          eq(designDraft.id, input.draftId),
+          eq(designDraft.userId, context.user.id),
+          eq(designDraft.status, 'active'),
+        ),
+      )
+
+    return serializePullRequest(created)
+  })
+
+const getPullRequest = protectedProcedure
+  .input(z.object({ designId: z.string().min(1).max(128), draftId: draftIdSchema }))
+  .handler(async ({ context, input }) => {
+    const [found] = await db
+      .select(pullRequestSelection)
+      .from(designPullRequest)
+      .where(
+        and(
+          eq(designPullRequest.userId, context.user.id),
+          eq(designPullRequest.designId, input.designId),
+          eq(designPullRequest.draftId, input.draftId),
+        ),
+      )
+      .orderBy(desc(designPullRequest.createdAt))
+      .limit(1)
+    if (!found) return null
+
+    const [comments, commits] = await Promise.all([
+      listReviewComments(found.id),
+      listReviewCommits(context.user.id, input.designId, input.draftId),
+    ])
+    return { ...serializePullRequest(found), comments, commits }
+  })
+
+const commentOnPullRequest = protectedProcedure
+  .input(
+    z.object({
+      id: z.string().min(1).max(64),
+      body: z.string().trim().min(1).max(PULL_REQUEST_COMMENT_MAX),
+    }),
+  )
+  .handler(async ({ context, input }) => {
+    await getOwnedPullRequest(context.user.id, input.id)
+    const result = await addReviewComment({
+      prId: input.id,
+      authorName: context.user.name || 'Owner',
+      body: input.body,
+      authorUserId: context.user.id,
+      isOwner: true,
+    })
+    if (!result.ok) throw new ORPCError('BAD_REQUEST', { message: result.error })
+    return result.comment
+  })
+
+const closePullRequest = protectedProcedure
+  .input(z.object({ id: z.string().min(1).max(64) }))
+  .handler(async ({ context, input }) => {
+    const found = await getOwnedPullRequest(context.user.id, input.id)
+    if (found.status !== 'open') return serializePullRequest(found)
+
+    const now = new Date()
+    const [updated] = await db
+      .update(designPullRequest)
+      .set({ status: 'closed', closedAt: now, updatedAt: now })
+      .where(
+        and(eq(designPullRequest.id, input.id), eq(designPullRequest.userId, context.user.id)),
+      )
+      .returning(pullRequestSelection)
+
+    // Closing the review hands the branch back for regular editing rather than
+    // archiving it — discarding the branch is a separate, explicit action.
+    await db
+      .update(designDraft)
+      .set({ status: 'active', proposedAt: null, updatedAt: now })
+      .where(
+        and(
+          eq(designDraft.id, found.draftId),
+          eq(designDraft.userId, context.user.id),
+          eq(designDraft.status, 'proposed'),
+        ),
+      )
+
+    return serializePullRequest(updated)
+  })
+
+const deletePullRequestComment = protectedProcedure
+  .input(z.object({ id: z.string().min(1).max(64), commentId: z.string().min(1).max(64) }))
+  .handler(async ({ context, input }) => {
+    await getOwnedPullRequest(context.user.id, input.id)
+    await db
+      .delete(designPullRequestComment)
+      .where(
+        and(
+          eq(designPullRequestComment.id, input.commentId),
+          eq(designPullRequestComment.pullRequestId, input.id),
+        ),
+      )
+    return { deleted: true as const }
   })
 
 const createDesignHandoff = protectedProcedure
@@ -2005,6 +2213,13 @@ export const appRouter = {
     compare: compareDraft,
     apply: applyDraft,
     close: closeDraft,
+  },
+  pullRequest: {
+    open: openPullRequest,
+    get: getPullRequest,
+    comment: commentOnPullRequest,
+    deleteComment: deletePullRequestComment,
+    close: closePullRequest,
   },
   handoff: {
     create: createDesignHandoff,

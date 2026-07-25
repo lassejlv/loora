@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import type { CanvasElement, CanvasPage } from '#/lib/canvas'
 import {
   mergeCanvas,
@@ -39,6 +39,7 @@ import {
   AlertDialogTitle,
 } from '#/components/ui/alert-dialog'
 import { DesignDiff } from '#/components/design-diff'
+import { PullRequestView } from '#/components/pull-request-view'
 import { Spinner } from '#/components/ui/spinner'
 
 export interface BranchSummary {
@@ -56,12 +57,13 @@ export interface BranchSummary {
 }
 
 type Comparison = Awaited<ReturnType<typeof orpc.draft.compare>>
+type PullRequestRecord = NonNullable<Awaited<ReturnType<typeof orpc.pullRequest.get>>>
 
 const isOpenBranch = (branch: BranchSummary) =>
   branch.status === 'active' || branch.status === 'proposed'
 
 const branchStatusLabel = (status: DraftStatus) => {
-  if (status === 'proposed') return 'Reviewing'
+  if (status === 'proposed') return 'In review'
   if (status === 'applied') return 'Merged'
   if (status === 'closed') return 'Discarded'
   return 'Active'
@@ -125,6 +127,14 @@ export function BranchControls({
   const [renameTarget, setRenameTarget] = useState<BranchSummary | null>(null)
   const [renameName, setRenameName] = useState('')
   const [discardTarget, setDiscardTarget] = useState<BranchSummary | null>(null)
+  const [pullRequest, setPullRequest] = useState<PullRequestRecord | null>(null)
+  const [prComparison, setPrComparison] = useState<Comparison | null>(null)
+  const [prOpen, setPrOpen] = useState(false)
+  const [prFormOpen, setPrFormOpen] = useState(false)
+  const [prTitle, setPrTitle] = useState('')
+  const [prBody, setPrBody] = useState('')
+  const [prError, setPrError] = useState<string | null>(null)
+  const [linkCopied, setLinkCopied] = useState(false)
 
   const active = branches.find((branch) => branch.id === activeBranchId) ?? null
   const openBranches = branches.filter(isOpenBranch)
@@ -170,6 +180,115 @@ export function BranchControls({
     } finally {
       setWorking(false)
     }
+  }
+
+  // The pull request for whichever branch is active. Refetched on switch so a
+  // review opened in another tab (or merged from the review dialog) shows up.
+  useEffect(() => {
+    if (!activeBranchId) {
+      setPullRequest(null)
+      return
+    }
+    let cancelled = false
+    void orpc.pullRequest
+      .get({ designId, draftId: activeBranchId })
+      .then((found) => {
+        if (!cancelled) setPullRequest(found)
+      })
+      .catch(() => {
+        if (!cancelled) setPullRequest(null)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [designId, activeBranchId])
+
+  const reviewLink = pullRequest
+    ? `${typeof window === 'undefined' ? '' : window.location.origin}/pr/${pullRequest.id}`
+    : ''
+
+  const openPullRequest = async () => {
+    if (!active || !prTitle.trim()) return
+    setWorking(true)
+    setPrError(null)
+    try {
+      await flush()
+      const created = await orpc.pullRequest.open({
+        designId,
+        draftId: active.id,
+        title: prTitle.trim(),
+        body: prBody.trim(),
+      })
+      setPullRequest({ ...created, comments: [], commits: [] })
+      setPrFormOpen(false)
+      setPrTitle('')
+      setPrBody('')
+      await onChanged()
+      await showPullRequest()
+    } catch (error) {
+      setPrError(error instanceof Error ? error.message : 'Could not open this pull request.')
+    } finally {
+      setWorking(false)
+    }
+  }
+
+  // The PR view needs both sides of the diff, which only `compare` returns.
+  const showPullRequest = async () => {
+    if (!active) return
+    setWorking(true)
+    setPrError(null)
+    setPrOpen(true)
+    try {
+      await flush()
+      const [found, next] = await Promise.all([
+        orpc.pullRequest.get({ designId, draftId: active.id }),
+        orpc.draft.compare({ designId, id: active.id }),
+      ])
+      setPullRequest(found)
+      setPrComparison(next)
+    } catch (error) {
+      setPrError(error instanceof Error ? error.message : 'Could not load this pull request.')
+    } finally {
+      setWorking(false)
+    }
+  }
+
+  const postPullRequestComment = async (body: string) => {
+    if (!pullRequest) return
+    const comment = await orpc.pullRequest.comment({ id: pullRequest.id, body })
+    setPullRequest((current) =>
+      current ? { ...current, comments: [...current.comments, comment] } : current,
+    )
+  }
+
+  const deletePullRequestComment = async (commentId: string) => {
+    if (!pullRequest) return
+    await orpc.pullRequest.deleteComment({ id: pullRequest.id, commentId })
+    setPullRequest((current) =>
+      current
+        ? { ...current, comments: current.comments.filter((item) => item.id !== commentId) }
+        : current,
+    )
+  }
+
+  const closePullRequest = async () => {
+    if (!pullRequest) return
+    setWorking(true)
+    try {
+      const closed = await orpc.pullRequest.close({ id: pullRequest.id })
+      setPullRequest((current) => (current ? { ...current, ...closed } : current))
+      await onChanged()
+      setPrOpen(false)
+    } finally {
+      setWorking(false)
+    }
+  }
+
+  const copyReviewLink = async () => {
+    if (!reviewLink) return
+    await navigator.clipboard.writeText(reviewLink)
+    setLinkCopied(true)
+    setTimeout(() => setLinkCopied(false), 1500)
   }
 
   const loadReview = async (branch = reviewTarget ?? active) => {
@@ -302,7 +421,7 @@ export function BranchControls({
                 <GitBranchIcon />
                 <span className="min-w-0 flex-1 truncate">{branch.name}</span>
                 {branch.status === 'proposed' ? (
-                  <span className="text-[10px] uppercase text-muted-foreground">Reviewing</span>
+                  <span className="text-[10px] uppercase text-muted-foreground">PR</span>
                 ) : null}
                 {running.has(branch.id) ? <Spinner className="size-3 text-cx-accent" /> : null}
                 {branch.id === activeBranchId ? <CheckIcon className="size-3.5" /> : null}
@@ -323,8 +442,31 @@ export function BranchControls({
         {active && isOpenBranch(active) ? (
           <>
             <span className="hidden text-xs text-muted-foreground md:inline">
-              {activeBusy ? 'Agent running' : 'Isolated from Main'}
+              {activeBusy
+                ? 'Agent running'
+                : pullRequest?.status === 'open'
+                  ? 'Pull request open'
+                  : 'Isolated from Main'}
             </span>
+            {pullRequest?.status === 'open' ? (
+              <Button size="xs" variant="outline" onClick={() => void showPullRequest()}>
+                Pull request
+              </Button>
+            ) : (
+              <Button
+                size="xs"
+                variant="outline"
+                disabled={working}
+                onClick={() => {
+                  setPrTitle(active.name)
+                  setPrBody('')
+                  setPrError(null)
+                  setPrFormOpen(true)
+                }}
+              >
+                Open pull request
+              </Button>
+            )}
             <Button
               size="xs"
               disabled={working || activeBusy}
@@ -422,6 +564,125 @@ export function BranchControls({
             </Button>
             <Button disabled={!createName.trim() || working} onClick={() => void create()}>
               {working ? 'Creating…' : 'Create branch'}
+            </Button>
+          </DialogFooter>
+        </DialogPopup>
+      </Dialog>
+
+      <Dialog open={prFormOpen} onOpenChange={setPrFormOpen}>
+        <DialogPopup className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Open pull request</DialogTitle>
+            <DialogDescription>
+              Share a review link for “{active?.name}”. Anyone with the link can read the diff and
+              comment — the branch stays editable while the review is open.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogPanel className="space-y-3">
+            <Input
+              autoFocus
+              value={prTitle}
+              maxLength={200}
+              placeholder="Title"
+              aria-label="Pull request title"
+              onChange={(event) => setPrTitle(event.target.value)}
+            />
+            <textarea
+              value={prBody}
+              maxLength={4000}
+              rows={4}
+              placeholder="What changed, and what feedback do you want?"
+              aria-label="Pull request description"
+              className="w-full resize-y rounded-md border bg-background px-2.5 py-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              onChange={(event) => setPrBody(event.target.value)}
+            />
+            {prError ? <p className="text-xs text-destructive-foreground">{prError}</p> : null}
+          </DialogPanel>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setPrFormOpen(false)}>
+              Cancel
+            </Button>
+            <Button disabled={!prTitle.trim() || working} onClick={() => void openPullRequest()}>
+              {working ? 'Opening…' : 'Open pull request'}
+            </Button>
+          </DialogFooter>
+        </DialogPopup>
+      </Dialog>
+
+      <Dialog
+        open={prOpen}
+        onOpenChange={(open) => {
+          setPrOpen(open)
+          if (!open) {
+            setPrComparison(null)
+            setPrError(null)
+          }
+        }}
+      >
+        <DialogPopup className="h-[min(88svh,60rem)] max-w-6xl overflow-hidden">
+          <DialogHeader>
+            <DialogTitle>{pullRequest?.title ?? 'Pull request'}</DialogTitle>
+            <DialogDescription>
+              Anyone with the review link can comment. Commits you make on this branch show up here.
+            </DialogDescription>
+          </DialogHeader>
+          {/* Not DialogPanel: the diff needs the popup's own height. */}
+          <div className="flex min-h-0 flex-1 flex-col gap-3 px-6 pt-1 pb-6">
+            <div className="flex items-center gap-2">
+              <Input readOnly value={reviewLink} aria-label="Review link" className="text-xs" />
+              <Button size="xs" variant="outline" onClick={() => void copyReviewLink()}>
+                {linkCopied ? 'Copied' : 'Copy link'}
+              </Button>
+            </div>
+            {prError ? (
+              <p className="rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive-foreground">
+                {prError}
+              </p>
+            ) : null}
+            {pullRequest && prComparison ? (
+              <PullRequestView
+                pr={{
+                  id: pullRequest.id,
+                  title: pullRequest.title,
+                  body: pullRequest.body,
+                  status: pullRequest.status,
+                  designName: '',
+                  branchName: prComparison.draft.name,
+                  ownerName: 'You',
+                  createdAt: pullRequest.createdAt,
+                  mergedAt: pullRequest.mergedAt,
+                  closedAt: pullRequest.closedAt,
+                  mainShapes: prComparison.mainShapes,
+                  branchShapes: prComparison.draftShapes,
+                  commits: pullRequest.commits,
+                  comments: pullRequest.comments,
+                }}
+                comments={pullRequest.comments}
+                canComment={pullRequest.status === 'open'}
+                commentAs="you"
+                onComment={({ body }) => postPullRequestComment(body)}
+                onDeleteComment={deletePullRequestComment}
+              />
+            ) : (
+              <div className="grid min-h-0 flex-1 place-items-center text-sm text-muted-foreground">
+                {working ? 'Loading pull request…' : 'Pull request unavailable.'}
+              </div>
+            )}
+          </div>
+          <DialogFooter>
+            {pullRequest?.status === 'open' ? (
+              <Button variant="outline" disabled={working} onClick={() => void closePullRequest()}>
+                Close pull request
+              </Button>
+            ) : null}
+            <Button
+              disabled={working || activeBusy || !active}
+              onClick={() => {
+                setPrOpen(false)
+                void loadReview(active ?? undefined)
+              }}
+            >
+              Review &amp; merge
             </Button>
           </DialogFooter>
         </DialogPopup>

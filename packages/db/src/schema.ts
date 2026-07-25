@@ -15,6 +15,7 @@ import {
 import type { UIMessage } from 'ai'
 import type { CanvasElement, CanvasPage } from './canvas'
 import type { DraftStatus } from './drafts'
+import type { PullRequestStatus } from './pull-requests'
 import type { ShortcutConfig } from './shortcuts'
 import { EMPTY_SHORTCUT_CONFIG } from './shortcuts'
 
@@ -226,6 +227,62 @@ export const designChat = pgTable(
       table.draftId,
       table.updatedAt,
     ),
+  ],
+)
+
+// A branch opened for review. The row id doubles as the review URL's
+// capability token (same trade as publish_link), so anyone holding the link
+// can read the diff and comment without a Loora account.
+export const designPullRequest = pgTable(
+  'design_pull_request',
+  {
+    id: text('id').primaryKey(),
+    designId: text('design_id').notNull(),
+    draftId: text('draft_id').notNull(),
+    userId: text('user_id').notNull(),
+    title: text('title').notNull(),
+    body: text('body').default('').notNull(),
+    status: text('status').$type<PullRequestStatus>().default('open').notNull(),
+    mergedAt: timestamp('merged_at'),
+    closedAt: timestamp('closed_at'),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+    updatedAt: timestamp('updated_at')
+      .defaultNow()
+      .$onUpdate(() => new Date())
+      .notNull(),
+  },
+  (table) => [
+    foreignKey({
+      columns: [table.designId, table.userId],
+      foreignColumns: [design.id, design.userId],
+      name: 'design_pull_request_design_fk',
+    }).onDelete('cascade'),
+    foreignKey({
+      columns: [table.draftId, table.userId],
+      foreignColumns: [designDraft.id, designDraft.userId],
+      name: 'design_pull_request_draft_fk',
+    }).onDelete('cascade'),
+    index('design_pull_request_draft_idx').on(table.userId, table.designId, table.draftId),
+  ],
+)
+
+// Review thread. Guests have no account, so identity is the name they typed;
+// authorUserId is set only when a signed-in Loora user posts.
+export const designPullRequestComment = pgTable(
+  'design_pull_request_comment',
+  {
+    id: text('id').primaryKey(),
+    pullRequestId: text('pull_request_id')
+      .notNull()
+      .references(() => designPullRequest.id, { onDelete: 'cascade' }),
+    authorUserId: text('author_user_id').references(() => user.id, { onDelete: 'set null' }),
+    authorName: text('author_name').notNull(),
+    isOwner: boolean('is_owner').default(false).notNull(),
+    body: text('body').notNull(),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+  },
+  (table) => [
+    index('design_pull_request_comment_idx').on(table.pullRequestId, table.createdAt),
   ],
 )
 
