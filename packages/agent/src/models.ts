@@ -50,6 +50,10 @@ export interface ModelDefinition {
   price: {
     input: number
     output: number
+    contextOver200k?: {
+      input: number
+      output: number
+    }
   }
 }
 
@@ -63,6 +67,26 @@ export const MODELS = [
     modelId: 'gemini-3-5-flash',
     supportsImageInput: true,
     price: { input: 1.5, output: 9 },
+  },
+  {
+    id: 'gemini-3-1-pro',
+    label: 'Gemini 3.1 Pro',
+    provider: 'loora',
+    modelId: 'gemini-3-1-pro',
+    supportsImageInput: true,
+    price: {
+      input: 2,
+      output: 12,
+      contextOver200k: { input: 4, output: 18 },
+    },
+  },
+  {
+    id: 'gemini-3-1-flash-lite',
+    label: 'Gemini 3.1 Flash Lite',
+    provider: 'loora',
+    modelId: 'gemini-3-1-flash-lite',
+    supportsImageInput: true,
+    price: { input: 0.25, output: 1.5 },
   },
   {
     id: 'gpt-5.6-sol',

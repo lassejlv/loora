@@ -14,7 +14,10 @@ const MICRO = 1_000_000
 
 export function costMicroUsd(model: ModelKey, inputTokens: number, outputTokens: number) {
   // A price of $X per 1M tokens equals X micro-USD per token.
-  const price = getModel(model).price
+  const configuredPrice = getModel(model).price
+  const price = 'contextOver200k' in configuredPrice && inputTokens > 200_000
+    ? configuredPrice.contextOver200k
+    : configuredPrice
   return Math.round(inputTokens * price.input + outputTokens * price.output)
 }
 

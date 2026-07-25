@@ -12,16 +12,34 @@ describe('agent model policy', () => {
     expect(getModel('unknown').id).toBe(DEFAULT_MODEL)
   })
 
-  it('routes the managed model through Neon under the Loora label', () => {
-    const model = getModel('gemini-3-5-flash')
+  it('routes the managed models through Neon under the Loora label', () => {
+    const flash = getModel('gemini-3-5-flash')
+    const pro = getModel('gemini-3-1-pro')
+    const flashLite = getModel('gemini-3-1-flash-lite')
 
-    expect(model).toMatchObject({
+    expect(flash).toMatchObject({
       label: 'Gemini 3.5 Flash',
       modelId: 'gemini-3-5-flash',
       supportsImageInput: true,
       price: { input: 1.5, output: 9 },
     })
-    expect(getProvider(model.provider)).toEqual({
+    expect(pro).toMatchObject({
+      label: 'Gemini 3.1 Pro',
+      modelId: 'gemini-3-1-pro',
+      supportsImageInput: true,
+      price: {
+        input: 2,
+        output: 12,
+        contextOver200k: { input: 4, output: 18 },
+      },
+    })
+    expect(flashLite).toMatchObject({
+      label: 'Gemini 3.1 Flash Lite',
+      modelId: 'gemini-3-1-flash-lite',
+      supportsImageInput: true,
+      price: { input: 0.25, output: 1.5 },
+    })
+    expect(getProvider(pro.provider)).toEqual({
       kind: 'neon',
       label: 'Loora',
       requiredEnv: ['NEON_AI_GATEWAY_BASE_URL', 'NEON_AI_GATEWAY_TOKEN'],
