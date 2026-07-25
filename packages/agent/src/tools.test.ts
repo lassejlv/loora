@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test'
-import { convertToModelMessages, type ToolSet, type UIMessage } from 'ai'
+import type { ToolSet } from 'ai'
 import { createAgentBaseTools } from './tools'
 
 describe('agent tool contracts', () => {
@@ -29,43 +29,5 @@ describe('agent tool contracts', () => {
     ])
     expect(tools.createElement.execute).toBeUndefined()
     expect(tools.updateElement.execute).toBeUndefined()
-  })
-
-  it('uses the Neon-compatible image result shape for completed canvas views', async () => {
-    const tools = createAgentBaseTools({
-      userId: 'user-one',
-      githubConnected: false,
-      imageInputsEnabled: true,
-      useLegacyNeonImageOutput: true,
-    }) as ToolSet
-    const messages = [{
-      id: 'assistant-view',
-      role: 'assistant',
-      parts: [{
-        type: 'tool-viewCanvas',
-        toolCallId: 'view-one',
-        state: 'output-available',
-        input: { focus: 'layout' },
-        output: { image: 'data:image/png;base64,aGVsbG8=' },
-      }],
-    }] as UIMessage[]
-
-    const converted = await convertToModelMessages(messages, { tools })
-
-    expect(converted[1]).toMatchObject({
-      role: 'tool',
-      content: [{
-        type: 'tool-result',
-        output: {
-          type: 'content',
-          value: [{
-            type: 'image-data',
-            data: 'aGVsbG8=',
-            mediaType: 'image/png',
-          }],
-        },
-      }],
-    })
-    expect(JSON.stringify(converted)).not.toContain('[object Object]')
   })
 })

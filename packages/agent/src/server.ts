@@ -1,4 +1,3 @@
-import { neon } from '@neondatabase/ai-sdk-provider'
 import { createChatGPTProxyProvider } from '@opencoredev/loginwithchatgpt-ai'
 import {
   convertToModelMessages,
@@ -43,6 +42,7 @@ import { asset, designChat, designDraft, userPreferences } from '@loora/db/schem
 import { chatgptAuth } from './internal/chatgpt-auth'
 import { getGitHubStatus } from '@loora/auth/github'
 import { createGenerationUsageAccounting } from './internal/usage-accounting'
+import { createNeonModel } from './internal/neon-compat'
 
 export async function handleAgentChatGPTRequest(request: Request): Promise<Response> {
   const session = await requireSession(request)
@@ -184,7 +184,7 @@ export async function handleAgentChatRequest(request: Request): Promise<Response
         { status: 503 },
       )
     }
-    model = neon(modelConfig.modelId)
+    model = createNeonModel(modelConfig.modelId)
   }
   const imageInputsEnabled = modelSupportsImageInput(key)
   const providerOptions = usingChatGPT
@@ -263,7 +263,6 @@ export async function handleAgentChatRequest(request: Request): Promise<Response
     userId: session.user.id,
     githubConnected,
     imageInputsEnabled,
-    useLegacyNeonImageOutput: !usingChatGPT,
   })
 
   // Materialize the prompt and model messages before streamText so nothing in
