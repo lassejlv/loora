@@ -8,7 +8,7 @@ import {
 export const SETTINGS_TABS = ['account', 'agent', 'integrations', 'billing', 'shortcuts', 'admin'] as const
 export type SettingsTab = (typeof SETTINGS_TABS)[number]
 
-export const INTEGRATION_TABS = ['chatgpt', 'github', 'figma', 'mcp'] as const
+export const INTEGRATION_TABS = ['chatgpt', 'openrouter', 'github', 'figma', 'mcp'] as const
 export type IntegrationTab = (typeof INTEGRATION_TABS)[number]
 
 const LEGACY_INTEGRATION_SETTINGS = new Set<string>(INTEGRATION_TABS)

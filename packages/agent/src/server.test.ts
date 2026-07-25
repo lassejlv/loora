@@ -10,12 +10,16 @@ let flushAllowed = true
 let meterBalance = 100
 let topUpRemaining = 0
 let chatgptModels: string[] | null = ['gpt-5.6-sol']
+let openRouterApiKey: string | null = null
 let releaseCalls: Array<[string, string]> = []
 let chatTarget: { designId: string; draftId: string | null } | null = {
   designId: 'design-one',
   draftId: null,
 }
 let draftStatus: 'active' | 'proposed' | 'applied' | 'closed' | null = 'active'
+const createOpenRouterMock = mock(() => {
+  throw new Error('OpenRouter provider constructed')
+})
 
 const originalNeonBaseUrl = process.env.NEON_AI_GATEWAY_BASE_URL
 const originalNeonToken = process.env.NEON_AI_GATEWAY_TOKEN
@@ -89,6 +93,32 @@ mock.module('@loora/auth/github', () => ({
   viewRepositoryImage: async () => ({}),
 }))
 
+class MockOpenRouterIntegrationError extends Error {
+  constructor(
+    message: string,
+    readonly code: 'RECONNECT_REQUIRED' | 'NOT_CONFIGURED',
+  ) {
+    super(message)
+  }
+}
+
+mock.module('@loora/auth/openrouter', () => ({
+  OpenRouterIntegrationError: MockOpenRouterIntegrationError,
+  getOpenRouterApiKey: async () => {
+    if (!openRouterApiKey) {
+      throw new MockOpenRouterIntegrationError(
+        'Connect OpenRouter in Settings before using this model.',
+        'RECONNECT_REQUIRED',
+      )
+    }
+    return openRouterApiKey
+  },
+}))
+
+mock.module('@openrouter/ai-sdk-provider', () => ({
+  createOpenRouter: createOpenRouterMock,
+}))
+
 mock.module('./internal/chatgpt-auth', () => ({
   chatgptAuth: {
     getModels: async () => chatgptModels,
@@ -140,9 +170,11 @@ describe('agent server HTTP contract', () => {
     meterBalance = 100
     topUpRemaining = 0
     chatgptModels = ['gpt-5.6-sol']
+    openRouterApiKey = null
     releaseCalls = []
     chatTarget = { designId: 'design-one', draftId: null }
     draftStatus = 'active'
+    createOpenRouterMock.mockClear()
     process.env.NEON_AI_GATEWAY_BASE_URL = 'https://test-api.ai.us-east-2.aws.neon.tech'
     process.env.NEON_AI_GATEWAY_TOKEN = 'test-neon-token'
   })
@@ -210,6 +242,12 @@ describe('agent server HTTP contract', () => {
 
     expect(response.status).toBe(403)
     expect(await response.json()).toMatchObject({ code: 'TRIAL_CHATGPT_REQUIRED' })
+
+    const openRouter = await handleAgentChatRequest(chatRequest('openrouter-auto'))
+    expect(openRouter.status).toBe(401)
+    expect(await openRouter.json()).toMatchObject({
+      code: 'OPENROUTER_CONNECTION_REQUIRED',
+    })
   })
 
   it('preserves provider configuration and ChatGPT availability errors', async () => {
@@ -231,6 +269,28 @@ describe('agent server HTTP contract', () => {
     expect(unavailable.status).toBe(403)
     expect(await unavailable.json()).toEqual({
       error: 'GPT-5.6 Sol is not available on this ChatGPT account.',
+    })
+
+    const openRouter = await handleAgentChatRequest(chatRequest('openrouter-auto'))
+    expect(openRouter.status).toBe(401)
+    expect(await openRouter.json()).toEqual({
+      error: 'Connect OpenRouter in Settings before using this model.',
+      code: 'OPENROUTER_CONNECTION_REQUIRED',
+    })
+  })
+
+  it('constructs OpenRouter with the connected user key and Loora attribution', async () => {
+    signedIn = true
+    openRouterApiKey = 'sk-or-v1-user-key'
+
+    await expect(handleAgentChatRequest(chatRequest('openrouter-auto'))).rejects.toThrow(
+      'OpenRouter provider constructed',
+    )
+    expect(createOpenRouterMock).toHaveBeenCalledWith({
+      apiKey: 'sk-or-v1-user-key',
+      compatibility: 'strict',
+      appName: 'Loora',
+      appUrl: process.env.BETTER_AUTH_URL?.trim(),
     })
   })
 

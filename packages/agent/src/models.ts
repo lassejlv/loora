@@ -8,6 +8,10 @@ export type ProviderDefinition =
       kind: 'chatgpt'
       label: string
     }
+  | {
+      kind: 'openrouter'
+      label: string
+    }
 
 // Provider credentials are read from server-only environment variables and never reach the client.
 export const PROVIDERS = {
@@ -19,6 +23,10 @@ export const PROVIDERS = {
   chatgpt: {
     kind: 'chatgpt',
     label: 'ChatGPT',
+  },
+  openrouter: {
+    kind: 'openrouter',
+    label: 'OpenRouter',
   },
 } as const satisfies Record<string, ProviderDefinition>
 
@@ -111,6 +119,16 @@ export const MODELS = [
     provider: 'chatgpt',
     modelId: 'gpt-5.6-luna',
     supportsImageInput: true,
+    price: { input: 0, output: 0 },
+  },
+  {
+    id: 'openrouter-auto',
+    label: 'OpenRouter Auto',
+    provider: 'openrouter',
+    modelId: 'openrouter/auto',
+    // Auto routing does not guarantee that the selected upstream model accepts images.
+    supportsImageInput: false,
+    // Requests use the user's OpenRouter balance, not Loora credits.
     price: { input: 0, output: 0 },
   },
 ] as const satisfies readonly ModelDefinition[]

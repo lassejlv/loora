@@ -50,4 +50,20 @@ describe('agent model policy', () => {
     expect(getChatGPTReasoningEffort('high')).toBe('high')
     expect(getChatGPTReasoningEffort('unsupported')).toBe(DEFAULT_CHATGPT_REASONING_EFFORT)
   })
+
+  it('routes OpenRouter Auto through the user-funded OpenRouter provider', () => {
+    const auto = getModel('openrouter-auto')
+
+    expect(auto).toMatchObject({
+      label: 'OpenRouter Auto',
+      provider: 'openrouter',
+      modelId: 'openrouter/auto',
+      supportsImageInput: false,
+      price: { input: 0, output: 0 },
+    })
+    expect(getProvider(auto.provider)).toEqual({
+      kind: 'openrouter',
+      label: 'OpenRouter',
+    })
+  })
 })

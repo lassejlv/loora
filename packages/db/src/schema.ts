@@ -425,6 +425,27 @@ export const userPreferences = pgTable('user_preferences', {
     .notNull(),
 })
 
+// User-supplied AI provider credentials are encrypted before storage. The
+// provider name is part of the primary key so more BYOK providers can be added
+// without changing the ownership or deletion model.
+export const aiProviderCredential = pgTable(
+  'ai_provider_credential',
+  {
+    userId: text('user_id')
+      .notNull()
+      .references(() => user.id, { onDelete: 'cascade' }),
+    provider: text('provider').notNull(),
+    encryptedApiKey: text('encrypted_api_key').notNull(),
+    label: text('label'),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+    updatedAt: timestamp('updated_at')
+      .defaultNow()
+      .$onUpdate(() => new Date())
+      .notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.userId, table.provider] })],
+)
+
 export const billingEntitlement = pgTable('billing_entitlement', {
   userId: text('user_id')
     .primaryKey()

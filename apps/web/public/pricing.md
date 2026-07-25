@@ -28,7 +28,7 @@ Studio is $49 per month with 300 AI credits each month. It includes 3 times the 
 
 ## AI credits
 
-AI credits pay for Loora-managed model usage. Included credits reset each billing month and do not roll over. ChatGPT-backed requests require an active plan but do not consume Loora AI credits.
+AI credits pay for Loora-managed model usage. Included credits reset each billing month and do not roll over. ChatGPT-backed requests and requests made with your connected OpenRouter API key require an active plan but do not consume Loora AI credits.
 
 Running out of AI credits does not disable the editor, saved designs, history, exports, or handoffs. You can keep working manually, connect ChatGPT, or add prepaid credits.
 
@@ -51,4 +51,3 @@ Active, non-trial subscribers can add prepaid AI credits without changing plans.
 
 - Product: <https://loora.design>
 - Design system: <https://loora.design/design.md>
-

@@ -1,4 +1,4 @@
-import { cleanup, render, screen, waitFor } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, mock, test } from 'bun:test'
 import { createContext, useContext, type ReactNode } from 'react'
 import { withNuqsTestingAdapter } from 'nuqs/adapters/testing'
@@ -6,6 +6,9 @@ import { withNuqsTestingAdapter } from 'nuqs/adapters/testing'
 const billingStatus = mock()
 const listPublished = mock()
 const publishedEgress = mock()
+const openRouterStatus = mock()
+const connectOpenRouter = mock()
+const disconnectOpenRouter = mock()
 
 const TabsContext = createContext('')
 
@@ -15,6 +18,11 @@ mock.module('#/lib/orpc-client', () => ({
     publish: {
       listAll: listPublished,
       egress: publishedEgress,
+    },
+    openrouter: {
+      status: openRouterStatus,
+      connect: connectOpenRouter,
+      disconnect: disconnectOpenRouter,
     },
   },
 }))
@@ -108,6 +116,16 @@ describe('SettingsPanel billing visibility', () => {
       windowDays: 30,
       unlimited: true,
     })
+    openRouterStatus.mockReset().mockResolvedValue({
+      connected: false,
+      label: null,
+      updatedAt: null,
+    })
+    connectOpenRouter.mockReset().mockResolvedValue({
+      connected: true,
+      label: 'Loora key',
+    })
+    disconnectOpenRouter.mockReset().mockResolvedValue({ disconnected: true })
   })
 
   afterEach(() => cleanup())
@@ -125,5 +143,28 @@ describe('SettingsPanel billing visibility', () => {
     renderSettings('?settings=shortcuts')
 
     await waitFor(() => expect(screen.getByRole('tab', { name: 'Billing' })).toBeTruthy())
+  })
+
+  test('connects OpenRouter with a masked custom API key', async () => {
+    openRouterStatus
+      .mockResolvedValueOnce({ connected: false, label: null, updatedAt: null })
+      .mockResolvedValue({
+        connected: true,
+        label: 'Loora key',
+        updatedAt: new Date(),
+      })
+    renderSettings('?settings=integrations&integration=openrouter')
+
+    const input = await screen.findByPlaceholderText('sk-or-v1-…')
+    expect((input as HTMLInputElement).type).toBe('password')
+    fireEvent.change(input, { target: { value: 'sk-or-v1-user-secret' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Connect OpenRouter' }))
+
+    await waitFor(() =>
+      expect(connectOpenRouter).toHaveBeenCalledWith({
+        apiKey: 'sk-or-v1-user-secret',
+      }),
+    )
+    expect(await screen.findByText(/OpenRouter Auto is available/)).toBeTruthy()
   })
 })

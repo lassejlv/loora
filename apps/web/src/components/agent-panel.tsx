@@ -766,6 +766,8 @@ function ChatSession({
   const [chatGPTModels, setChatGPTModels] = useState<string[] | null>(null)
   const [loadingChatGPTModels, setLoadingChatGPTModels] = useState(false)
   const [chatGPTModelsError, setChatGPTModelsError] = useState<'disconnected' | 'failed' | null>(null)
+  const [openRouterConnected, setOpenRouterConnected] = useState<boolean | null>(null)
+  const [openRouterStatusError, setOpenRouterStatusError] = useState(false)
   const modelRef = useRef(model)
   modelRef.current = model
   const reasoningEffortRef = useRef(reasoningEffort)
@@ -796,6 +798,16 @@ function ChatSession({
       )
     } finally {
       setLoadingChatGPTModels(false)
+    }
+  }
+  const loadOpenRouterStatus = async () => {
+    setOpenRouterStatusError(false)
+    try {
+      const status = await orpc.openrouter.status()
+      setOpenRouterConnected(status.connected)
+    } catch {
+      setOpenRouterConnected(false)
+      setOpenRouterStatusError(true)
     }
   }
   const [chatReady, setChatReady] = useState(false)
@@ -1988,6 +2000,9 @@ function ChatSession({
                 chatGPTModelsError={chatGPTModelsError}
                 loadingChatGPTModels={loadingChatGPTModels}
                 onLoadChatGPTModels={loadChatGPTModels}
+                openRouterConnected={openRouterConnected}
+                openRouterStatusError={openRouterStatusError}
+                onLoadOpenRouterStatus={loadOpenRouterStatus}
                 onModelChange={changeModel}
               />
               {usingChatGPT ? (
@@ -2193,6 +2208,9 @@ function ModelPicker({
   chatGPTModelsError,
   loadingChatGPTModels,
   onLoadChatGPTModels,
+  openRouterConnected,
+  openRouterStatusError,
+  onLoadOpenRouterStatus,
   onModelChange,
 }: {
   model: string
@@ -2200,15 +2218,26 @@ function ModelPicker({
   chatGPTModelsError: 'disconnected' | 'failed' | null
   loadingChatGPTModels: boolean
   onLoadChatGPTModels: () => Promise<void>
+  openRouterConnected: boolean | null
+  openRouterStatusError: boolean
+  onLoadOpenRouterStatus: () => Promise<void>
   onModelChange: (model: string) => void
 }) {
-  const standardModels = MODELS.filter(({ provider }) => provider !== 'chatgpt')
+  const standardModels = MODELS.filter(({ provider }) => provider === 'loora')
+  const openRouterModels = openRouterConnected
+    ? MODELS.filter(({ provider }) => provider === 'openrouter')
+    : []
   const availableChatGPTModels = MODELS.filter(
     ({ provider, modelId }) => provider === 'chatgpt' && chatGPTModels?.includes(modelId),
   )
 
   return (
-    <DropdownMenu onOpenChange={(open) => open && void onLoadChatGPTModels()}>
+    <DropdownMenu
+      onOpenChange={(open) => {
+        if (!open) return
+        void Promise.all([onLoadChatGPTModels(), onLoadOpenRouterStatus()])
+      }}
+    >
       <DropdownMenuTrigger asChild>
         <button
           type="button"
@@ -2227,6 +2256,23 @@ function ModelPicker({
             {model === id && <CheckIcon className="text-foreground" />}
           </DropdownMenuItem>
         ))}
+        <DropdownMenuSeparator />
+        {openRouterModels.map(({ id, label, provider }) => (
+          <DropdownMenuItem key={id} onSelect={() => onModelChange(id)}>
+            <span className="min-w-0 flex-1 truncate">{label}</span>
+            <span className="text-xs text-muted-foreground">{PROVIDERS[provider].label}</span>
+            {model === id && <CheckIcon className="text-foreground" />}
+          </DropdownMenuItem>
+        ))}
+        {openRouterModels.length === 0 ? (
+          <DropdownMenuItem disabled>
+            {openRouterConnected === null
+              ? 'Checking OpenRouter…'
+              : openRouterStatusError
+                ? 'Could not load OpenRouter'
+                : 'Connect OpenRouter in Settings'}
+          </DropdownMenuItem>
+        ) : null}
         <DropdownMenuSeparator />
         {availableChatGPTModels.map(({ id, label, provider }) => (
           <DropdownMenuItem key={id} onSelect={() => onModelChange(id)}>

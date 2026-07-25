@@ -6,7 +6,7 @@ type TokenUsage = {
 }
 
 export function createGenerationUsageAccounting({
-  usingChatGPT,
+  unmetered,
   subscriberFunded,
   userId,
   model,
@@ -17,7 +17,7 @@ export function createGenerationUsageAccounting({
   releaseGenerationLease,
   logError = console.error,
 }: {
-  usingChatGPT: boolean
+  unmetered: boolean
   subscriberFunded: boolean
   userId: string
   model: ModelKey
@@ -47,7 +47,7 @@ export function createGenerationUsageAccounting({
       }
     },
     async onFinish({ totalUsage }: { totalUsage: TokenUsage }) {
-      if (usingChatGPT) return
+      if (unmetered) return
       try {
         const inputTokens = totalUsage.inputTokens ?? 0
         const outputTokens = totalUsage.outputTokens ?? 0

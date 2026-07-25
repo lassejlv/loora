@@ -38,6 +38,9 @@ const orpc = {
     clear: mock(),
     disconnect: mock(),
   },
+  openrouter: {
+    status: mock(),
+  },
 }
 
 mock.module('#/lib/orpc-client', () => ({ orpc }))
@@ -85,6 +88,11 @@ describe('AgentPanel empty response recovery', () => {
     })
     orpc.github.binding.mockResolvedValue(null)
     orpc.github.repositories.mockResolvedValue([])
+    orpc.openrouter.status.mockResolvedValue({
+      connected: false,
+      label: null,
+      updatedAt: null,
+    })
 
     Object.defineProperty(window, 'matchMedia', {
       configurable: true,

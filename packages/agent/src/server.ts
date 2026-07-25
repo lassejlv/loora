@@ -1,4 +1,5 @@
 import { createChatGPTProxyProvider } from '@opencoredev/loginwithchatgpt-ai'
+import { createOpenRouter } from '@openrouter/ai-sdk-provider'
 import {
   convertToModelMessages,
   stepCountIs,
@@ -41,6 +42,10 @@ import { db } from '@loora/db'
 import { asset, designChat, designDraft, userPreferences } from '@loora/db/schema'
 import { chatgptAuth } from './internal/chatgpt-auth'
 import { getGitHubStatus } from '@loora/auth/github'
+import {
+  getOpenRouterApiKey,
+  OpenRouterIntegrationError,
+} from '@loora/auth/openrouter'
 import { createGenerationUsageAccounting } from './internal/usage-accounting'
 import { createNeonModel } from './internal/neon-compat'
 
@@ -147,11 +152,15 @@ export async function handleAgentChatRequest(request: Request): Promise<Response
   const providerConfig = getProvider(modelConfig.provider)
   const key = modelConfig.id
   const usingChatGPT = providerConfig.kind === 'chatgpt'
+  const usingOpenRouter = providerConfig.kind === 'openrouter'
+  const usingUserProvider = usingChatGPT || usingOpenRouter
+  const usingNeon = providerConfig.kind === 'neon'
   const reasoningEffort = getChatGPTReasoningEffort(requestedReasoningEffort)
-  if (!usingChatGPT && !billing.managedAiAccess) {
+  if (!usingUserProvider && !billing.managedAiAccess) {
     return Response.json(
       {
-        error: 'Managed AI is unavailable during the Pro trial. Connect ChatGPT in Settings to use AI.',
+        error:
+          'Managed AI is unavailable during the Pro trial. Connect ChatGPT or OpenRouter in Settings to use AI.',
         code: 'TRIAL_CHATGPT_REQUIRED',
       },
       { status: 403 },
@@ -178,6 +187,26 @@ export async function handleAgentChatRequest(request: Request): Promise<Response
       defaultModel: modelConfig.modelId,
     })
     model = provider(modelConfig.modelId)
+  } else if (usingOpenRouter) {
+    let apiKey: string
+    try {
+      apiKey = await getOpenRouterApiKey(session.user.id)
+    } catch (error) {
+      if (error instanceof OpenRouterIntegrationError) {
+        return Response.json(
+          { error: error.message, code: 'OPENROUTER_CONNECTION_REQUIRED' },
+          { status: error.code === 'NOT_CONFIGURED' ? 503 : 401 },
+        )
+      }
+      throw error
+    }
+    const provider = createOpenRouter({
+      apiKey,
+      compatibility: 'strict',
+      appName: 'Loora',
+      appUrl: process.env.BETTER_AUTH_URL?.trim(),
+    })
+    model = provider(modelConfig.modelId)
   } else {
     const missingEnv = providerConfig.requiredEnv.filter((name) => !process.env[name])
     if (missingEnv.length > 0) {
@@ -196,7 +225,7 @@ export async function handleAgentChatRequest(request: Request): Promise<Response
     : undefined
   let generationLease: string | null = null
   let includedCreditsAvailable = 0
-  const subscriberFunded = usesPolarCredits(usingChatGPT, billing.source)
+  const subscriberFunded = usesPolarCredits(usingUserProvider, billing.source)
 
   if (subscriberFunded) {
     generationLease = await acquireGenerationLease(session.user.id)
@@ -231,7 +260,7 @@ export async function handleAgentChatRequest(request: Request): Promise<Response
         { status: 503 },
       )
     }
-  } else if (!usingChatGPT) {
+  } else if (!usingUserProvider) {
     const limitError = await checkLimits(session.user.id)
     if (limitError) {
       return Response.json({ error: limitError }, { status: 429 })
@@ -239,7 +268,7 @@ export async function handleAgentChatRequest(request: Request): Promise<Response
   }
 
   const usageAccounting = createGenerationUsageAccounting({
-    usingChatGPT,
+    unmetered: usingUserProvider,
     subscriberFunded,
     userId: session.user.id,
     model: key,
@@ -248,6 +277,9 @@ export async function handleAgentChatRequest(request: Request): Promise<Response
     recordManagedUsage: recordUsage,
     recordSubscriberUsage,
     releaseGenerationLease,
+    logError: usingOpenRouter
+      ? () => console.error('[chat] OpenRouter stream failed.')
+      : (...args) => console.error(...args),
   })
 
   let assets: { id: string; name: string; mediaType: string }[] = []
@@ -286,7 +318,7 @@ export async function handleAgentChatRequest(request: Request): Promise<Response
   })
   const preparedMessages = messagesForModel(messages, imageInputsEnabled)
   const modelMessages = await convertToModelMessages(
-    usingChatGPT ? preparedMessages : bridgeCompletedToolTurn(preparedMessages),
+    usingNeon ? bridgeCompletedToolTurn(preparedMessages) : preparedMessages,
     { tools, ignoreIncompleteToolCalls: true },
   )
 
@@ -297,7 +329,7 @@ export async function handleAgentChatRequest(request: Request): Promise<Response
     messages: modelMessages,
     // Neon currently omits Gemini thought signatures from tool calls. Keep managed
     // generations to one tool step, then use the UI's existing automatic continuation.
-    stopWhen: stepCountIs(usingChatGPT ? 40 : 1),
+    stopWhen: stepCountIs(usingNeon ? 1 : 40),
     tools,
     // Design tasks (multi-shape layouts, components) routinely need >60s; a short abort
     // surfaces to the client as an empty successful stream and trips empty-response retries.
