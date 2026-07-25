@@ -114,6 +114,7 @@ import {
 } from '#/lib/mentions'
 
 type ChatState = ReturnType<typeof useChat>
+type CustomAiProviderConnections = Awaited<ReturnType<typeof orpc.aiProvider.list>>
 type ChatSummary = {
   id: string
   draftId?: string | null
@@ -768,6 +769,9 @@ function ChatSession({
   const [chatGPTModelsError, setChatGPTModelsError] = useState<'disconnected' | 'failed' | null>(null)
   const [openRouterConnected, setOpenRouterConnected] = useState<boolean | null>(null)
   const [openRouterStatusError, setOpenRouterStatusError] = useState(false)
+  const [customAiProviderConnections, setCustomAiProviderConnections] =
+    useState<CustomAiProviderConnections | null>(null)
+  const [customAiProviderStatusError, setCustomAiProviderStatusError] = useState(false)
   const modelRef = useRef(model)
   modelRef.current = model
   const reasoningEffortRef = useRef(reasoningEffort)
@@ -808,6 +812,15 @@ function ChatSession({
     } catch {
       setOpenRouterConnected(false)
       setOpenRouterStatusError(true)
+    }
+  }
+  const loadCustomAiProviderStatus = async () => {
+    setCustomAiProviderStatusError(false)
+    try {
+      setCustomAiProviderConnections(await orpc.aiProvider.list())
+    } catch {
+      setCustomAiProviderConnections(null)
+      setCustomAiProviderStatusError(true)
     }
   }
   const [chatReady, setChatReady] = useState(false)
@@ -2003,6 +2016,9 @@ function ChatSession({
                 openRouterConnected={openRouterConnected}
                 openRouterStatusError={openRouterStatusError}
                 onLoadOpenRouterStatus={loadOpenRouterStatus}
+                customAiProviderConnections={customAiProviderConnections}
+                customAiProviderStatusError={customAiProviderStatusError}
+                onLoadCustomAiProviderStatus={loadCustomAiProviderStatus}
                 onModelChange={changeModel}
               />
               {usingChatGPT ? (
@@ -2211,6 +2227,9 @@ function ModelPicker({
   openRouterConnected,
   openRouterStatusError,
   onLoadOpenRouterStatus,
+  customAiProviderConnections,
+  customAiProviderStatusError,
+  onLoadCustomAiProviderStatus,
   onModelChange,
 }: {
   model: string
@@ -2221,6 +2240,9 @@ function ModelPicker({
   openRouterConnected: boolean | null
   openRouterStatusError: boolean
   onLoadOpenRouterStatus: () => Promise<void>
+  customAiProviderConnections: CustomAiProviderConnections | null
+  customAiProviderStatusError: boolean
+  onLoadCustomAiProviderStatus: () => Promise<void>
   onModelChange: (model: string) => void
 }) {
   const standardModels = MODELS.filter(({ provider }) => provider === 'loora')
@@ -2230,12 +2252,22 @@ function ModelPicker({
   const availableChatGPTModels = MODELS.filter(
     ({ provider, modelId }) => provider === 'chatgpt' && chatGPTModels?.includes(modelId),
   )
+  const customProviderModels = (['google', 'openai', 'anthropic'] as const)
+    .flatMap((provider) =>
+      customAiProviderConnections?.[provider].connected
+        ? MODELS.filter((model) => model.provider === provider)
+        : [],
+    )
 
   return (
     <DropdownMenu
       onOpenChange={(open) => {
         if (!open) return
-        void Promise.all([onLoadChatGPTModels(), onLoadOpenRouterStatus()])
+        void Promise.all([
+          onLoadChatGPTModels(),
+          onLoadOpenRouterStatus(),
+          onLoadCustomAiProviderStatus(),
+        ])
       }}
     >
       <DropdownMenuTrigger asChild>
@@ -2271,6 +2303,23 @@ function ModelPicker({
               : openRouterStatusError
                 ? 'Could not load OpenRouter'
                 : 'Connect OpenRouter in Settings'}
+          </DropdownMenuItem>
+        ) : null}
+        <DropdownMenuSeparator />
+        {customProviderModels.map(({ id, label, provider }) => (
+          <DropdownMenuItem key={id} onSelect={() => onModelChange(id)}>
+            <span className="min-w-0 flex-1 truncate">{label}</span>
+            <span className="text-xs text-muted-foreground">{PROVIDERS[provider].label}</span>
+            {model === id && <CheckIcon className="text-foreground" />}
+          </DropdownMenuItem>
+        ))}
+        {customProviderModels.length === 0 ? (
+          <DropdownMenuItem disabled>
+            {customAiProviderStatusError
+              ? 'Could not load API key providers'
+              : customAiProviderConnections === null
+                ? 'Checking API key providers…'
+                : 'Add Google, OpenAI, or Anthropic keys in Settings'}
           </DropdownMenuItem>
         ) : null}
         <DropdownMenuSeparator />

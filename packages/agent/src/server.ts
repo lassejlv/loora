@@ -1,5 +1,8 @@
 import { createChatGPTProxyProvider } from '@opencoredev/loginwithchatgpt-ai'
 import { createOpenRouter } from '@openrouter/ai-sdk-provider'
+import { createAnthropic } from '@ai-sdk/anthropic'
+import { createGoogle } from '@ai-sdk/google'
+import { createOpenAI } from '@ai-sdk/openai'
 import {
   convertToModelMessages,
   stepCountIs,
@@ -46,6 +49,10 @@ import {
   getOpenRouterApiKey,
   OpenRouterIntegrationError,
 } from '@loora/auth/openrouter'
+import {
+  AiProviderCredentialError,
+  getAiProviderApiKey,
+} from '@loora/auth/ai-provider-credentials'
 import { createGenerationUsageAccounting } from './internal/usage-accounting'
 import { createNeonModel } from './internal/neon-compat'
 
@@ -153,14 +160,15 @@ export async function handleAgentChatRequest(request: Request): Promise<Response
   const key = modelConfig.id
   const usingChatGPT = providerConfig.kind === 'chatgpt'
   const usingOpenRouter = providerConfig.kind === 'openrouter'
-  const usingUserProvider = usingChatGPT || usingOpenRouter
+  const usingCustomApiKey = providerConfig.kind === 'byok'
+  const usingUserProvider = usingChatGPT || usingOpenRouter || usingCustomApiKey
   const usingNeon = providerConfig.kind === 'neon'
   const reasoningEffort = getChatGPTReasoningEffort(requestedReasoningEffort)
   if (!usingUserProvider && !billing.managedAiAccess) {
     return Response.json(
       {
         error:
-          'Managed AI is unavailable during the Pro trial. Connect ChatGPT or OpenRouter in Settings to use AI.',
+          'Managed AI is unavailable during the Pro trial. Connect ChatGPT or add your own provider API key in Settings to use AI.',
         code: 'TRIAL_CHATGPT_REQUIRED',
       },
       { status: 403 },
@@ -207,6 +215,30 @@ export async function handleAgentChatRequest(request: Request): Promise<Response
       appUrl: process.env.BETTER_AUTH_URL?.trim(),
     })
     model = provider(modelConfig.modelId)
+  } else if (usingCustomApiKey) {
+    let apiKey: string
+    try {
+      apiKey = await getAiProviderApiKey(
+        session.user.id,
+        providerConfig.credentialProvider,
+      )
+    } catch (error) {
+      if (error instanceof AiProviderCredentialError) {
+        return Response.json(
+          { error: error.message, code: 'AI_PROVIDER_CONNECTION_REQUIRED' },
+          { status: error.code === 'NOT_CONFIGURED' ? 503 : 401 },
+        )
+      }
+      throw error
+    }
+
+    if (providerConfig.credentialProvider === 'google') {
+      model = createGoogle({ apiKey })(modelConfig.modelId)
+    } else if (providerConfig.credentialProvider === 'openai') {
+      model = createOpenAI({ apiKey })(modelConfig.modelId)
+    } else {
+      model = createAnthropic({ apiKey })(modelConfig.modelId)
+    }
   } else {
     const missingEnv = providerConfig.requiredEnv.filter((name) => !process.env[name])
     if (missingEnv.length > 0) {
@@ -221,6 +253,7 @@ export async function handleAgentChatRequest(request: Request): Promise<Response
   }
   const imageInputsEnabled = modelSupportsImageInput(key)
   const providerOptions = usingChatGPT
+    || (usingCustomApiKey && providerConfig.credentialProvider === 'openai')
     ? { openai: { reasoningEffort } }
     : undefined
   let generationLease: string | null = null
@@ -277,8 +310,8 @@ export async function handleAgentChatRequest(request: Request): Promise<Response
     recordManagedUsage: recordUsage,
     recordSubscriberUsage,
     releaseGenerationLease,
-    logError: usingOpenRouter
-      ? () => console.error('[chat] OpenRouter stream failed.')
+    logError: usingOpenRouter || usingCustomApiKey
+      ? () => console.error('[chat] User-funded provider stream failed.')
       : (...args) => console.error(...args),
   })
 

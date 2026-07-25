@@ -66,4 +66,45 @@ describe('agent model policy', () => {
       label: 'OpenRouter',
     })
   })
+
+  it('routes custom API key models through their native providers', () => {
+    expect(getModel('google-gemini-3-5-flash')).toMatchObject({
+      provider: 'google',
+      modelId: 'gemini-3.5-flash',
+      supportsImageInput: true,
+      price: { input: 0, output: 0 },
+    })
+    expect(getModel('google-gemini-3-1-pro')).toMatchObject({
+      provider: 'google',
+      modelId: 'gemini-3.1-pro-preview',
+    })
+    expect(getProvider('google')).toEqual({
+      kind: 'byok',
+      label: 'Google',
+      credentialProvider: 'google',
+    })
+
+    expect(getModel('openai-gpt-5-6-sol')).toMatchObject({
+      provider: 'openai',
+      modelId: 'gpt-5.6-sol',
+      price: { input: 0, output: 0 },
+    })
+    expect(getProvider('openai')).toEqual({
+      kind: 'byok',
+      label: 'OpenAI',
+      credentialProvider: 'openai',
+    })
+
+    expect(getModel('anthropic-claude-opus-5')).toMatchObject({
+      provider: 'anthropic',
+      modelId: 'claude-opus-5',
+      supportsImageInput: true,
+      price: { input: 0, output: 0 },
+    })
+    expect(getProvider('anthropic')).toEqual({
+      kind: 'byok',
+      label: 'Anthropic',
+      credentialProvider: 'anthropic',
+    })
+  })
 })

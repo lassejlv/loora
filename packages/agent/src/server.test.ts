@@ -11,6 +11,7 @@ let meterBalance = 100
 let topUpRemaining = 0
 let chatgptModels: string[] | null = ['gpt-5.6-sol']
 let openRouterApiKey: string | null = null
+let customApiKeys: Partial<Record<'google' | 'openai' | 'anthropic', string>> = {}
 let releaseCalls: Array<[string, string]> = []
 let chatTarget: { designId: string; draftId: string | null } | null = {
   designId: 'design-one',
@@ -20,6 +21,18 @@ let draftStatus: 'active' | 'proposed' | 'applied' | 'closed' | null = 'active'
 const createOpenRouterMock = mock(() => {
   throw new Error('OpenRouter provider constructed')
 })
+const createGoogleModelMock = mock(() => {
+  throw new Error('Google provider constructed')
+})
+const createOpenAIModelMock = mock(() => {
+  throw new Error('OpenAI provider constructed')
+})
+const createAnthropicModelMock = mock(() => {
+  throw new Error('Anthropic provider constructed')
+})
+const createGoogleMock = mock(() => createGoogleModelMock)
+const createOpenAIMock = mock(() => createOpenAIModelMock)
+const createAnthropicMock = mock(() => createAnthropicModelMock)
 
 const originalNeonBaseUrl = process.env.NEON_AI_GATEWAY_BASE_URL
 const originalNeonToken = process.env.NEON_AI_GATEWAY_TOKEN
@@ -119,6 +132,36 @@ mock.module('@openrouter/ai-sdk-provider', () => ({
   createOpenRouter: createOpenRouterMock,
 }))
 
+class MockAiProviderCredentialError extends Error {
+  constructor(
+    message: string,
+    readonly code: 'RECONNECT_REQUIRED' | 'NOT_CONFIGURED',
+  ) {
+    super(message)
+  }
+}
+
+mock.module('@loora/auth/ai-provider-credentials', () => ({
+  AiProviderCredentialError: MockAiProviderCredentialError,
+  getAiProviderApiKey: async (
+    _userId: string,
+    provider: 'google' | 'openai' | 'anthropic',
+  ) => {
+    const key = customApiKeys[provider]
+    if (!key) {
+      throw new MockAiProviderCredentialError(
+        `Connect ${provider} in Settings before using this model.`,
+        'RECONNECT_REQUIRED',
+      )
+    }
+    return key
+  },
+}))
+
+mock.module('@ai-sdk/google', () => ({ createGoogle: createGoogleMock }))
+mock.module('@ai-sdk/openai', () => ({ createOpenAI: createOpenAIMock }))
+mock.module('@ai-sdk/anthropic', () => ({ createAnthropic: createAnthropicMock }))
+
 mock.module('./internal/chatgpt-auth', () => ({
   chatgptAuth: {
     getModels: async () => chatgptModels,
@@ -171,10 +214,17 @@ describe('agent server HTTP contract', () => {
     topUpRemaining = 0
     chatgptModels = ['gpt-5.6-sol']
     openRouterApiKey = null
+    customApiKeys = {}
     releaseCalls = []
     chatTarget = { designId: 'design-one', draftId: null }
     draftStatus = 'active'
     createOpenRouterMock.mockClear()
+    createGoogleMock.mockClear()
+    createGoogleModelMock.mockClear()
+    createOpenAIMock.mockClear()
+    createOpenAIModelMock.mockClear()
+    createAnthropicMock.mockClear()
+    createAnthropicModelMock.mockClear()
     process.env.NEON_AI_GATEWAY_BASE_URL = 'https://test-api.ai.us-east-2.aws.neon.tech'
     process.env.NEON_AI_GATEWAY_TOKEN = 'test-neon-token'
   })
@@ -248,6 +298,12 @@ describe('agent server HTTP contract', () => {
     expect(await openRouter.json()).toMatchObject({
       code: 'OPENROUTER_CONNECTION_REQUIRED',
     })
+
+    const google = await handleAgentChatRequest(chatRequest('google-gemini-3-5-flash'))
+    expect(google.status).toBe(401)
+    expect(await google.json()).toMatchObject({
+      code: 'AI_PROVIDER_CONNECTION_REQUIRED',
+    })
   })
 
   it('preserves provider configuration and ChatGPT availability errors', async () => {
@@ -292,6 +348,33 @@ describe('agent server HTTP contract', () => {
       appName: 'Loora',
       appUrl: process.env.BETTER_AUTH_URL?.trim(),
     })
+  })
+
+  it('constructs native providers with the connected user API keys', async () => {
+    signedIn = true
+    customApiKeys = {
+      google: 'google-user-key',
+      openai: 'openai-user-key',
+      anthropic: 'anthropic-user-key',
+    }
+
+    await expect(
+      handleAgentChatRequest(chatRequest('google-gemini-3-5-flash')),
+    ).rejects.toThrow('Google provider constructed')
+    expect(createGoogleMock).toHaveBeenCalledWith({ apiKey: 'google-user-key' })
+    expect(createGoogleModelMock).toHaveBeenCalledWith('gemini-3.5-flash')
+
+    await expect(
+      handleAgentChatRequest(chatRequest('openai-gpt-5-6-sol')),
+    ).rejects.toThrow('OpenAI provider constructed')
+    expect(createOpenAIMock).toHaveBeenCalledWith({ apiKey: 'openai-user-key' })
+    expect(createOpenAIModelMock).toHaveBeenCalledWith('gpt-5.6-sol')
+
+    await expect(
+      handleAgentChatRequest(chatRequest('anthropic-claude-sonnet-5')),
+    ).rejects.toThrow('Anthropic provider constructed')
+    expect(createAnthropicMock).toHaveBeenCalledWith({ apiKey: 'anthropic-user-key' })
+    expect(createAnthropicModelMock).toHaveBeenCalledWith('claude-sonnet-5')
   })
 
   it('rejects lease conflicts before consuming credits', async () => {

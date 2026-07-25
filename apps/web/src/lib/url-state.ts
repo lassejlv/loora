@@ -8,10 +8,20 @@ import {
 export const SETTINGS_TABS = ['account', 'agent', 'integrations', 'billing', 'shortcuts', 'admin'] as const
 export type SettingsTab = (typeof SETTINGS_TABS)[number]
 
-export const INTEGRATION_TABS = ['chatgpt', 'openrouter', 'github', 'figma', 'mcp'] as const
+export const INTEGRATION_TABS = ['providers', 'github', 'figma', 'mcp'] as const
 export type IntegrationTab = (typeof INTEGRATION_TABS)[number]
 
-const LEGACY_INTEGRATION_SETTINGS = new Set<string>(INTEGRATION_TABS)
+const LEGACY_INTEGRATION_SETTINGS = new Set<string>([
+  ...INTEGRATION_TABS,
+  'chatgpt',
+  'openrouter',
+])
+
+function integrationTab(value: string): IntegrationTab {
+  return value === 'chatgpt' || value === 'openrouter'
+    ? 'providers'
+    : value as IntegrationTab
+}
 
 export const editorSearchParams = {
   d: parseAsString,
@@ -62,12 +72,12 @@ export function bootstrapEditorSearch(activeId: string): Partial<{
   const settingsRaw = raw.get('settings')
   if (settingsRaw && LEGACY_INTEGRATION_SETTINGS.has(settingsRaw)) {
     patch.settings = 'integrations'
-    patch.integration = settingsRaw as IntegrationTab
+    patch.integration = integrationTab(settingsRaw)
   } else if (settingsRaw === 'integrations') {
     patch.settings = 'integrations'
     const integrationRaw = raw.get('integration')
     if (integrationRaw && LEGACY_INTEGRATION_SETTINGS.has(integrationRaw)) {
-      patch.integration = integrationRaw as IntegrationTab
+      patch.integration = integrationTab(integrationRaw)
     }
   } else if (settingsRaw && (SETTINGS_TABS as readonly string[]).includes(settingsRaw)) {
     patch.settings = settingsRaw as SettingsTab

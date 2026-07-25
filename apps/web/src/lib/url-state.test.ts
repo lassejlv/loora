@@ -21,6 +21,26 @@ describe('bootstrapEditorSearch', () => {
     })
   })
 
+  test('maps old provider deep-links into the combined provider tab', () => {
+    window.history.replaceState(
+      {},
+      '',
+      '/?settings=integrations&integration=openrouter',
+    )
+    expect(bootstrapEditorSearch('doc_1')).toEqual({
+      d: 'doc_1',
+      settings: 'integrations',
+      integration: 'providers',
+    })
+
+    window.history.replaceState({}, '', '/?settings=chatgpt')
+    expect(bootstrapEditorSearch('doc_1')).toEqual({
+      d: 'doc_1',
+      settings: 'integrations',
+      integration: 'providers',
+    })
+  })
+
   test('opens billing on topup success', () => {
     window.history.replaceState({}, '', '/?topup=success')
     expect(bootstrapEditorSearch('doc_1')).toEqual({

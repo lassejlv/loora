@@ -18,7 +18,7 @@ Loora has two monthly plans. Both include the full canvas editor, saved designs,
 
 ### Pro
 
-Pro is $20 per month and begins with a 3-day free trial. During the trial, the full editor is available and you can connect ChatGPT for AI features. Loora-managed AI and prepaid credit top-ups unlock after the trial ends.
+Pro is $20 per month and begins with a 3-day free trial. During the trial, the full editor is available and you can connect ChatGPT or add your own provider API key for AI features. Loora-managed AI and prepaid credit top-ups unlock after the trial ends.
 
 Unless canceled, the subscription renews at $20 per month when the trial ends.
 
@@ -28,9 +28,9 @@ Studio is $49 per month with 300 AI credits each month. It includes 3 times the 
 
 ## AI credits
 
-AI credits pay for Loora-managed model usage. Included credits reset each billing month and do not roll over. ChatGPT-backed requests and requests made with your connected OpenRouter API key require an active plan but do not consume Loora AI credits.
+AI credits pay for Loora-managed model usage. Included credits reset each billing month and do not roll over. ChatGPT-backed requests and requests made with connected OpenRouter, Google Gemini, OpenAI, or Anthropic API keys require an active plan but do not consume Loora AI credits.
 
-Running out of AI credits does not disable the editor, saved designs, history, exports, or handoffs. You can keep working manually, connect ChatGPT, or add prepaid credits.
+Running out of AI credits does not disable the editor, saved designs, history, exports, or handoffs. You can keep working manually, use a connected provider, or add prepaid credits.
 
 ## Prepaid credits
 

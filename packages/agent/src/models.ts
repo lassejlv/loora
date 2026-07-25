@@ -12,8 +12,13 @@ export type ProviderDefinition =
       kind: 'openrouter'
       label: string
     }
+  | {
+      kind: 'byok'
+      label: string
+      credentialProvider: 'google' | 'openai' | 'anthropic'
+    }
 
-// Provider credentials are read from server-only environment variables and never reach the client.
+// Provider credentials are resolved server-side and never included in this client-safe catalog.
 export const PROVIDERS = {
   loora: {
     kind: 'neon',
@@ -27,6 +32,21 @@ export const PROVIDERS = {
   openrouter: {
     kind: 'openrouter',
     label: 'OpenRouter',
+  },
+  google: {
+    kind: 'byok',
+    label: 'Google',
+    credentialProvider: 'google',
+  },
+  openai: {
+    kind: 'byok',
+    label: 'OpenAI',
+    credentialProvider: 'openai',
+  },
+  anthropic: {
+    kind: 'byok',
+    label: 'Anthropic',
+    credentialProvider: 'anthropic',
   },
 } as const satisfies Record<string, ProviderDefinition>
 
@@ -129,6 +149,70 @@ export const MODELS = [
     // Auto routing does not guarantee that the selected upstream model accepts images.
     supportsImageInput: false,
     // Requests use the user's OpenRouter balance, not Loora credits.
+    price: { input: 0, output: 0 },
+  },
+  {
+    id: 'google-gemini-3-5-flash',
+    label: 'Gemini 3.5 Flash',
+    provider: 'google',
+    modelId: 'gemini-3.5-flash',
+    supportsImageInput: true,
+    price: { input: 0, output: 0 },
+  },
+  {
+    id: 'google-gemini-3-1-pro',
+    label: 'Gemini 3.1 Pro',
+    provider: 'google',
+    modelId: 'gemini-3.1-pro-preview',
+    supportsImageInput: true,
+    price: { input: 0, output: 0 },
+  },
+  {
+    id: 'google-gemini-3-1-flash-lite',
+    label: 'Gemini 3.1 Flash Lite',
+    provider: 'google',
+    modelId: 'gemini-3.1-flash-lite',
+    supportsImageInput: true,
+    price: { input: 0, output: 0 },
+  },
+  {
+    id: 'openai-gpt-5-6-sol',
+    label: 'GPT-5.6 Sol',
+    provider: 'openai',
+    modelId: 'gpt-5.6-sol',
+    supportsImageInput: true,
+    price: { input: 0, output: 0 },
+  },
+  {
+    id: 'openai-gpt-5-6-terra',
+    label: 'GPT-5.6 Terra',
+    provider: 'openai',
+    modelId: 'gpt-5.6-terra',
+    supportsImageInput: true,
+    price: { input: 0, output: 0 },
+  },
+  {
+    id: 'openai-gpt-5-6-luna',
+    label: 'GPT-5.6 Luna',
+    provider: 'openai',
+    modelId: 'gpt-5.6-luna',
+    supportsImageInput: true,
+    price: { input: 0, output: 0 },
+  },
+  {
+    id: 'anthropic-claude-opus-5',
+    label: 'Claude Opus 5',
+    provider: 'anthropic',
+    modelId: 'claude-opus-5',
+    supportsImageInput: true,
+    price: { input: 0, output: 0 },
+  },
+  {
+    id: 'anthropic-claude-sonnet-5',
+    label: 'Claude Sonnet 5',
+    provider: 'anthropic',
+    modelId: 'claude-sonnet-5',
+    supportsImageInput: true,
     price: { input: 0, output: 0 },
   },
 ] as const satisfies readonly ModelDefinition[]

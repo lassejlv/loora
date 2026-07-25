@@ -9,6 +9,9 @@ const publishedEgress = mock()
 const openRouterStatus = mock()
 const connectOpenRouter = mock()
 const disconnectOpenRouter = mock()
+const aiProviderStatus = mock()
+const connectAiProvider = mock()
+const disconnectAiProvider = mock()
 
 const TabsContext = createContext('')
 
@@ -23,6 +26,11 @@ mock.module('#/lib/orpc-client', () => ({
       status: openRouterStatus,
       connect: connectOpenRouter,
       disconnect: disconnectOpenRouter,
+    },
+    aiProvider: {
+      status: aiProviderStatus,
+      connect: connectAiProvider,
+      disconnect: disconnectAiProvider,
     },
   },
 }))
@@ -126,6 +134,12 @@ describe('SettingsPanel billing visibility', () => {
       label: 'Loora key',
     })
     disconnectOpenRouter.mockReset().mockResolvedValue({ disconnected: true })
+    aiProviderStatus.mockReset().mockResolvedValue({
+      connected: false,
+      updatedAt: null,
+    })
+    connectAiProvider.mockReset().mockResolvedValue({ connected: true })
+    disconnectAiProvider.mockReset().mockResolvedValue({ disconnected: true })
   })
 
   afterEach(() => cleanup())
@@ -145,6 +159,17 @@ describe('SettingsPanel billing visibility', () => {
     await waitFor(() => expect(screen.getByRole('tab', { name: 'Billing' })).toBeTruthy())
   })
 
+  test('keeps every AI provider under one integration tab', async () => {
+    renderSettings('?settings=integrations&integration=providers')
+
+    expect(await screen.findByRole('tab', { name: 'AI providers' })).toBeTruthy()
+    expect(screen.queryByRole('tab', { name: 'ChatGPT' })).toBeNull()
+    expect(screen.queryByRole('tab', { name: 'OpenRouter' })).toBeNull()
+    expect(await screen.findByText('Google Gemini')).toBeTruthy()
+    expect(await screen.findByText('OpenAI')).toBeTruthy()
+    expect(await screen.findByText('Anthropic')).toBeTruthy()
+  })
+
   test('connects OpenRouter with a masked custom API key', async () => {
     openRouterStatus
       .mockResolvedValueOnce({ connected: false, label: null, updatedAt: null })
@@ -153,7 +178,7 @@ describe('SettingsPanel billing visibility', () => {
         label: 'Loora key',
         updatedAt: new Date(),
       })
-    renderSettings('?settings=integrations&integration=openrouter')
+    renderSettings('?settings=integrations&integration=providers')
 
     const input = await screen.findByPlaceholderText('sk-or-v1-…')
     expect((input as HTMLInputElement).type).toBe('password')
@@ -166,5 +191,25 @@ describe('SettingsPanel billing visibility', () => {
       }),
     )
     expect(await screen.findByText(/OpenRouter Auto is available/)).toBeTruthy()
+  })
+
+  test('connects Google Gemini with a masked custom API key', async () => {
+    aiProviderStatus
+      .mockResolvedValueOnce({ connected: false, updatedAt: null })
+      .mockResolvedValue({ connected: true, updatedAt: new Date() })
+    renderSettings('?settings=integrations&integration=providers')
+
+    const input = await screen.findByPlaceholderText('AIza…')
+    expect((input as HTMLInputElement).type).toBe('password')
+    fireEvent.change(input, { target: { value: 'AIza-user-secret' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Connect Google Gemini' }))
+
+    await waitFor(() =>
+      expect(connectAiProvider).toHaveBeenCalledWith({
+        provider: 'google',
+        apiKey: 'AIza-user-secret',
+      }),
+    )
+    expect(await screen.findByText(/Gemini 3.5 Flash.*agent model picker/)).toBeTruthy()
   })
 })

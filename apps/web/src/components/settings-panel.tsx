@@ -25,6 +25,7 @@ import { authClient } from '@loora/auth/client'
 import { orpc } from '#/lib/orpc-client'
 import { ChatGPTAccount } from '#/components/chatgpt-account'
 import { OpenRouterAccount } from '#/components/openrouter-account'
+import { CustomAiProviderAccounts } from '#/components/custom-ai-provider-accounts'
 import { CreditTopUp } from '#/components/credit-top-up'
 import { GitHubAccount } from '#/components/github-account'
 import { FigmaAccount } from '#/components/figma-account'
@@ -169,7 +170,7 @@ function BillingTab({
           <div className="mt-3 rounded-md bg-secondary px-3 py-2 text-xs">
             <p>Your trial ends {new Date(billing.trial.endsAt).toLocaleDateString()}.</p>
             <p className="mt-1 text-muted-foreground">
-              Connect ChatGPT or OpenRouter to use your own AI access. Managed AI and credit
+              Connect ChatGPT or add your own provider API key to use AI. Managed AI and credit
               top-ups unlock after trial.
             </p>
           </div>
@@ -830,7 +831,7 @@ export function SettingsPanel({
   const tab: SettingsTab = settings === 'billing' && billing?.required === false
     ? 'account'
     : settings ?? 'account'
-  const integrationTab: IntegrationTab = integration ?? 'chatgpt'
+  const integrationTab: IntegrationTab = integration ?? 'providers'
 
   useEffect(() => {
     let cancelled = false
@@ -932,18 +933,18 @@ export function SettingsPanel({
             }}
             className="flex flex-col gap-4"
           >
-            <TabsList className="grid w-full grid-cols-2 sm:grid-cols-5">
-              <TabsTab value="chatgpt">ChatGPT</TabsTab>
-              <TabsTab value="openrouter">OpenRouter</TabsTab>
+            <TabsList className="grid w-full grid-cols-2 sm:grid-cols-4">
+              <TabsTab value="providers">AI providers</TabsTab>
               <TabsTab value="github">GitHub</TabsTab>
               <TabsTab value="figma">Figma</TabsTab>
               <TabsTab value="mcp">MCP</TabsTab>
             </TabsList>
-            <TabsPanel value="chatgpt" id="integration-chatgpt">
-              <ChatGPTAccount />
-            </TabsPanel>
-            <TabsPanel value="openrouter" id="integration-openrouter">
-              <OpenRouterAccount />
+            <TabsPanel value="providers" id="integration-providers">
+              <div className="flex flex-col gap-4">
+                <ChatGPTAccount />
+                <OpenRouterAccount />
+                <CustomAiProviderAccounts />
+              </div>
             </TabsPanel>
             <TabsPanel value="github" id="integration-github">
               <GitHubAccount />

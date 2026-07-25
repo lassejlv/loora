@@ -75,6 +75,14 @@ import {
   getOpenRouterStatus,
   OpenRouterIntegrationError,
 } from '@loora/auth/openrouter'
+import {
+  AiProviderCredentialError,
+  connectAiProvider,
+  CUSTOM_AI_PROVIDERS,
+  disconnectAiProvider,
+  getAiProviderConnection,
+  listAiProviderConnections,
+} from '@loora/auth/ai-provider-credentials'
 import { importFigmaDesign } from './figma-import'
 
 type Session = Awaited<ReturnType<typeof getSession>>
@@ -1382,6 +1390,69 @@ function openRouterProcedureError(error: unknown): never {
   throw error
 }
 
+function aiProviderProcedureError(error: unknown): never {
+  if (error instanceof AiProviderCredentialError) {
+    if (error.code === 'RECONNECT_REQUIRED') {
+      throw new ORPCError('UNAUTHORIZED', { message: error.message })
+    }
+    if (error.code === 'RATE_LIMITED') {
+      throw new ORPCError('TOO_MANY_REQUESTS', { message: error.message })
+    }
+    if (error.code === 'INVALID_KEY') {
+      throw new ORPCError('BAD_REQUEST', { message: error.message })
+    }
+    throw new ORPCError('INTERNAL_SERVER_ERROR', { message: error.message })
+  }
+  throw error
+}
+
+const customAiProviderSchema = z.enum(CUSTOM_AI_PROVIDERS)
+
+const listCustomAiProviderConnections = protectedProcedure.handler(
+  async ({ context }) => {
+    try {
+      return await listAiProviderConnections(context.user.id)
+    } catch (error) {
+      return aiProviderProcedureError(error)
+    }
+  },
+)
+
+const getCustomAiProviderConnection = protectedProcedure
+  .input(z.object({ provider: customAiProviderSchema }))
+  .handler(async ({ context, input }) => {
+    try {
+      return await getAiProviderConnection(context.user.id, input.provider)
+    } catch (error) {
+      return aiProviderProcedureError(error)
+    }
+  })
+
+const connectCustomAiProvider = protectedProcedure
+  .input(
+    z.object({
+      provider: customAiProviderSchema,
+      apiKey: z.string().trim().min(10).max(512),
+    }),
+  )
+  .handler(async ({ context, input }) => {
+    try {
+      return await connectAiProvider(context.user.id, input.provider, input.apiKey)
+    } catch (error) {
+      return aiProviderProcedureError(error)
+    }
+  })
+
+const disconnectCustomAiProvider = protectedProcedure
+  .input(z.object({ provider: customAiProviderSchema }))
+  .handler(async ({ context, input }) => {
+    try {
+      return await disconnectAiProvider(context.user.id, input.provider)
+    } catch (error) {
+      return aiProviderProcedureError(error)
+    }
+  })
+
 const getOpenRouterConnection = protectedProcedure.handler(async ({ context }) => {
   try {
     return await getOpenRouterStatus(context.user.id)
@@ -1984,6 +2055,12 @@ export const appRouter = {
     status: getOpenRouterConnection,
     connect: connectOpenRouterAccount,
     disconnect: disconnectOpenRouterAccount,
+  },
+  aiProvider: {
+    list: listCustomAiProviderConnections,
+    status: getCustomAiProviderConnection,
+    connect: connectCustomAiProvider,
+    disconnect: disconnectCustomAiProvider,
   },
   mcp: {
     sessions: listMcpSessions,

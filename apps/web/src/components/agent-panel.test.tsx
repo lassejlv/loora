@@ -41,6 +41,9 @@ const orpc = {
   openrouter: {
     status: mock(),
   },
+  aiProvider: {
+    list: mock(),
+  },
 }
 
 mock.module('#/lib/orpc-client', () => ({ orpc }))
@@ -92,6 +95,11 @@ describe('AgentPanel empty response recovery', () => {
       connected: false,
       label: null,
       updatedAt: null,
+    })
+    orpc.aiProvider.list.mockResolvedValue({
+      google: { connected: false, updatedAt: null },
+      openai: { connected: false, updatedAt: null },
+      anthropic: { connected: false, updatedAt: null },
     })
 
     Object.defineProperty(window, 'matchMedia', {
