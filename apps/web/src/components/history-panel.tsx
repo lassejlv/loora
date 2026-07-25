@@ -264,9 +264,13 @@ export function HistoryPopover({
               {comparison?.current.message ?? viewingSummary?.message ?? 'Version changes'}
             </DialogTitle>
             <DialogDescription>
+              {viewingSummary
+                ? `${viewingSummary.added} added, ${viewingSummary.removed} removed, ${viewingSummary.changed} changed · `
+                : ''}
               {comparison?.previous
-                ? `Compared with “${comparison.previous.message}”.`
-                : 'Compared with an empty canvas.'}
+                ? `compared with “${comparison.previous.message}”`
+                : 'compared with an empty canvas'}
+              {comparison ? ` · ${relativeTime(comparison.current.at)}` : ''}
             </DialogDescription>
           </DialogHeader>
           <div className="min-h-0 flex-1 border-y">

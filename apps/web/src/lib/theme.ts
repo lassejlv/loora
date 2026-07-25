@@ -1,3 +1,5 @@
+import { useSyncExternalStore } from 'react'
+
 export type ThemePreference = 'light' | 'dark' | 'system'
 
 const STORAGE_KEY = 'loora:theme'
@@ -33,6 +35,25 @@ export function watchSystemTheme(): () => void {
   }
   media.addEventListener('change', onChange)
   return () => media.removeEventListener('change', onChange)
+}
+
+// Components that theme a third-party surface (Monaco, the diff viewer) need the
+// resolved mode as a value, not just the `.dark` class. Watching the class keeps
+// them right for `system` flips and manual switches alike.
+export function useIsDarkTheme(): boolean {
+  return useSyncExternalStore(
+    (onChange) => {
+      if (typeof document === 'undefined') return () => undefined
+      const observer = new MutationObserver(onChange)
+      observer.observe(document.documentElement, {
+        attributes: true,
+        attributeFilter: ['class'],
+      })
+      return () => observer.disconnect()
+    },
+    () => (typeof document === 'undefined' ? false : document.documentElement.classList.contains('dark')),
+    () => false,
+  )
 }
 
 // Inlined into <head> so `.dark` lands before first paint — without it a dark
