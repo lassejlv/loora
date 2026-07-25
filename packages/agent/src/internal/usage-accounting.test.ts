@@ -18,7 +18,7 @@ function harness({
     usingChatGPT,
     subscriberFunded,
     userId: 'user-one',
-    model: 'mini',
+    model: 'gemini-3-5-flash',
     includedCreditsAvailable: 100,
     generationLease,
     recordManagedUsage,
@@ -43,7 +43,7 @@ describe('generation usage accounting', () => {
       totalUsage: { inputTokens: 100, outputTokens: 200 },
     })
 
-    expect(recordManagedUsage).toHaveBeenCalledWith('user-one', 'mini', 100, 200)
+    expect(recordManagedUsage).toHaveBeenCalledWith('user-one', 'gemini-3-5-flash', 100, 200)
   })
 
   it('records subscriber usage and releases the lease on finish', async () => {
@@ -58,7 +58,7 @@ describe('generation usage accounting', () => {
 
     expect(recordSubscriberUsage).toHaveBeenCalledWith(
       'user-one',
-      'mini',
+      'gemini-3-5-flash',
       100,
       200,
       100,

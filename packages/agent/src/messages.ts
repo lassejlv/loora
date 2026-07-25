@@ -6,6 +6,30 @@ export function modelSupportsImageInput(model: string): boolean {
   return getModel(model).supportsImageInput
 }
 
+const TOOL_CONTINUATION_TEXT =
+  'Continue from the completed tool result above. Do not repeat a successful tool call.'
+
+export function bridgeCompletedToolTurn(messages: UIMessage[]): UIMessage[] {
+  const last = messages.at(-1)
+  if (!last || last.role !== 'assistant') return messages
+
+  const hasCompletedTool = last.parts.some((part) => {
+    if (typeof part.type !== 'string' || !part.type.startsWith('tool-')) return false
+    const state = 'state' in part ? part.state : undefined
+    return state === 'output-available' || state === 'output-error' || state === 'output-denied'
+  })
+  if (!hasCompletedTool) return messages
+
+  return [
+    ...messages,
+    {
+      id: `${last.id}-tool-continuation`,
+      role: 'user',
+      parts: [{ type: 'text', text: TOOL_CONTINUATION_TEXT }],
+    },
+  ]
+}
+
 export function withoutImageParts(
   messages: UIMessage[],
   imageInputsEnabled: boolean,

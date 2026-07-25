@@ -11,11 +11,10 @@
     "./server": "./src/server.ts"
   },
   "dependencies": {
-    "@ai-sdk/anthropic": "^3.0.19",
-    "@ai-sdk/openai-compatible": "^3.0.12",
     "@loora/auth": "workspace:*",
     "@loora/billing": "workspace:*",
     "@loora/db": "workspace:*",
+    "@neondatabase/ai-sdk-provider": "^0.7.2",
     "@opencoredev/loginwithchatgpt-ai": "^0.2.0",
     "@opencoredev/loginwithchatgpt-server": "^0.2.0",
     "ai": "catalog:",

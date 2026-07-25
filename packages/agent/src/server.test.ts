@@ -17,7 +17,8 @@ let chatTarget: { designId: string; draftId: string | null } | null = {
 }
 let draftStatus: 'active' | 'proposed' | 'applied' | 'closed' | null = 'active'
 
-const originalOpenCodeGoApiKey = process.env.OPENCODE_GO_API_KEY
+const originalNeonBaseUrl = process.env.NEON_AI_GATEWAY_BASE_URL
+const originalNeonToken = process.env.NEON_AI_GATEWAY_TOKEN
 
 mock.module('@loora/db', () => ({
   db: {
@@ -101,7 +102,7 @@ const {
   handleAgentChatRequest,
 } = await import('./server')
 
-function chatRequest(model = 'mini') {
+function chatRequest(model = 'gemini-3-5-flash') {
   return new Request('http://localhost/api/chat', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
@@ -120,8 +121,10 @@ function chatRequest(model = 'mini') {
 }
 
 afterAll(() => {
-  if (originalOpenCodeGoApiKey === undefined) delete process.env.OPENCODE_GO_API_KEY
-  else process.env.OPENCODE_GO_API_KEY = originalOpenCodeGoApiKey
+  if (originalNeonBaseUrl === undefined) delete process.env.NEON_AI_GATEWAY_BASE_URL
+  else process.env.NEON_AI_GATEWAY_BASE_URL = originalNeonBaseUrl
+  if (originalNeonToken === undefined) delete process.env.NEON_AI_GATEWAY_TOKEN
+  else process.env.NEON_AI_GATEWAY_TOKEN = originalNeonToken
   mock.restore()
 })
 
@@ -140,7 +143,8 @@ describe('agent server HTTP contract', () => {
     releaseCalls = []
     chatTarget = { designId: 'design-one', draftId: null }
     draftStatus = 'active'
-    process.env.OPENCODE_GO_API_KEY = 'test-opencode-go-key'
+    process.env.NEON_AI_GATEWAY_BASE_URL = 'https://test-api.ai.us-east-2.aws.neon.tech'
+    process.env.NEON_AI_GATEWAY_TOKEN = 'test-neon-token'
   })
 
   it('keeps unauthenticated chat requests at 401', async () => {
@@ -189,7 +193,7 @@ describe('agent server HTTP contract', () => {
         designId: 'design-one',
         draftId: 'draft-one',
         chatId: 'chat-one',
-        model: 'mini',
+        model: 'gemini-3-5-flash',
       }),
     })
     draftStatus = 'proposed'
@@ -210,11 +214,12 @@ describe('agent server HTTP contract', () => {
 
   it('preserves provider configuration and ChatGPT availability errors', async () => {
     signedIn = true
-    delete process.env.OPENCODE_GO_API_KEY
+    delete process.env.NEON_AI_GATEWAY_BASE_URL
+    delete process.env.NEON_AI_GATEWAY_TOKEN
     const missingKey = await handleAgentChatRequest(chatRequest())
     expect(missingKey.status).toBe(503)
     expect(await missingKey.json()).toEqual({
-      error: 'OpenCode Go is not configured. Set OPENCODE_GO_API_KEY on the server.',
+      error: 'Loora is not configured. Set NEON_AI_GATEWAY_BASE_URL and NEON_AI_GATEWAY_TOKEN on the server.',
     })
 
     chatgptModels = null

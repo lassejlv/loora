@@ -1,39 +1,20 @@
 export type ProviderDefinition =
   | {
-      kind: 'openai-compatible'
+      kind: 'neon'
       label: string
-      baseURL: string
-      apiKeyEnv: string
-      includeUsage?: boolean
-      headers?: Record<string, string>
-    }
-  | {
-      kind: 'anthropic-compatible'
-      label: string
-      baseURL: string
-      apiKeyEnv: string
-      headers?: Record<string, string>
+      requiredEnv: readonly string[]
     }
   | {
       kind: 'chatgpt'
       label: string
     }
 
-// Managed providers declare only the environment variable name. Keys are read from the named
-// environment variable on the server and are never included in this config. OpenCode Go uses
-// different wire protocols for its models, so both adapters share the same label and API key.
+// Provider credentials are read from server-only environment variables and never reach the client.
 export const PROVIDERS = {
-  opencodeGoAnthropic: {
-    kind: 'anthropic-compatible',
-    label: 'OpenCode Go',
-    baseURL: 'https://opencode.ai/zen/go/v1',
-    apiKeyEnv: 'OPENCODE_GO_API_KEY',
-  },
-  opencodeGoOpenAI: {
-    kind: 'openai-compatible',
-    label: 'OpenCode Go',
-    baseURL: 'https://opencode.ai/zen/go/v1',
-    apiKeyEnv: 'OPENCODE_GO_API_KEY',
+  loora: {
+    kind: 'neon',
+    label: 'Loora',
+    requiredEnv: ['NEON_AI_GATEWAY_BASE_URL', 'NEON_AI_GATEWAY_TOKEN'],
   },
   chatgpt: {
     kind: 'chatgpt',
@@ -76,20 +57,12 @@ export interface ModelDefinition {
 // Prices are USD per 1M tokens and power the existing usage limits.
 export const MODELS = [
   {
-    id: 'mini',
-    label: 'Mini',
-    provider: 'opencodeGoAnthropic',
-    modelId: 'minimax-m3',
+    id: 'gemini-3-5-flash',
+    label: 'Gemini 3.5 Flash',
+    provider: 'loora',
+    modelId: 'gemini-3-5-flash',
     supportsImageInput: true,
-    price: { input: 0.3, output: 1.2 },
-  },
-  {
-    id: 'max',
-    label: 'Max',
-    provider: 'opencodeGoOpenAI',
-    modelId: 'glm-5.2',
-    supportsImageInput: false,
-    price: { input: 1.4, output: 4.4 },
+    price: { input: 1.5, output: 9 },
   },
   {
     id: 'gpt-5.6-sol',

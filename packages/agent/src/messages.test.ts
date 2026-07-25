@@ -2,6 +2,7 @@ import { describe, expect, it } from 'bun:test'
 import type { UIMessage } from 'ai'
 import {
   boundedJson,
+  bridgeCompletedToolTurn,
   canvasForPrompt,
   messagesForModel,
   modelSupportsImageInput,
@@ -11,8 +12,7 @@ import {
 
 describe('AI image input capabilities', () => {
   it('reads image support from the model catalog', () => {
-    expect(modelSupportsImageInput('mini')).toBe(true)
-    expect(modelSupportsImageInput('max')).toBe(false)
+    expect(modelSupportsImageInput('gemini-3-5-flash')).toBe(true)
     expect(modelSupportsImageInput('gpt-5.6-sol')).toBe(true)
     expect(modelSupportsImageInput('unknown')).toBe(true)
   })
@@ -47,6 +47,46 @@ describe('AI image input capabilities', () => {
     ])
 
     expect(withoutImageParts(messages, true)).toBe(messages)
+  })
+})
+
+describe('Gemini tool continuation', () => {
+  it('adds a fresh user boundary after a completed tool turn', () => {
+    const messages = [
+      {
+        id: 'assistant-tool',
+        role: 'assistant',
+        parts: [{
+          type: 'tool-createElement',
+          toolCallId: 'call-one',
+          state: 'output-available',
+          input: { name: 'Hero' },
+          output: { id: 'hero-one', render: 'ok' },
+        }],
+      },
+    ] as UIMessage[]
+
+    const bridged = bridgeCompletedToolTurn(messages)
+
+    expect(bridged).toHaveLength(2)
+    expect(bridged[1]).toMatchObject({
+      role: 'user',
+      parts: [{
+        type: 'text',
+        text: 'Continue from the completed tool result above. Do not repeat a successful tool call.',
+      }],
+    })
+    expect(messages).toHaveLength(1)
+  })
+
+  it('leaves ordinary assistant replies unchanged', () => {
+    const messages = [{
+      id: 'assistant-text',
+      role: 'assistant',
+      parts: [{ type: 'text', text: 'Done.' }],
+    }] as UIMessage[]
+
+    expect(bridgeCompletedToolTurn(messages)).toBe(messages)
   })
 })
 
@@ -148,6 +188,6 @@ describe('model message preparation', () => {
     expect(summaries[0].code).toHaveLength(1200)
     expect(summaries[0].code).not.toContain('truncated')
     expect(summaries[1].code).toContain('truncated — 1201 chars total')
-    expect(sanitizeModelNames('minimax-m3 failed')).toBe('Mini failed')
+    expect(sanitizeModelNames('gemini-3-5-flash failed')).toBe('Gemini 3.5 Flash failed')
   })
 })

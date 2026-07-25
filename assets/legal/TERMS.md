@@ -95,7 +95,7 @@ The Service relies on and may integrate with third-party providers, including (w
 - Authentication and identity (Better Auth; Google sign-in when enabled)
 - Billing (Polar)
 - Analytics (Databuddy)
-- AI providers (OpenCode Go for Loora-managed models; OpenAI / ChatGPT when you connect your own account)
+- AI providers (Neon AI Gateway for Loora-managed models; OpenAI / ChatGPT when you connect your own account)
 - Optional integrations (GitHub, Figma)
 - MCP clients you authorize
 

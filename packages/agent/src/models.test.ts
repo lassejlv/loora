@@ -12,21 +12,19 @@ describe('agent model policy', () => {
     expect(getModel('unknown').id).toBe(DEFAULT_MODEL)
   })
 
-  it('routes the managed models through their OpenCode Go protocols', () => {
-    const mini = getModel('mini')
-    const max = getModel('max')
+  it('routes the managed model through Neon under the Loora label', () => {
+    const model = getModel('gemini-3-5-flash')
 
-    expect(mini.modelId).toBe('minimax-m3')
-    expect(getProvider(mini.provider)).toMatchObject({
-      kind: 'anthropic-compatible',
-      baseURL: 'https://opencode.ai/zen/go/v1',
-      apiKeyEnv: 'OPENCODE_GO_API_KEY',
+    expect(model).toMatchObject({
+      label: 'Gemini 3.5 Flash',
+      modelId: 'gemini-3-5-flash',
+      supportsImageInput: true,
+      price: { input: 1.5, output: 9 },
     })
-    expect(max.modelId).toBe('glm-5.2')
-    expect(getProvider(max.provider)).toMatchObject({
-      kind: 'openai-compatible',
-      baseURL: 'https://opencode.ai/zen/go/v1',
-      apiKeyEnv: 'OPENCODE_GO_API_KEY',
+    expect(getProvider(model.provider)).toEqual({
+      kind: 'neon',
+      label: 'Loora',
+      requiredEnv: ['NEON_AI_GATEWAY_BASE_URL', 'NEON_AI_GATEWAY_TOKEN'],
     })
   })
 

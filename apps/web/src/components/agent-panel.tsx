@@ -44,6 +44,7 @@ import {
   DialogDescription,
   DialogFooter,
   DialogHeader,
+  DialogPanel,
   DialogPopup,
   DialogTitle,
 } from '#/components/ui/dialog'
@@ -622,20 +623,20 @@ export const AgentPanel = memo(function AgentPanel({
               Starts from the latest Main canvas. Your current prompt and attachments stay here.
             </DialogDescription>
           </DialogHeader>
-          <Input
-            autoFocus
-            value={branchName}
-            maxLength={200}
-            placeholder="Pricing experiment"
-            aria-label="Branch name"
-            onChange={(event) => setBranchName(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === 'Enter') void createBranchChat()
-            }}
-          />
-          {branchError ? (
-            <p className="text-sm text-destructive">{branchError}</p>
-          ) : null}
+          <DialogPanel className="space-y-2">
+            <Input
+              autoFocus
+              value={branchName}
+              maxLength={200}
+              placeholder="Pricing experiment"
+              aria-label="Branch name"
+              onChange={(event) => setBranchName(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter') void createBranchChat()
+              }}
+            />
+            {branchError ? <p className="text-sm text-destructive">{branchError}</p> : null}
+          </DialogPanel>
           <DialogFooter>
             <Button variant="outline" onClick={() => setBranchDialogOpen(false)}>
               Cancel

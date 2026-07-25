@@ -24,6 +24,7 @@ import {
   DialogDescription,
   DialogFooter,
   DialogHeader,
+  DialogPanel,
   DialogPopup,
   DialogTitle,
 } from '#/components/ui/dialog'
@@ -352,17 +353,19 @@ export function BranchControls({
               Starts from the latest Main canvas and stays isolated until you merge it.
             </DialogDescription>
           </DialogHeader>
-          <Input
-            autoFocus
-            value={createName}
-            maxLength={200}
-            placeholder="Pricing experiment"
-            aria-label="Branch name"
-            onChange={(event) => setCreateName(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === 'Enter') void create()
-            }}
-          />
+          <DialogPanel>
+            <Input
+              autoFocus
+              value={createName}
+              maxLength={200}
+              placeholder="Pricing experiment"
+              aria-label="Branch name"
+              onChange={(event) => setCreateName(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter') void create()
+              }}
+            />
+          </DialogPanel>
           <DialogFooter>
             <Button variant="outline" onClick={() => setCreateOpen(false)}>
               Cancel
@@ -375,14 +378,14 @@ export function BranchControls({
       </Dialog>
 
       <Dialog open={manageOpen} onOpenChange={setManageOpen}>
-        <DialogPopup className="max-w-2xl">
+        <DialogPopup className="max-h-[min(80svh,44rem)] max-w-2xl">
           <DialogHeader>
             <DialogTitle>Manage branches</DialogTitle>
             <DialogDescription>
               Review active work or revisit merged and discarded branch snapshots.
             </DialogDescription>
           </DialogHeader>
-          <div className="min-h-0 space-y-5 overflow-y-auto">
+          <DialogPanel className="space-y-6">
             <BranchList
               title="Active"
               empty="No active branches."
@@ -410,7 +413,7 @@ export function BranchControls({
                 setManageOpen(false)
               }}
             />
-          </div>
+          </DialogPanel>
           <DialogFooter>
             <Button variant="outline" onClick={() => setManageOpen(false)}>
               Done
@@ -433,16 +436,18 @@ export function BranchControls({
             <DialogTitle>Rename branch</DialogTitle>
             <DialogDescription>Use a name that describes the work happening here.</DialogDescription>
           </DialogHeader>
-          <Input
-            autoFocus
-            value={renameName}
-            maxLength={200}
-            aria-label="Branch name"
-            onChange={(event) => setRenameName(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === 'Enter') void rename()
-            }}
-          />
+          <DialogPanel>
+            <Input
+              autoFocus
+              value={renameName}
+              maxLength={200}
+              aria-label="Branch name"
+              onChange={(event) => setRenameName(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter') void rename()
+              }}
+            />
+          </DialogPanel>
           <DialogFooter>
             <Button variant="outline" onClick={() => setRenameTarget(null)}>
               Cancel
@@ -504,6 +509,8 @@ export function BranchControls({
                 : 'Compare this branch with the latest Main canvas.'}
             </DialogDescription>
           </DialogHeader>
+          {/* Not DialogPanel: the diff needs the popup's own height, not a nested scroll area. */}
+          <div className="flex min-h-0 flex-1 flex-col gap-3 px-6 pt-1 pb-6">
           {reviewError ? (
             <div className="flex items-center justify-between gap-3 rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive-foreground">
               <span>{reviewError}</span>
@@ -553,6 +560,7 @@ export function BranchControls({
               {working ? 'Loading review…' : 'Review unavailable.'}
             </div>
           )}
+          </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setReviewOpen(false)}>
               Cancel
@@ -600,7 +608,7 @@ function BranchList({
 }) {
   return (
     <section>
-      <h3 className="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+      <h3 className="mb-2 text-[11px] font-medium uppercase tracking-[0.08em] text-muted-foreground">
         {title}
       </h3>
       {branches.length === 0 ? (
@@ -608,15 +616,18 @@ function BranchList({
           {empty}
         </p>
       ) : (
-        <ul className="divide-y rounded-lg border">
+        <ul className="divide-y overflow-hidden rounded-lg border">
           {branches.map((branch) => {
             const busy = running.has(branch.id)
             return (
-              <li key={branch.id} className="flex items-center gap-3 px-3 py-2.5">
+              <li
+                key={branch.id}
+                className="flex items-center gap-3 px-3 py-2.5 transition-colors hover:bg-muted/40"
+              >
                 <GitBranchIcon className="size-4 shrink-0 text-muted-foreground" />
                 <button
                   type="button"
-                  className="min-w-0 flex-1 text-left"
+                  className="min-w-0 flex-1 rounded-sm text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                   onClick={() => onView(branch)}
                 >
                   <span className="block truncate text-sm font-medium">{branch.name}</span>

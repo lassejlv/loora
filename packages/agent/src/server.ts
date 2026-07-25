@@ -1,5 +1,4 @@
-import { createAnthropic } from '@ai-sdk/anthropic'
-import { createOpenAICompatible } from '@ai-sdk/openai-compatible'
+import { neon } from '@neondatabase/ai-sdk-provider'
 import { createChatGPTProxyProvider } from '@opencoredev/loginwithchatgpt-ai'
 import {
   convertToModelMessages,
@@ -14,6 +13,7 @@ import {
   getProvider,
 } from './models'
 import {
+  bridgeCompletedToolTurn,
   messagesForModel,
   modelSupportsImageInput,
   sanitizeModelNames,
@@ -175,29 +175,16 @@ export async function handleAgentChatRequest(request: Request): Promise<Response
     })
     model = provider(modelConfig.modelId)
   } else {
-    const apiKey = process.env[providerConfig.apiKeyEnv]
-    if (!apiKey) {
+    const missingEnv = providerConfig.requiredEnv.filter((name) => !process.env[name])
+    if (missingEnv.length > 0) {
       return Response.json(
         {
-          error: `${providerConfig.label} is not configured. Set ${providerConfig.apiKeyEnv} on the server.`,
+          error: `${providerConfig.label} is not configured. Set ${missingEnv.join(' and ')} on the server.`,
         },
         { status: 503 },
       )
     }
-    const provider = providerConfig.kind === 'anthropic-compatible'
-      ? createAnthropic({
-          baseURL: providerConfig.baseURL,
-          apiKey,
-          headers: providerConfig.headers,
-        })
-      : createOpenAICompatible({
-          name: modelConfig.provider,
-          baseURL: providerConfig.baseURL,
-          apiKey,
-          headers: providerConfig.headers,
-          includeUsage: providerConfig.includeUsage,
-        })
-    model = provider(modelConfig.modelId)
+    model = neon(modelConfig.modelId)
   }
   const imageInputsEnabled = modelSupportsImageInput(key)
   const providerOptions = usingChatGPT
@@ -291,8 +278,9 @@ export async function handleAgentChatRequest(request: Request): Promise<Response
     shapes,
     selectedIds,
   })
+  const preparedMessages = messagesForModel(messages, imageInputsEnabled)
   const modelMessages = await convertToModelMessages(
-    messagesForModel(messages, imageInputsEnabled),
+    usingChatGPT ? preparedMessages : bridgeCompletedToolTurn(preparedMessages),
     { tools, ignoreIncompleteToolCalls: true },
   )
 
@@ -301,7 +289,9 @@ export async function handleAgentChatRequest(request: Request): Promise<Response
     providerOptions,
     system,
     messages: modelMessages,
-    stopWhen: stepCountIs(40),
+    // Neon currently omits Gemini thought signatures from tool calls. Keep managed
+    // generations to one tool step, then use the UI's existing automatic continuation.
+    stopWhen: stepCountIs(usingChatGPT ? 40 : 1),
     tools,
     // Design tasks (multi-shape layouts, components) routinely need >60s; a short abort
     // surfaces to the client as an empty successful stream and trips empty-response retries.
