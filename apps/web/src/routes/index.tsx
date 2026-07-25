@@ -65,9 +65,11 @@ import {
   docId,
   hasStoredElements,
   hasStoredTargetElements,
+  loadActiveDraft,
   loadDocs,
   loadElements,
   loadTargetElements,
+  saveActiveDraft,
   saveDocs,
   saveElements,
   saveTargetElements,
@@ -716,11 +718,18 @@ function Editor({ preview = false, userId }: { preview?: boolean; userId?: strin
             includeArchived: true,
           })
           if (cancelled) return
-          const requestedDraft = new URLSearchParams(window.location.search).get('draft')
+          // A shared link's ?draft wins; otherwise resume the branch this design
+          // was last edited on. Only 'active' branches resume — merged and
+          // discarded ones are read-only snapshots nobody wants to land in.
+          const requestedDraft =
+            new URLSearchParams(window.location.search).get('draft') ??
+            loadActiveDraft(nextActive)
           const nextDraft =
-            requestedDraft && remoteDrafts.some((draft) => draft.id === requestedDraft)
+            requestedDraft &&
+            remoteDrafts.some((draft) => draft.id === requestedDraft && draft.status === 'active')
               ? requestedDraft
               : null
+          saveActiveDraft(nextActive, nextDraft)
           const nextTarget = { designId: nextActive, draftId: nextDraft }
           const nextKey = targetKey(nextTarget)
           const cached = hasStoredTargetElements(nextTarget)
@@ -1009,7 +1018,20 @@ function Editor({ preview = false, userId }: { preview?: boolean; userId?: strin
         fetchDocument(target, cached),
         orpc.draft
           .list({ designId: id, includeArchived: true })
-          .then(setDrafts)
+          .then((rows) => {
+            setDrafts(rows)
+            // Resume the branch this design was last edited on, unless the user
+            // moved on while the list was in flight.
+            if (preview) return
+            if (activeIdRef.current !== id || activeDraftIdRef.current !== null) return
+            const remembered = loadActiveDraft(id)
+            if (!remembered) return
+            if (!rows.some((draft) => draft.id === remembered && draft.status === 'active')) {
+              saveActiveDraft(id, null)
+              return
+            }
+            switchDraft(remembered, true)
+          })
           .catch((error) => console.error('[drafts] Failed to list drafts:', error)),
       ])
     }
@@ -1033,7 +1055,10 @@ function Editor({ preview = false, userId }: { preview?: boolean; userId?: strin
     activeDraftIdRef.current = draftId
     activeTargetKeyRef.current = key
     setActiveDraftId(draftId)
-    if (!preview) void setUrlState({ draft: draftId })
+    if (!preview) {
+      saveActiveDraft(activeIdRef.current, draftId)
+      void setUrlState({ draft: draftId })
+    }
     const cached = hasStoredTargetElements(target)
     const cachedShapes = cached ? loadTargetElements(target) : []
     const cachedRevision =
@@ -2530,6 +2555,7 @@ function Editor({ preview = false, userId }: { preview?: boolean; userId?: strin
                   setLoadedDocId(key)
                   setSyncConflict(null)
                   restoreTargetEditorState(key, nextShapes)
+                  saveActiveDraft(activeId, null)
                   void setUrlState({ draft: null })
                   announceBranch(`Merged ${branchName} into Main`)
                 }}

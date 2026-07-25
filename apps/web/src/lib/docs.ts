@@ -9,6 +9,7 @@ export interface DocMeta {
 
 const INDEX_KEY = 'loora:docs'
 const ACTIVE_KEY = 'loora:active-doc'
+const ACTIVE_DRAFT_KEY = 'loora:active-drafts'
 const docKey = (id: string) => `loora:doc:${id}`
 const draftKey = (designId: string, draftId: string) => `loora:doc:${designId}:draft:${draftId}`
 
@@ -86,7 +87,23 @@ export function saveDocs(docs: DocMeta[], activeId: string) {
   localStorage.setItem(ACTIVE_KEY, activeId)
 }
 
+// Which branch each design was last edited on. Kept per design so reopening a
+// design lands where the work was left, not on Main. Callers re-validate the id
+// against the live branch list — a merged or discarded branch is read-only and
+// must not be restored.
+export function loadActiveDraft(designId: string): string | null {
+  return readJson<Record<string, string>>(ACTIVE_DRAFT_KEY, {})[designId] ?? null
+}
+
+export function saveActiveDraft(designId: string, draftId: string | null) {
+  const map = readJson<Record<string, string>>(ACTIVE_DRAFT_KEY, {})
+  if (draftId) map[designId] = draftId
+  else delete map[designId]
+  localStorage.setItem(ACTIVE_DRAFT_KEY, JSON.stringify(map))
+}
+
 export function deleteDocStorage(id: string) {
+  saveActiveDraft(id, null)
   localStorage.removeItem(docKey(id))
   const draftPrefix = `${docKey(id)}:draft:`
   for (let index = localStorage.length - 1; index >= 0; index -= 1) {

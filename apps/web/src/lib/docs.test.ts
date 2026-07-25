@@ -3,8 +3,10 @@ import {
   deleteDocStorage,
   hasStoredElements,
   hasStoredTargetElements,
+  loadActiveDraft,
   loadElements,
   loadTargetElements,
+  saveActiveDraft,
   saveElements,
   saveTargetElements,
   targetKey,
@@ -65,5 +67,42 @@ describe('document shape cache', () => {
 
     expect(hasStoredElements('doc')).toBe(false)
     expect(hasStoredTargetElements({ designId: 'doc', draftId: 'draft-one' })).toBe(false)
+  })
+})
+
+describe('active branch memory', () => {
+  beforeEach(() => {
+    Object.defineProperty(globalThis, 'localStorage', {
+      configurable: true,
+      value: window.localStorage,
+    })
+    localStorage.clear()
+  })
+
+  it('remembers a branch per design', () => {
+    saveActiveDraft('d1', 'dr1')
+    saveActiveDraft('d2', 'dr2')
+    expect(loadActiveDraft('d1')).toBe('dr1')
+    expect(loadActiveDraft('d2')).toBe('dr2')
+    expect(loadActiveDraft('d3')).toBeNull()
+  })
+
+  it('forgets the branch when the design goes back to Main', () => {
+    saveActiveDraft('d1', 'dr1')
+    saveActiveDraft('d1', null)
+    expect(loadActiveDraft('d1')).toBeNull()
+  })
+
+  it('drops the memory with the design', () => {
+    saveActiveDraft('d1', 'dr1')
+    deleteDocStorage('d1')
+    expect(loadActiveDraft('d1')).toBeNull()
+  })
+
+  it('survives corrupt storage', () => {
+    localStorage.setItem('loora:active-drafts', '{not json')
+    expect(loadActiveDraft('d1')).toBeNull()
+    saveActiveDraft('d1', 'dr1')
+    expect(loadActiveDraft('d1')).toBe('dr1')
   })
 })
