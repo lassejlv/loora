@@ -24,14 +24,33 @@ export function withConsentPrompt(prompt: string | null): string {
 }
 
 /**
+ * Refresh tokens are only issued when the granted scope contains
+ * `offline_access`, and the authorize endpoint defaults an absent `scope` to
+ * bare `openid`. A client that doesn't ask for it therefore gets an access
+ * token that dies after its TTL with no way to renew — the connection just
+ * stops working and has to be re-authorized. Add it so every client can stay
+ * connected; the consent screen lists it, so this is disclosed, not silent.
+ */
+export function withOfflineAccessScope(scope: string | null): string {
+  const tokens = (scope ?? '').split(/\s+/).filter(Boolean)
+  if (tokens.length === 0) tokens.push('openid')
+  if (!tokens.includes('offline_access')) tokens.push('offline_access')
+  return tokens.join(' ')
+}
+
+/**
  * Returns the request to hand to Better Auth: unchanged for everything except
- * an MCP authorize call, which gains `prompt=consent`.
+ * an MCP authorize call, which gains `prompt=consent` and `offline_access`.
  */
 export function requireMcpConsent(request: Request): Request {
   const url = new URL(request.url)
   if (!isMcpAuthorizePath(url.pathname)) return request
-  const forced = withConsentPrompt(url.searchParams.get('prompt'))
-  if (url.searchParams.get('prompt') === forced) return request
-  url.searchParams.set('prompt', forced)
+  const prompt = withConsentPrompt(url.searchParams.get('prompt'))
+  const scope = withOfflineAccessScope(url.searchParams.get('scope'))
+  if (url.searchParams.get('prompt') === prompt && url.searchParams.get('scope') === scope) {
+    return request
+  }
+  url.searchParams.set('prompt', prompt)
+  url.searchParams.set('scope', scope)
   return new Request(url, request)
 }

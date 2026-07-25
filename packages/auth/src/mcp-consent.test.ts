@@ -1,10 +1,16 @@
 import { describe, expect, it } from 'bun:test'
-import { isMcpAuthorizePath, requireMcpConsent, withConsentPrompt } from './mcp-consent'
+import {
+  isMcpAuthorizePath,
+  requireMcpConsent,
+  withConsentPrompt,
+  withOfflineAccessScope,
+} from './mcp-consent'
 
 const authorize = (query: string) =>
   new Request(`https://loora.design/api/auth/mcp/authorize${query}`)
 
 const promptOf = (request: Request) => new URL(request.url).searchParams.get('prompt')
+const scopeOf = (request: Request) => new URL(request.url).searchParams.get('scope')
 
 describe('withConsentPrompt', () => {
   it('adds consent to an empty or missing prompt', () => {
@@ -19,6 +25,18 @@ describe('withConsentPrompt', () => {
 
   it('overrides none, which asks for no interaction at all', () => {
     expect(withConsentPrompt('none')).toBe('consent')
+  })
+})
+
+describe('withOfflineAccessScope', () => {
+  it('keeps requested scopes and appends offline_access once', () => {
+    expect(withOfflineAccessScope('openid email')).toBe('openid email offline_access')
+    expect(withOfflineAccessScope('openid offline_access')).toBe('openid offline_access')
+  })
+
+  it('falls back to openid when the client sends no scope', () => {
+    expect(withOfflineAccessScope(null)).toBe('openid offline_access')
+    expect(withOfflineAccessScope('')).toBe('openid offline_access')
   })
 })
 
@@ -43,9 +61,17 @@ describe('requireMcpConsent', () => {
     expect(promptOf(requireMcpConsent(authorize('?prompt=login')))).toBe('login consent')
   })
 
-  it('passes an already-consenting request through untouched', () => {
-    const request = authorize('?prompt=consent')
+  it('passes a fully-formed request through untouched', () => {
+    const request = authorize('?prompt=consent&scope=openid+offline_access')
     expect(requireMcpConsent(request)).toBe(request)
+  })
+
+  it('adds offline_access so the client can refresh instead of expiring', () => {
+    expect(scopeOf(requireMcpConsent(authorize('?scope=openid+profile')))).toBe(
+      'openid profile offline_access',
+    )
+    // No scope at all defaults to bare openid upstream, which yields no refresh token.
+    expect(scopeOf(requireMcpConsent(authorize('?client_id=abc')))).toBe('openid offline_access')
   })
 
   it('leaves every other auth route alone', () => {

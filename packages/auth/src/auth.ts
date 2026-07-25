@@ -94,6 +94,11 @@ export const auth = betterAuth({
       oidcConfig: {
         loginPage: '/',
         consentPage: '/mcp-consent',
+        // The 1h default meant a connected editor died mid-session every hour;
+        // clients that do refresh then churn a token per hour, and clients that
+        // don't just stop working. A working day of access, a month of refresh.
+        accessTokenExpiresIn: 60 * 60 * 12,
+        refreshTokenExpiresIn: 60 * 60 * 24 * 30,
       },
       ...(process.env.MCP_RESOURCE_URL?.trim()
         ? { resource: process.env.MCP_RESOURCE_URL.trim() }

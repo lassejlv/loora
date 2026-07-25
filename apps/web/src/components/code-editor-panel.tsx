@@ -4,6 +4,7 @@ import type { CanvasElement } from '#/lib/canvas'
 import { classifyCode } from '#/components/element-frame'
 import { PanelShell } from '#/components/panel-shell'
 import { Button } from '#/components/ui/button'
+import { useIsDarkTheme } from '#/lib/theme'
 
 const MonacoEditor = lazy(async () => {
   await import('#/lib/monaco-editor')
@@ -59,6 +60,27 @@ const configureEditor: BeforeMount = (monaco) => {
       'editorWidget.border': '#00000014',
     },
   })
+  // Same palette as the app's dark tokens (graphite surfaces, #738af4 accent)
+  // so the editor is not a white slab inside a dark canvas.
+  monaco.editor.defineTheme('loora-dark', {
+    base: 'vs-dark',
+    inherit: true,
+    rules: [],
+    colors: {
+      'editor.background': '#15161b',
+      'editor.foreground': '#e9eaee',
+      'editor.lineHighlightBackground': '#ffffff08',
+      'editor.selectionBackground': '#738af440',
+      'editor.inactiveSelectionBackground': '#738af422',
+      'editorCursor.foreground': '#738af4',
+      'editorLineNumber.foreground': '#5b5f6b',
+      'editorLineNumber.activeForeground': '#9a9eab',
+      'editorIndentGuide.background1': '#ffffff10',
+      'editorIndentGuide.activeBackground1': '#ffffff24',
+      'editorWidget.background': '#1c1e24',
+      'editorWidget.border': '#ffffff14',
+    },
+  })
 }
 
 export function CodeEditorPanel({
@@ -74,6 +96,7 @@ export function CodeEditorPanel({
   onDraftChange?: (code: string) => void
   onClose?: () => void
 }) {
+  const dark = useIsDarkTheme()
   const [draft, setDraft] = useState(element.code)
   const applyRef = useRef(onApply)
   applyRef.current = onApply
@@ -126,7 +149,7 @@ export function CodeEditorPanel({
             height="100%"
             language={language}
             path={modelPath}
-            theme="loora-light"
+            theme={dark ? 'loora-dark' : 'loora-light'}
             value={draft}
             beforeMount={configureEditor}
             onMount={handleMount}
