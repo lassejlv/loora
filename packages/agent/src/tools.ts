@@ -45,10 +45,12 @@ export function createAgentBaseTools({
   userId,
   githubConnected,
   imageInputsEnabled,
+  useLegacyNeonImageOutput = false,
 }: {
   userId: string
   githubConnected: boolean
   imageInputsEnabled: boolean
+  useLegacyNeonImageOutput?: boolean
 }) {
   const imageToolOutput =
     (emptyMessage: string) =>
@@ -65,12 +67,27 @@ export function createAgentBaseTools({
       if (!output?.image) {
         return { type: 'text' as const, value: emptyMessage }
       }
+      const data = output.image.split(',')[1]
+      if (useLegacyNeonImageOutput) {
+        // Neon 0.7.x still uses the AI SDK v3 provider interface internally.
+        // Its OpenAI-compatible adapter stringifies the AI SDK v4 FileData
+        // object as "[object Object]", which Gemini then rejects as invalid
+        // base64. Keep this compatibility shape scoped to Neon.
+        return {
+          type: 'content' as const,
+          value: [{
+            type: 'image-data' as const,
+            data,
+            mediaType: 'image/png',
+          }],
+        } as never
+      }
       return {
         type: 'content' as const,
         value: [
           {
             type: 'file' as const,
-            data: { type: 'data' as const, data: output.image.split(',')[1] },
+            data: { type: 'data' as const, data },
             mediaType: 'image/png',
           },
         ],

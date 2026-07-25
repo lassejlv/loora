@@ -263,6 +263,7 @@ export async function handleAgentChatRequest(request: Request): Promise<Response
     userId: session.user.id,
     githubConnected,
     imageInputsEnabled,
+    useLegacyNeonImageOutput: !usingChatGPT,
   })
 
   // Materialize the prompt and model messages before streamText so nothing in
