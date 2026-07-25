@@ -1459,7 +1459,14 @@ function ChatSession({
         files: [
           ...uploadedFiles,
           ...(snapshot
-            ? [{ type: 'file' as const, mediaType: 'image/png', url: snapshot }]
+            ? [
+                {
+                  type: 'file' as const,
+                  mediaType: 'image/png',
+                  url: snapshot,
+                  filename: CANVAS_SNAPSHOT_FILENAME,
+                },
+              ]
             : []),
         ],
       })
@@ -2349,6 +2356,11 @@ function toolSummary(name: string, part: ToolPart, elements: CanvasElement[]) {
   return ''
 }
 
+// The canvas snapshot rides along on every send as the agent's vision input,
+// not as something the user attached — the filename marks it so the message
+// bubble can skip it.
+const CANVAS_SNAPSHOT_FILENAME = 'loora-canvas-snapshot.png'
+
 type Block =
   | { kind: 'text'; text: string }
   | { kind: 'file'; part: FileUIPart }
@@ -2430,13 +2442,19 @@ function ChatFileAttachment({ file }: { file: FileUIPart }) {
 
 // Group consecutive tool calls so a burst of 20 creates reads as one line.
 // Questions stay standalone - they need their own interactive card.
-function toBlocks(parts: { type: string }[]): Block[] {
+function toBlocks(parts: { type: string }[], role: string): Block[] {
   const blocks: Block[] = []
   for (const part of parts) {
     if (part.type === 'text') {
       blocks.push({ kind: 'text', text: (part as unknown as { text: string }).text })
     } else if (part.type === 'file') {
-      blocks.push({ kind: 'file', part: part as FileUIPart })
+      const file = part as FileUIPart
+      // Composer attachments always carry a filename, so an unnamed image on a
+      // user message is a snapshot from a chat saved before the marker existed.
+      const snapshot =
+        file.filename === CANVAS_SNAPSHOT_FILENAME ||
+        (role === 'user' && !file.filename && file.mediaType.startsWith('image/'))
+      if (!snapshot) blocks.push({ kind: 'file', part: file })
     } else if (part.type === 'reasoning') {
       blocks.push({ kind: 'reasoning' })
     } else if (part.type === 'tool-askQuestion') {
@@ -2468,7 +2486,7 @@ export const ChatMessageRow = memo(function ChatMessageRow({
   onRenderMeasure?: () => void
 }) {
   onRenderMeasure?.()
-  const blocks = useMemo(() => toBlocks(message.parts), [message.parts])
+  const blocks = useMemo(() => toBlocks(message.parts, message.role), [message.parts, message.role])
   return (
     <Message from={message.role}>
       <MessageContent>
