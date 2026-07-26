@@ -41,7 +41,7 @@ import { EMPTY_SHORTCUT_CONFIG } from '@loora/db/shortcuts'
 import { parseShortcutConfig, shortcutConfigSchema } from './shortcuts'
 import { agentSystemPromptSchema } from './agent-prompt'
 import { googleOAuthEnabled, type getSession } from '@loora/auth'
-import type { CanvasElement, CanvasPage } from '@loora/db/canvas'
+import { legacyArray, type CanvasElement, type CanvasPage } from '@loora/db/canvas'
 import {
   mergeCanvas,
   type MergeChoice,
@@ -909,10 +909,16 @@ const beginCanvasMigration = protectedProcedure
         id: leased.id,
         name: leased.name,
         revision: leased.revision,
-        shapes: leased.shapes,
-        pages: leased.pages,
+        shapes: legacyArray<CanvasElement>(leased.shapes),
+        pages: legacyArray<CanvasPage>(leased.pages),
       },
-      drafts,
+      drafts: drafts.map((draft) => ({
+        ...draft,
+        shapes: legacyArray<CanvasElement>(draft.shapes),
+        pages: legacyArray<CanvasPage>(draft.pages),
+        baseShapes: legacyArray<CanvasElement>(draft.baseShapes),
+        basePages: legacyArray<CanvasPage>(draft.basePages),
+      })),
     }
   })
 
@@ -1847,8 +1853,8 @@ const getCanvasVersionForMigration = protectedProcedure
     return {
       status: 'migration-required' as const,
       name: version.message,
-      shapes: version.shapes,
-      pages: version.pages,
+      shapes: legacyArray<CanvasElement>(version.shapes),
+      pages: legacyArray<CanvasPage>(version.pages),
     }
   })
 

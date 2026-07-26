@@ -32,3 +32,23 @@ export interface CanvasPage {
   w: number
   items: CanvasPageItem[]
 }
+
+/**
+ * Older writes stored `shapes`/`pages` as a JSON *string* inside the jsonb
+ * column instead of a jsonb array, so a row reads back as `"[{…}]"` rather
+ * than `[{…}]`. Production is mostly in that state, and iterating a string
+ * yields characters — which crashed first-open migration for those designs.
+ * Read every legacy array through this.
+ */
+export function legacyArray<T>(value: unknown): T[] {
+  if (Array.isArray(value)) return value as T[]
+  if (typeof value === 'string') {
+    try {
+      const parsed = JSON.parse(value)
+      return Array.isArray(parsed) ? (parsed as T[]) : []
+    } catch {
+      return []
+    }
+  }
+  return []
+}
