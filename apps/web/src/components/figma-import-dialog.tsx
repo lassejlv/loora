@@ -1,6 +1,5 @@
 import { useEffect, useState } from 'react'
 import { FigmaIcon, ImportIcon } from 'lucide-react'
-import type { CanvasElement, CanvasPage } from '@loora/db/canvas'
 import { Button } from '#/components/ui/button'
 import {
   Dialog,
@@ -19,6 +18,12 @@ const PENDING_DESTINATION_KEY = 'loora:pending-figma-destination'
 
 type ImportResult = Awaited<ReturnType<typeof orpc.figma.import>>
 export type FigmaImportDestination = 'new' | 'current'
+export interface FigmaImportCurrentTarget {
+  id: string
+  name: string
+  draftId?: string | null
+  revision: number
+}
 
 function errorMessage(error: unknown): string {
   if (error instanceof Error && error.message) return error.message
@@ -30,19 +35,14 @@ export function FigmaImportDialog({
   onOpenChange,
   onImported,
   currentDocument,
+  prepareCurrentImport,
   initialDestination = 'new',
 }: {
   open: boolean
   onOpenChange: (open: boolean) => void
   onImported: (result: ImportResult, destination: FigmaImportDestination) => void
-  currentDocument: {
-    id: string
-    name: string
-    shapes: CanvasElement[]
-    pages: CanvasPage[]
-    draftId?: string | null
-    revision?: number
-  }
+  currentDocument: FigmaImportCurrentTarget
+  prepareCurrentImport?: () => Promise<{ revision: number }>
   initialDestination?: FigmaImportDestination
 }) {
   const [url, setUrl] = useState(() => window.sessionStorage.getItem(PENDING_KEY) ?? '')
@@ -98,10 +98,19 @@ export function FigmaImportDialog({
 
     setImporting(true)
     try {
+      const prepared =
+        destination === 'current'
+          ? await prepareCurrentImport?.()
+          : undefined
       const imported = await orpc.figma.import({
         url: source,
         ...(destination === 'current'
-          ? { target: { ...currentDocument, revision: currentDocument.revision ?? 0 } }
+          ? {
+              target: {
+                ...currentDocument,
+                revision: prepared?.revision ?? currentDocument.revision,
+              },
+            }
           : {}),
       })
       window.sessionStorage.removeItem(PENDING_KEY)

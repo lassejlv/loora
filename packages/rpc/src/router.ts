@@ -1,15 +1,14 @@
-import { and, asc, desc, eq, gt, gte, isNotNull, isNull, lt, or, sql } from 'drizzle-orm'
+import { and, asc, desc, eq, gt, gte, inArray, isNotNull, isNull, lt, or, sql } from 'drizzle-orm'
 import { ORPCError, os } from '@orpc/server'
 import { z } from 'zod'
 import { db } from '@loora/db'
 import {
   asset,
+  canvasTransaction as canvasTransactionLog,
   design,
   designChat,
   designDraft,
   designGithubRepository,
-  designPullRequest,
-  designPullRequestComment,
   designVersion,
   oauthAccessToken,
   oauthApplication,
@@ -19,6 +18,25 @@ import {
   user,
   userPreferences,
 } from '@loora/db/schema'
+import {
+  CanvasConflictError,
+  CanvasEngine,
+  parseCanvasTransaction,
+  withTransactionPreconditions,
+  type CanvasTransaction,
+} from '@loora/canvas/engine'
+import {
+  CANVAS_SCHEMA_VERSION,
+  createCanvasDocument,
+  parseCanvasDocument,
+  type CanvasDocumentV2,
+} from '@loora/canvas/model'
+import {
+  diffDocuments,
+  mergeDocuments,
+  type CanvasMergeConflict,
+  type CanvasMergeResolutions,
+} from '@loora/canvas/merge'
 import { EMPTY_SHORTCUT_CONFIG } from '@loora/db/shortcuts'
 import { parseShortcutConfig, shortcutConfigSchema } from './shortcuts'
 import { agentSystemPromptSchema } from './agent-prompt'
@@ -30,17 +48,6 @@ import {
 } from '@loora/db/drafts'
 import { assetKey, s3 } from './storage'
 import { createHandoffToken } from './handoff-token'
-import {
-  PULL_REQUEST_BODY_MAX,
-  PULL_REQUEST_COMMENT_MAX,
-  PULL_REQUEST_TITLE_MAX,
-} from '@loora/db/pull-requests'
-import {
-  addReviewComment,
-  listReviewCommits,
-  listReviewComments,
-  pullRequestId,
-} from './pull-requests'
 import {
   egressWindowCutoff,
   PUBLISH_EGRESS_LIMIT_BYTES,
@@ -324,6 +331,732 @@ const deleteDesign = protectedProcedure
     return { deleted: deleted.length > 0 }
   })
 
+const canvasTargetKey = (draftId: string | null | undefined) =>
+  draftId ? `draft:${draftId}` : 'main'
+
+const canvasTargetInput = z.object({
+  designId: z.string().min(1).max(128),
+  draftId: optionalDraftIdSchema,
+})
+
+const createCanvasDesign = protectedProcedure
+  .input(
+    z.object({
+      designId: z.string().min(1).max(128),
+      name: z.string().trim().min(1).max(200),
+      document: z.unknown(),
+    }),
+  )
+  .handler(async ({ context, input }) => {
+    const document = parseCanvasDocument(input.document)
+    if (document.id !== input.designId) {
+      throw new ORPCError('BAD_REQUEST', {
+        message: 'Canvas document id must match the design id.',
+      })
+    }
+    const [created] = await db
+      .insert(design)
+      .values({
+        id: input.designId,
+        userId: context.user.id,
+        name: input.name,
+        shapes: [],
+        pages: [],
+        canvasVersion: CANVAS_SCHEMA_VERSION,
+        canvasDocument: { ...document, name: input.name },
+      })
+      .onConflictDoNothing({ target: [design.id, design.userId] })
+      .returning({
+        id: design.id,
+        revision: design.revision,
+        document: design.canvasDocument,
+      })
+    if (created) {
+      return {
+        created: true as const,
+        id: created.id,
+        revision: created.revision,
+        document: parseCanvasDocument(created.document),
+      }
+    }
+    const [existing] = await db
+      .select({
+        id: design.id,
+        version: design.canvasVersion,
+        revision: design.revision,
+        document: design.canvasDocument,
+      })
+      .from(design)
+      .where(and(eq(design.id, input.designId), eq(design.userId, context.user.id)))
+      .limit(1)
+    if (!existing) throw new ORPCError('CONFLICT')
+    if (existing.version !== CANVAS_SCHEMA_VERSION || !existing.document) {
+      throw new ORPCError('CONFLICT', { message: 'MIGRATION_REQUIRED' })
+    }
+    return {
+      created: false as const,
+      id: existing.id,
+      revision: existing.revision,
+      document: parseCanvasDocument(existing.document),
+    }
+  })
+
+const renameCanvasDesign = protectedProcedure
+  .input(
+    z.object({
+      designId: z.string().min(1).max(128),
+      name: z.string().trim().min(1).max(200),
+      expectedRevision: z.number().int().nonnegative(),
+    }),
+  )
+  .handler(async ({ context, input }) => {
+    const [target] = await db
+      .select({
+        document: design.canvasDocument,
+        version: design.canvasVersion,
+        revision: design.revision,
+      })
+      .from(design)
+      .where(and(eq(design.id, input.designId), eq(design.userId, context.user.id)))
+      .limit(1)
+    if (!target) throw new ORPCError('NOT_FOUND')
+    if (target.version !== CANVAS_SCHEMA_VERSION || !target.document) {
+      throw new ORPCError('CONFLICT', { message: 'MIGRATION_REQUIRED' })
+    }
+    if (target.revision !== input.expectedRevision) {
+      throw new ORPCError('CONFLICT', {
+        message: 'Main changed before it could be renamed.',
+      })
+    }
+    const document = parseCanvasDocument(target.document)
+    const renamedDocument: CanvasDocumentV2 = {
+      ...document,
+      name: input.name,
+      metadata: { ...document.metadata, updatedAt: Date.now() },
+    }
+    const [updated] = await db
+      .update(design)
+      .set({
+        name: input.name,
+        canvasDocument: renamedDocument,
+        revision: target.revision + 1,
+        updatedAt: new Date(),
+      })
+      .where(
+        and(
+          eq(design.id, input.designId),
+          eq(design.userId, context.user.id),
+          eq(design.revision, target.revision),
+        ),
+      )
+      .returning({ revision: design.revision })
+    if (!updated) {
+      throw new ORPCError('CONFLICT', {
+        message: 'Main changed while it was being renamed.',
+      })
+    }
+    return {
+      renamed: true as const,
+      revision: updated.revision,
+      document: renamedDocument,
+    }
+  })
+
+async function canvasInterveningTransactions(
+  userId: string,
+  designId: string,
+  draftId: string | null | undefined,
+  revision: number,
+) {
+  return db
+    .select({
+      revision: canvasTransactionLog.revision,
+      transaction: canvasTransactionLog.transaction,
+    })
+    .from(canvasTransactionLog)
+    .where(
+      and(
+        eq(canvasTransactionLog.userId, userId),
+        eq(canvasTransactionLog.designId, designId),
+        eq(canvasTransactionLog.targetKey, canvasTargetKey(draftId)),
+        gt(canvasTransactionLog.revision, revision),
+      ),
+    )
+    .orderBy(asc(canvasTransactionLog.revision))
+    .limit(101)
+}
+
+const getCanvas = protectedProcedure
+  .input(
+    canvasTargetInput.extend({
+      sinceRevision: z.number().int().nonnegative().optional(),
+    }),
+  )
+  .handler(async ({ context, input }) => {
+    const target = input.draftId
+      ? await db
+          .select({
+            version: designDraft.canvasVersion,
+            document: designDraft.canvasDocument,
+            revision: designDraft.revision,
+            status: designDraft.status,
+          })
+          .from(designDraft)
+          .where(
+            and(
+              eq(designDraft.id, input.draftId),
+              eq(designDraft.designId, input.designId),
+              eq(designDraft.userId, context.user.id),
+            ),
+          )
+          .limit(1)
+          .then((rows) => rows[0])
+      : await db
+          .select({
+            version: design.canvasVersion,
+            document: design.canvasDocument,
+            revision: design.revision,
+          })
+          .from(design)
+          .where(and(eq(design.id, input.designId), eq(design.userId, context.user.id)))
+          .limit(1)
+          .then((rows) => rows[0])
+    if (!target) throw new ORPCError('NOT_FOUND')
+    if (target.version !== CANVAS_SCHEMA_VERSION || !target.document) {
+      return {
+        status: 'migration-required' as const,
+        version: target.version,
+        revision: target.revision,
+        openPath: `/?design=${encodeURIComponent(input.designId)}&migrate=canvas-v2`,
+      }
+    }
+    const document = parseCanvasDocument(target.document)
+    if (
+      input.sinceRevision === undefined ||
+      input.sinceRevision === target.revision
+    ) {
+      return {
+        status: 'ready' as const,
+        version: CANVAS_SCHEMA_VERSION,
+        revision: target.revision,
+        document,
+        transactions: [] as CanvasTransaction[],
+      }
+    }
+    const intervening = await canvasInterveningTransactions(
+      context.user.id,
+      input.designId,
+      input.draftId,
+      input.sinceRevision,
+    )
+    const complete =
+      intervening.length <= 100 &&
+      intervening[0]?.revision === input.sinceRevision + 1 &&
+      intervening.at(-1)?.revision === target.revision
+    return {
+      status: 'ready' as const,
+      version: CANVAS_SCHEMA_VERSION,
+      revision: target.revision,
+      document: complete ? null : document,
+      transactions: complete
+        ? intervening.map((entry) => parseCanvasTransaction(entry.transaction))
+        : [],
+    }
+  })
+
+const applyCanvasTransactions = protectedProcedure
+  .input(
+    canvasTargetInput.extend({
+      expectedRevision: z.number().int().nonnegative(),
+      transactions: z.array(z.unknown()).min(1).max(100),
+    }),
+  )
+  .handler(async ({ context, input }) => {
+    const transactions = input.transactions.map(parseCanvasTransaction)
+    if (
+      new Set(transactions.map((transaction) => transaction.id)).size !==
+      transactions.length
+    ) {
+      throw new ORPCError('BAD_REQUEST', {
+        message: 'A transaction batch cannot contain duplicate ids.',
+      })
+    }
+    const duplicateIds = new Set(
+      await db
+        .select({ id: canvasTransactionLog.transactionId })
+        .from(canvasTransactionLog)
+        .where(
+          and(
+            eq(canvasTransactionLog.userId, context.user.id),
+            eq(canvasTransactionLog.designId, input.designId),
+            eq(canvasTransactionLog.targetKey, canvasTargetKey(input.draftId)),
+            inArray(
+              canvasTransactionLog.transactionId,
+              transactions.map((transaction) => transaction.id),
+            ),
+          ),
+        )
+        .then((rows) => rows.map((row) => row.id)),
+    )
+
+    return db.transaction(async (tx) => {
+      const target = input.draftId
+        ? await tx
+            .select({
+              version: designDraft.canvasVersion,
+              document: designDraft.canvasDocument,
+              revision: designDraft.revision,
+              status: designDraft.status,
+            })
+            .from(designDraft)
+            .where(
+              and(
+                eq(designDraft.id, input.draftId),
+                eq(designDraft.designId, input.designId),
+                eq(designDraft.userId, context.user.id),
+              ),
+            )
+            .limit(1)
+            .then((rows) => rows[0])
+        : await tx
+            .select({
+              version: design.canvasVersion,
+              document: design.canvasDocument,
+              revision: design.revision,
+            })
+            .from(design)
+            .where(and(eq(design.id, input.designId), eq(design.userId, context.user.id)))
+            .limit(1)
+            .then((rows) => rows[0])
+      if (!target) throw new ORPCError('NOT_FOUND')
+      if (target.version !== CANVAS_SCHEMA_VERSION || !target.document) {
+        throw new ORPCError('CONFLICT', { message: 'MIGRATION_REQUIRED' })
+      }
+      if ('status' in target && target.status !== 'active') {
+        throw new ORPCError('CONFLICT', { message: 'This branch is read-only.' })
+      }
+      const document = parseCanvasDocument(target.document)
+      if (transactions.every((transaction) => duplicateIds.has(transaction.id))) {
+        return {
+          applied: true as const,
+          idempotent: true,
+          revision: target.revision,
+          document,
+          transactionIds: transactions.map((transaction) => transaction.id),
+          changedNodeIds: [] as string[],
+        }
+      }
+      if (target.revision !== input.expectedRevision) {
+        const intervening = await canvasInterveningTransactions(
+          context.user.id,
+          input.designId,
+          input.draftId,
+          input.expectedRevision,
+        )
+        const complete =
+          intervening.length <= 100 &&
+          intervening[0]?.revision === input.expectedRevision + 1 &&
+          intervening.at(-1)?.revision === target.revision
+        return {
+          applied: false as const,
+          reason: 'stale' as const,
+          revision: target.revision,
+          document: complete ? null : document,
+          transactions: complete
+            ? intervening.map((entry) => parseCanvasTransaction(entry.transaction))
+            : [],
+        }
+      }
+
+      const engine = new CanvasEngine(document)
+      let nextDocument: CanvasDocumentV2 = document
+      const freshTransactions = transactions.filter(
+        (transaction) => !duplicateIds.has(transaction.id),
+      )
+      const appliedTransactions: CanvasTransaction[] = []
+      const changedNodeIds = new Set<string>()
+      try {
+        for (const transaction of freshTransactions) {
+          const prepared = withTransactionPreconditions(
+            engine.document,
+            transaction,
+          )
+          const result = engine.apply(prepared, { recordHistory: false })
+          appliedTransactions.push(prepared)
+          nextDocument = engine.document
+          for (const id of result.changedNodeIds) changedNodeIds.add(id)
+        }
+      } catch (error) {
+        if (error instanceof CanvasConflictError) {
+          return {
+            applied: false as const,
+            reason: 'conflict' as const,
+            revision: target.revision,
+            conflicts: error.conflicts,
+          }
+        }
+        throw error
+      }
+
+      const nextRevision = target.revision + freshTransactions.length
+      const updated = input.draftId
+        ? await tx
+            .update(designDraft)
+            .set({
+              canvasDocument: nextDocument,
+              canvasVersion: CANVAS_SCHEMA_VERSION,
+              revision: nextRevision,
+              updatedAt: new Date(),
+            })
+            .where(
+              and(
+                eq(designDraft.id, input.draftId),
+                eq(designDraft.designId, input.designId),
+                eq(designDraft.userId, context.user.id),
+                eq(designDraft.status, 'active'),
+                eq(designDraft.revision, target.revision),
+              ),
+            )
+            .returning({ revision: designDraft.revision })
+        : await tx
+            .update(design)
+            .set({
+              canvasDocument: nextDocument,
+              canvasVersion: CANVAS_SCHEMA_VERSION,
+              revision: nextRevision,
+              updatedAt: new Date(),
+            })
+            .where(
+              and(
+                eq(design.id, input.designId),
+                eq(design.userId, context.user.id),
+                eq(design.revision, target.revision),
+              ),
+            )
+            .returning({ revision: design.revision })
+      if (updated.length === 0) {
+        const latest = input.draftId
+          ? await tx
+              .select({
+                revision: designDraft.revision,
+                document: designDraft.canvasDocument,
+              })
+              .from(designDraft)
+              .where(
+                and(
+                  eq(designDraft.id, input.draftId),
+                  eq(designDraft.designId, input.designId),
+                  eq(designDraft.userId, context.user.id),
+                ),
+              )
+              .limit(1)
+              .then((rows) => rows[0])
+          : await tx
+              .select({
+                revision: design.revision,
+                document: design.canvasDocument,
+              })
+              .from(design)
+              .where(
+                and(
+                  eq(design.id, input.designId),
+                  eq(design.userId, context.user.id),
+                ),
+              )
+              .limit(1)
+              .then((rows) => rows[0])
+        if (!latest?.document) {
+          throw new ORPCError('CONFLICT', { message: 'STALE_REVISION' })
+        }
+        return {
+          applied: false as const,
+          reason: 'stale' as const,
+          revision: latest.revision,
+          document: parseCanvasDocument(latest.document),
+          transactions: [] as CanvasTransaction[],
+        }
+      }
+      if (freshTransactions.length > 0) {
+        await tx.insert(canvasTransactionLog).values(
+          appliedTransactions.map((transaction, index) => ({
+            designId: input.designId,
+            userId: context.user.id,
+            targetKey: canvasTargetKey(input.draftId),
+            transactionId: transaction.id,
+            baseRevision: target.revision + index,
+            revision: target.revision + index + 1,
+            transaction,
+          })),
+        )
+        await tx
+          .delete(canvasTransactionLog)
+          .where(
+            and(
+              eq(canvasTransactionLog.userId, context.user.id),
+              eq(canvasTransactionLog.designId, input.designId),
+              eq(canvasTransactionLog.targetKey, canvasTargetKey(input.draftId)),
+              lt(canvasTransactionLog.revision, Math.max(0, nextRevision - 500)),
+            ),
+          )
+      }
+      return {
+        applied: true as const,
+        idempotent: freshTransactions.length === 0,
+        revision: nextRevision,
+        document: nextDocument,
+        transactionIds: transactions.map((transaction) => transaction.id),
+        changedNodeIds: [...changedNodeIds],
+      }
+    })
+  })
+
+const beginCanvasMigration = protectedProcedure
+  .input(
+    z.object({
+      designId: z.string().min(1).max(128),
+      leaseId: z.string().min(16).max(200),
+    }),
+  )
+  .handler(async ({ context, input }) => {
+    const now = new Date()
+    const expiresAt = new Date(now.getTime() + 2 * 60_000)
+    const [leased] = await db
+      .update(design)
+      .set({
+        canvasMigrationLeaseId: input.leaseId,
+        canvasMigrationLeaseExpiresAt: expiresAt,
+      })
+      .where(
+        and(
+          eq(design.id, input.designId),
+          eq(design.userId, context.user.id),
+          or(
+            isNull(design.canvasMigrationLeaseId),
+            lt(design.canvasMigrationLeaseExpiresAt, now),
+            eq(design.canvasMigrationLeaseId, input.leaseId),
+          ),
+        ),
+      )
+      .returning({
+        id: design.id,
+        name: design.name,
+        canvasVersion: design.canvasVersion,
+        canvasDocument: design.canvasDocument,
+        shapes: design.shapes,
+        pages: design.pages,
+        revision: design.revision,
+      })
+    if (!leased) {
+      const [current] = await db
+        .select({
+          leaseId: design.canvasMigrationLeaseId,
+          expiresAt: design.canvasMigrationLeaseExpiresAt,
+        })
+        .from(design)
+        .where(and(eq(design.id, input.designId), eq(design.userId, context.user.id)))
+        .limit(1)
+      if (!current) throw new ORPCError('NOT_FOUND')
+      return {
+        acquired: false as const,
+        retryAt: current.expiresAt?.getTime() ?? now.getTime() + 1_000,
+      }
+    }
+    if (
+      leased.canvasVersion === CANVAS_SCHEMA_VERSION &&
+      leased.canvasDocument
+    ) {
+      await db
+        .update(design)
+        .set({ canvasMigrationLeaseId: null, canvasMigrationLeaseExpiresAt: null })
+        .where(
+          and(
+            eq(design.id, input.designId),
+            eq(design.userId, context.user.id),
+            eq(design.canvasMigrationLeaseId, input.leaseId),
+          ),
+        )
+      return {
+        acquired: true as const,
+        alreadyMigrated: true as const,
+        revision: leased.revision,
+        document: parseCanvasDocument(leased.canvasDocument),
+      }
+    }
+    const drafts = await db
+      .select({
+        id: designDraft.id,
+        name: designDraft.name,
+        revision: designDraft.revision,
+        baseRevision: designDraft.baseRevision,
+        shapes: designDraft.shapes,
+        pages: designDraft.pages,
+        baseShapes: designDraft.baseShapes,
+        basePages: designDraft.basePages,
+      })
+      .from(designDraft)
+      .where(
+        and(
+          eq(designDraft.designId, input.designId),
+          eq(designDraft.userId, context.user.id),
+          or(eq(designDraft.status, 'active'), eq(designDraft.status, 'proposed')),
+        ),
+      )
+    return {
+      acquired: true as const,
+      alreadyMigrated: false as const,
+      leaseExpiresAt: expiresAt.getTime(),
+      main: {
+        id: leased.id,
+        name: leased.name,
+        revision: leased.revision,
+        shapes: leased.shapes,
+        pages: leased.pages,
+      },
+      drafts,
+    }
+  })
+
+const renewCanvasMigration = protectedProcedure
+  .input(
+    z.object({
+      designId: z.string().min(1).max(128),
+      leaseId: z.string().min(16).max(200),
+    }),
+  )
+  .handler(async ({ context, input }) => {
+    const now = new Date()
+    const expiresAt = new Date(now.getTime() + 2 * 60_000)
+    const [renewed] = await db
+      .update(design)
+      .set({ canvasMigrationLeaseExpiresAt: expiresAt })
+      .where(
+        and(
+          eq(design.id, input.designId),
+          eq(design.userId, context.user.id),
+          eq(design.canvasMigrationLeaseId, input.leaseId),
+          gt(design.canvasMigrationLeaseExpiresAt, now),
+        ),
+      )
+      .returning({ id: design.id })
+    if (!renewed) {
+      throw new ORPCError('CONFLICT', {
+        message: 'The Canvas migration lease expired.',
+      })
+    }
+    return { renewed: true as const, expiresAt: expiresAt.getTime() }
+  })
+
+const cancelCanvasMigration = protectedProcedure
+  .input(
+    z.object({
+      designId: z.string().min(1).max(128),
+      leaseId: z.string().min(16).max(200),
+    }),
+  )
+  .handler(async ({ context, input }) => {
+    const [cancelled] = await db
+      .update(design)
+      .set({
+        canvasMigrationLeaseId: null,
+        canvasMigrationLeaseExpiresAt: null,
+      })
+      .where(
+        and(
+          eq(design.id, input.designId),
+          eq(design.userId, context.user.id),
+          eq(design.canvasMigrationLeaseId, input.leaseId),
+        ),
+      )
+      .returning({ id: design.id })
+    return { cancelled: cancelled !== undefined }
+  })
+
+const commitCanvasMigration = protectedProcedure
+  .input(
+    z.object({
+      designId: z.string().min(1).max(128),
+      leaseId: z.string().min(16).max(200),
+      sourceRevision: z.number().int().nonnegative(),
+      document: z.unknown(),
+      drafts: z.array(z.object({
+        id: draftIdSchema,
+        sourceRevision: z.number().int().nonnegative(),
+        document: z.unknown(),
+        baseDocument: z.unknown(),
+      })).max(100),
+    }),
+  )
+  .handler(async ({ context, input }) => {
+    const mainDocument = parseCanvasDocument(input.document)
+    const drafts = input.drafts.map((draft) => ({
+      ...draft,
+      document: parseCanvasDocument(draft.document),
+      baseDocument: parseCanvasDocument(draft.baseDocument),
+    }))
+    const now = new Date()
+    return db.transaction(async (tx) => {
+      for (const draft of drafts) {
+        const [updated] = await tx
+          .update(designDraft)
+          .set({
+            canvasVersion: CANVAS_SCHEMA_VERSION,
+            baseCanvasVersion: CANVAS_SCHEMA_VERSION,
+            canvasDocument: draft.document,
+            baseCanvasDocument: draft.baseDocument,
+            revision: draft.sourceRevision + 1,
+            updatedAt: now,
+          })
+          .where(
+            and(
+              eq(designDraft.id, draft.id),
+              eq(designDraft.designId, input.designId),
+              eq(designDraft.userId, context.user.id),
+              eq(designDraft.revision, draft.sourceRevision),
+              or(eq(designDraft.status, 'active'), eq(designDraft.status, 'proposed')),
+            ),
+          )
+          .returning({ id: designDraft.id })
+        if (!updated) {
+          throw new ORPCError('CONFLICT', {
+            message: `Draft ${draft.id} changed during migration.`,
+          })
+        }
+      }
+      const [updatedMain] = await tx
+        .update(design)
+        .set({
+          canvasVersion: CANVAS_SCHEMA_VERSION,
+          canvasDocument: mainDocument,
+          canvasMigrationLeaseId: null,
+          canvasMigrationLeaseExpiresAt: null,
+          revision: input.sourceRevision + 1,
+          updatedAt: now,
+        })
+        .where(
+          and(
+            eq(design.id, input.designId),
+            eq(design.userId, context.user.id),
+            eq(design.revision, input.sourceRevision),
+            eq(design.canvasMigrationLeaseId, input.leaseId),
+            gt(design.canvasMigrationLeaseExpiresAt, now),
+          ),
+        )
+        .returning({ id: design.id })
+      if (!updatedMain) {
+        throw new ORPCError('CONFLICT', {
+          message: 'Main changed or the migration lease expired.',
+        })
+      }
+      return {
+        committed: true as const,
+        revision: input.sourceRevision + 1,
+        draftRevisions: Object.fromEntries(
+          drafts.map((draft) => [draft.id, draft.sourceRevision + 1]),
+        ),
+      }
+    })
+  })
+
 async function getOwnedDraft(userId: string, designId: string, draftId: string) {
   const [draft] = await db
     .select()
@@ -340,12 +1073,35 @@ async function getOwnedDraft(userId: string, designId: string, draftId: string) 
   return draft
 }
 
+type BranchMergeResolutions = Record<string, 'main' | 'draft'>
+
+function canvasMergeResolutions(
+  resolutions: BranchMergeResolutions,
+): CanvasMergeResolutions {
+  return Object.fromEntries(
+    Object.entries(resolutions).map(([id, side]) => [
+      id,
+      side === 'draft' ? 'right' : 'left',
+    ]),
+  )
+}
+
+function branchMergeConflicts(conflicts: CanvasMergeConflict[]) {
+  return conflicts.map(({ left, right, ...conflict }) => ({
+    ...conflict,
+    main: left,
+    draft: right,
+  }))
+}
+
 async function getDraftComparison(userId: string, designId: string, draftId: string) {
   const [main, draft] = await Promise.all([
     db
       .select({
         shapes: design.shapes,
         pages: design.pages,
+        canvasVersion: design.canvasVersion,
+        canvasDocument: design.canvasDocument,
         revision: design.revision,
       })
       .from(design)
@@ -355,15 +1111,31 @@ async function getDraftComparison(userId: string, designId: string, draftId: str
     getOwnedDraft(userId, designId, draftId),
   ])
   if (!main) throw new ORPCError('NOT_FOUND')
-  const merge = mergeCanvas(
-    draft.baseShapes,
-    main.shapes,
-    draft.shapes,
-    {},
-    draft.basePages,
-    main.pages,
-    draft.pages,
-  )
+  const usesV2 =
+    main.canvasVersion === CANVAS_SCHEMA_VERSION &&
+    draft.canvasVersion === CANVAS_SCHEMA_VERSION &&
+    draft.baseCanvasVersion === CANVAS_SCHEMA_VERSION &&
+    !!main.canvasDocument &&
+    !!draft.canvasDocument &&
+    !!draft.baseCanvasDocument
+  const v2Merge = usesV2
+    ? mergeDocuments(
+        parseCanvasDocument(draft.baseCanvasDocument),
+        parseCanvasDocument(main.canvasDocument),
+        parseCanvasDocument(draft.canvasDocument),
+      )
+    : null
+  const legacyMerge = usesV2
+    ? null
+    : mergeCanvas(
+        draft.baseShapes,
+        main.shapes,
+        draft.shapes,
+        {},
+        draft.basePages,
+        main.pages,
+        draft.pages,
+      )
   return {
     draft: {
       id: draft.id,
@@ -377,15 +1149,21 @@ async function getDraftComparison(userId: string, designId: string, draftId: str
       closedAt: draft.closedAt?.getTime() ?? null,
     },
     mainRevision: main.revision,
+    canvasVersion: usesV2 ? CANVAS_SCHEMA_VERSION : 1,
+    mainDocument: usesV2 ? parseCanvasDocument(main.canvasDocument) : null,
+    draftDocument: usesV2 ? parseCanvasDocument(draft.canvasDocument) : null,
+    baseDocument: usesV2 ? parseCanvasDocument(draft.baseCanvasDocument) : null,
     mainShapes: main.shapes,
     draftShapes: draft.shapes,
     baseShapes: draft.baseShapes,
     mainPages: main.pages,
     draftPages: draft.pages,
     basePages: draft.basePages,
-    summary: merge.summary,
-    conflicts: merge.conflicts,
-    unresolved: merge.unresolved,
+    summary: v2Merge?.summary ?? legacyMerge!.summary,
+    conflicts: v2Merge
+      ? branchMergeConflicts(v2Merge.conflicts)
+      : legacyMerge!.conflicts,
+    unresolved: v2Merge?.unresolved ?? legacyMerge!.unresolved,
   }
 }
 
@@ -446,11 +1224,29 @@ const createDraft = protectedProcedure
   .handler(async ({ context, input }) => {
     const { empty, ...values } = input
     const [main] = await db
-      .select({ shapes: design.shapes, pages: design.pages, revision: design.revision })
+      .select({
+        name: design.name,
+        shapes: design.shapes,
+        pages: design.pages,
+        canvasVersion: design.canvasVersion,
+        canvasDocument: design.canvasDocument,
+        revision: design.revision,
+      })
       .from(design)
       .where(and(eq(design.id, input.designId), eq(design.userId, context.user.id)))
       .limit(1)
     if (!main) throw new ORPCError('NOT_FOUND')
+    const mainDocument =
+      main.canvasVersion === CANVAS_SCHEMA_VERSION && main.canvasDocument
+        ? parseCanvasDocument(main.canvasDocument)
+        : null
+    const emptyDocument = mainDocument
+      ? {
+          ...createCanvasDocument(mainDocument.name, mainDocument.id),
+          breakpoints: mainDocument.breakpoints,
+          metadata: { ...mainDocument.metadata, updatedAt: Date.now() },
+        }
+      : null
 
     // An empty branch bases off an empty canvas rather than Main's, so merging
     // it back adds its work instead of reading as "the branch deleted Main".
@@ -463,6 +1259,18 @@ const createDraft = protectedProcedure
         shapes: empty ? [] : main.shapes,
         basePages: empty ? [] : main.pages,
         pages: empty ? [] : main.pages,
+        canvasVersion: mainDocument ? CANVAS_SCHEMA_VERSION : 1,
+        baseCanvasVersion: mainDocument ? CANVAS_SCHEMA_VERSION : 1,
+        baseCanvasDocument: mainDocument
+          ? empty
+            ? emptyDocument
+            : mainDocument
+          : null,
+        canvasDocument: mainDocument
+          ? empty
+            ? emptyDocument
+            : mainDocument
+          : null,
         baseRevision: main.revision,
       })
       .returning()
@@ -652,20 +1460,38 @@ const applyDraft = protectedProcedure
       throw new ORPCError('CONFLICT', { message: 'This draft is already archived.' })
     }
 
-    const merge = mergeCanvas(
-      comparison.baseShapes,
-      comparison.mainShapes,
-      comparison.draftShapes,
-      input.resolutions as Record<string, MergeChoice>,
-      comparison.basePages,
-      comparison.mainPages,
-      comparison.draftPages,
-    )
-    if (merge.unresolved.length > 0) {
+    const v2Merge =
+      comparison.canvasVersion === CANVAS_SCHEMA_VERSION &&
+      comparison.baseDocument &&
+      comparison.mainDocument &&
+      comparison.draftDocument
+        ? mergeDocuments(
+            comparison.baseDocument,
+            comparison.mainDocument,
+            comparison.draftDocument,
+            canvasMergeResolutions(input.resolutions),
+          )
+        : null
+    const legacyMerge = v2Merge
+      ? null
+      : mergeCanvas(
+          comparison.baseShapes,
+          comparison.mainShapes,
+          comparison.draftShapes,
+          input.resolutions as Record<string, MergeChoice>,
+          comparison.basePages,
+          comparison.mainPages,
+          comparison.draftPages,
+        )
+    const unresolved = v2Merge?.unresolved ?? legacyMerge!.unresolved
+    const conflicts = v2Merge
+      ? branchMergeConflicts(v2Merge.conflicts)
+      : legacyMerge!.conflicts
+    if (unresolved.length > 0) {
       return {
         applied: false as const,
-        unresolved: merge.unresolved,
-        conflicts: merge.conflicts,
+        unresolved,
+        conflicts,
       }
     }
 
@@ -676,8 +1502,10 @@ const applyDraft = protectedProcedure
       const [updatedMain] = await tx
         .update(design)
         .set({
-          shapes: merge.shapes,
-          pages: merge.pages,
+          shapes: legacyMerge?.shapes ?? comparison.mainShapes,
+          pages: legacyMerge?.pages ?? comparison.mainPages,
+          canvasVersion: v2Merge ? CANVAS_SCHEMA_VERSION : comparison.canvasVersion,
+          canvasDocument: v2Merge?.document ?? comparison.mainDocument,
           revision: input.expectedMainRevision + 1,
           updatedAt: now,
         })
@@ -701,21 +1529,35 @@ const applyDraft = protectedProcedure
           message: `Before applying: ${comparison.draft.name}`,
           shapes: comparison.mainShapes,
           pages: comparison.mainPages,
-          ...documentDiff([], comparison.mainShapes, [], comparison.mainPages),
+          canvasVersion: comparison.canvasVersion,
+          canvasDocument: comparison.mainDocument,
+          ...(v2Merge
+            ? diffDocuments(
+                createCanvasDocument(
+                  comparison.mainDocument?.name,
+                  comparison.mainDocument?.id,
+                ),
+                comparison.mainDocument!,
+              )
+            : documentDiff([], comparison.mainShapes, [], comparison.mainPages)),
         },
         {
           id: appliedId,
           designId: input.designId,
           userId: context.user.id,
           message: `Applied draft: ${comparison.draft.name}`,
-          shapes: merge.shapes,
-          pages: merge.pages,
-          ...documentDiff(
-            comparison.mainShapes,
-            merge.shapes,
-            comparison.mainPages,
-            merge.pages,
-          ),
+          shapes: legacyMerge?.shapes ?? comparison.mainShapes,
+          pages: legacyMerge?.pages ?? comparison.mainPages,
+          canvasVersion: v2Merge ? CANVAS_SCHEMA_VERSION : comparison.canvasVersion,
+          canvasDocument: v2Merge?.document ?? comparison.mainDocument,
+          ...(v2Merge
+            ? diffDocuments(comparison.mainDocument!, v2Merge.document)
+            : documentDiff(
+                comparison.mainShapes,
+                legacyMerge!.shapes,
+                comparison.mainPages,
+                legacyMerge!.pages,
+              )),
         },
       ])
 
@@ -741,210 +1583,18 @@ const applyDraft = protectedProcedure
         throw new ORPCError('CONFLICT', { message: 'The draft changed while it was applying.' })
       }
 
-      // A branch merged from anywhere (review dialog, PR view) closes its
-      // review as merged, so the public link stops inviting comments.
-      await tx
-        .update(designPullRequest)
-        .set({ status: 'merged', mergedAt: now, updatedAt: now })
-        .where(
-          and(
-            eq(designPullRequest.draftId, input.id),
-            eq(designPullRequest.userId, context.user.id),
-            eq(designPullRequest.status, 'open'),
-          ),
-        )
     })
 
     return {
       applied: true as const,
       revision: input.expectedMainRevision + 1,
       versionId: appliedId,
-      shapes: merge.shapes,
-      pages: merge.pages,
+      canvasVersion: v2Merge ? CANVAS_SCHEMA_VERSION : comparison.canvasVersion,
+      document: v2Merge?.document ?? null,
+      shapes: legacyMerge?.shapes ?? comparison.mainShapes,
+      pages: legacyMerge?.pages ?? comparison.mainPages,
       unresolved: [] as string[],
     }
-  })
-
-const pullRequestSelection = {
-  id: designPullRequest.id,
-  designId: designPullRequest.designId,
-  draftId: designPullRequest.draftId,
-  title: designPullRequest.title,
-  body: designPullRequest.body,
-  status: designPullRequest.status,
-  createdAt: designPullRequest.createdAt,
-  updatedAt: designPullRequest.updatedAt,
-  mergedAt: designPullRequest.mergedAt,
-  closedAt: designPullRequest.closedAt,
-}
-
-const serializePullRequest = <
-  T extends { createdAt: Date; updatedAt: Date; mergedAt: Date | null; closedAt: Date | null },
->(
-  row: T,
-) => ({
-  ...row,
-  createdAt: row.createdAt.getTime(),
-  updatedAt: row.updatedAt.getTime(),
-  mergedAt: row.mergedAt?.getTime() ?? null,
-  closedAt: row.closedAt?.getTime() ?? null,
-})
-
-async function getOwnedPullRequest(userId: string, id: string) {
-  const [found] = await db
-    .select(pullRequestSelection)
-    .from(designPullRequest)
-    .where(and(eq(designPullRequest.id, id), eq(designPullRequest.userId, userId)))
-    .limit(1)
-  if (!found) throw new ORPCError('NOT_FOUND')
-  return found
-}
-
-// Opening a review parks the branch in 'proposed'. It stays editable — pushing
-// more commits to an open pull request is the point.
-const openPullRequest = protectedProcedure
-  .input(
-    z.object({
-      designId: z.string().min(1).max(128),
-      draftId: draftIdSchema,
-      title: z.string().trim().min(1).max(PULL_REQUEST_TITLE_MAX),
-      body: z.string().trim().max(PULL_REQUEST_BODY_MAX).default(''),
-    }),
-  )
-  .handler(async ({ context, input }) => {
-    const draft = await getOwnedDraft(context.user.id, input.designId, input.draftId)
-    if (draft.status !== 'active' && draft.status !== 'proposed') {
-      throw new ORPCError('CONFLICT', { message: 'This branch is already archived.' })
-    }
-
-    const [open] = await db
-      .select(pullRequestSelection)
-      .from(designPullRequest)
-      .where(
-        and(
-          eq(designPullRequest.userId, context.user.id),
-          eq(designPullRequest.draftId, input.draftId),
-          eq(designPullRequest.status, 'open'),
-        ),
-      )
-      .limit(1)
-    if (open) return serializePullRequest(open)
-
-    const now = new Date()
-    const [created] = await db
-      .insert(designPullRequest)
-      .values({
-        id: pullRequestId(),
-        designId: input.designId,
-        draftId: input.draftId,
-        userId: context.user.id,
-        title: input.title,
-        body: input.body,
-      })
-      .returning(pullRequestSelection)
-
-    await db
-      .update(designDraft)
-      .set({ status: 'proposed', proposedAt: now, updatedAt: now })
-      .where(
-        and(
-          eq(designDraft.id, input.draftId),
-          eq(designDraft.userId, context.user.id),
-          eq(designDraft.status, 'active'),
-        ),
-      )
-
-    return serializePullRequest(created)
-  })
-
-const getPullRequest = protectedProcedure
-  .input(z.object({ designId: z.string().min(1).max(128), draftId: draftIdSchema }))
-  .handler(async ({ context, input }) => {
-    const [found] = await db
-      .select(pullRequestSelection)
-      .from(designPullRequest)
-      .where(
-        and(
-          eq(designPullRequest.userId, context.user.id),
-          eq(designPullRequest.designId, input.designId),
-          eq(designPullRequest.draftId, input.draftId),
-        ),
-      )
-      .orderBy(desc(designPullRequest.createdAt))
-      .limit(1)
-    if (!found) return null
-
-    const [comments, commits] = await Promise.all([
-      listReviewComments(found.id),
-      listReviewCommits(context.user.id, input.designId, input.draftId),
-    ])
-    return { ...serializePullRequest(found), comments, commits }
-  })
-
-const commentOnPullRequest = protectedProcedure
-  .input(
-    z.object({
-      id: z.string().min(1).max(64),
-      body: z.string().trim().min(1).max(PULL_REQUEST_COMMENT_MAX),
-    }),
-  )
-  .handler(async ({ context, input }) => {
-    await getOwnedPullRequest(context.user.id, input.id)
-    const result = await addReviewComment({
-      prId: input.id,
-      authorName: context.user.name || 'Owner',
-      body: input.body,
-      authorUserId: context.user.id,
-      isOwner: true,
-    })
-    if (!result.ok) throw new ORPCError('BAD_REQUEST', { message: result.error })
-    return result.comment
-  })
-
-const closePullRequest = protectedProcedure
-  .input(z.object({ id: z.string().min(1).max(64) }))
-  .handler(async ({ context, input }) => {
-    const found = await getOwnedPullRequest(context.user.id, input.id)
-    if (found.status !== 'open') return serializePullRequest(found)
-
-    const now = new Date()
-    const [updated] = await db
-      .update(designPullRequest)
-      .set({ status: 'closed', closedAt: now, updatedAt: now })
-      .where(
-        and(eq(designPullRequest.id, input.id), eq(designPullRequest.userId, context.user.id)),
-      )
-      .returning(pullRequestSelection)
-
-    // Closing the review hands the branch back for regular editing rather than
-    // archiving it — discarding the branch is a separate, explicit action.
-    await db
-      .update(designDraft)
-      .set({ status: 'active', proposedAt: null, updatedAt: now })
-      .where(
-        and(
-          eq(designDraft.id, found.draftId),
-          eq(designDraft.userId, context.user.id),
-          eq(designDraft.status, 'proposed'),
-        ),
-      )
-
-    return serializePullRequest(updated)
-  })
-
-const deletePullRequestComment = protectedProcedure
-  .input(z.object({ id: z.string().min(1).max(64), commentId: z.string().min(1).max(64) }))
-  .handler(async ({ context, input }) => {
-    await getOwnedPullRequest(context.user.id, input.id)
-    await db
-      .delete(designPullRequestComment)
-      .where(
-        and(
-          eq(designPullRequestComment.id, input.commentId),
-          eq(designPullRequestComment.pullRequestId, input.id),
-        ),
-      )
-    return { deleted: true as const }
   })
 
 const createDesignHandoff = protectedProcedure
@@ -984,29 +1634,41 @@ const createPublishLink = protectedProcedure
   )
   .handler(async ({ context, input }) => {
     const [found] = await db
-      .select({ shapes: design.shapes, pages: design.pages })
+      .select({
+        canvasVersion: design.canvasVersion,
+        canvasDocument: design.canvasDocument,
+        shapes: design.shapes,
+        pages: design.pages,
+      })
       .from(design)
       .where(and(eq(design.id, input.designId), eq(design.userId, context.user.id)))
       .limit(1)
     const shapesById = new Map(found?.shapes.map((shape) => [shape.id, shape]) ?? [])
-    const targetExists = found && (
-      input.elementId
+    const targetExists =
+      found &&
+      (found.canvasVersion === CANVAS_SCHEMA_VERSION && found.canvasDocument
         ? (() => {
-            const shape = shapesById.get(input.elementId)
-            return Boolean(shape && !shape.hidden && shape.code)
+            if (!input.pageId || input.elementId) return false
+            const document = parseCanvasDocument(found.canvasDocument)
+            const page = document.nodes[input.pageId]
+            return page?.type === 'page' && !page.hidden
           })()
-        : (() => {
-            const page = found.pages.find((candidate) => candidate.id === input.pageId)
-            return Boolean(
-              page &&
-                page.items.length > 0 &&
-                page.items.every(({ elementId }) => {
-                  const shape = shapesById.get(elementId)
-                  return shape && !shape.hidden && shape.code
-                }),
-            )
-          })()
-    )
+        : input.elementId
+          ? (() => {
+              const shape = shapesById.get(input.elementId)
+              return Boolean(shape && !shape.hidden && shape.code)
+            })()
+          : (() => {
+              const page = found.pages.find((candidate) => candidate.id === input.pageId)
+              return Boolean(
+                page &&
+                  page.items.length > 0 &&
+                  page.items.every(({ elementId }) => {
+                    const shape = shapesById.get(elementId)
+                    return shape && !shape.hidden && shape.code
+                  }),
+              )
+            })())
     if (!targetExists) {
       throw new ORPCError('NOT_FOUND')
     }
@@ -1121,6 +1783,7 @@ const listVersions = protectedProcedure
       .select({
         id: designVersion.id,
         message: designVersion.message,
+        canvasVersion: designVersion.canvasVersion,
         added: designVersion.added,
         removed: designVersion.removed,
         changed: designVersion.changed,
@@ -1144,6 +1807,106 @@ const listVersions = protectedProcedure
       .limit(input.limit + 1)
 
     return toHistoryPage(versions, input.limit)
+  })
+
+const getCanvasVersionForMigration = protectedProcedure
+  .input(
+    canvasTargetInput.extend({
+      id: z.string().min(1).max(128),
+    }),
+  )
+  .handler(async ({ context, input }) => {
+    const [version] = await db
+      .select({
+        message: designVersion.message,
+        canvasVersion: designVersion.canvasVersion,
+        document: designVersion.canvasDocument,
+        shapes: designVersion.shapes,
+        pages: designVersion.pages,
+      })
+      .from(designVersion)
+      .where(
+        and(
+          eq(designVersion.id, input.id),
+          eq(designVersion.designId, input.designId),
+          eq(designVersion.userId, context.user.id),
+          draftTargetWhere(input.draftId),
+        ),
+      )
+      .limit(1)
+    if (!version) throw new ORPCError('NOT_FOUND')
+    if (
+      version.canvasVersion === CANVAS_SCHEMA_VERSION &&
+      version.document
+    ) {
+      return {
+        status: 'ready' as const,
+        document: parseCanvasDocument(version.document),
+      }
+    }
+    return {
+      status: 'migration-required' as const,
+      name: version.message,
+      shapes: version.shapes,
+      pages: version.pages,
+    }
+  })
+
+const commitCanvasVersionMigration = protectedProcedure
+  .input(
+    canvasTargetInput.extend({
+      id: z.string().min(1).max(128),
+      document: z.unknown(),
+    }),
+  )
+  .handler(async ({ context, input }) => {
+    const document = parseCanvasDocument(input.document)
+    const [migrated] = await db
+      .update(designVersion)
+      .set({
+        canvasVersion: CANVAS_SCHEMA_VERSION,
+        canvasDocument: document,
+      })
+      .where(
+        and(
+          eq(designVersion.id, input.id),
+          eq(designVersion.designId, input.designId),
+          eq(designVersion.userId, context.user.id),
+          draftTargetWhere(input.draftId),
+          eq(designVersion.canvasVersion, 1),
+        ),
+      )
+      .returning({ id: designVersion.id })
+    if (!migrated) {
+      const [current] = await db
+        .select({
+          canvasVersion: designVersion.canvasVersion,
+          document: designVersion.canvasDocument,
+        })
+        .from(designVersion)
+        .where(
+          and(
+            eq(designVersion.id, input.id),
+            eq(designVersion.designId, input.designId),
+            eq(designVersion.userId, context.user.id),
+            draftTargetWhere(input.draftId),
+          ),
+        )
+        .limit(1)
+      if (
+        current?.canvasVersion !== CANVAS_SCHEMA_VERSION ||
+        !current.document
+      ) {
+        throw new ORPCError('CONFLICT', {
+          message: 'The historical version could not be migrated.',
+        })
+      }
+      return {
+        migrated: false as const,
+        document: parseCanvasDocument(current.document),
+      }
+    }
+    return { migrated: true as const, document }
   })
 
 const compareVersion = protectedProcedure
@@ -1327,6 +2090,231 @@ const commitVersion = protectedProcedure
       removed: version.removed,
       changed: version.changed,
       at: version.createdAt.getTime(),
+    }
+  })
+
+const commitCanvasVersion = protectedProcedure
+  .input(
+    canvasTargetInput.extend({
+      id: z.string().min(1).max(128),
+      message: z.string().trim().min(1).max(200),
+      document: z.unknown(),
+      skipIfUnchanged: z.boolean().default(true),
+    }),
+  )
+  .handler(async ({ context, input }) => {
+    const document = parseCanvasDocument(input.document)
+    if (input.draftId) {
+      const draft = await getOwnedDraft(
+        context.user.id,
+        input.designId,
+        input.draftId,
+      )
+      if (draft.status !== 'active') {
+        throw new ORPCError('CONFLICT', { message: 'This branch is read-only.' })
+      }
+    } else {
+      await ensureDesign(input.designId, context.user.id)
+    }
+    const [latest] = await db
+      .select({
+        canvasVersion: designVersion.canvasVersion,
+        document: designVersion.canvasDocument,
+      })
+      .from(designVersion)
+      .where(
+        and(
+          eq(designVersion.designId, input.designId),
+          eq(designVersion.userId, context.user.id),
+          draftTargetWhere(input.draftId),
+        ),
+      )
+      .orderBy(desc(designVersion.createdAt), desc(designVersion.id))
+      .limit(1)
+    const previous =
+      latest?.canvasVersion === CANVAS_SCHEMA_VERSION && latest.document
+        ? parseCanvasDocument(latest.document)
+        : createCanvasDocument(document.name, document.id)
+    if (
+      input.skipIfUnchanged &&
+      JSON.stringify(previous) === JSON.stringify(document)
+    ) {
+      return null
+    }
+    const changes = diffDocuments(previous, document)
+    const [version] = await db
+      .insert(designVersion)
+      .values({
+        id: input.id,
+        designId: input.designId,
+        draftId: input.draftId ?? null,
+        userId: context.user.id,
+        message: input.message,
+        shapes: [],
+        pages: [],
+        canvasVersion: CANVAS_SCHEMA_VERSION,
+        canvasDocument: document,
+        ...changes,
+      })
+      .returning()
+    return {
+      id: version.id,
+      message: version.message,
+      added: version.added,
+      removed: version.removed,
+      changed: version.changed,
+      at: version.createdAt.getTime(),
+    }
+  })
+
+const compareCanvasVersion = protectedProcedure
+  .input(
+    canvasTargetInput.extend({
+      id: z.string().min(1).max(128),
+    }),
+  )
+  .handler(async ({ context, input }) => {
+    const [current] = await db
+      .select({
+        id: designVersion.id,
+        message: designVersion.message,
+        canvasVersion: designVersion.canvasVersion,
+        document: designVersion.canvasDocument,
+        createdAt: designVersion.createdAt,
+      })
+      .from(designVersion)
+      .where(
+        and(
+          eq(designVersion.id, input.id),
+          eq(designVersion.designId, input.designId),
+          eq(designVersion.userId, context.user.id),
+          draftTargetWhere(input.draftId),
+        ),
+      )
+      .limit(1)
+    if (
+      !current ||
+      current.canvasVersion !== CANVAS_SCHEMA_VERSION ||
+      !current.document
+    ) {
+      throw new ORPCError('NOT_FOUND')
+    }
+    const [previous] = await db
+      .select({
+        id: designVersion.id,
+        message: designVersion.message,
+        canvasVersion: designVersion.canvasVersion,
+        document: designVersion.canvasDocument,
+        createdAt: designVersion.createdAt,
+      })
+      .from(designVersion)
+      .where(
+        and(
+          eq(designVersion.designId, input.designId),
+          eq(designVersion.userId, context.user.id),
+          draftTargetWhere(input.draftId),
+          or(
+            lt(designVersion.createdAt, current.createdAt),
+            and(
+              eq(designVersion.createdAt, current.createdAt),
+              lt(designVersion.id, current.id),
+            ),
+          ),
+          eq(designVersion.canvasVersion, CANVAS_SCHEMA_VERSION),
+          isNotNull(designVersion.canvasDocument),
+        ),
+      )
+      .orderBy(desc(designVersion.createdAt), desc(designVersion.id))
+      .limit(1)
+    const detail = (version: typeof current) => ({
+      id: version.id,
+      message: version.message,
+      document: parseCanvasDocument(version.document),
+      at: version.createdAt.getTime(),
+    })
+    return {
+      current: detail(current),
+      previous:
+        previous?.document && previous.canvasVersion === CANVAS_SCHEMA_VERSION
+          ? detail(previous as typeof current)
+          : null,
+    }
+  })
+
+const restoreCanvasVersion = protectedProcedure
+  .input(
+    canvasTargetInput.extend({
+      id: z.string().min(1).max(128),
+      expectedRevision: z.number().int().nonnegative(),
+    }),
+  )
+  .handler(async ({ context, input }) => {
+    const [version] = await db
+      .select({
+        canvasVersion: designVersion.canvasVersion,
+        document: designVersion.canvasDocument,
+      })
+      .from(designVersion)
+      .where(
+        and(
+          eq(designVersion.id, input.id),
+          eq(designVersion.designId, input.designId),
+          eq(designVersion.userId, context.user.id),
+          draftTargetWhere(input.draftId),
+        ),
+      )
+      .limit(1)
+    if (
+      !version ||
+      version.canvasVersion !== CANVAS_SCHEMA_VERSION ||
+      !version.document
+    ) {
+      throw new ORPCError('NOT_FOUND')
+    }
+    const document = parseCanvasDocument(version.document)
+    const updated = input.draftId
+      ? await db
+          .update(designDraft)
+          .set({
+            canvasVersion: CANVAS_SCHEMA_VERSION,
+            canvasDocument: document,
+            revision: input.expectedRevision + 1,
+            updatedAt: new Date(),
+          })
+          .where(
+            and(
+              eq(designDraft.id, input.draftId),
+              eq(designDraft.designId, input.designId),
+              eq(designDraft.userId, context.user.id),
+              eq(designDraft.status, 'active'),
+              eq(designDraft.revision, input.expectedRevision),
+            ),
+          )
+          .returning({ revision: designDraft.revision })
+      : await db
+          .update(design)
+          .set({
+            canvasVersion: CANVAS_SCHEMA_VERSION,
+            canvasDocument: document,
+            revision: input.expectedRevision + 1,
+            updatedAt: new Date(),
+          })
+          .where(
+            and(
+              eq(design.id, input.designId),
+              eq(design.userId, context.user.id),
+              eq(design.revision, input.expectedRevision),
+            ),
+          )
+          .returning({ revision: design.revision })
+    if (!updated[0]) {
+      throw new ORPCError('CONFLICT', {
+        message: 'The canvas changed before the version could be restored.',
+      })
+    }
+    return {
+      revision: updated[0].revision,
+      document,
     }
   })
 
@@ -1707,8 +2695,6 @@ const importFigma = protectedProcedure
         .object({
           id: z.string().min(1).max(128),
           name: z.string().trim().min(1).max(200),
-          shapes: z.array(shapeSchema).max(10_000),
-          pages: z.array(pageSchema).max(1_000).default([]),
           draftId: optionalDraftIdSchema,
           revision: z.number().int().nonnegative(),
         })
@@ -2202,6 +3188,16 @@ export const appRouter = {
     save: saveDesign,
     delete: deleteDesign,
   },
+  canvas: {
+    create: createCanvasDesign,
+    get: getCanvas,
+    rename: renameCanvasDesign,
+    applyTransactions: applyCanvasTransactions,
+    beginMigration: beginCanvasMigration,
+    renewMigration: renewCanvasMigration,
+    cancelMigration: cancelCanvasMigration,
+    commitMigration: commitCanvasMigration,
+  },
   draft: {
     list: listDrafts,
     create: createDraft,
@@ -2213,13 +3209,6 @@ export const appRouter = {
     compare: compareDraft,
     apply: applyDraft,
     close: closeDraft,
-  },
-  pullRequest: {
-    open: openPullRequest,
-    get: getPullRequest,
-    comment: commentOnPullRequest,
-    deleteComment: deletePullRequestComment,
-    close: closePullRequest,
   },
   handoff: {
     create: createDesignHandoff,
@@ -2236,6 +3225,11 @@ export const appRouter = {
     compare: compareVersion,
     import: importVersions,
     commit: commitVersion,
+    commitV2: commitCanvasVersion,
+    compareV2: compareCanvasVersion,
+    getForMigration: getCanvasVersionForMigration,
+    commitMigration: commitCanvasVersionMigration,
+    restoreV2: restoreCanvasVersion,
   },
   chat: {
     list: listChats,

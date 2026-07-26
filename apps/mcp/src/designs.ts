@@ -1,13 +1,39 @@
-import { and, asc, desc, eq, isNull, or } from 'drizzle-orm'
+import {
+  and,
+  asc,
+  desc,
+  eq,
+  inArray,
+  isNull,
+  lt,
+  or,
+} from 'drizzle-orm'
 import { db } from '@loora/db'
-import { asset, design, designDraft, designVersion } from '@loora/db/schema'
-import type { CanvasElement } from '@loora/db/canvas'
-import { canvasDiff, mergeCanvas, type MergeChoice } from '@loora/db/drafts'
+import {
+  asset,
+  canvasTransaction as canvasTransactionLog,
+  design,
+  designDraft,
+  designVersion,
+} from '@loora/db/schema'
+import {
+  CanvasEngine,
+  parseCanvasTransaction,
+  withTransactionPreconditions,
+  type CanvasTransaction,
+} from '@loora/canvas/engine'
+import {
+  CANVAS_SCHEMA_VERSION,
+  createCanvasDocument,
+  parseCanvasDocument,
+  type CanvasDocumentV2,
+} from '@loora/canvas/model'
+import {
+  diffDocuments,
+  mergeDocuments,
+  type CanvasMergeConflict,
+} from '@loora/canvas/merge'
 
-// Mirrors the oRPC shape limits (packages/rpc/src/router.ts) so anything the
-// MCP server writes stays loadable and saveable by the web app.
-export const MAX_ELEMENTS = 10_000
-export const MAX_CODE_LENGTH = 200_000
 export const MAX_NAME_LENGTH = 200
 
 let counter = 0
@@ -18,30 +44,70 @@ function suffix() {
 
 export const newDesignId = () => `d${suffix()}`
 export const newDraftId = () => `dr${suffix()}`
-export const newElementId = () => `e${suffix()}`
+
+export class MigrationRequiredError extends Error {
+  readonly code = 'MIGRATION_REQUIRED'
+
+  constructor(
+    readonly designId: string,
+    readonly openUrl: string,
+  ) {
+    super(`Canvas V1 must be migrated in Loora before MCP can edit it: ${openUrl}`)
+  }
+}
+
+export interface CanvasTarget {
+  designId: string
+  draftId?: string | null
+}
+
+function migrationUrl(designId: string) {
+  const origin = (process.env.LOORA_APP_URL?.trim() || 'https://loora.design').replace(/\/+$/, '')
+  return `${origin}/?design=${encodeURIComponent(designId)}`
+}
 
 export async function listDesigns(userId: string) {
   const rows = await db
     .select({
       id: design.id,
       name: design.name,
+      canvasVersion: design.canvasVersion,
       revision: design.revision,
       updatedAt: design.updatedAt,
     })
     .from(design)
     .where(eq(design.userId, userId))
     .orderBy(asc(design.createdAt))
-  return rows.map((row) => ({ ...row, updatedAt: row.updatedAt.toISOString() }))
+  return rows.map((row) => ({
+    ...row,
+    migrationRequired: row.canvasVersion !== CANVAS_SCHEMA_VERSION,
+    openUrl:
+      row.canvasVersion === CANVAS_SCHEMA_VERSION ? undefined : migrationUrl(row.id),
+    updatedAt: row.updatedAt.toISOString(),
+  }))
 }
 
-export async function getDesign(userId: string, id: string, draftId?: string | null) {
-  if (draftId) {
+export async function getCanvasTarget(
+  userId: string,
+  target: CanvasTarget,
+): Promise<{
+  id: string
+  name: string
+  draftId: string | null
+  draftName: string | null
+  status: 'active' | 'proposed' | 'applied' | 'closed'
+  document: CanvasDocumentV2
+  revision: number
+  updatedAt: Date
+}> {
+  if (target.draftId) {
     const [found] = await db
       .select({
         id: design.id,
         name: design.name,
         draftName: designDraft.name,
-        shapes: designDraft.shapes,
+        canvasVersion: designDraft.canvasVersion,
+        document: designDraft.canvasDocument,
         revision: designDraft.revision,
         status: designDraft.status,
         updatedAt: designDraft.updatedAt,
@@ -53,90 +119,250 @@ export async function getDesign(userId: string, id: string, draftId?: string | n
       )
       .where(
         and(
-          eq(designDraft.id, draftId),
-          eq(designDraft.designId, id),
+          eq(designDraft.id, target.draftId),
+          eq(designDraft.designId, target.designId),
           eq(designDraft.userId, userId),
         ),
       )
       .limit(1)
-    if (!found) throw new Error(`Draft "${draftId}" not found in design "${id}"`)
-    return { ...found, draftId }
+    if (!found) {
+      throw new Error(
+        `Draft "${target.draftId}" not found in design "${target.designId}"`,
+      )
+    }
+    if (found.canvasVersion !== CANVAS_SCHEMA_VERSION || !found.document) {
+      throw new MigrationRequiredError(
+        target.designId,
+        migrationUrl(target.designId),
+      )
+    }
+    return {
+      id: found.id,
+      name: found.name,
+      draftId: target.draftId,
+      draftName: found.draftName,
+      status: found.status,
+      document: parseCanvasDocument(found.document),
+      revision: found.revision,
+      updatedAt: found.updatedAt,
+    }
   }
+
   const [found] = await db
     .select({
       id: design.id,
       name: design.name,
-      shapes: design.shapes,
+      canvasVersion: design.canvasVersion,
+      document: design.canvasDocument,
       revision: design.revision,
       updatedAt: design.updatedAt,
     })
     .from(design)
-    .where(and(eq(design.id, id), eq(design.userId, userId)))
+    .where(and(eq(design.id, target.designId), eq(design.userId, userId)))
     .limit(1)
-  if (!found) throw new Error(`Design "${id}" not found`)
-  return { ...found, draftId: null, draftName: null, status: 'active' as const }
+  if (!found) throw new Error(`Design "${target.designId}" not found`)
+  if (found.canvasVersion !== CANVAS_SCHEMA_VERSION || !found.document) {
+    throw new MigrationRequiredError(target.designId, migrationUrl(target.designId))
+  }
+  return {
+    id: found.id,
+    name: found.name,
+    draftId: null,
+    draftName: null,
+    status: 'active',
+    document: parseCanvasDocument(found.document),
+    revision: found.revision,
+    updatedAt: found.updatedAt,
+  }
 }
 
-export async function mutateShapes(
+export async function applyCanvasTransactions(
   userId: string,
-  id: string,
-  draftId: string | null | undefined,
-  mutate: (shapes: CanvasElement[]) => CanvasElement[],
+  target: CanvasTarget,
+  transactions: CanvasTransaction[],
 ) {
-  for (let attempt = 0; attempt < 3; attempt++) {
-    const found = await getDesign(userId, id, draftId)
-    if (found.status !== 'active') throw new Error(`Draft "${draftId}" is read-only`)
-    const shapes = mutate(found.shapes)
-    if (shapes.length > MAX_ELEMENTS) {
-      throw new Error(`Designs are capped at ${MAX_ELEMENTS} elements`)
+  const parsed = transactions.map(parseCanvasTransaction)
+  if (parsed.length === 0) throw new Error('At least one transaction is required')
+  if (
+    new Set(parsed.map((transaction) => transaction.id)).size !== parsed.length
+  ) {
+    throw new Error('A transaction batch cannot contain duplicate ids')
+  }
+
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const found = await getCanvasTarget(userId, target)
+    if (found.status !== 'active') {
+      throw new Error(`Draft "${target.draftId}" is read-only`)
     }
+    const targetKey = target.draftId
+      ? `draft:${target.draftId}`
+      : 'main'
+    const ids = parsed.map((transaction) => transaction.id)
+    const existing = await db
+      .select({ transactionId: canvasTransactionLog.transactionId })
+      .from(canvasTransactionLog)
+      .where(
+        and(
+          eq(canvasTransactionLog.userId, userId),
+          eq(canvasTransactionLog.designId, target.designId),
+          eq(canvasTransactionLog.targetKey, targetKey),
+          inArray(canvasTransactionLog.transactionId, ids),
+        ),
+      )
+    const seen = new Set(existing.map((row) => row.transactionId))
+    const pending = parsed.filter((transaction) => !seen.has(transaction.id))
+    if (pending.length === 0) {
+      return {
+        document: found.document,
+        revision: found.revision,
+        transactionIds: ids,
+        changedNodeIds: [] as string[],
+      }
+    }
+
+    const engine = new CanvasEngine(found.document)
+    const changed = new Set<string>()
+    const applied: CanvasTransaction[] = []
+    for (const transaction of pending) {
+      const prepared = withTransactionPreconditions(
+        engine.document,
+        transaction,
+      )
+      const result = engine.apply(prepared, { recordHistory: false })
+      applied.push(prepared)
+      for (const id of result.changedNodeIds) changed.add(id)
+    }
+    const document = engine.document
     const now = new Date()
-    const updated = draftId
-      ? await db
-          .update(designDraft)
-          .set({ shapes, revision: found.revision + 1, updatedAt: now })
-          .where(
-            and(
-              eq(designDraft.id, draftId),
-              eq(designDraft.designId, id),
-              eq(designDraft.userId, userId),
-              eq(designDraft.status, 'active'),
-              eq(designDraft.revision, found.revision),
+    const revision = found.revision + pending.length
+    const committed = await db.transaction(async (tx) => {
+      const updated = target.draftId
+        ? await tx
+            .update(designDraft)
+            .set({
+              canvasVersion: CANVAS_SCHEMA_VERSION,
+              canvasDocument: document,
+              revision,
+              updatedAt: now,
+            })
+            .where(
+              and(
+                eq(designDraft.id, target.draftId),
+                eq(designDraft.designId, target.designId),
+                eq(designDraft.userId, userId),
+                eq(designDraft.status, 'active'),
+                eq(designDraft.revision, found.revision),
+              ),
+            )
+            .returning({ revision: designDraft.revision })
+        : await tx
+            .update(design)
+            .set({
+              canvasVersion: CANVAS_SCHEMA_VERSION,
+              canvasDocument: document,
+              revision,
+              updatedAt: now,
+            })
+            .where(
+              and(
+                eq(design.id, target.designId),
+                eq(design.userId, userId),
+                eq(design.revision, found.revision),
+              ),
+            )
+            .returning({ revision: design.revision })
+      if (!updated[0]) return false
+      await tx
+        .insert(canvasTransactionLog)
+        .values(
+          applied.map((transaction, index) => ({
+            designId: target.designId,
+            userId,
+            targetKey,
+            transactionId: transaction.id,
+            baseRevision: found.revision + index,
+            revision: found.revision + index + 1,
+            transaction,
+          })),
+        )
+        .onConflictDoNothing()
+      await tx
+        .delete(canvasTransactionLog)
+        .where(
+          and(
+            eq(canvasTransactionLog.userId, userId),
+            eq(canvasTransactionLog.designId, target.designId),
+            eq(canvasTransactionLog.targetKey, targetKey),
+            lt(
+              canvasTransactionLog.revision,
+              Math.max(0, revision - 500),
             ),
-          )
-          .returning({ revision: designDraft.revision })
-      : await db
-          .update(design)
-          .set({ shapes, revision: found.revision + 1, updatedAt: now })
-          .where(
-            and(
-              eq(design.id, id),
-              eq(design.userId, userId),
-              eq(design.revision, found.revision),
-            ),
-          )
-          .returning({ revision: design.revision })
-    if (updated[0]) return { shapes, revision: updated[0].revision }
+          ),
+        )
+      return true
+    })
+    if (!committed) continue
+    return {
+      document,
+      revision,
+      transactionIds: ids,
+      changedNodeIds: [...changed],
+    }
   }
   throw new Error('The canvas changed repeatedly; read it again before retrying.')
 }
 
 export async function createDesign(userId: string, name: string) {
+  const id = newDesignId()
+  const document = createCanvasDocument(name, id)
   const [created] = await db
     .insert(design)
-    .values({ id: newDesignId(), userId, name, shapes: [] })
+    .values({
+      id,
+      userId,
+      name,
+      shapes: [],
+      pages: [],
+      canvasVersion: CANVAS_SCHEMA_VERSION,
+      canvasDocument: document,
+    })
     .returning({ id: design.id, name: design.name, revision: design.revision })
   return created
 }
 
 export async function renameDesign(userId: string, id: string, name: string) {
-  const updated = await db
+  const current = await getCanvasTarget(userId, { designId: id })
+  const document: CanvasDocumentV2 = {
+    ...current.document,
+    name,
+    metadata: {
+      ...current.document.metadata,
+      updatedAt: Date.now(),
+    },
+  }
+  const [updated] = await db
     .update(design)
-    .set({ name, updatedAt: new Date() })
-    .where(and(eq(design.id, id), eq(design.userId, userId)))
-    .returning({ id: design.id, name: design.name })
-  if (updated.length === 0) throw new Error(`Design "${id}" not found`)
-  return updated[0]
+    .set({
+      name,
+      canvasVersion: CANVAS_SCHEMA_VERSION,
+      canvasDocument: document,
+      revision: current.revision + 1,
+      updatedAt: new Date(),
+    })
+    .where(
+      and(
+        eq(design.id, id),
+        eq(design.userId, userId),
+        eq(design.revision, current.revision),
+      ),
+    )
+    .returning({
+      id: design.id,
+      name: design.name,
+      revision: design.revision,
+    })
+  if (!updated) throw new Error(`Design "${id}" changed before it could be renamed`)
+  return { ...updated, document }
 }
 
 export async function deleteDesign(userId: string, id: string) {
@@ -157,6 +383,7 @@ export async function listVersions(
     .select({
       id: designVersion.id,
       message: designVersion.message,
+      canvasVersion: designVersion.canvasVersion,
       added: designVersion.added,
       removed: designVersion.removed,
       changed: designVersion.changed,
@@ -184,6 +411,7 @@ export async function listDrafts(userId: string, designId: string) {
       status: designDraft.status,
       baseRevision: designDraft.baseRevision,
       revision: designDraft.revision,
+      canvasVersion: designDraft.canvasVersion,
       createdAt: designDraft.createdAt,
       updatedAt: designDraft.updatedAt,
     })
@@ -198,7 +426,7 @@ export async function listDrafts(userId: string, designId: string) {
 }
 
 export async function createDraft(userId: string, designId: string, name: string) {
-  const main = await getDesign(userId, designId)
+  const main = await getCanvasTarget(userId, { designId })
   const [created] = await db
     .insert(designDraft)
     .values({
@@ -206,8 +434,14 @@ export async function createDraft(userId: string, designId: string, name: string
       designId,
       userId,
       name,
-      baseShapes: main.shapes,
-      shapes: main.shapes,
+      baseShapes: [],
+      shapes: [],
+      basePages: [],
+      pages: [],
+      canvasVersion: CANVAS_SCHEMA_VERSION,
+      baseCanvasVersion: CANVAS_SCHEMA_VERSION,
+      baseCanvasDocument: main.document,
+      canvasDocument: main.document,
       baseRevision: main.revision,
     })
     .returning({
@@ -244,7 +478,7 @@ async function transitionDraft(
         eq(designDraft.designId, designId),
         eq(designDraft.userId, userId),
         allowed.length === 1
-          ? eq(designDraft.status, allowed[0])
+          ? eq(designDraft.status, allowed[0]!)
           : or(...allowed.map((status) => eq(designDraft.status, status))),
       ),
     )
@@ -266,9 +500,9 @@ export const reopenDraft = (userId: string, designId: string, draftId: string) =
 export const closeDraft = (userId: string, designId: string, draftId: string) =>
   transitionDraft(userId, designId, draftId, ['active', 'proposed'], 'closed')
 
-export async function compareDraft(userId: string, designId: string, draftId: string) {
+async function draftMergeSource(userId: string, designId: string, draftId: string) {
   const [main, draft] = await Promise.all([
-    getDesign(userId, designId),
+    getCanvasTarget(userId, { designId }),
     db
       .select()
       .from(designDraft)
@@ -283,15 +517,56 @@ export async function compareDraft(userId: string, designId: string, draftId: st
       .then((rows) => rows[0]),
   ])
   if (!draft) throw new Error(`Draft "${draftId}" not found`)
-  const merge = mergeCanvas(draft.baseShapes, main.shapes, draft.shapes)
+  if (
+    draft.canvasVersion !== CANVAS_SCHEMA_VERSION ||
+    draft.baseCanvasVersion !== CANVAS_SCHEMA_VERSION ||
+    !draft.canvasDocument ||
+    !draft.baseCanvasDocument
+  ) {
+    throw new MigrationRequiredError(designId, migrationUrl(designId))
+  }
+  return {
+    main,
+    draft,
+    baseDocument: parseCanvasDocument(draft.baseCanvasDocument),
+    draftDocument: parseCanvasDocument(draft.canvasDocument),
+  }
+}
+
+type BranchMergeResolutions = Record<string, 'main' | 'draft'>
+
+function canvasMergeResolutions(resolutions: BranchMergeResolutions) {
+  return Object.fromEntries(
+    Object.entries(resolutions).map(([id, side]) => [
+      id,
+      side === 'draft' ? 'right' : 'left',
+    ]),
+  ) as Record<string, 'left' | 'right'>
+}
+
+function branchMergeConflicts(conflicts: CanvasMergeConflict[]) {
+  return conflicts.map(({ left, right, ...conflict }) => ({
+    ...conflict,
+    main: left,
+    draft: right,
+  }))
+}
+
+export async function compareDraft(userId: string, designId: string, draftId: string) {
+  const source = await draftMergeSource(userId, designId, draftId)
+  const merge = mergeDocuments(
+    source.baseDocument,
+    source.main.document,
+    source.draftDocument,
+  )
   return {
     designId,
     draftId,
-    status: draft.status,
-    mainRevision: main.revision,
-    draftRevision: draft.revision,
+    status: source.draft.status,
+    mainRevision: source.main.revision,
+    draftRevision: source.draft.revision,
     summary: merge.summary,
-    conflicts: merge.conflicts,
+    conflicts: branchMergeConflicts(merge.conflicts),
   }
 }
 
@@ -301,33 +576,30 @@ export async function applyDraft(
   draftId: string,
   expectedMainRevision: number,
   expectedDraftRevision: number,
-  resolutions: Record<string, MergeChoice>,
+  resolutions: BranchMergeResolutions,
 ) {
-  const [main, draft] = await Promise.all([
-    getDesign(userId, designId),
-    db
-      .select()
-      .from(designDraft)
-      .where(
-        and(
-          eq(designDraft.id, draftId),
-          eq(designDraft.designId, designId),
-          eq(designDraft.userId, userId),
-        ),
-      )
-      .limit(1)
-      .then((rows) => rows[0]),
-  ])
-  if (!draft) throw new Error(`Draft "${draftId}" not found`)
-  if (main.revision !== expectedMainRevision || draft.revision !== expectedDraftRevision) {
+  const source = await draftMergeSource(userId, designId, draftId)
+  if (
+    source.main.revision !== expectedMainRevision ||
+    source.draft.revision !== expectedDraftRevision
+  ) {
     throw new Error('Main or the draft changed during review')
   }
-  if (draft.status !== 'active' && draft.status !== 'proposed') {
+  if (source.draft.status !== 'active' && source.draft.status !== 'proposed') {
     throw new Error(`Draft "${draftId}" is already archived`)
   }
-  const merge = mergeCanvas(draft.baseShapes, main.shapes, draft.shapes, resolutions)
+  const merge = mergeDocuments(
+    source.baseDocument,
+    source.main.document,
+    source.draftDocument,
+    canvasMergeResolutions(resolutions),
+  )
   if (merge.unresolved.length > 0) {
-    return { applied: false as const, unresolved: merge.unresolved, conflicts: merge.conflicts }
+    return {
+      applied: false as const,
+      unresolved: merge.unresolved,
+      conflicts: branchMergeConflicts(merge.conflicts),
+    }
   }
 
   const beforeId = `v${crypto.randomUUID().replaceAll('-', '')}`
@@ -336,12 +608,17 @@ export async function applyDraft(
   await db.transaction(async (tx) => {
     const [updated] = await tx
       .update(design)
-      .set({ shapes: merge.shapes, revision: main.revision + 1, updatedAt: now })
+      .set({
+        canvasVersion: CANVAS_SCHEMA_VERSION,
+        canvasDocument: merge.document,
+        revision: source.main.revision + 1,
+        updatedAt: now,
+      })
       .where(
         and(
           eq(design.id, designId),
           eq(design.userId, userId),
-          eq(design.revision, main.revision),
+          eq(design.revision, source.main.revision),
         ),
       )
       .returning({ id: design.id })
@@ -351,17 +628,23 @@ export async function applyDraft(
         id: beforeId,
         designId,
         userId,
-        message: `Before applying: ${draft.name}`,
-        shapes: main.shapes,
-        ...canvasDiff([], main.shapes),
+        message: `Before applying: ${source.draft.name}`,
+        shapes: [],
+        pages: [],
+        canvasVersion: CANVAS_SCHEMA_VERSION,
+        canvasDocument: source.main.document,
+        ...diffDocuments(createCanvasDocument(), source.main.document),
       },
       {
         id: appliedId,
         designId,
         userId,
-        message: `Applied draft: ${draft.name}`,
-        shapes: merge.shapes,
-        ...canvasDiff(main.shapes, merge.shapes),
+        message: `Applied draft: ${source.draft.name}`,
+        shapes: [],
+        pages: [],
+        canvasVersion: CANVAS_SCHEMA_VERSION,
+        canvasDocument: merge.document,
+        ...diffDocuments(source.main.document, merge.document),
       },
     ])
     const [archived] = await tx
@@ -377,7 +660,7 @@ export async function applyDraft(
           eq(designDraft.id, draftId),
           eq(designDraft.designId, designId),
           eq(designDraft.userId, userId),
-          eq(designDraft.revision, draft.revision),
+          eq(designDraft.revision, source.draft.revision),
           or(eq(designDraft.status, 'active'), eq(designDraft.status, 'proposed')),
         ),
       )
@@ -386,8 +669,9 @@ export async function applyDraft(
   })
   return {
     applied: true as const,
-    revision: main.revision + 1,
+    revision: source.main.revision + 1,
     versionId: appliedId,
+    document: merge.document,
   }
 }
 
@@ -404,33 +688,4 @@ export async function listAssets(userId: string) {
     .where(eq(asset.userId, userId))
     .orderBy(desc(asset.createdAt))
   return rows.map((row) => ({ ...row, createdAt: row.createdAt.toISOString() }))
-}
-
-export function summarizeElement(element: CanvasElement) {
-  const { code, ...rest } = element
-  const firstLine = code.split('\n', 1)[0] ?? ''
-  return {
-    ...rest,
-    codeLength: code.length,
-    codePreview: firstLine.length > 120 ? `${firstLine.slice(0, 120)}…` : firstLine,
-  }
-}
-
-export function searchElements(shapes: CanvasElement[], query: string, maxMatches = 50) {
-  const needle = query.toLowerCase()
-  const matches: { elementId: string; elementName: string; line: number; text: string }[] = []
-  for (const shape of shapes) {
-    const lines = shape.code.split('\n')
-    for (let i = 0; i < lines.length; i++) {
-      if (!lines[i].toLowerCase().includes(needle)) continue
-      matches.push({
-        elementId: shape.id,
-        elementName: shape.name,
-        line: i + 1,
-        text: lines[i].trim().slice(0, 200),
-      })
-      if (matches.length >= maxMatches) return { matches, truncated: true }
-    }
-  }
-  return { matches, truncated: false }
 }

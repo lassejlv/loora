@@ -4,6 +4,11 @@ import {
   composeAgentSystemPrompt,
   renderPromptTemplate,
 } from './prompts'
+import {
+  createCanvasDocument,
+  createPageNode,
+  createTextNode,
+} from '@loora/canvas/model'
 
 describe('composeAgentSystemPrompt', () => {
   test('leaves the built-in prompt unchanged for empty instructions', () => {
@@ -23,34 +28,31 @@ describe('composeAgentSystemPrompt', () => {
 
 describe('agent prompt builders', () => {
   test('keeps capability-dependent instructions and request context', () => {
+    const document = createCanvasDocument('Website', 'design-one')
+    const page = createPageNode('Home', { id: 'home' })
+    const heading = createTextNode('Welcome', {
+      id: 'one',
+      parentId: page.id,
+    })
+    document.nodes = { [page.id]: page, [heading.id]: heading }
     const result = buildAgentSystemPrompt({
       customInstructions: 'Prefer concise replies.',
       forceCanvasAction: true,
       imageInputsEnabled: false,
       githubConnected: true,
       assets: [{ id: 'asset-one', name: 'Logo', mediaType: 'image/png' }],
-      shapes: [{ id: 'one', name: 'Page', x: 0, y: 0, w: 1200, h: 800, code: '<main />' }],
-      pages: [{
-        id: 'home',
-        name: 'Home',
-        x: 1400,
-        y: 0,
-        w: 1200,
-        items: [{ id: 'hero', elementId: 'one', height: 800 }],
-      }],
-      selectedIds: ['one'],
-      selectedPageId: 'home',
+      document,
+      selectedRefs: [{ nodeId: 'one', instancePath: [] }],
     })
 
     expect(result).toContain('Your previous response promised a canvas change')
     expect(result).toContain('Image input is temporarily disabled')
     expect(result).toContain('GitHub is connected')
     expect(result).toContain('/api/asset/asset-one')
-    expect(result).toContain('The user currently has these element ids selected: ["one"]')
-    expect(result).toContain('The user currently has Page id "home" selected')
-    expect(result).toContain('"elementId":"one"')
+    expect(result).toContain('The current selection is [{"nodeId":"one","instancePath":[]}]')
+    expect(result).toContain('"id":"one"')
     expect(result.match(/Prefer concise replies\./g)).toHaveLength(1)
-    expect(result).toContain('You are the design agent inside loora')
+    expect(result).toContain('You are Loora')
     expect(result).not.toContain('{{')
   })
 
@@ -63,10 +65,10 @@ describe('agent prompt builders', () => {
       imageInputsEnabled: true,
       githubConnected: false,
       assets: [],
-      shapes: [],
+      document: createCanvasDocument(),
     })
     expect(result).not.toContain('{{')
     expect(result).not.toContain('\n\n\n')
-    expect(result).toContain('Verify loop')
+    expect(result).toContain('After meaningful edits')
   })
 })

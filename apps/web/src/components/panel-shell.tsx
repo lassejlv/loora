@@ -13,7 +13,7 @@ export function PanelShell({
   children,
   bodyClassName,
   className,
-  /** Native overflow when the body hosts a filling child (e.g. Monaco). */
+  /** Native overflow when the body hosts a filling child. */
   bodyScroll = true,
 }: {
   title: string

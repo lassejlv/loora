@@ -32,7 +32,7 @@ export function clearWelcomeSeen() {
 const BEATS = [
   {
     title: 'Describe, don’t draw first',
-    body: 'Tell the agent what you want. It places real HTML and React on the board.',
+    body: 'Tell the agent what you want. It builds editable, structured UI directly on the board.',
   },
   {
     title: 'Arrange like a design tool',

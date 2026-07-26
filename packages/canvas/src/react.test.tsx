@@ -1,0 +1,327 @@
+import { describe, expect, it } from 'bun:test'
+import { fireEvent, render, waitFor } from '@testing-library/react'
+import { useEffect } from 'react'
+import { CanvasEngine } from './engine'
+import {
+  createCanvasDocument,
+  createComponentNode,
+  createFrameNode,
+  createInstanceNode,
+  createPageNode,
+  createTextNode,
+} from './model'
+import {
+  CanvasProvider,
+  CanvasSurface,
+  useCanvasHistory,
+  useCanvasSelection,
+  useCanvasSession,
+  useCanvasTransaction,
+  type CanvasSurfaceControls,
+} from './react'
+
+function fixture() {
+  const document = createCanvasDocument('React fixture', 'doc')
+  document.nodes.page = createPageNode('Home', { id: 'page' })
+  document.nodes.frame = createFrameNode('Card', {
+    id: 'frame',
+    parentId: 'page',
+    order: 1_024,
+  })
+  document.nodes.text = createTextNode('Hello', {
+    id: 'text',
+    parentId: 'frame',
+    order: 1_024,
+  })
+  return document
+}
+
+function SelectNode({ id }: { id: string }) {
+  const session = useCanvasSession()
+  useEffect(() => {
+    session.select([{ nodeId: id, instancePath: [] }])
+  }, [id, session])
+  return null
+}
+
+function SelectionProbe() {
+  const selection = useCanvasSelection()
+  return (
+    <output data-testid="selection">
+      {selection
+        .map((ref) => `${ref.instancePath.join('/')}:${ref.nodeId}`)
+        .join(',')}
+    </output>
+  )
+}
+
+function InsertUndoProbe() {
+  const session = useCanvasSession()
+  const transact = useCanvasTransaction()
+  const history = useCanvasHistory()
+  return (
+    <>
+      <button
+        onClick={() => {
+          transact({
+            id: 'insert-temporary',
+            label: 'Insert temporary node',
+            operations: [
+              {
+                type: 'node.insert',
+                node: createFrameNode('Temporary', {
+                  id: 'temporary',
+                  parentId: 'page',
+                }),
+              },
+            ],
+          })
+          session.select([{ nodeId: 'temporary', instancePath: [] }])
+        }}
+      >
+        Insert temporary
+      </button>
+      <button onClick={() => history.undo()}>Undo temporary</button>
+    </>
+  )
+}
+
+describe('Canvas React surface', () => {
+  it('uses host theme tokens for the workspace and grid', () => {
+    const view = render(
+      <CanvasProvider engine={new CanvasEngine(fixture())}>
+        <CanvasSurface pageWidth={1_440} />
+      </CanvasProvider>,
+    )
+    const surface = view.container.querySelector<HTMLElement>(
+      '[data-loora-canvas-surface]',
+    )
+    expect(surface?.style.backgroundColor).toBe(
+      'var(--cx-canvas, #f3f3f5)',
+    )
+    // Flat surface: the artboard should read on its own, without a dot grid.
+    expect(surface?.style.backgroundImage).toBe('')
+  })
+
+  it('selects top-level layers, drills into frames, and deep-selects descendants', async () => {
+    const view = render(
+      <CanvasProvider engine={new CanvasEngine(fixture())}>
+        <SelectionProbe />
+        <CanvasSurface pageWidth={1_440} />
+      </CanvasProvider>,
+    )
+    const surface = view.container.querySelector<HTMLElement>(
+      '[data-loora-canvas-surface]',
+    )!
+    surface.setPointerCapture = () => undefined
+    const page = view.container.querySelector<HTMLElement>(
+      '[data-loora-node="page"]',
+    )!
+    const frame = view.container.querySelector<HTMLElement>(
+      '[data-loora-node="frame"]',
+    )!
+    const text = view.container.querySelector<HTMLElement>(
+      '[data-loora-node="text"]',
+    )!
+    const originalElementsFromPoint = document.elementsFromPoint
+    Object.defineProperty(document, 'elementsFromPoint', {
+      configurable: true,
+      value: () => [text, frame, page],
+    })
+    try {
+      // A first click picks the Page's top-level layer, not the Page. Returning
+      // the Page here left everything inside it unclickable.
+      fireEvent.pointerDown(surface, { button: 0, clientX: 40, clientY: 40 })
+      expect(view.getByTestId('selection').textContent).toBe(':frame')
+      expect(
+        view.container.querySelectorAll('[data-loora-viewport-overlay]'),
+      ).toHaveLength(1)
+      expect(
+        view.container.querySelector(
+          '[data-loora-viewport-overlay] [data-loora-marquee]',
+        ),
+      ).not.toBeNull()
+      expect(
+        view.container.querySelectorAll(
+          '[data-loora-viewport-overlay] [data-loora-guide]',
+        ),
+      ).toHaveLength(2)
+
+      // Pressing again inside the current selection keeps it, so a drag moves
+      // the frame; releasing without moving drills one level in.
+      fireEvent.pointerDown(surface, { button: 0, clientX: 40, clientY: 40 })
+      expect(view.getByTestId('selection').textContent).toBe(':frame')
+      fireEvent.pointerUp(surface, { button: 0, clientX: 40, clientY: 40 })
+      expect(view.getByTestId('selection').textContent).toBe(':text')
+
+      // A press that turns into a drag leaves the selection where it was.
+      fireEvent.pointerDown(surface, { button: 0, clientX: 40, clientY: 40 })
+      fireEvent.pointerUp(surface, { button: 0, clientX: 140, clientY: 40 })
+      expect(view.getByTestId('selection').textContent).toBe(':text')
+
+      fireEvent.doubleClick(page)
+      fireEvent.pointerDown(surface, { button: 0, clientX: 40, clientY: 40 })
+      expect(view.getByTestId('selection').textContent).toBe(':frame')
+
+      // Only a hit whose whole ancestry is the Page itself selects the Page.
+      Object.defineProperty(document, 'elementsFromPoint', {
+        configurable: true,
+        value: () => [page],
+      })
+      fireEvent.keyDown(window, { key: 'Escape' })
+      fireEvent.pointerDown(surface, { button: 0, clientX: 40, clientY: 40 })
+      expect(view.getByTestId('selection').textContent).toBe(':page')
+      Object.defineProperty(document, 'elementsFromPoint', {
+        configurable: true,
+        value: () => [text, frame, page],
+      })
+
+      fireEvent.doubleClick(frame)
+      fireEvent.pointerDown(surface, { button: 0, clientX: 40, clientY: 40 })
+      expect(view.getByTestId('selection').textContent).toBe(':text')
+
+      fireEvent.keyDown(window, { key: 'Escape' })
+      fireEvent.pointerDown(surface, {
+        button: 0,
+        clientX: 40,
+        clientY: 40,
+        metaKey: true,
+      })
+      expect(view.getByTestId('selection').textContent).toBe(':text')
+    } finally {
+      Object.defineProperty(document, 'elementsFromPoint', {
+        configurable: true,
+        value: originalElementsFromPoint,
+      })
+    }
+  })
+
+  it('renders nested real DOM and nudges the selected node transactionally', async () => {
+    const engine = new CanvasEngine(fixture())
+    const view = render(
+      <CanvasProvider engine={engine}>
+        <SelectNode id="frame" />
+        <CanvasSurface pageWidth={1_440} />
+      </CanvasProvider>,
+    )
+    await waitFor(() =>
+      expect(view.container.querySelector('[data-loora-node="text"]')).not.toBeNull(),
+    )
+    fireEvent.keyDown(window, { key: 'ArrowRight' })
+    expect(engine.getNode('frame')?.layout.x).toBe(1)
+    fireEvent.keyDown(window, { key: 'ArrowDown', shiftKey: true })
+    expect(engine.getNode('frame')?.layout.y).toBe(10)
+  })
+
+  it('commits plaintext editing once on blur and keeps undo available', async () => {
+    const engine = new CanvasEngine(fixture())
+    const view = render(
+      <CanvasProvider engine={engine}>
+        <CanvasSurface pageWidth={1_440} />
+      </CanvasProvider>,
+    )
+    const text = await waitFor(() => {
+      const element = view.container.querySelector<HTMLElement>(
+        '[data-loora-node="text"]',
+      )
+      expect(element).not.toBeNull()
+      return element!
+    })
+    fireEvent.doubleClick(text)
+    expect(text.getAttribute('contenteditable')).toBe('plaintext-only')
+    text.innerText = 'Edited'
+    fireEvent.blur(text)
+    expect(engine.getNode('text')).toMatchObject({
+      type: 'text',
+      text: 'Edited',
+      runs: [],
+    })
+    expect(engine.canUndo).toBe(true)
+  })
+
+  it('clears stale selection when undo removes the selected node', () => {
+    const view = render(
+      <CanvasProvider engine={new CanvasEngine(fixture())}>
+        <SelectionProbe />
+        <InsertUndoProbe />
+      </CanvasProvider>,
+    )
+    fireEvent.click(view.getByRole('button', { name: 'Insert temporary' }))
+    expect(view.getByTestId('selection').textContent).toBe(':temporary')
+    fireEvent.click(view.getByRole('button', { name: 'Undo temporary' }))
+    expect(view.getByTestId('selection').textContent).toBe('')
+  })
+
+  it('resolves a named component variant inside an instance', async () => {
+    const document = fixture()
+    document.nodes.component = createComponentNode('Button', {
+      id: 'component',
+      order: 2_048,
+      variants: ['default', 'hover'],
+      defaultVariant: 'default',
+      variantOverrides: {
+        hover: {
+          component: {
+            style: {
+              fills: [{ type: 'solid', color: '#ff0000' }],
+            },
+          },
+          label: { text: 'Hovered' },
+        },
+      },
+    })
+    document.nodes.label = createTextNode('Default', {
+      id: 'label',
+      parentId: 'component',
+      order: 1_024,
+    })
+    document.nodes.instance = createInstanceNode(
+      'component',
+      'Button instance',
+      {
+        id: 'instance',
+        parentId: 'frame',
+        order: 2_048,
+        variant: 'hover',
+      },
+    )
+    const view = render(
+      <CanvasProvider engine={new CanvasEngine(document)}>
+        <CanvasSurface pageWidth={1_440} />
+      </CanvasProvider>,
+    )
+    await waitFor(() =>
+      expect(
+        view.container.querySelector('[data-loora-node="label"]')?.textContent,
+      ).toBe('Hovered'),
+    )
+    const componentRoot = view.container.querySelector<HTMLElement>(
+      '[data-loora-node="component"][data-loora-instance-path="instance"]',
+    )
+    expect(componentRoot?.style.background).toBe('rgb(255, 0, 0)')
+  })
+  it('repositions the selection overlay when the camera moves', async () => {
+    const controls = { current: null as CanvasSurfaceControls | null }
+    const view = render(
+      <CanvasProvider engine={new CanvasEngine(fixture())}>
+        <SelectNode id="frame" />
+        <CanvasSurface controlsRef={controls} />
+      </CanvasProvider>,
+    )
+    const outline = await waitFor(() => {
+      const node = view.container.querySelector<SVGRectElement>(
+        '[data-loora-selection-overlay] rect',
+      )
+      if (!node) throw new Error('No selection overlay')
+      return node
+    })
+    // JSDOM reports zero-sized rects, so the overlay sits exactly on the
+    // camera origin. That makes the camera offset the thing under test.
+    expect(outline.getAttribute('x')).toBe('80')
+
+    controls.current?.zoomIn()
+    const camera = controls.current?.getCamera()
+    expect(camera?.x).not.toBe(80)
+    expect(outline.getAttribute('x')).toBe(String(camera?.x))
+  })
+})

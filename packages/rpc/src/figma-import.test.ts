@@ -3,9 +3,9 @@ import { FigmaIntegrationError } from '@loora/auth/figma'
 import {
   convertFigmaFile,
   parseFigmaFileUrl,
-  placeImportedShapes,
   type FigmaNode,
 } from './figma-import'
+import { createCanvasDocument, createPageNode } from '@loora/canvas/model'
 
 function fileWithPages(pages: FigmaNode[]) {
   return {
@@ -45,7 +45,7 @@ describe('Figma URL parsing', () => {
 })
 
 describe('Figma conversion', () => {
-  it('creates editable HTML, escapes text, and records fonts', () => {
+  it('creates editable structured text and records fonts', () => {
     const payload = fileWithPages([
       {
         id: '0:1',
@@ -78,14 +78,23 @@ describe('Figma conversion', () => {
 
     expect(converted.pages).toBe(1)
     expect(converted.fonts).toEqual(['Acme Sans'])
-    expect(converted.drafts).toHaveLength(1)
-    expect(converted.drafts[0]).toMatchObject({ name: 'Hero', x: 40, y: 40, w: 1200, h: 700 })
-    expect(converted.drafts[0].code).toContain('&lt;script&gt;')
-    expect(converted.drafts[0].code).not.toContain('<script>')
-    expect(converted.drafts[0].code).toContain('color:rgba(26, 51, 77, 1)')
+    const page = Object.values(converted.document.nodes).find(
+      (node) => node.type === 'page',
+    )
+    const text = Object.values(converted.document.nodes).find(
+      (node) => node.type === 'text',
+    )
+    expect(page).toMatchObject({ name: 'Hero' })
+    expect(text).toMatchObject({
+      name: 'Heading',
+      text: '<script>alert("no")</script>',
+    })
+    expect(text?.style.fills).toEqual([
+      { type: 'solid', color: 'rgba(26, 51, 77, 1)' },
+    ])
   })
 
-  it('keeps pages in separate vertical bands and prefixes names', () => {
+  it('places imported Figma pages side by side and prefixes names', () => {
     const page = (id: string, name: string, y: number): FigmaNode => ({
       id,
       name,
@@ -105,11 +114,14 @@ describe('Figma conversion', () => {
       null,
     )
 
-    expect(converted.drafts.map((draft) => draft.name)).toEqual([
+    const pages = Object.values(converted.document.nodes)
+      .filter((node) => node.type === 'page')
+      .sort((left, right) => left.layout.x - right.layout.x)
+    expect(pages.map((page) => page.name)).toEqual([
       'Desktop / Screen',
       'Mobile / Screen',
     ])
-    expect(converted.drafts[1].y).toBeGreaterThan(converted.drafts[0].y + 200)
+    expect(pages[1]!.layout.x).toBeGreaterThan(pages[0]!.layout.x + 300)
   })
 
   it('marks unsupported vector nodes for a visual fallback', () => {
@@ -130,24 +142,325 @@ describe('Figma conversion', () => {
     ])
     const converted = convertFigmaFile(payload, '3:1')
 
-    expect(converted.drafts[0].fallbackNodeIds).toEqual(['3:1'])
-    expect(converted.drafts[0].code).toContain('__FIGMA_ASSET_3:1__')
+    expect(converted.fallbacks).toHaveLength(1)
+    expect(converted.fallbacks[0]?.figmaNodeId).toBe('3:1')
+    const fallback = converted.document.nodes[converted.fallbacks[0]!.canvasNodeId]
+    expect(fallback).toMatchObject({
+      type: 'image',
+      metadata: {
+        figmaNodeId: '3:1',
+        figmaFallback: true,
+      },
+    })
+    expect(fallback?.type === 'image' && fallback.src.startsWith('data:image/')).toBe(true)
+  })
+
+  it('rasterizes a complete root when its visual effects are unsupported', () => {
+    const converted = convertFigmaFile(
+      fileWithPages([
+        {
+          id: '0:1',
+          name: 'Effects',
+          type: 'CANVAS',
+          children: [
+            {
+              id: '4:1',
+              name: 'Blurred screen',
+              type: 'FRAME',
+              absoluteBoundingBox: { x: 0, y: 0, width: 320, height: 240 },
+              effects: [{ type: 'LAYER_BLUR', radius: 12 }],
+              children: [
+                {
+                  id: '4:2',
+                  name: 'Text',
+                  type: 'TEXT',
+                  characters: 'Preserved inside the fallback',
+                  absoluteBoundingBox: { x: 20, y: 20, width: 200, height: 40 },
+                },
+              ],
+            },
+          ],
+        },
+      ]),
+      null,
+    )
+
+    expect(converted.fallbacks).toHaveLength(1)
+    expect(converted.fallbacks[0]?.figmaNodeId).toBe('4:1')
+    expect(
+      Object.values(converted.document.nodes).some(
+        (node) => node.metadata?.figmaNodeId === '4:2',
+      ),
+    ).toBe(false)
+  })
+
+  it('maps component-set variants to one definition with field overrides', () => {
+    const converted = convertFigmaFile(
+      fileWithPages([
+        {
+          id: '0:1',
+          name: 'Components',
+          type: 'CANVAS',
+          children: [
+            {
+              id: 'set:1',
+              name: 'Button',
+              type: 'COMPONENT_SET',
+              absoluteBoundingBox: {
+                x: 0,
+                y: 0,
+                width: 120,
+                height: 40,
+              },
+              children: [
+                {
+                  id: 'component:default',
+                  name: 'State=Default',
+                  type: 'COMPONENT',
+                  absoluteBoundingBox: {
+                    x: 0,
+                    y: 0,
+                    width: 120,
+                    height: 40,
+                  },
+                  fills: [
+                    {
+                      type: 'SOLID',
+                      color: { r: 0.1, g: 0.1, b: 0.1 },
+                    },
+                  ],
+                  children: [
+                    {
+                      id: 'label:default',
+                      name: 'Label',
+                      type: 'TEXT',
+                      characters: 'Default',
+                      absoluteBoundingBox: {
+                        x: 20,
+                        y: 10,
+                        width: 80,
+                        height: 20,
+                      },
+                    },
+                  ],
+                },
+                {
+                  id: 'component:hover',
+                  name: 'State=Hover',
+                  type: 'COMPONENT',
+                  absoluteBoundingBox: {
+                    x: 0,
+                    y: 0,
+                    width: 120,
+                    height: 40,
+                  },
+                  fills: [
+                    {
+                      type: 'SOLID',
+                      color: { r: 0.2, g: 0.3, b: 0.8 },
+                    },
+                  ],
+                  children: [
+                    {
+                      id: 'label:hover',
+                      name: 'Label',
+                      type: 'TEXT',
+                      characters: 'Hover',
+                      absoluteBoundingBox: {
+                        x: 20,
+                        y: 10,
+                        width: 80,
+                        height: 20,
+                      },
+                    },
+                  ],
+                },
+              ],
+            },
+          ],
+        },
+      ]),
+      null,
+    )
+
+    const components = Object.values(converted.document.nodes).filter(
+      (node) => node.type === 'component',
+    )
+    expect(components).toHaveLength(1)
+    const component = components[0]!
+    expect(component.type === 'component' && component.variants).toEqual([
+      'State=Default',
+      'State=Hover',
+    ])
+    const label = Object.values(converted.document.nodes).find(
+      (node) => node.metadata?.figmaNodeId === 'label:default',
+    )
+    expect(
+      component.type === 'component' &&
+        label &&
+        component.variantOverrides['State=Hover']?.[label.id],
+    ).toMatchObject({
+      text: 'Hover',
+    })
+    expect(
+      component.type === 'component' &&
+        component.variantOverrides['State=Hover']?.[component.id]?.style,
+    ).toMatchObject({
+      fills: [
+        {
+          type: 'solid',
+          color: 'rgba(51, 77, 204, 1)',
+        },
+      ],
+    })
+  })
+
+  it('rasterizes only an unsupported component variant', () => {
+    const converted = convertFigmaFile(
+      fileWithPages([
+        {
+          id: '0:1',
+          name: 'Components',
+          type: 'CANVAS',
+          children: [
+            {
+              id: 'set:1',
+              name: 'Card',
+              type: 'COMPONENT_SET',
+              absoluteBoundingBox: {
+                x: 0,
+                y: 0,
+                width: 160,
+                height: 80,
+              },
+              children: [
+                {
+                  id: 'component:default',
+                  name: 'State=Default',
+                  type: 'COMPONENT',
+                  absoluteBoundingBox: {
+                    x: 0,
+                    y: 0,
+                    width: 160,
+                    height: 80,
+                  },
+                  children: [
+                    {
+                      id: 'label:default',
+                      name: 'Label',
+                      type: 'TEXT',
+                      characters: 'Default',
+                      absoluteBoundingBox: {
+                        x: 20,
+                        y: 20,
+                        width: 120,
+                        height: 40,
+                      },
+                    },
+                  ],
+                },
+                {
+                  id: 'component:blurred',
+                  name: 'State=Blurred',
+                  type: 'COMPONENT',
+                  absoluteBoundingBox: {
+                    x: 0,
+                    y: 0,
+                    width: 160,
+                    height: 80,
+                  },
+                  effects: [{ type: 'LAYER_BLUR', radius: 12 }],
+                  children: [
+                    {
+                      id: 'label:blurred',
+                      name: 'Label',
+                      type: 'TEXT',
+                      characters: 'Blurred',
+                      absoluteBoundingBox: {
+                        x: 20,
+                        y: 20,
+                        width: 120,
+                        height: 40,
+                      },
+                    },
+                  ],
+                },
+              ],
+            },
+          ],
+        },
+      ]),
+      null,
+    )
+
+    expect(converted.fallbacks).toHaveLength(1)
+    expect(converted.fallbacks[0]?.figmaNodeId).toBe('component:blurred')
+    const component = Object.values(converted.document.nodes).find(
+      (node) => node.type === 'component',
+    )
+    const label = Object.values(converted.document.nodes).find(
+      (node) => node.metadata?.figmaNodeId === 'label:default',
+    )
+    const fallback = Object.values(converted.document.nodes).find(
+      (node) => node.metadata?.figmaNodeId === 'component:blurred',
+    )
+    expect(fallback).toMatchObject({
+      type: 'image',
+      hidden: true,
+      metadata: {
+        figmaFallback: true,
+      },
+    })
+    expect(
+      component?.type === 'component' &&
+        fallback &&
+        component.variantOverrides['State=Blurred']?.[fallback.id],
+    ).toEqual({ hidden: false })
+    expect(
+      component?.type === 'component' &&
+        label &&
+        component.variantOverrides['State=Blurred']?.[label.id],
+    ).toEqual({ hidden: true })
   })
 })
 
 describe('Figma placement', () => {
-  it('places imported frames beside existing document content', () => {
-    const existing = [
-      { id: 'e1', name: 'Existing', x: 20, y: 30, w: 100, h: 80, code: '<div />' },
-    ]
-    const imported = [
-      { id: 'e2', name: 'First', x: 40, y: 100, w: 200, h: 120, code: '<div />' },
-      { id: 'e3', name: 'Second', x: 280, y: 140, w: 100, h: 80, code: '<div />' },
-    ]
-
-    expect(placeImportedShapes(existing, imported)).toEqual([
-      { ...imported[0], x: 280, y: 30 },
-      { ...imported[1], x: 520, y: 70 },
-    ])
+  it('places imported Pages after existing Pages', () => {
+    const base = createCanvasDocument('Existing')
+    const existing = createPageNode('Existing', {
+      id: 'existing',
+      layout: {
+        ...createPageNode().layout,
+        x: 20,
+        y: 30,
+        width: { unit: 'px', value: 100 },
+        height: { unit: 'px', value: 80 },
+      },
+      viewport: { width: 100, minHeight: 80 },
+    })
+    base.nodes[existing.id] = existing
+    const converted = convertFigmaFile(
+      fileWithPages([
+        {
+          id: '0:1',
+          name: 'Imported',
+          type: 'CANVAS',
+          children: [
+            {
+              id: '1:1',
+              name: 'Screen',
+              type: 'FRAME',
+              absoluteBoundingBox: { x: 0, y: 0, width: 200, height: 120 },
+            },
+          ],
+        },
+      ]),
+      null,
+      base,
+    )
+    const imported = Object.values(converted.document.nodes).find(
+      (node) => node.type === 'page' && node.id !== existing.id,
+    )
+    expect(imported?.layout.x).toBe(280)
   })
 })

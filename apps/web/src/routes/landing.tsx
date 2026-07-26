@@ -1267,7 +1267,7 @@ function BranchDemo({ reduceMotion }: { reduceMotion: boolean | null }) {
 const BEATS = [
   {
     title: 'Describe, don’t draw first',
-    body: 'Tell the agent what you want. It places real HTML and React on the board.',
+    body: 'Tell the agent what you want. It builds editable, structured UI directly on the board.',
   },
   {
     title: 'Arrange like a design tool',
@@ -1475,7 +1475,7 @@ function LandingPage() {
               ease: [0.22, 1, 0.36, 1],
             }}
           >
-            Put an agent on an infinite canvas. It builds live HTML and React in place — you steer,
+            Put an agent on an infinite canvas. It builds structured, responsive UI in place — you steer,
             arrange, and ship from the board.
           </motion.p>
           <motion.div
@@ -1515,7 +1515,7 @@ function LandingPage() {
               ease: [0.22, 1, 0.36, 1],
             }}
           >
-            {['Live HTML & React', 'Infinite canvas', 'Branches and history'].map((claim) => (
+            {['Structured real UI', 'Infinite canvas', 'Branches and history'].map((claim) => (
               <li key={claim} className="flex items-center gap-1.5">
                 <CheckIcon className="size-3.5" style={{ color: palette.accent }} strokeWidth={2.5} />
                 {claim}
@@ -1604,7 +1604,7 @@ function LandingPage() {
                   Real UI, not mockups
                 </p>
                 <p className="mt-2.5 text-[14px] leading-[1.55] text-muted-foreground sm:text-[15px]">
-                  Every element on the board is live HTML or React — the same stuff you ship,
+                  Every element on the board is editable structured UI, with deterministic code generated when you need it,
                   rendered in place. Not a picture of a button. The button.
                 </p>
               </div>

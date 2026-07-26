@@ -9,7 +9,12 @@ import {
   streamText,
   type UIMessage,
 } from 'ai'
-import type { CanvasElement, CanvasPage } from '@loora/db/canvas'
+import {
+  createCanvasDocument,
+  parseCanvasDocument,
+  type CanvasDocumentV2,
+  type NodeRef,
+} from '@loora/canvas/model'
 import {
   getChatGPTReasoningEffort,
   getModel,
@@ -87,10 +92,8 @@ export async function handleAgentChatRequest(request: Request): Promise<Response
 
   const {
     messages,
-    shapes,
-    pages,
-    selectedIds,
-    selectedPageId,
+    document: rawDocument,
+    selectedRefs,
     designId,
     draftId,
     chatId,
@@ -99,10 +102,8 @@ export async function handleAgentChatRequest(request: Request): Promise<Response
     forceCanvasAction,
   } = (await request.json()) as {
     messages: UIMessage[]
-    shapes: CanvasElement[]
-    pages?: CanvasPage[]
-    selectedIds?: string[]
-    selectedPageId?: string | null
+    document?: CanvasDocumentV2
+    selectedRefs?: NodeRef[]
     designId?: string
     draftId?: string | null
     chatId?: string
@@ -112,6 +113,14 @@ export async function handleAgentChatRequest(request: Request): Promise<Response
   }
   if (!designId || !chatId) {
     return Response.json({ error: 'A design and chat are required.' }, { status: 400 })
+  }
+  let canvasDocument: CanvasDocumentV2
+  try {
+    canvasDocument = rawDocument
+      ? parseCanvasDocument(rawDocument)
+      : createCanvasDocument('Untitled', designId)
+  } catch {
+    return Response.json({ error: 'CanvasDocumentV2 is invalid.' }, { status: 400 })
   }
 
   const [chatTarget] = await db
@@ -344,10 +353,8 @@ export async function handleAgentChatRequest(request: Request): Promise<Response
     imageInputsEnabled,
     githubConnected,
     assets,
-    shapes,
-    pages,
-    selectedIds,
-    selectedPageId,
+    document: canvasDocument,
+    selectedRefs,
   })
   const preparedMessages = messagesForModel(messages, imageInputsEnabled)
   const modelMessages = await convertToModelMessages(

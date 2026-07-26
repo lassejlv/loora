@@ -25,11 +25,239 @@ const VENDOR_SCRIPTS = [
   '/vendor/html-to-image.js',
 ] as const
 
+// html-to-image otherwise copies every computed property onto every cloned
+// element. Chromium exposes hundreds of properties, which can turn a normal
+// legacy page into a multi-megabyte SVG data URL that the browser cannot
+// decode. Keep the visual properties that affect a static canvas capture.
+export const LEGACY_CAPTURE_STYLE_PROPERTIES = [
+  '-webkit-background-clip',
+  '-webkit-box-reflect',
+  '-webkit-line-clamp',
+  '-webkit-mask-clip',
+  '-webkit-mask-composite',
+  '-webkit-mask-image',
+  '-webkit-mask-origin',
+  '-webkit-mask-position',
+  '-webkit-mask-repeat',
+  '-webkit-mask-size',
+  '-webkit-text-fill-color',
+  '-webkit-text-stroke-color',
+  '-webkit-text-stroke-width',
+  'align-content',
+  'align-items',
+  'align-self',
+  'animation-delay',
+  'animation-direction',
+  'animation-duration',
+  'animation-fill-mode',
+  'animation-iteration-count',
+  'animation-name',
+  'animation-play-state',
+  'animation-timing-function',
+  'appearance',
+  'aspect-ratio',
+  'backdrop-filter',
+  'backface-visibility',
+  'background-attachment',
+  'background-blend-mode',
+  'background-clip',
+  'background-color',
+  'background-image',
+  'background-origin',
+  'background-position',
+  'background-repeat',
+  'background-size',
+  'border-bottom-color',
+  'border-bottom-left-radius',
+  'border-bottom-right-radius',
+  'border-bottom-style',
+  'border-bottom-width',
+  'border-collapse',
+  'border-left-color',
+  'border-left-style',
+  'border-left-width',
+  'border-right-color',
+  'border-right-style',
+  'border-right-width',
+  'border-spacing',
+  'border-top-color',
+  'border-top-left-radius',
+  'border-top-right-radius',
+  'border-top-style',
+  'border-top-width',
+  'bottom',
+  'box-decoration-break',
+  'box-shadow',
+  'box-sizing',
+  'break-after',
+  'break-before',
+  'break-inside',
+  'caption-side',
+  'clear',
+  'clip',
+  'clip-path',
+  'color',
+  'color-scheme',
+  'column-count',
+  'column-fill',
+  'column-gap',
+  'column-rule-color',
+  'column-rule-style',
+  'column-rule-width',
+  'column-span',
+  'column-width',
+  'contain',
+  'contain-intrinsic-size',
+  'content',
+  'content-visibility',
+  'direction',
+  'display',
+  'fill',
+  'fill-opacity',
+  'fill-rule',
+  'filter',
+  'flex-basis',
+  'flex-direction',
+  'flex-grow',
+  'flex-shrink',
+  'flex-wrap',
+  'float',
+  'font-family',
+  'font-feature-settings',
+  'font-kerning',
+  'font-optical-sizing',
+  'font-size',
+  'font-stretch',
+  'font-style',
+  'font-variant',
+  'font-variation-settings',
+  'font-weight',
+  'grid-auto-columns',
+  'grid-auto-flow',
+  'grid-auto-rows',
+  'grid-column-end',
+  'grid-column-start',
+  'grid-row-end',
+  'grid-row-start',
+  'grid-template-areas',
+  'grid-template-columns',
+  'grid-template-rows',
+  'height',
+  'hyphens',
+  'image-rendering',
+  'isolation',
+  'justify-content',
+  'justify-items',
+  'justify-self',
+  'left',
+  'letter-spacing',
+  'line-break',
+  'line-height',
+  'list-style-image',
+  'list-style-position',
+  'list-style-type',
+  'margin-bottom',
+  'margin-left',
+  'margin-right',
+  'margin-top',
+  'mask-border',
+  'mask-clip',
+  'mask-composite',
+  'mask-image',
+  'mask-mode',
+  'mask-origin',
+  'mask-position',
+  'mask-repeat',
+  'mask-size',
+  'max-height',
+  'max-width',
+  'min-height',
+  'min-width',
+  'mix-blend-mode',
+  'object-fit',
+  'object-position',
+  'opacity',
+  'order',
+  'outline-color',
+  'outline-offset',
+  'outline-style',
+  'outline-width',
+  'overflow-wrap',
+  'overflow-x',
+  'overflow-y',
+  'padding-bottom',
+  'padding-left',
+  'padding-right',
+  'padding-top',
+  'paint-order',
+  'perspective',
+  'perspective-origin',
+  'place-content',
+  'place-items',
+  'place-self',
+  'position',
+  'right',
+  'rotate',
+  'row-gap',
+  'scale',
+  'shape-image-threshold',
+  'shape-margin',
+  'shape-outside',
+  'stroke',
+  'stroke-dasharray',
+  'stroke-dashoffset',
+  'stroke-linecap',
+  'stroke-linejoin',
+  'stroke-miterlimit',
+  'stroke-opacity',
+  'stroke-width',
+  'table-layout',
+  'tab-size',
+  'text-align',
+  'text-align-last',
+  'text-decoration-color',
+  'text-decoration-line',
+  'text-decoration-style',
+  'text-decoration-thickness',
+  'text-emphasis-color',
+  'text-emphasis-position',
+  'text-emphasis-style',
+  'text-indent',
+  'text-overflow',
+  'text-rendering',
+  'text-shadow',
+  'text-transform',
+  'text-underline-offset',
+  'text-underline-position',
+  'top',
+  'transform',
+  'transform-box',
+  'transform-origin',
+  'transform-style',
+  'transition-delay',
+  'transition-duration',
+  'transition-property',
+  'transition-timing-function',
+  'translate',
+  'unicode-bidi',
+  'vertical-align',
+  'visibility',
+  'white-space',
+  'width',
+  'word-break',
+  'word-spacing',
+  'writing-mode',
+  'z-index',
+] as const
+
 // Families available inside every frame (and offered by the style editor's
-// font row). The css2 endpoint is one stylesheet; actual font FILES only
-// download when a family is used, so listing several here is near-free.
-export const FONTS_URL =
-  'https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&family=Spline+Sans+Mono:wght@400;500&family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@400;500;600;700&family=Playfair+Display:wght@400;600;700&family=Lora:wght@400;500;600&display=swap'
+// font row). Self-hosted: the migration sandbox blocks outbound network, and a
+// legacy render in fallback fonts would never match the V2 comparison render,
+// so every text block would rasterize. Regenerate with scripts/vendor-fonts.py.
+// Data-URL variant: element frames are sandboxed without allow-same-origin, so
+// their font fetches carry Origin: null and a plain same-origin woff2 would be
+// refused by CORS.
+export const FONTS_URL = '/vendor/fonts-sandbox.css'
 
 /**
  * Strip ES module import/export so Babel's classic preset can run.
@@ -419,7 +647,7 @@ export function buildElementDoc(): string {
 <html>
 <head>
 <meta charset="utf-8" />
-<link rel="stylesheet" href="${FONTS_URL}" crossorigin="anonymous" />
+<link rel="stylesheet" href="${FONTS_URL}" />
 ${VENDOR_SCRIPTS.map((src) => `<script src="${src}"><\/script>`).join('\n')}
 <style>html,body{margin:0;height:100%;background:transparent}#root{height:100%}body{font-family:Archivo,system-ui,sans-serif}</style>
 </head>
@@ -921,6 +1149,56 @@ function __mountHtml(code) {
 window.addEventListener('message', function (e) {
   var msg = e.data
   if (!msg) return
+  if (msg.type === 'loora:migration-snapshot') {
+    var styleNames = [
+      'position', 'display', 'flexDirection', 'flexWrap', 'gap',
+      'alignItems', 'justifyContent', 'gridTemplateColumns',
+      'paddingTop', 'paddingRight', 'paddingBottom', 'paddingLeft',
+      'backgroundColor', 'backgroundImage', 'borderRadius', 'borderWidth',
+      'borderColor', 'borderStyle', 'boxShadow', 'opacity', 'overflow',
+      'fontFamily', 'fontSize', 'fontWeight', 'lineHeight', 'letterSpacing',
+      'textAlign', 'textDecoration', 'textTransform', 'color', 'objectFit'
+    ]
+    var serializeNode = function (node) {
+      var rect = node.getBoundingClientRect()
+      var computed = getComputedStyle(node)
+      var style = {}
+      styleNames.forEach(function (name) { style[name] = computed[name] || '' })
+      var attributes = {}
+      ;['src', 'href', 'alt', 'role', 'aria-label', 'type'].forEach(function (name) {
+        if (node.hasAttribute && node.hasAttribute(name)) attributes[name] = node.getAttribute(name) || ''
+      })
+      var unsupported = []
+      if (['CANVAS', 'VIDEO', 'IFRAME', 'OBJECT', 'EMBED'].includes(node.tagName)) {
+        unsupported.push(node.tagName.toLowerCase())
+      }
+      try {
+        var before = getComputedStyle(node, '::before').content
+        var after = getComputedStyle(node, '::after').content
+        if ((before && before !== 'none' && before !== 'normal') ||
+            (after && after !== 'none' && after !== 'normal')) {
+          unsupported.push('pseudo-element')
+        }
+      } catch (error) {}
+      var elementChildren = Array.from(node.children || [])
+      return {
+        tag: (node.tagName || 'div').toLowerCase(),
+        text: elementChildren.length === 0 ? (node.textContent || '') : undefined,
+        attributes: attributes,
+        style: style,
+        rect: { x: rect.x, y: rect.y, width: rect.width, height: rect.height },
+        children: elementChildren.map(serializeNode),
+        unsupported: unsupported,
+      }
+    }
+    var rootNode = __root.children.length === 1 ? __root.firstElementChild : __root
+    parent.postMessage({
+      type: 'loora:migration-snapshot-result',
+      token: msg.token,
+      root: rootNode ? serializeNode(rootNode) : null,
+    }, '*')
+    return
+  }
   // Canvas snapshots can't see into the sandboxed iframe, so the frame
   // captures itself on request and posts the PNG back to the parent.
   if (msg.type === 'loora:capture') {
@@ -928,11 +1206,12 @@ window.addEventListener('message', function (e) {
     var volatile = !!(document.getAnimations && document.getAnimations().some(function (animation) {
       return animation.playState === 'running' || animation.playState === 'pending'
     }))
-    var reply = function (png, fontsSkipped) {
+    var reply = function (png, fontsSkipped, captureError) {
       parent.postMessage({
         type: 'loora:capture-result',
         token: msg.token,
         png: png,
+        error: captureError || null,
         revision: captureRevision,
         volatile: volatile,
         fontsSkipped: !!fontsSkipped,
@@ -940,18 +1219,37 @@ window.addEventListener('message', function (e) {
       if (__revision === captureRevision) __dirty = false
       else __postDirty()
     }
-    if (!window.htmlToImage) return reply(null)
+    var captureErrorMessage = function (error) {
+      return String((error && error.message) || error || 'Unknown browser capture error').slice(0, 500)
+    }
+    if (!window.htmlToImage) {
+      return reply(null, false, 'The legacy image capture runtime did not load')
+    }
     // Capture at device resolution (capped at 2x) so the agent judges text
-    // and detail from a sharp image. Cross-origin stylesheets (fonts) can
-    // make font embedding throw; retry without fonts before giving up, and
-    // flag the reply so the degraded fidelity is visible downstream.
+    // and detail from a sharp image. A bounded style list keeps the cloned SVG
+    // below browser data-URI limits. Cross-origin stylesheets (fonts) can make
+    // font embedding throw, so retry without fonts before giving up.
     var pixelRatio = Math.min(window.devicePixelRatio || 1, 2)
-    htmlToImage.toPng(document.body, { pixelRatio: pixelRatio }).then(
-      function (png) { reply(png, false) },
-      function () {
-        htmlToImage.toPng(document.body, { pixelRatio: pixelRatio, skipFonts: true }).then(
-          function (png) { reply(png, true) },
-          function () { reply(null, false) }
+    var captureStyleProperties = ${JSON.stringify(LEGACY_CAPTURE_STYLE_PROPERTIES)}
+    htmlToImage.toPng(document.body, {
+      pixelRatio: pixelRatio,
+      includeStyleProperties: captureStyleProperties,
+    }).then(
+      function (png) { reply(png, false, null) },
+      function (firstCaptureError) {
+        htmlToImage.toPng(document.body, {
+          pixelRatio: pixelRatio,
+          skipFonts: true,
+          includeStyleProperties: captureStyleProperties,
+        }).then(
+          function (png) { reply(png, true, null) },
+          function (retryCaptureError) {
+            var captureError =
+              'PNG capture failed: ' + captureErrorMessage(firstCaptureError) +
+              '; retry without fonts failed: ' + captureErrorMessage(retryCaptureError)
+            console.error(captureError)
+            reply(null, false, captureError)
+          }
         )
       }
     )
@@ -1018,6 +1316,24 @@ parent.postMessage({ type: 'loora:element-ready' }, '*')
 
 const ELEMENT_DOC = buildElementDoc()
 
+function migrationElementDoc() {
+  const origin = typeof location === 'undefined' ? '' : location.origin
+  const policy = [
+    "default-src 'none'",
+    `script-src 'unsafe-inline' ${origin}`,
+    `style-src 'unsafe-inline' ${origin}`,
+    `img-src data: blob: ${origin}`,
+    `font-src data: ${origin}`,
+    "connect-src 'none'",
+    "media-src 'none'",
+    "frame-src 'none'",
+  ].join('; ')
+  return ELEMENT_DOC.replace(
+    '<head>',
+    `<head><meta http-equiv="Content-Security-Policy" content="${policy}">`,
+  )
+}
+
 // Sandboxed iframes have an opaque origin: an <img src="/api/asset/…"> inside
 // one sends no session cookie and gets a 401. The parent document is
 // authenticated, so it fetches each asset once and inlines it as a data URL
@@ -1080,6 +1396,7 @@ export function ElementFrame({
   interactive,
   suspended = false,
   textEditable = false,
+  networkRestricted = false,
   onError,
   onTextEdit,
   onImagePick,
@@ -1100,6 +1417,9 @@ export function ElementFrame({
   // its source-code src via onImagePick instead (inlined data URLs are
   // mapped back to their /api/asset/… form).
   textEditable?: boolean
+  // One-time legacy migration runs with no outbound network and the minimum
+  // iframe capability. The normal editor never uses this path.
+  networkRestricted?: boolean
   // Called with a message when the latest payload failed, null when it rendered.
   onError?: (message: string | null) => void
   onTextEdit?: (edits: FrameTextEdit[]) => void
@@ -1274,8 +1594,8 @@ export function ElementFrame({
     <iframe
       ref={iframeRef}
       title="Element"
-      sandbox="allow-scripts allow-forms allow-modals"
-      srcDoc={ELEMENT_DOC}
+      sandbox={networkRestricted ? 'allow-scripts' : 'allow-scripts allow-forms allow-modals'}
+      srcDoc={networkRestricted ? migrationElementDoc() : ELEMENT_DOC}
       data-element-frame={runtimeId}
       data-source-element={elementId}
       className="h-full w-full border-0"
@@ -1287,11 +1607,75 @@ export function ElementFrame({
 // Ask a mounted element iframe for a PNG of itself. Resolves null when the
 // frame is missing, still booting, or slow to respond.
 export interface ElementCapture {
-  png: string
+  png: string | null
+  error: string | null
   revision: number
   volatile: boolean
   // True when font embedding failed and the capture rendered without webfonts.
   fontsSkipped: boolean
+}
+
+export interface LegacyElementSnapshot {
+  root: import('@loora/canvas/migration').LegacyDomNode | null
+  png: string | null
+  error: string | null
+}
+
+export async function snapshotLegacyElement(
+  elementId: string,
+  timeoutMs = 3_000,
+): Promise<LegacyElementSnapshot> {
+  const iframe = document.querySelector<HTMLIFrameElement>(
+    `iframe[data-element-frame="${CSS.escape(elementId)}"]`,
+  )
+  if (!iframe?.contentWindow) {
+    return {
+      root: null,
+      png: null,
+      error: 'The legacy element frame was unavailable',
+    }
+  }
+  const token = `${elementId}:migration:${crypto.randomUUID()}`
+  const root = await new Promise<LegacyElementSnapshot['root']>((resolve) => {
+    const timer = window.setTimeout(() => {
+      window.removeEventListener('message', onMessage)
+      resolve(null)
+    }, timeoutMs)
+    const onMessage = (event: MessageEvent) => {
+      const message = event.data as {
+        type?: string
+        token?: string
+        root?: LegacyElementSnapshot['root']
+      }
+      if (
+        event.source !== iframe.contentWindow ||
+        message.type !== 'loora:migration-snapshot-result' ||
+        message.token !== token
+      ) {
+        return
+      }
+      window.clearTimeout(timer)
+      window.removeEventListener('message', onMessage)
+      const replaceSources = (node: NonNullable<LegacyElementSnapshot['root']>) => {
+        if (node.attributes.src) {
+          node.attributes.src = sourceUrlForInlinedSrc(node.attributes.src)
+        }
+        node.children.forEach(replaceSources)
+      }
+      if (message.root) replaceSources(message.root)
+      resolve(message.root ?? null)
+    }
+    window.addEventListener('message', onMessage)
+    iframe.contentWindow!.postMessage({ type: 'loora:migration-snapshot', token }, '*')
+  })
+  const capture = await captureElement(elementId, timeoutMs)
+  return {
+    root,
+    png: capture?.png ?? null,
+    error:
+      capture?.error ??
+      (capture ? null : 'The legacy element capture timed out'),
+  }
 }
 
 // Ask a mounted element iframe for its runtime log buffer (console.error/warn
@@ -1370,6 +1754,7 @@ export function captureElement(elementId: string, timeoutMs = 1500): Promise<Ele
         type?: string
         token?: string
         png?: string | null
+        error?: string | null
         revision?: number
         volatile?: boolean
         fontsSkipped?: boolean
@@ -1377,11 +1762,16 @@ export function captureElement(elementId: string, timeoutMs = 1500): Promise<Ele
       if (e.source !== iframe.contentWindow || msg?.type !== 'loora:capture-result' || msg.token !== token) return
       window.clearTimeout(timer)
       window.removeEventListener('message', onMessage)
-      if (typeof msg.png !== 'string') return resolve(null)
       const revision = typeof msg.revision === 'number' ? msg.revision : getElementCaptureRevision(elementId)
       noteFrameRevision(elementId, revision)
       resolve({
-        png: msg.png,
+        png: typeof msg.png === 'string' ? msg.png : null,
+        error:
+          typeof msg.error === 'string' && msg.error.trim()
+            ? msg.error.slice(0, 500)
+            : typeof msg.png === 'string'
+              ? null
+              : 'The browser returned no PNG data',
         revision,
         volatile: msg.volatile === true,
         fontsSkipped: msg.fontsSkipped === true,

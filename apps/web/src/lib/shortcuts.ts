@@ -52,7 +52,6 @@ export const BUILTIN_META: Record<
   toggleLayers: { label: 'Toggle layers', group: 'panels' },
   toggleAssets: { label: 'Toggle assets', group: 'panels' },
   toggleHistory: { label: 'Toggle history', group: 'panels' },
-  toggleCode: { label: 'Toggle code editor', group: 'panels' },
   openCommandMenu: { label: 'Open command menu', group: 'panels' },
   openSettings: { label: 'Open settings', group: 'panels' },
 }
@@ -116,7 +115,6 @@ export const DEFAULT_SHORTCUTS: Record<BuiltInShortcutId, KeyChord | KeyChord[]>
   toggleLayers: key('l', { meta: true }),
   toggleAssets: key('k', { meta: true, shift: true }),
   toggleHistory: key('y', { meta: true }),
-  toggleCode: key('e', { meta: true }),
   openCommandMenu: key('k', { meta: true }),
   openSettings: key(',', { meta: true }),
 }

@@ -11,7 +11,10 @@ export const Route = createFileRoute('/api/handoff/$token/asset/$id')({
     handlers: {
       GET: async ({ params }) => {
         const handoff = await getHandoffDesign(params.token)
-        if (!handoff || !referencedAssetIds(handoff.shapes).has(params.id)) {
+        if (
+          !handoff ||
+          !referencedAssetIds(handoff.document ?? handoff.shapes).has(params.id)
+        ) {
           return new Response('Not found', { status: 404 })
         }
 

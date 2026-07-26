@@ -38,7 +38,6 @@ const BUILTIN_IDS = [
   'toggleLayers',
   'toggleAssets',
   'toggleHistory',
-  'toggleCode',
   'openCommandMenu',
   'openSettings',
 ] as const satisfies readonly BuiltInShortcutId[]

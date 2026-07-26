@@ -7,6 +7,7 @@ import { referencedAssetIds } from '@loora/rpc/handoff'
 import {
   getPublishedTarget,
   publishEgressExceeded,
+  referencedCanvasAssetIds,
   recordPublishEgress,
 } from '@loora/rpc/publish'
 import { s3 } from '@loora/rpc/storage'
@@ -18,11 +19,15 @@ export const Route = createFileRoute('/api/p/$linkId/asset/$id')({
         const published = await getPublishedTarget(params.linkId)
         // Only assets the published element or composed Page actually references are servable —
         // the link is not a key to the owner's whole asset library.
-        const publishedElements =
-          published?.kind === 'element'
-            ? [published.element]
-            : published?.items.map(({ element }) => element) ?? []
-        if (!published || !referencedAssetIds(publishedElements).has(params.id)) {
+        const referencedIds =
+          published?.kind === 'canvas-v2'
+            ? referencedCanvasAssetIds(published.document)
+            : referencedAssetIds(
+                published?.kind === 'element'
+                  ? [published.element]
+                  : published?.items.map(({ element }) => element) ?? [],
+              )
+        if (!published || !referencedIds.has(params.id)) {
           return new Response('Not found', { status: 404 })
         }
         // Egress check before touching the asset, so an over-limit page never

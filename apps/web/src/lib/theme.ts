@@ -37,8 +37,8 @@ export function watchSystemTheme(): () => void {
   return () => media.removeEventListener('change', onChange)
 }
 
-// Components that theme a third-party surface (Monaco, the diff viewer) need the
-// resolved mode as a value, not just the `.dark` class. Watching the class keeps
+// Components that theme a third-party surface need the resolved mode as a
+// value, not just the `.dark` class. Watching the class keeps
 // them right for `system` flips and manual switches alike.
 export function useIsDarkTheme(): boolean {
   return useSyncExternalStore(

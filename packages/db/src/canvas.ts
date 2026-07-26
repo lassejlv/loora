@@ -1,8 +1,6 @@
-// The persisted canvas model: every element is a positioned box of code. The
-// code is plain HTML/CSS/JS or JSX defining App — rendered live in a sandboxed
-// iframe with React and Tailwind available (see apps/web element-frame.tsx).
-// Lives in @loora/db because design rows persist `CanvasElement[]` as JSONB;
-// the canvas helpers built on top of it stay in apps/web (src/lib/canvas.ts).
+// Legacy V1 persisted canvas data. It remains readable only for first-open
+// migration, rollback, and expiring-link compatibility. Writable editor code
+// uses CanvasDocumentV2 from @loora/canvas.
 export interface CanvasElement {
   id: string
   name: string

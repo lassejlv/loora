@@ -17,6 +17,7 @@ export type CommitSummary = Omit<Commit, 'shapes' | 'pages'>
 export interface StoredHistorySummary {
   id: string
   message: string
+  canvasVersion?: number
   added: number
   removed: number
   changed: number
@@ -35,15 +36,23 @@ export function sortCommitsOldestFirst<T extends { at: number; id: string }>(com
   return [...commits].sort(compareHistoryKeys)
 }
 
-export function toHistoryPage(rows: StoredHistorySummary[], limit: number) {
-  const items: CommitSummary[] = rows.slice(0, limit).map((row) => ({
-    id: row.id,
-    message: row.message,
-    added: row.added,
-    removed: row.removed,
-    changed: row.changed,
-    at: row.createdAt.getTime(),
-  }))
+export function toHistoryPage(
+  rows: StoredHistorySummary[],
+  limit: number,
+) {
+  const items: (CommitSummary & { canvasVersion?: number })[] = rows
+    .slice(0, limit)
+    .map((row) => ({
+      id: row.id,
+      message: row.message,
+      ...(row.canvasVersion === undefined
+        ? {}
+        : { canvasVersion: row.canvasVersion }),
+      added: row.added,
+      removed: row.removed,
+      changed: row.changed,
+      at: row.createdAt.getTime(),
+    }))
   const last = items.at(-1)
   return {
     items,

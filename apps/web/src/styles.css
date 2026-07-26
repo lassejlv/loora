@@ -1,4 +1,6 @@
-@import url('https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&family=Spline+Sans+Mono:wght@400;500&display=swap');
+/* Self-hosted, and byte-identical to what the migration sandbox loads.
+   Regenerate with scripts/vendor-fonts.py. */
+@import url('/vendor/fonts.css');
 @import 'tailwindcss' source('../');
 @plugin '@tailwindcss/typography';
 
@@ -37,7 +39,8 @@
   --chart-3: oklch(0.398 0.07 227.392);
   --chart-4: oklch(0.828 0.189 84.429);
   --chart-5: oklch(0.769 0.188 70.08);
-  --radius: 0.75rem;
+  /* Tightened: the editor chrome reads quieter with less rounding. */
+  --radius: 0.5rem;
   --sidebar: var(--background);
   --sidebar-foreground: var(--foreground);
   --sidebar-primary: var(--cx-accent);

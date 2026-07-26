@@ -46,8 +46,8 @@ export function AssetsPanel({
       .then((items) => {
         if (!cancelled) setAssets(items)
       })
-      .catch((err) => {
-        console.error('[assets] Failed to list assets:', err)
+      .catch((cause) => {
+        console.error('[assets] Failed to list assets:', cause)
         if (!cancelled) setError('Could not load assets.')
       })
       .finally(() => {
@@ -72,8 +72,8 @@ export function AssetsPanel({
         })
         setAssets((current) => [saved, ...current])
       }
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Upload failed.')
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Upload failed.')
     } finally {
       setBusy(false)
       if (fileInputRef.current) fileInputRef.current.value = ''
@@ -81,10 +81,12 @@ export function AssetsPanel({
   }
 
   const remove = (id: string) => {
-    setAssets((current) => current.filter((a) => a.id !== id))
+    setAssets((current) => current.filter((asset) => asset.id !== id))
     void orpc.asset
       .delete({ id })
-      .catch((err) => console.error('[assets] Failed to delete asset:', err))
+      .catch((cause) =>
+        console.error('[assets] Failed to delete asset:', cause),
+      )
   }
 
   return (
@@ -93,10 +95,14 @@ export function AssetsPanel({
         <div className="min-w-0">
           <h2 className="text-sm font-semibold">Assets</h2>
           <p className="text-xs text-muted-foreground">
-            Click an image to place it on the canvas. The agent can use them too.
+            Click an image to place it in the selected V2 container.
           </p>
         </div>
-        <Button size="sm" disabled={busy} onClick={() => fileInputRef.current?.click()}>
+        <Button
+          size="sm"
+          disabled={busy}
+          onClick={() => fileInputRef.current?.click()}
+        >
           <ImagePlusIcon data-slot="icon" />
           {busy ? 'Uploading…' : 'Upload'}
         </Button>
@@ -106,14 +112,20 @@ export function AssetsPanel({
           accept="image/*"
           multiple
           className="hidden"
-          onChange={(e) => void upload(e.target.files)}
+          onChange={(event) => void upload(event.target.files)}
         />
       </div>
 
-      {error ? <p className="text-xs text-destructive-foreground">{error}</p> : null}
+      {error ? (
+        <p className="text-xs text-destructive-foreground">{error}</p>
+      ) : null}
 
       {loading ? (
-        <div className="grid grid-cols-[repeat(auto-fill,minmax(8rem,1fr))] gap-3" aria-busy="true" aria-label="Loading assets">
+        <div
+          className="grid grid-cols-[repeat(auto-fill,minmax(8rem,1fr))] gap-3"
+          aria-busy="true"
+          aria-label="Loading assets"
+        >
           {Array.from({ length: 4 }, (_, index) => (
             <Skeleton key={index} className="aspect-square w-full rounded-lg" />
           ))}
@@ -128,38 +140,41 @@ export function AssetsPanel({
         </button>
       ) : (
         <div className="grid flex-1 auto-rows-min grid-cols-[repeat(auto-fill,minmax(8rem,1fr))] gap-3 overflow-y-auto">
-          {assets.map((a) => (
-            <div key={a.id} className="group relative">
+          {assets.map((asset) => (
+            <div key={asset.id} className="group relative">
               <button
                 type="button"
                 className={cn(
                   'block w-full overflow-hidden rounded-lg border border-black/12 bg-white outline-none',
                   'hover:border-cx-accent focus-visible:ring-2 focus-visible:ring-ring',
                 )}
-                title={`Place ${a.name}`}
-                onClick={() => onInsert(a)}
+                title={`Place ${asset.name}`}
+                onClick={() => onInsert(asset)}
               >
                 <img
-                  src={`/api/asset/${a.id}`}
-                  alt={a.name}
+                  src={`/api/asset/${asset.id}`}
+                  alt={asset.name}
                   className="aspect-square w-full object-contain"
                   loading="lazy"
                 />
               </button>
               <div className="mt-1 flex items-center justify-between gap-1">
-                <span className="min-w-0 truncate text-[11px] text-muted-foreground" title={a.name}>
-                  {a.name}
+                <span
+                  className="min-w-0 truncate text-[11px] text-muted-foreground"
+                  title={asset.name}
+                >
+                  {asset.name}
                 </span>
                 <span className="shrink-0 text-[10px] text-muted-foreground/60">
-                  {formatSize(a.size)}
+                  {formatSize(asset.size)}
                 </span>
               </div>
               <Button
                 variant="outline"
                 size="icon"
-                aria-label={`Delete ${a.name}`}
+                aria-label={`Delete ${asset.name}`}
                 className="absolute top-1 right-1 size-6 opacity-0 shadow-sm group-hover:opacity-100"
-                onClick={() => remove(a.id)}
+                onClick={() => remove(asset.id)}
               >
                 <Trash2Icon data-slot="icon" className="size-3" />
               </Button>

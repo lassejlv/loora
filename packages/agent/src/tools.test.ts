@@ -11,38 +11,24 @@ describe('agent tool contracts', () => {
     }) as ToolSet
 
     expect(Object.keys(tools)).toEqual([
-      'createElement',
-      'createElements',
-      'updateElement',
-      'editElement',
-      'searchCanvas',
-      'reorderElements',
-      'groupElements',
-      'ungroupElements',
       'createPage',
-      'readPage',
-      'updatePage',
-      'editPageItems',
-      'duplicatePage',
-      'reorderPages',
-      'deletePage',
-      'readElement',
-      'deleteElement',
-      'viewCanvas',
-      'viewElement',
+      'insertNodes',
+      'patchNodes',
+      'moveNodes',
+      'deleteNodes',
+      'readNode',
+      'readTree',
+      'searchNodes',
+      'createComponent',
+      'createInstance',
+      'setTokens',
+      'viewNode',
       'viewPage',
-      'readElementLogs',
-      'arrangeElements',
+      'viewCanvas',
       'askQuestion',
     ])
-    expect(tools.createElement.execute).toBeUndefined()
-    expect(tools.updateElement.execute).toBeUndefined()
-    expect(tools.createPage.execute).toBeUndefined()
-    expect(tools.readPage.execute).toBeUndefined()
-    expect(tools.updatePage.execute).toBeUndefined()
-    expect(tools.editPageItems.execute).toBeUndefined()
-    expect(tools.duplicatePage.execute).toBeUndefined()
-    expect(tools.reorderPages.execute).toBeUndefined()
-    expect(tools.viewPage.execute).toBeUndefined()
+    for (const tool of Object.values(tools)) {
+      expect(tool.execute).toBeUndefined()
+    }
   })
 })

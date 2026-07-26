@@ -1,6 +1,8 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, type SyntheticEvent } from 'react'
 import { createFileRoute, Link } from '@tanstack/react-router'
 import { ElementFrame } from '#/components/element-frame'
+import type { CanvasInteraction } from '@loora/canvas/model'
+import { applyCanvasActions } from '#/lib/canvas-v2-runtime'
 
 // Public viewer for a published element. No auth: the link id is the
 // capability. The payload arrives with asset URLs already rewritten to the
@@ -18,6 +20,12 @@ type LoadState =
       status: 'ready'
       payload:
         | { kind: 'element'; name: string; code: string }
+        | {
+            kind: 'canvas-v2'
+            name: string
+            html: string
+            css: string
+          }
         | {
             kind: 'page'
             name: string
@@ -41,9 +49,11 @@ function PublishedPage() {
     fetch(`/api/p/${encodeURIComponent(linkId)}`)
       .then(async (response) => {
         const body = (await response.json()) as {
-          kind?: 'element' | 'page'
+          kind?: 'element' | 'page' | 'canvas-v2'
           name?: string
           code?: string
+          html?: string
+          css?: string
           width?: number
           items?: Array<{
             id: string
@@ -56,7 +66,16 @@ function PublishedPage() {
         }
         if (cancelled) return
         const payload =
-          body.kind === 'page' && Array.isArray(body.items) && typeof body.width === 'number'
+          body.kind === 'canvas-v2' &&
+          typeof body.html === 'string' &&
+          typeof body.css === 'string'
+            ? {
+                kind: 'canvas-v2' as const,
+                name: body.name ?? 'Page',
+                html: body.html,
+                css: body.css,
+              }
+            : body.kind === 'page' && Array.isArray(body.items) && typeof body.width === 'number'
             ? {
                 kind: 'page' as const,
                 name: body.name ?? 'Page',
@@ -107,6 +126,10 @@ function PublishedPage() {
 
   const payload = state.payload
 
+  if (payload.kind === 'canvas-v2') {
+    return <PublishedCanvasV2 payload={payload} />
+  }
+
   return (
     <main className="min-h-screen bg-white">
       {payload.kind === 'element' ? (
@@ -136,6 +159,68 @@ function PublishedPage() {
           ))}
         </div>
       )}
+      <Link
+        to="/"
+        target="_blank"
+        rel="noreferrer"
+        className="fixed right-3 bottom-3 z-10 rounded-full border bg-card/85 px-2.5 py-1 text-[11px] text-muted-foreground opacity-60 shadow-sm backdrop-blur transition-opacity hover:opacity-100"
+      >
+        Made with loora
+      </Link>
+    </main>
+  )
+}
+
+function interactionsFor(
+  event: SyntheticEvent<HTMLElement>,
+  trigger: CanvasInteraction['trigger'],
+) {
+  const target =
+    event.target instanceof Element
+      ? event.target.closest<HTMLElement>('[data-loora-interactions]')
+      : null
+  if (!target) return []
+  try {
+    const interactions = JSON.parse(
+      target.dataset.looraInteractions ?? '[]',
+    ) as CanvasInteraction[]
+    return interactions
+      .filter((interaction) => interaction.trigger === trigger)
+      .flatMap((interaction) => interaction.actions)
+  } catch {
+    return []
+  }
+}
+
+function PublishedCanvasV2({
+  payload,
+}: {
+  payload: Extract<
+    Extract<LoadState, { status: 'ready' }>['payload'],
+    { kind: 'canvas-v2' }
+  >
+}) {
+  const invoke = (
+    event: SyntheticEvent<HTMLElement>,
+    trigger: CanvasInteraction['trigger'],
+  ) => {
+    const actions = interactionsFor(event, trigger)
+    if (actions.length > 0) applyCanvasActions(event.currentTarget, actions)
+  }
+  return (
+    <main
+      className="min-h-screen bg-white"
+      onClick={(event) => invoke(event, 'click')}
+      onPointerOver={(event) => invoke(event, 'hover')}
+      onSubmit={(event) => {
+        const actions = interactionsFor(event, 'submit')
+        if (actions.length === 0) return
+        event.preventDefault()
+        applyCanvasActions(event.currentTarget, actions)
+      }}
+    >
+      <style>{`html,body{margin:0;min-height:100%}${payload.css}`}</style>
+      <div dangerouslySetInnerHTML={{ __html: payload.html }} />
       <Link
         to="/"
         target="_blank"

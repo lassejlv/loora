@@ -13,6 +13,7 @@
     "studio": "bun --env-file=../../.env run drizzle-kit studio"
   },
   "dependencies": {
+    "@loora/canvas": "workspace:*",
     "@neondatabase/serverless": "^1.1.0",
     "ai": "catalog:",
     "drizzle-orm": "catalog:"

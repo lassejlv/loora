@@ -1,10 +1,13 @@
 import { describe, expect, it, mock } from 'bun:test'
+import { readFileSync } from 'node:fs'
 import {
   buildElementDoc,
+  FONTS_URL,
   classifyCode,
   compileForFrame,
   hasEntryCall,
   inlineAssetUrls,
+  LEGACY_CAPTURE_STYLE_PROPERTIES,
   REACT_GLOBALS_PRELUDE,
   stripModuleSyntax,
   type BabelLike,
@@ -263,6 +266,21 @@ describe('buildElementDoc', () => {
     expect(doc).toContain('htmlToImage.toPng')
   })
 
+  it('bounds legacy capture styles and returns the final browser error', () => {
+    expect(LEGACY_CAPTURE_STYLE_PROPERTIES.length).toBeGreaterThan(100)
+    expect(LEGACY_CAPTURE_STYLE_PROPERTIES.length).toBeLessThan(250)
+    expect(new Set(LEGACY_CAPTURE_STYLE_PROPERTIES).size).toBe(
+      LEGACY_CAPTURE_STYLE_PROPERTIES.length,
+    )
+    expect(LEGACY_CAPTURE_STYLE_PROPERTIES).toContain('background-image')
+    expect(LEGACY_CAPTURE_STYLE_PROPERTIES).toContain('grid-template-columns')
+    expect(LEGACY_CAPTURE_STYLE_PROPERTIES).toContain('mix-blend-mode')
+    expect(LEGACY_CAPTURE_STYLE_PROPERTIES).toContain('transform')
+    expect(doc).toContain('includeStyleProperties: captureStyleProperties')
+    expect(doc).toContain('error: captureError || null')
+    expect(doc).toContain('retry without fonts failed')
+  })
+
   it('tracks runtime changes and marks animated captures as volatile', () => {
     expect(doc).toContain("type: 'loora:dirty'")
     expect(doc).toContain('new MutationObserver(__markDirty)')
@@ -353,5 +371,33 @@ describe('inlineAssetUrls', () => {
     } finally {
       globalThis.fetch = originalFetch
     }
+  })
+})
+
+describe('migration font parity', () => {
+  // Both stylesheets must declare the same faces. If they drift, the legacy
+  // render and the V2 comparison render use different typefaces, every text
+  // block falls under the 0.98 similarity threshold, and customer designs
+  // migrate to flat images instead of editable nodes.
+  const faces = (path: string) =>
+    [...readFileSync(path, 'utf8').matchAll(/font-family: '([^']+)'/g)]
+      .map((match) => match[1])
+      .sort()
+
+  it('serves fonts from our own origin so the sandbox can load them', () => {
+    expect(FONTS_URL.startsWith('/')).toBe(true)
+  })
+
+  it('declares identical families in both generated stylesheets', () => {
+    const app = faces('apps/web/public/vendor/fonts.css')
+    const sandbox = faces(`apps/web/public${FONTS_URL}`)
+    expect(sandbox).toEqual(app)
+    expect(app.length).toBeGreaterThan(0)
+  })
+
+  it('inlines the sandbox fonts, which cannot pass CORS from an opaque origin', () => {
+    const css = readFileSync(`apps/web/public${FONTS_URL}`, 'utf8')
+    expect(css).toContain('src: url(data:font/woff2;base64,')
+    expect(css).not.toContain('https://fonts.g')
   })
 })

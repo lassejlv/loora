@@ -1,6 +1,6 @@
-import type { CanvasElement, CanvasPage } from '@loora/db/canvas'
+import type { CanvasDocumentV2, NodeRef } from '@loora/canvas/model'
 import agentPromptTemplate from './agent-prompt.txt' with { type: 'text' }
-import { canvasForPrompt } from './messages'
+import { semanticTree } from './canvas-v2-tools'
 import { DESIGN_SKILL_PROMPT } from './design-skill'
 
 export const MAX_AGENT_SYSTEM_PROMPT_LENGTH = 8_000
@@ -44,31 +44,20 @@ export function buildAgentSystemPrompt({
   imageInputsEnabled,
   githubConnected,
   assets,
-  shapes,
-  pages,
-  selectedIds,
-  selectedPageId,
+  document,
+  selectedRefs,
 }: {
   customInstructions: string
   forceCanvasAction?: boolean
   imageInputsEnabled: boolean
   githubConnected: boolean
   assets: { id: string; name: string; mediaType: string }[]
-  shapes?: CanvasElement[]
-  pages?: CanvasPage[]
-  selectedIds?: string[]
-  selectedPageId?: string | null
+  document: CanvasDocumentV2
+  selectedRefs?: NodeRef[]
 }) {
-  const selectionContext = [
-    selectedIds?.length
-      ? `The user currently has these element ids selected: ${JSON.stringify(selectedIds)}. When the request says "this", "these", or "the selected", it refers to those elements.`
-      : '',
-    selectedPageId
-      ? `The user currently has Page id ${JSON.stringify(selectedPageId)} selected. When the request refers to "this Page" or "the selected Page", use that Page.`
-      : '',
-  ]
-    .filter(Boolean)
-    .join('\n')
+  const selectionContext = selectedRefs?.length
+    ? `The current selection is ${JSON.stringify(selectedRefs)}. Words like "this" and "selected" refer to these NodeRefs.`
+    : ''
 
   const basePrompt = renderPromptTemplate(agentPromptTemplate, {
     forceCanvasAction: forceCanvasAction
@@ -76,7 +65,7 @@ export function buildAgentSystemPrompt({
       : '',
     imageInput: imageInputsEnabled
       ? 'The user message may include a PNG snapshot of the current canvas. Use it to judge layout, overlap, and balance before and after your edits.'
-      : 'Image input is temporarily disabled. Rely on the current canvas elements JSON and do not call viewCanvas.',
+      : 'Image input is temporarily disabled. Rely on the semantic tree and do not call visual tools.',
     github: githubConnected
       ? [
           'GitHub is connected. When the user asks to list their repositories, call listGitHubRepositories. When they ask to explore or match a repository, use the repository tools with its owner/repository name; list repositories first if the name is unclear. Never tell the user to run GitHub CLI while these tools are available.',
@@ -86,10 +75,9 @@ export function buildAgentSystemPrompt({
     designSkill: DESIGN_SKILL_PROMPT,
     assets: JSON.stringify(assets.map((a) => ({ name: a.name, mediaType: a.mediaType, src: `/api/asset/${a.id}` }))),
     verify: imageInputsEnabled
-      ? 'Verify loop: after finishing the edits for a design task, call viewCanvas to see the actual result. If you spot problems (overlap, misalignment, cramped spacing, poor contrast), fix them and check again. Also check the restraint limits mechanically: a headline wrapping past 2 lines, oversized display type, or a wall of text is a defect — shrink and cut before finishing. Use viewElement for a sharp closeup of one element when the full-canvas image is too small to judge text or details. Skip verification for trivial single-shape edits.'
+      ? 'After meaningful edits, call viewCanvas or viewPage. Fix overlap, clipping, poor hierarchy, cramped spacing, weak contrast, and bad responsive behavior before finishing. Use viewNode for sharp detail.'
       : 'Canvas image verification is temporarily disabled. Do not call viewCanvas.',
-    canvas: JSON.stringify(canvasForPrompt(shapes ?? [])),
-    pages: JSON.stringify(pages ?? []),
+    canvas: JSON.stringify(semanticTree(document)),
     selected: selectionContext,
   })
 

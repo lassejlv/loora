@@ -46,7 +46,6 @@ export type BuiltInShortcutId =
   | 'toggleLayers'
   | 'toggleAssets'
   | 'toggleHistory'
-  | 'toggleCode'
   | 'openCommandMenu'
   | 'openSettings'
 

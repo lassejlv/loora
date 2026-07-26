@@ -13,9 +13,10 @@ import {
   timestamp,
 } from 'drizzle-orm/pg-core'
 import type { UIMessage } from 'ai'
+import type { CanvasDocumentV2 } from '@loora/canvas/model'
+import type { CanvasTransaction } from '@loora/canvas/engine'
 import type { CanvasElement, CanvasPage } from './canvas'
 import type { DraftStatus } from './drafts'
-import type { PullRequestStatus } from './pull-requests'
 import type { ShortcutConfig } from './shortcuts'
 import { EMPTY_SHORTCUT_CONFIG } from './shortcuts'
 
@@ -107,6 +108,10 @@ export const design = pgTable(
     name: text('name').notNull(),
     shapes: jsonb('shapes').$type<CanvasElement[]>().default([]).notNull(),
     pages: jsonb('pages').$type<CanvasPage[]>().default([]).notNull(),
+    canvasVersion: integer('canvas_version').default(1).notNull(),
+    canvasDocument: jsonb('canvas_document').$type<CanvasDocumentV2>(),
+    canvasMigrationLeaseId: text('canvas_migration_lease_id'),
+    canvasMigrationLeaseExpiresAt: timestamp('canvas_migration_lease_expires_at'),
     revision: integer('revision').default(0).notNull(),
     createdAt: timestamp('created_at').defaultNow().notNull(),
     updatedAt: timestamp('updated_at')
@@ -133,6 +138,10 @@ export const designDraft = pgTable(
     shapes: jsonb('shapes').$type<CanvasElement[]>().notNull(),
     basePages: jsonb('base_pages').$type<CanvasPage[]>().default([]).notNull(),
     pages: jsonb('pages').$type<CanvasPage[]>().default([]).notNull(),
+    canvasVersion: integer('canvas_version').default(1).notNull(),
+    baseCanvasVersion: integer('base_canvas_version').default(1).notNull(),
+    baseCanvasDocument: jsonb('base_canvas_document').$type<CanvasDocumentV2>(),
+    canvasDocument: jsonb('canvas_document').$type<CanvasDocumentV2>(),
     baseRevision: integer('base_revision').notNull(),
     revision: integer('revision').default(0).notNull(),
     appliedVersionId: text('applied_version_id'),
@@ -166,6 +175,8 @@ export const designVersion = pgTable(
     message: text('message').notNull(),
     shapes: jsonb('shapes').$type<CanvasElement[]>().notNull(),
     pages: jsonb('pages').$type<CanvasPage[]>().default([]).notNull(),
+    canvasVersion: integer('canvas_version').default(1).notNull(),
+    canvasDocument: jsonb('canvas_document').$type<CanvasDocumentV2>(),
     added: integer('added').notNull(),
     removed: integer('removed').notNull(),
     changed: integer('changed').notNull(),
@@ -189,6 +200,37 @@ export const designVersion = pgTable(
       table.draftId,
       table.createdAt,
     ),
+  ],
+)
+
+export const canvasTransaction = pgTable(
+  'canvas_transaction',
+  {
+    designId: text('design_id').notNull(),
+    userId: text('user_id').notNull(),
+    targetKey: text('target_key').notNull(),
+    transactionId: text('transaction_id').notNull(),
+    baseRevision: integer('base_revision').notNull(),
+    revision: integer('revision').notNull(),
+    transaction: jsonb('transaction').$type<CanvasTransaction>().notNull(),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+  },
+  (table) => [
+    primaryKey({
+      columns: [table.userId, table.designId, table.targetKey, table.transactionId],
+    }),
+    foreignKey({
+      columns: [table.designId, table.userId],
+      foreignColumns: [design.id, design.userId],
+      name: 'canvas_transaction_design_fk',
+    }).onDelete('cascade'),
+    index('canvas_transaction_target_revision_idx').on(
+      table.userId,
+      table.designId,
+      table.targetKey,
+      table.revision,
+    ),
+    index('canvas_transaction_created_idx').on(table.createdAt),
   ],
 )
 
@@ -227,62 +269,6 @@ export const designChat = pgTable(
       table.draftId,
       table.updatedAt,
     ),
-  ],
-)
-
-// A branch opened for review. The row id doubles as the review URL's
-// capability token (same trade as publish_link), so anyone holding the link
-// can read the diff and comment without a Loora account.
-export const designPullRequest = pgTable(
-  'design_pull_request',
-  {
-    id: text('id').primaryKey(),
-    designId: text('design_id').notNull(),
-    draftId: text('draft_id').notNull(),
-    userId: text('user_id').notNull(),
-    title: text('title').notNull(),
-    body: text('body').default('').notNull(),
-    status: text('status').$type<PullRequestStatus>().default('open').notNull(),
-    mergedAt: timestamp('merged_at'),
-    closedAt: timestamp('closed_at'),
-    createdAt: timestamp('created_at').defaultNow().notNull(),
-    updatedAt: timestamp('updated_at')
-      .defaultNow()
-      .$onUpdate(() => new Date())
-      .notNull(),
-  },
-  (table) => [
-    foreignKey({
-      columns: [table.designId, table.userId],
-      foreignColumns: [design.id, design.userId],
-      name: 'design_pull_request_design_fk',
-    }).onDelete('cascade'),
-    foreignKey({
-      columns: [table.draftId, table.userId],
-      foreignColumns: [designDraft.id, designDraft.userId],
-      name: 'design_pull_request_draft_fk',
-    }).onDelete('cascade'),
-    index('design_pull_request_draft_idx').on(table.userId, table.designId, table.draftId),
-  ],
-)
-
-// Review thread. Guests have no account, so identity is the name they typed;
-// authorUserId is set only when a signed-in Loora user posts.
-export const designPullRequestComment = pgTable(
-  'design_pull_request_comment',
-  {
-    id: text('id').primaryKey(),
-    pullRequestId: text('pull_request_id')
-      .notNull()
-      .references(() => designPullRequest.id, { onDelete: 'cascade' }),
-    authorUserId: text('author_user_id').references(() => user.id, { onDelete: 'set null' }),
-    authorName: text('author_name').notNull(),
-    isOwner: boolean('is_owner').default(false).notNull(),
-    body: text('body').notNull(),
-    createdAt: timestamp('created_at').defaultNow().notNull(),
-  },
-  (table) => [
-    index('design_pull_request_comment_idx').on(table.pullRequestId, table.createdAt),
   ],
 )
 

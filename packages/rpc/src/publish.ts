@@ -4,6 +4,12 @@ import { db } from '@loora/db'
 import { design, publishEgress, publishLink, user } from '@loora/db/schema'
 import { authorizeBilling } from '@loora/billing/billing'
 import { canUseApp } from '@loora/auth/preview-access'
+import { compileCanvas } from '@loora/canvas/export'
+import {
+  CANVAS_SCHEMA_VERSION,
+  parseCanvasDocument,
+  type CanvasDocumentV2,
+} from '@loora/canvas/model'
 
 export const PUBLISH_TTL_MS = 12 * 60 * 60 * 1000
 
@@ -66,6 +72,24 @@ export function rewriteAssetUrls(code: string, linkId: string) {
   return code.split('/api/asset/').join(`/api/p/${encodeURIComponent(linkId)}/asset/`)
 }
 
+function publishedAssetUrl(url: string, linkId: string) {
+  if (!url.startsWith('/api/asset/')) return url
+  const id = url.slice('/api/asset/'.length).split(/[?#]/, 1)[0]
+  return id
+    ? `/api/p/${encodeURIComponent(linkId)}/asset/${encodeURIComponent(id)}`
+    : url
+}
+
+export function referencedCanvasAssetIds(document: CanvasDocumentV2) {
+  const ids = new Set<string>()
+  for (const node of Object.values(document.nodes)) {
+    if (node.type !== 'image' || !node.src.startsWith('/api/asset/')) continue
+    const id = node.src.slice('/api/asset/'.length).split(/[?#]/, 1)[0]
+    if (id) ids.add(id)
+  }
+  return ids
+}
+
 export async function getPublishedTarget(linkId: string) {
   if (!linkId || linkId.length > 64) return null
 
@@ -76,6 +100,8 @@ export async function getPublishedTarget(linkId: string) {
       expiresAt: publishLink.expiresAt,
       userId: publishLink.userId,
       designName: design.name,
+      canvasVersion: design.canvasVersion,
+      canvasDocument: design.canvasDocument,
       shapes: design.shapes,
       pages: design.pages,
       isAdmin: user.isAdmin,
@@ -109,6 +135,29 @@ export async function getPublishedTarget(linkId: string) {
     isAdmin: found.isAdmin,
     designName: found.designName,
     expiresAt: found.expiresAt.getTime(),
+  }
+
+  if (
+    found.canvasVersion === CANVAS_SCHEMA_VERSION &&
+    found.canvasDocument
+  ) {
+    const document = parseCanvasDocument(found.canvasDocument)
+    const targetId = found.pageId ?? found.elementId
+    const target = targetId ? document.nodes[targetId] : null
+    if (
+      !target ||
+      target.type === 'component' ||
+      target.hidden ||
+      (found.pageId !== null && target.type !== 'page')
+    ) {
+      return null
+    }
+    return {
+      ...common,
+      kind: 'canvas-v2' as const,
+      document,
+      target,
+    }
   }
 
   if (found.elementId) {
@@ -145,6 +194,26 @@ export async function getPublishedTarget(linkId: string) {
 export async function buildPublishPayload(linkId: string) {
   const found = await getPublishedTarget(linkId)
   if (!found) return null
+  if (found.kind === 'canvas-v2') {
+    const compiled = compileCanvas(found.document, {
+      ...(found.target.type === 'page'
+        ? { pageId: found.target.id }
+        : { nodeId: found.target.id }),
+      title: found.target.name || found.designName,
+      assetUrl: (url) => publishedAssetUrl(url, linkId),
+    })
+    return {
+      userId: found.userId,
+      isAdmin: found.isAdmin,
+      payload: {
+        kind: 'canvas-v2' as const,
+        name: found.target.name || found.designName,
+        html: compiled.html,
+        css: compiled.css,
+        expiresAt: found.expiresAt,
+      },
+    }
+  }
   if (found.kind === 'page') {
     return {
       userId: found.userId,

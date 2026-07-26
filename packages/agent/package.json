@@ -5,12 +5,14 @@
   "exports": {
     "./models": "./src/models.ts",
     "./messages": "./src/messages.ts",
+    "./canvas-v2-tools": "./src/canvas-v2-tools.ts",
     "./prompts": "./src/prompts.ts",
     "./tools": "./src/tools.ts",
     "./usage": "./src/usage.ts",
     "./server": "./src/server.ts"
   },
   "dependencies": {
+    "@loora/canvas": "workspace:*",
     "@ai-sdk/anthropic": "^4.0.20",
     "@ai-sdk/google": "^4.0.24",
     "@ai-sdk/openai": "^4.0.20",
