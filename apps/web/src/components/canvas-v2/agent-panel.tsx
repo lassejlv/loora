@@ -420,7 +420,7 @@ export function CanvasV2AgentPanel({
                 className={cn(
                   'size-1.5 shrink-0 rounded-full',
                   activeBusy
-                    ? 'animate-pulse bg-cx-accent'
+                    ? 'animate-pulse bg-foreground/60'
                     : 'bg-muted-foreground/40',
                 )}
               />
@@ -446,7 +446,7 @@ export function CanvasV2AgentPanel({
                 {runningChatIds.includes(chat.id) ? (
                   <Spinner
                     aria-label="Agent running"
-                    className="size-3 text-cx-accent"
+                    className="size-3 text-muted-foreground"
                   />
                 ) : null}
                 {chat.id === activeChatId ? (
@@ -1203,7 +1203,7 @@ export function CanvasV2AgentSession({
   return (
     <>
       <Conversation className="min-h-0 flex-1">
-        <ConversationContent className="gap-4">
+        <ConversationContent className="gap-3">
           {messages.length === 0 ? (
             <ConversationEmptyState
               title="Direct the canvas"
@@ -1232,13 +1232,13 @@ export function CanvasV2AgentSession({
             <p className="text-xs text-destructive">{composerError}</p>
           ) : null}
           {pendingQuestion ? (
-            <div className="rounded-lg border bg-background px-3 py-2.5">
-              <p className="text-xs">{pendingQuestion.question}</p>
-              <div className="mt-2 flex flex-wrap gap-1">
+            <div className="rounded-md border bg-background px-2.5 py-2">
+              <p className="text-[11px]">{pendingQuestion.question}</p>
+              <div className="mt-1.5 flex flex-wrap gap-1">
                 {pendingQuestion.options.map((option) => (
                   <Button
                     key={option}
-                    size="sm"
+                    size="xs"
                     variant="outline"
                     onClick={() => resolveQuestion(option)}
                   >
@@ -1249,25 +1249,25 @@ export function CanvasV2AgentSession({
             </div>
           ) : null}
           {pendingDelete ? (
-            <div className="rounded-lg border bg-background px-3 py-2.5">
-              <p className="text-xs font-medium">
+            <div className="rounded-md border bg-background px-2.5 py-2">
+              <p className="text-[11px] font-medium">
                 Delete {pendingDelete.nodeIds.length} node
                 {pendingDelete.nodeIds.length === 1 ? '' : 's'}?
               </p>
-              <p className="mt-1 text-xs text-muted-foreground">
+              <p className="mt-1 text-[11px] text-muted-foreground">
                 Descendants are deleted too. This can be undone until the
                 history is cleared.
               </p>
-              <div className="mt-2 flex justify-end gap-1.5">
+              <div className="mt-1.5 flex justify-end gap-1">
                 <Button
-                  size="sm"
+                  size="xs"
                   variant="outline"
                   onClick={() => resolveDelete(false)}
                 >
                   Keep
                 </Button>
                 <Button
-                  size="sm"
+                  size="xs"
                   variant="destructive"
                   onClick={() => resolveDelete(true)}
                 >
@@ -1280,7 +1280,7 @@ export function CanvasV2AgentSession({
         <ConversationScrollButton />
       </Conversation>
 
-      <div className="relative shrink-0 border-t p-3">
+      <div className="relative shrink-0 border-t p-2">
         {mentionOpen && mentionItems.length > 0 ? (
           <MentionMenu
             items={mentionItems}
@@ -1294,7 +1294,7 @@ export function CanvasV2AgentSession({
             {queuedMessages.map((text, index) => (
               <div
                 key={`${index}-${text.slice(0, 24)}`}
-                className="flex items-center gap-2 rounded-md border bg-muted/40 px-2 py-1.5 text-xs text-muted-foreground"
+                className="flex items-center gap-2 rounded-md border bg-muted/40 px-2 py-1 text-[11px] text-muted-foreground"
               >
                 <Spinner className="size-3 shrink-0 opacity-50" aria-hidden />
                 <span className="min-w-0 flex-1 truncate">{text}</span>
@@ -1395,7 +1395,7 @@ export function CanvasV2AgentSession({
                     : 'Describe a change… (@ to mention)'
             }
             disabled={!ready || readOnly}
-            className="w-full"
+            className="w-full text-[13px]"
           />
           <PromptInputFooter>
             <div className="flex min-w-0 items-center gap-1">
@@ -2006,20 +2006,23 @@ function ToolGroup({
     .join(' · ')
   return (
     <details className="group">
-      <summary className="flex cursor-pointer list-none items-center gap-2 text-xs">
-        <ChevronDownIcon className="size-3.5 -rotate-90 text-muted-foreground transition-transform group-open:rotate-0" />
+      <summary className="flex h-6 cursor-pointer list-none items-center gap-1.5 text-[11px]">
+        <ChevronDownIcon className="size-3 -rotate-90 text-muted-foreground transition-transform group-open:rotate-0" />
         <span className="font-medium">{summary || `${parts.length} actions`}</span>
         <span className="ms-auto">
           {failed ? (
-            <XIcon className="size-3.5 text-destructive" aria-label="Tool failed" />
+            <XIcon className="size-3 text-destructive" aria-label="Tool failed" />
           ) : busy ? (
-            <Spinner className="size-3.5 text-cx-accent" aria-label="Tool in progress" />
+            <Spinner
+              className="size-3 text-muted-foreground"
+              aria-label="Tool in progress"
+            />
           ) : (
-            <CheckIcon className="size-3.5 text-muted-foreground" />
+            <CheckIcon className="size-3 text-muted-foreground" />
           )}
         </span>
       </summary>
-      <div className="ms-1.5 mt-1.5 flex flex-col gap-1.5 border-s ps-3">
+      <div className="ms-1.5 mt-1 flex flex-col gap-1 border-s ps-2.5">
         {parts.map((part) => (
           <ToolRow
             key={part.toolCallId}
@@ -2046,10 +2049,10 @@ function ToolRow({
   const done = part.state === 'output-available'
   const summary = toolSummary(name, part, document)
   return (
-    <div className="flex items-center gap-2 text-xs">
+    <div className="flex h-5 items-center gap-1.5 text-[11px]">
       <meta.icon
         className={cn(
-          'size-3.5 shrink-0 text-muted-foreground',
+          'size-3 shrink-0 text-muted-foreground',
           name === 'deleteNodes' && 'text-destructive/70',
         )}
       />

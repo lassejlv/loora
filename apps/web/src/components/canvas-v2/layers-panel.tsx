@@ -131,7 +131,7 @@ export function CanvasV2LayersPanel({
 
   return (
     <aside
-      className="flex h-full min-h-0 w-full flex-col bg-card"
+      className="flex h-full min-h-0 w-full flex-col bg-background"
       aria-label="Layers"
     >
       <header className="shrink-0 border-b px-2 py-1.5">

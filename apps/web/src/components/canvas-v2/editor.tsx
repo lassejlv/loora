@@ -2132,7 +2132,7 @@ function CanvasV2Export({
                     </Button>
                   ))}
                 </div>
-                <pre className="max-h-[22rem] min-h-48 overflow-auto rounded-lg border bg-[#17151f] p-4 text-xs leading-5 text-[#ebe7f5]">
+                <pre className="max-h-[22rem] min-h-48 overflow-auto rounded-md border bg-muted p-3 text-[11px] leading-5">
                   <code>{output}</code>
                 </pre>
               </div>
