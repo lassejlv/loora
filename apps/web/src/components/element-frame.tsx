@@ -1232,18 +1232,50 @@ window.addEventListener('message', function (e) {
     var pixelRatio = typeof msg.pixelRatio === 'number' && msg.pixelRatio > 0
       ? msg.pixelRatio
       : Math.min(window.devicePixelRatio || 1, 2)
+    var captureWidth = Math.max(
+      1,
+      document.body.scrollWidth,
+      document.documentElement.scrollWidth
+    )
+    var captureHeight = Math.max(
+      1,
+      document.body.scrollHeight,
+      document.documentElement.scrollHeight
+    )
+    var maxDimension = typeof msg.maxDimension === 'number' && msg.maxDimension > 0
+      ? msg.maxDimension
+      : Math.max(captureWidth, captureHeight)
+    var captureScale = Math.min(
+      1,
+      maxDimension / Math.max(captureWidth, captureHeight)
+    )
+    var scaledCaptureWidth = Math.max(1, Math.round(captureWidth * captureScale))
+    var scaledCaptureHeight = Math.max(1, Math.round(captureHeight * captureScale))
     var captureStyleProperties = ${JSON.stringify(LEGACY_CAPTURE_STYLE_PROPERTIES)}
-    htmlToImage.toPng(document.body, {
-      pixelRatio: pixelRatio,
-      includeStyleProperties: captureStyleProperties,
-    }).then(
+    var captureOptions = function (skipFonts) {
+      var options = {
+        pixelRatio: pixelRatio,
+        includeStyleProperties: captureStyleProperties,
+        skipFonts: !!skipFonts,
+      }
+      if (captureScale < 1) {
+        options.width = scaledCaptureWidth
+        options.height = scaledCaptureHeight
+        options.canvasWidth = scaledCaptureWidth
+        options.canvasHeight = scaledCaptureHeight
+        options.style = {
+          width: captureWidth + 'px',
+          height: captureHeight + 'px',
+          transform: 'scale(' + captureScale + ')',
+          transformOrigin: 'top left',
+        }
+      }
+      return options
+    }
+    htmlToImage.toPng(document.body, captureOptions(false)).then(
       function (png) { reply(png, false, null) },
       function (firstCaptureError) {
-        htmlToImage.toPng(document.body, {
-          pixelRatio: pixelRatio,
-          skipFonts: true,
-          includeStyleProperties: captureStyleProperties,
-        }).then(
+        htmlToImage.toPng(document.body, captureOptions(true)).then(
           function (png) { reply(png, true, null) },
           function (retryCaptureError) {
             var captureError =
@@ -1633,10 +1665,11 @@ export async function snapshotLegacyElement(
   elementId: string,
   timeoutMs = 3_000,
 ): Promise<LegacyElementSnapshot> {
-  // The PNG only feeds visualSimilarity, which compares at the element's own
-  // width and height. Capturing at device resolution quadrupled the canvas
-  // for no gain and pushed whole-page legacy elements past the timeout.
+  // The PNG feeds visual comparison and raster fallback. Keep ordinary
+  // elements at full size, but cap long-page SVG decoding before the browser
+  // turns it into a bitmap; pixelRatio alone does not shrink that SVG.
   const capturePixelRatio = 1
+  const captureMaxDimension = 2_048
   const iframe = document.querySelector<HTMLIFrameElement>(
     `iframe[data-element-frame="${CSS.escape(elementId)}"]`,
   )
@@ -1682,6 +1715,7 @@ export async function snapshotLegacyElement(
   })
   const capture = await captureElement(elementId, timeoutMs, {
     pixelRatio: capturePixelRatio,
+    maxDimension: captureMaxDimension,
   })
   return {
     root,
@@ -1755,7 +1789,7 @@ export function measureElement(
 export function captureElement(
   elementId: string,
   timeoutMs = 1500,
-  options: { pixelRatio?: number } = {},
+  options: { pixelRatio?: number; maxDimension?: number } = {},
 ): Promise<ElementCapture | null> {
   const iframe = document.querySelector<HTMLIFrameElement>(
     `iframe[data-element-frame="${CSS.escape(elementId)}"]`,
@@ -1797,7 +1831,12 @@ export function captureElement(
     }
     window.addEventListener('message', onMessage)
     iframe.contentWindow!.postMessage(
-      { type: 'loora:capture', token, pixelRatio: options.pixelRatio },
+      {
+        type: 'loora:capture',
+        token,
+        pixelRatio: options.pixelRatio,
+        maxDimension: options.maxDimension,
+      },
       '*',
     )
   })

@@ -282,6 +282,14 @@ describe('buildElementDoc', () => {
     expect(doc).toContain('retry without fonts failed')
   })
 
+  it('scales full-page migration captures before the browser decodes the SVG', () => {
+    expect(doc).toContain('var maxDimension = typeof msg.maxDimension')
+    expect(doc).toContain('var captureScale = Math.min')
+    expect(doc).toContain("transform: 'scale(' + captureScale + ')'")
+    expect(doc).toContain('options.width = scaledCaptureWidth')
+    expect(doc).toContain('options.height = scaledCaptureHeight')
+  })
+
   it('tracks runtime changes and marks animated captures as volatile', () => {
     expect(doc).toContain("type: 'loora:dirty'")
     expect(doc).toContain('new MutationObserver(__markDirty)')
@@ -342,7 +350,7 @@ describe('buildElementDoc', () => {
   it('captures at device pixel ratio and flags skipped fonts', () => {
     expect(doc).toContain('pixelRatio')
     expect(doc).toContain('fontsSkipped')
-    expect(doc).toContain('skipFonts: true')
+    expect(doc).toContain('skipFonts: !!skipFonts')
   })
 })
 
