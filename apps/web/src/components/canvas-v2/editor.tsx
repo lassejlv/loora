@@ -378,6 +378,7 @@ function CanvasV2Shell({
   const shortcutLabel = (id: BuiltInShortcutId) =>
     formatBuiltInChord(id, shortcutConfig)
 
+
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (isEditableTarget(event.target)) return
@@ -870,7 +871,7 @@ function CanvasV2Shell({
                 variant="inset"
                 className="h-[min(60svh,32rem)] overflow-hidden rounded-xl border"
               >
-                <AssetsPanel
+                <CanvasV2Assets
                   onInsert={(asset) => {
                     actions.insertAsset(asset)
                     setAssetsOpen(false)
@@ -1822,6 +1823,21 @@ function CanvasV2ToolButton({
       </TooltipPopup>
     </Tooltip>
   )
+}
+
+/** Assets, with the usage counts read off the live document. */
+function CanvasV2Assets({ onInsert }: { onInsert: (asset: AssetMeta) => void }) {
+  const document = useCanvasDocument()
+  const usage = useMemo(() => {
+    const counts: Record<string, number> = {}
+    for (const node of Object.values(document.nodes)) {
+      if (node.type !== 'image') continue
+      const id = node.src.match(/^\/api\/asset\/([\w-]+)$/)?.[1]
+      if (id) counts[id] = (counts[id] ?? 0) + 1
+    }
+    return counts
+  }, [document])
+  return <AssetsPanel usage={usage} onInsert={onInsert} />
 }
 
 /** Flush vertical strip against the canvas, not a floating cluster. */
