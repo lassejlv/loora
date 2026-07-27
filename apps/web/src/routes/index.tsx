@@ -122,7 +122,8 @@ const LIGHT: Palette = {
   page: '#fafaf8',
   ok: '#059669',
   dotAccent: 'rgba(30,61,234,0.34)',
-  glow: 'rgba(30,61,234,0.13)',
+  // Neutral on purpose: an accent-tinted wash reads as a blue shadow behind the hero.
+  glow: 'rgba(26,25,23,0.05)',
   accentInk: '#ffffff',
 }
 
@@ -141,7 +142,7 @@ const DARK: Palette = {
   page: '#101114',
   ok: '#34d399',
   dotAccent: 'rgba(115,138,244,0.40)',
-  glow: 'rgba(115,138,244,0.20)',
+  glow: 'rgba(233,234,238,0.05)',
   accentInk: '#101114',
 }
 
@@ -1451,7 +1452,7 @@ function LandingPage() {
                     <MoonIcon className="size-4" strokeWidth={1.75} />
                   )}
                 </button>
-                <Button render={<Link to="/app" />} size="sm" className="rounded-full px-4">
+                <Button render={<Link to="/app" />} size="sm" className="rounded-full px-4 shadow-none">
                   Open the board
                 </Button>
               </div>
@@ -1509,7 +1510,7 @@ function LandingPage() {
             <Button
               render={<Link to="/app" />}
               size="lg"
-              className="group w-full rounded-full border-transparent px-5 hover:opacity-90 sm:w-auto"
+              className="group w-full rounded-full border-transparent px-5 shadow-none hover:opacity-90 sm:w-auto"
               style={{ background: palette.accent, color: palette.accentInk }}
             >
               Open the board
@@ -1722,7 +1723,7 @@ function LandingPage() {
               No mockup theater. Real UI on an infinite canvas — describe, arrange, revise, ship.
             </p>
             <div className="mt-7 flex justify-center">
-              <Button render={<Link to="/app" />} size="lg" className="rounded-full px-5">
+              <Button render={<Link to="/app" />} size="lg" className="rounded-full px-5 shadow-none">
                 Open the board
               </Button>
             </div>
