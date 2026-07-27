@@ -12,6 +12,7 @@ import {
   useState,
   useSyncExternalStore,
   type CSSProperties,
+  type DragEvent as ReactDragEvent,
   type FocusEvent,
   type HTMLAttributes,
   type MouseEvent,
@@ -72,13 +73,35 @@ export interface CanvasProviderProps {
   ) => void | Promise<void>
 }
 
-export interface CanvasSurfaceProps extends Omit<HTMLAttributes<HTMLDivElement>, 'children'> {
+/**
+ * Where something dragged in from outside the canvas would land: the container
+ * under the pointer, the order it would take among that container's children,
+ * and — when the container places children freely — the point inside it.
+ */
+export interface CanvasDropPlacement {
+  parentId: NodeId
+  order: number
+  position: 'flow' | 'absolute'
+  /** Local coordinates inside the parent, in document units. */
+  x: number
+  y: number
+}
+
+export interface CanvasSurfaceProps extends Omit<HTMLAttributes<HTMLDivElement>, 'children' | 'onDrop'> {
   controlsRef?: Ref<CanvasSurfaceControls>
   initialCamera?: Partial<CanvasCamera>
   interactionMode?: 'select' | 'pan'
   onCameraChange?: (camera: CanvasCamera) => void
   onSelectionChange?: (selection: NodeRef[]) => void
   pageWidth?: number
+  /**
+   * Something was dropped onto the canvas from outside it. The surface resolves
+   * the placement — it owns hit testing and the camera — and the host decides
+   * what the payload becomes.
+   */
+  onDrop?: (event: ReactDragEvent<HTMLDivElement>, placement: CanvasDropPlacement) => void
+  /** Whether a drag carries a payload this canvas accepts. */
+  acceptsDrop?: (event: ReactDragEvent<HTMLDivElement>) => boolean
 }
 
 type Listener = () => void
@@ -1472,6 +1495,8 @@ export function CanvasSurface({
   onCameraChange,
   onSelectionChange,
   pageWidth = 1440,
+  onDrop,
+  acceptsDrop,
   className,
   style,
   ...props
@@ -2442,6 +2467,77 @@ export function CanvasSurface({
     })
   }
 
+  /** The container under the pointer, and where a new child would sit in it. */
+  const dropPlacement = (
+    event: ReactDragEvent<HTMLDivElement>,
+  ): CanvasDropPlacement | null => {
+    const scene = sceneRef.current
+    if (!scene || readOnly) return null
+    const hit = document
+      .elementsFromPoint(event.clientX, event.clientY)
+      .map((element) => ({ element, ref: parseNodeRef(element) }))
+      .find(({ ref }) => {
+        if (!ref || ref.instancePath.length > 0) return false
+        const node = engine.getNode(ref.nodeId)
+        return !!node && ['page', 'frame', 'group', 'component'].includes(node.type)
+      })
+    const parent = hit?.ref ? engine.getNode(hit.ref.nodeId) : null
+    if (!parent || !hit) return null
+
+    const children = engine.getChildren(parent.id)
+    const arranged = parent.layout.mode === 'flex' || parent.layout.mode === 'grid'
+    if (arranged) {
+      const siblings = children
+        .map((child) => ({
+          order: child.order,
+          rect: registry.get(nodeRefFor(child.id))?.getBoundingClientRect() ?? null,
+        }))
+        .filter((entry): entry is DropSibling => entry.rect !== null)
+      const axis =
+        parent.layout.mode === 'grid'
+          ? 'grid'
+          : (parent.layout.direction ?? 'row')
+      const index = dropIndex(
+        siblings,
+        { x: event.clientX, y: event.clientY },
+        axis,
+      )
+      return {
+        parentId: parent.id,
+        order: orderAtIndex(siblings, index),
+        position: 'flow',
+        x: 0,
+        y: 0,
+      }
+    }
+
+    const rect = hit.element.getBoundingClientRect()
+    const zoom = cameraRef.current.zoom || 1
+    return {
+      parentId: parent.id,
+      order: (children.at(-1)?.order ?? 0) + DEFAULT_ORDER_STEP,
+      position: 'absolute',
+      x: (event.clientX - rect.left) / zoom,
+      y: (event.clientY - rect.top) / zoom,
+    }
+  }
+
+  const onDragOver = (event: ReactDragEvent<HTMLDivElement>) => {
+    if (!onDrop || readOnly) return
+    if (acceptsDrop && !acceptsDrop(event)) return
+    event.preventDefault()
+    event.dataTransfer.dropEffect = 'copy'
+  }
+
+  const onDropped = (event: ReactDragEvent<HTMLDivElement>) => {
+    if (!onDrop || readOnly) return
+    if (acceptsDrop && !acceptsDrop(event)) return
+    const placement = dropPlacement(event)
+    if (!placement) return
+    event.preventDefault()
+    onDrop(event, placement)
+  }
+
   const onWheel = (event: WheelEvent<HTMLDivElement>) => {
     event.preventDefault()
     const camera = cameraRef.current
@@ -2478,6 +2574,8 @@ export function CanvasSurface({
       tabIndex={0}
       data-loora-canvas-surface
       data-loora-interaction-mode={interactionMode}
+      onDragOver={onDragOver}
+      onDrop={onDropped}
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}
       onPointerUp={onPointerUp}

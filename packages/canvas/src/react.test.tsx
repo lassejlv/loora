@@ -63,6 +63,15 @@ function stubRect(
   })
 }
 
+/** jsdom's DragEvent drops the pointer coordinates, so drops are hand-built. */
+function dropAt(target: Element, clientX: number, clientY: number) {
+  const event = new MouseEvent('drop', { bubbles: true, clientX, clientY })
+  Object.defineProperty(event, 'dataTransfer', {
+    value: { types: [], files: [], getData: () => '', dropEffect: 'none' },
+  })
+  target.dispatchEvent(event)
+}
+
 /** Runs `body` with hit testing pinned to the given stack, topmost first. */
 function withHits(stack: Element[], body: () => void) {
   const original = document.elementsFromPoint
@@ -335,6 +344,89 @@ describe('Canvas React surface', () => {
       position: 'absolute',
       x: 90,
       y: 190,
+    })
+  })
+
+  it('resolves where an outside drop lands, in flow and in free space', () => {
+    const document = createCanvasDocument('Drop fixture', 'drop')
+    document.nodes.page = createPageNode('Home', {
+      id: 'page',
+      layout: { ...defaultLayout(1_440, 900), x: 0, y: 0 },
+    })
+    document.nodes.stack = createFrameNode('Stack', {
+      id: 'stack',
+      parentId: 'page',
+      order: 1_024,
+      layout: {
+        ...defaultLayout(),
+        position: 'flow',
+        mode: 'flex',
+        direction: 'column',
+      },
+    })
+    document.nodes.first = createFrameNode('First', {
+      id: 'first',
+      parentId: 'stack',
+      order: 1_024,
+      layout: { ...defaultLayout(), position: 'flow' },
+    })
+    document.nodes.second = createFrameNode('Second', {
+      id: 'second',
+      parentId: 'stack',
+      order: 2_048,
+      layout: { ...defaultLayout(), position: 'flow' },
+    })
+    const engine = new CanvasEngine(document)
+    const drops: unknown[] = []
+    const view = render(
+      <CanvasProvider engine={engine}>
+        <CanvasSurface
+          pageWidth={1_440}
+          initialCamera={{ x: 0, y: 0, zoom: 1 }}
+          acceptsDrop={() => true}
+          onDrop={(_event, placement) => drops.push(placement)}
+        />
+      </CanvasProvider>,
+    )
+    const surface = view.container.querySelector<HTMLElement>(
+      '[data-loora-canvas-surface]',
+    )!
+    const element = (id: string) =>
+      view.container.querySelector<HTMLElement>(`[data-loora-node="${id}"]`)!
+    stubRect(element('page'), { left: 0, top: 0, width: 1_440, height: 900 })
+    stubRect(element('first'), { top: 0, height: 100 })
+    stubRect(element('second'), { top: 100, height: 100 })
+
+    // Between the children of an arranging parent: an order in that gap.
+    withHits([element('stack'), element('page')], () => {
+      dropAt(surface, 20, 150)
+    })
+    expect(drops.at(-1)).toMatchObject({
+      parentId: 'stack',
+      position: 'flow',
+      order: 1_536,
+    })
+
+    // Onto a child that can hold children: inside it, at the point it landed.
+    withHits([element('second'), element('stack'), element('page')], () => {
+      dropAt(surface, 20, 150)
+    })
+    expect(drops.at(-1)).toMatchObject({
+      parentId: 'second',
+      position: 'absolute',
+      x: 20,
+      y: 50,
+    })
+
+    // Over a free parent: the point inside it, in document units.
+    withHits([element('page')], () => {
+      dropAt(surface, 240, 320)
+    })
+    expect(drops.at(-1)).toMatchObject({
+      parentId: 'page',
+      position: 'absolute',
+      x: 240,
+      y: 320,
     })
   })
 

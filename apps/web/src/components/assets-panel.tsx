@@ -29,8 +29,11 @@ export interface AssetMeta {
   at?: number
 }
 
+/** Payload a canvas drop reads to place an asset it was handed. */
+export const ASSET_DRAG_TYPE = 'application/x-loora-asset'
+
 /** Matches the server cap, so an oversized file is refused before it is read. */
-const MAX_ASSET_BYTES = 5 * 1024 * 1024
+export const MAX_ASSET_BYTES = 5 * 1024 * 1024
 
 type SortKey = 'newest' | 'name' | 'size'
 
@@ -40,7 +43,7 @@ function formatSize(bytes: number) {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
 }
 
-async function fileToBase64(file: File): Promise<string> {
+export async function fileToBase64(file: File): Promise<string> {
   const dataUrl = await new Promise<string>((resolve, reject) => {
     const reader = new FileReader()
     reader.onload = () => resolve(reader.result as string)
@@ -303,12 +306,25 @@ export function AssetsPanel({
               <div key={asset.id} className="group relative">
                 <button
                   type="button"
+                  draggable
                   className={cn(
-                    'block w-full overflow-hidden rounded-lg border bg-white outline-none',
+                    'block w-full cursor-grab overflow-hidden rounded-lg border bg-white outline-none',
                     'hover:border-cx-accent focus-visible:ring-2 focus-visible:ring-ring',
                   )}
                   title={`Place ${asset.name}`}
                   onClick={() => onInsert(asset)}
+                  onDragStart={(event) => {
+                    // The canvas reads the structured payload; the URL is there
+                    // for anything else the file lands on.
+                    event.dataTransfer.setData(ASSET_DRAG_TYPE, JSON.stringify(asset))
+                    event.dataTransfer.setData(
+                      'text/plain',
+                      `${window.location.origin}/api/asset/${asset.id}`,
+                    )
+                    event.dataTransfer.effectAllowed = 'copy'
+                    const image = event.currentTarget.querySelector('img')
+                    if (image) event.dataTransfer.setDragImage(image, 24, 24)
+                  }}
                   style={{
                     // Transparent art needs something behind it to read against.
                     backgroundImage:

@@ -44,6 +44,7 @@ import {
   CanvasProvider,
   CanvasSurface,
   type CanvasCamera,
+  type CanvasDropPlacement,
   type CanvasSurfaceControls,
   useCanvasDocument,
   useCanvasDomRegistry,
@@ -93,7 +94,10 @@ import { CanvasV2ContextMenu } from './canvas-menu'
 import { CanvasV2History } from './history'
 import { CanvasV2Publish } from './publish'
 import {
+  ASSET_DRAG_TYPE,
   AssetsPanel,
+  MAX_ASSET_BYTES,
+  fileToBase64,
   type AssetMeta,
 } from '#/components/assets-panel'
 import {
@@ -377,6 +381,38 @@ function CanvasV2Shell({
 
   const shortcutLabel = (id: BuiltInShortcutId) =>
     formatBuiltInChord(id, shortcutConfig)
+
+  /**
+   * Image files dropped straight from the desktop are uploaded, then placed
+   * where they landed. Anything the assets panel would refuse is refused here.
+   */
+  const uploadDroppedImages = async (
+    files: File[],
+    placement: CanvasDropPlacement,
+  ) => {
+    const images = files.filter(
+      (file) => file.type.startsWith('image/') && file.size <= MAX_ASSET_BYTES,
+    )
+    if (images.length === 0 || readOnly) return
+    for (const [index, file] of images.entries()) {
+      try {
+        const saved = await orpc.asset.upload({
+          name: file.name,
+          mediaType: file.type,
+          data: await fileToBase64(file),
+        })
+        actions.insertAsset(saved, {
+          ...placement,
+          // Several files at once cascade instead of stacking on one point.
+          order: placement.order + index,
+          x: placement.x + index * 24,
+          y: placement.y + index * 24,
+        })
+      } catch (cause) {
+        console.error('[assets] Drop upload failed:', cause)
+      }
+    }
+  }
 
 
   useEffect(() => {
@@ -852,6 +888,22 @@ function CanvasV2Shell({
                 interactionMode={interactionMode}
                 className="h-full w-full"
                 pageWidth={previewWidth}
+                acceptsDrop={(event) =>
+                  event.dataTransfer.types.includes(ASSET_DRAG_TYPE) ||
+                  event.dataTransfer.types.includes('Files')
+                }
+                onDrop={(event, placement) => {
+                  const payload = event.dataTransfer.getData(ASSET_DRAG_TYPE)
+                  if (payload) {
+                    try {
+                      actions.insertAsset(JSON.parse(payload) as AssetMeta, placement)
+                    } catch {
+                      // A payload we cannot read is not ours to place.
+                    }
+                    return
+                  }
+                  void uploadDroppedImages([...event.dataTransfer.files], placement)
+                }}
                 onCameraChange={(camera) => {
                   setZoom(camera.zoom)
                   if (controller.target) {
@@ -1076,7 +1128,7 @@ export interface CanvasEditorActions {
   pasteFromText: (text: string) => void
   addShape: () => void
   addComponent: () => void
-  insertAsset: (asset: AssetMeta) => void
+  insertAsset: (asset: AssetMeta, placement?: CanvasDropPlacement) => void
   duplicateSelection: () => void
   deleteSelection: () => void
   groupSelection: () => void
@@ -1347,16 +1399,27 @@ function useCanvasEditorActions(): CanvasEditorActions {
     session.select([{ nodeId: instance.id, instancePath: [] }])
   }
 
-  const insertAsset = (asset: AssetMeta) => {
-    if (!parent || readOnly) return
-    const children = orderedChildren(document, parent.id)
+  /**
+   * Places an image. Without a placement it lands in the current insertion
+   * parent; a drop onto the canvas supplies the container and point it was
+   * dropped on.
+   */
+  const insertAsset = (asset: AssetMeta, placement?: CanvasDropPlacement) => {
+    const target = placement
+      ? document.nodes[placement.parentId]
+      : parent
+    if (!target || readOnly) return
+    const children = orderedChildren(document, target.id)
     const frame = createFrameNode(asset.name, {
-      parentId: parent.id,
-      order: (children.at(-1)?.order ?? 0) + 1024,
+      parentId: target.id,
+      order: placement?.order ?? (children.at(-1)?.order ?? 0) + 1024,
       layout: defaultLayout(320, 240, {
-        position: parent.layout.mode === 'absolute' ? 'absolute' : 'flow',
-        x: 48,
-        y: 48,
+        position:
+          placement?.position ??
+          (target.layout.mode === 'absolute' ? 'absolute' : 'flow'),
+        // Dropped images centre on the pointer rather than hanging off it.
+        x: placement ? Math.round(placement.x - 160) : 48,
+        y: placement ? Math.round(placement.y - 120) : 48,
       }),
       style: defaultStyle({
         fills: [{ type: 'solid', color: '#ffffff' }],
