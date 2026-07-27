@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs'
 import {
   buildElementDoc,
   FONTS_URL,
+  migrationElementDoc,
   classifyCode,
   compileForFrame,
   hasEntryCall,
@@ -399,5 +400,25 @@ describe('migration font parity', () => {
     const css = readFileSync(`apps/web/public${FONTS_URL}`, 'utf8')
     expect(css).toContain('src: url(data:font/woff2;base64,')
     expect(css).not.toContain('https://fonts.g')
+  })
+})
+
+describe('migration sandbox policy', () => {
+  const policy = () =>
+    migrationElementDoc().match(
+      /Content-Security-Policy" content="([^"]+)"/,
+    )?.[1] ?? ''
+
+  it('permits the eval that runtime JSX compilation needs', () => {
+    // Without this every legacy element fails to render and first-open
+    // migration aborts for the entire design.
+    expect(policy()).toContain("'unsafe-eval'")
+  })
+
+  it('still denies the frame any network of its own', () => {
+    const value = policy()
+    expect(value).toContain("default-src 'none'")
+    expect(value).toContain("connect-src 'none'")
+    expect(value).toContain("frame-src 'none'")
   })
 })

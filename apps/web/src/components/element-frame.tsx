@@ -1229,7 +1229,9 @@ window.addEventListener('message', function (e) {
     // and detail from a sharp image. A bounded style list keeps the cloned SVG
     // below browser data-URI limits. Cross-origin stylesheets (fonts) can make
     // font embedding throw, so retry without fonts before giving up.
-    var pixelRatio = Math.min(window.devicePixelRatio || 1, 2)
+    var pixelRatio = typeof msg.pixelRatio === 'number' && msg.pixelRatio > 0
+      ? msg.pixelRatio
+      : Math.min(window.devicePixelRatio || 1, 2)
     var captureStyleProperties = ${JSON.stringify(LEGACY_CAPTURE_STYLE_PROPERTIES)}
     htmlToImage.toPng(document.body, {
       pixelRatio: pixelRatio,
@@ -1316,11 +1318,17 @@ parent.postMessage({ type: 'loora:element-ready' }, '*')
 
 const ELEMENT_DOC = buildElementDoc()
 
-function migrationElementDoc() {
+export function migrationElementDoc() {
   const origin = typeof location === 'undefined' ? '' : location.origin
   const policy = [
     "default-src 'none'",
-    `script-src 'unsafe-inline' ${origin}`,
+    // Legacy elements are JSX compiled at runtime and instantiated through
+    // `new Function`, so the sandbox has to permit eval or every element fails
+    // to render and first-open migration aborts for the whole design. What
+    // contains this frame is the opaque origin from sandbox="allow-scripts"
+    // plus connect-src 'none' — not the eval ban, which only blocked us from
+    // running the user's own source.
+    `script-src 'unsafe-inline' 'unsafe-eval' ${origin}`,
     `style-src 'unsafe-inline' ${origin}`,
     `img-src data: blob: ${origin}`,
     `font-src data: ${origin}`,
@@ -1625,6 +1633,10 @@ export async function snapshotLegacyElement(
   elementId: string,
   timeoutMs = 3_000,
 ): Promise<LegacyElementSnapshot> {
+  // The PNG only feeds visualSimilarity, which compares at the element's own
+  // width and height. Capturing at device resolution quadrupled the canvas
+  // for no gain and pushed whole-page legacy elements past the timeout.
+  const capturePixelRatio = 1
   const iframe = document.querySelector<HTMLIFrameElement>(
     `iframe[data-element-frame="${CSS.escape(elementId)}"]`,
   )
@@ -1668,7 +1680,9 @@ export async function snapshotLegacyElement(
     window.addEventListener('message', onMessage)
     iframe.contentWindow!.postMessage({ type: 'loora:migration-snapshot', token }, '*')
   })
-  const capture = await captureElement(elementId, timeoutMs)
+  const capture = await captureElement(elementId, timeoutMs, {
+    pixelRatio: capturePixelRatio,
+  })
   return {
     root,
     png: capture?.png ?? null,
@@ -1738,7 +1752,11 @@ export function measureElement(
   })
 }
 
-export function captureElement(elementId: string, timeoutMs = 1500): Promise<ElementCapture | null> {
+export function captureElement(
+  elementId: string,
+  timeoutMs = 1500,
+  options: { pixelRatio?: number } = {},
+): Promise<ElementCapture | null> {
   const iframe = document.querySelector<HTMLIFrameElement>(
     `iframe[data-element-frame="${CSS.escape(elementId)}"]`,
   )
@@ -1778,6 +1796,9 @@ export function captureElement(elementId: string, timeoutMs = 1500): Promise<Ele
       })
     }
     window.addEventListener('message', onMessage)
-    iframe.contentWindow!.postMessage({ type: 'loora:capture', token }, '*')
+    iframe.contentWindow!.postMessage(
+      { type: 'loora:capture', token, pixelRatio: options.pixelRatio },
+      '*',
+    )
   })
 }

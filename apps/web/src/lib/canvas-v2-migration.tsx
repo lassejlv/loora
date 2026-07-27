@@ -61,7 +61,10 @@ async function renderLegacyElement(
           : `${element.name} did not finish rendering`,
       )
     }
-    const snapshot = await snapshotLegacyElement(runtimeId, 8_000)
+    // Migration runs once, offscreen. A whole-page legacy element can take
+    // tens of seconds to serialise and rasterise; a patient capture beats
+    // failing the whole design.
+    const snapshot = await snapshotLegacyElement(runtimeId, 30_000)
     if (!snapshot.root || !snapshot.png) {
       throw new Error(
         snapshot.error
