@@ -10,7 +10,6 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
-import { Route as LandingRouteImport } from './routes/landing'
 import { Route as McpConsentRouteImport } from './routes/mcp-consent'
 import { Route as DotwellKnownOauthAuthorizationServerRouteImport } from './routes/[.]well-known.oauth-authorization-server'
 import { Route as ApiChatRouteImport } from './routes/api.chat'
@@ -36,11 +35,6 @@ import { Route as ApiPLinkIdAssetIdRouteImport } from './routes/api.p.$linkId.as
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const LandingRoute = LandingRouteImport.update({
-  id: '/landing',
-  path: '/landing',
   getParentRoute: () => rootRouteImport,
 } as any)
 const McpConsentRoute = McpConsentRouteImport.update({
@@ -152,7 +146,6 @@ const ApiPLinkIdAssetIdRoute = ApiPLinkIdAssetIdRouteImport.update({
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
-  '/landing': typeof LandingRoute
   '/mcp-consent': typeof McpConsentRoute
   '/.well-known/oauth-authorization-server': typeof DotwellKnownOauthAuthorizationServerRoute
   '/api/chat': typeof ApiChatRoute
@@ -177,7 +170,6 @@ export interface FileRoutesByFullPath {
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
-  '/landing': typeof LandingRoute
   '/mcp-consent': typeof McpConsentRoute
   '/.well-known/oauth-authorization-server': typeof DotwellKnownOauthAuthorizationServerRoute
   '/api/chat': typeof ApiChatRoute
@@ -203,7 +195,6 @@ export interface FileRoutesByTo {
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
-  '/landing': typeof LandingRoute
   '/mcp-consent': typeof McpConsentRoute
   '/.well-known/oauth-authorization-server': typeof DotwellKnownOauthAuthorizationServerRoute
   '/api/chat': typeof ApiChatRoute
@@ -230,7 +221,6 @@ export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | '/'
-    | '/landing'
     | '/mcp-consent'
     | '/.well-known/oauth-authorization-server'
     | '/api/chat'
@@ -255,7 +245,6 @@ export interface FileRouteTypes {
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
-    | '/landing'
     | '/mcp-consent'
     | '/.well-known/oauth-authorization-server'
     | '/api/chat'
@@ -280,7 +269,6 @@ export interface FileRouteTypes {
   id:
     | '__root__'
     | '/'
-    | '/landing'
     | '/mcp-consent'
     | '/.well-known/oauth-authorization-server'
     | '/api/chat'
@@ -306,7 +294,6 @@ export interface FileRouteTypes {
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
-  LandingRoute: typeof LandingRoute
   McpConsentRoute: typeof McpConsentRoute
   DotwellKnownOauthAuthorizationServerRoute: typeof DotwellKnownOauthAuthorizationServerRoute
   ApiChatRoute: typeof ApiChatRoute
@@ -335,13 +322,6 @@ declare module '@tanstack/react-router' {
       path: '/'
       fullPath: '/'
       preLoaderRoute: typeof IndexRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/landing': {
-      id: '/landing'
-      path: '/landing'
-      fullPath: '/landing'
-      preLoaderRoute: typeof LandingRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/mcp-consent': {
@@ -520,7 +500,6 @@ const ApiPLinkIdRouteWithChildren = ApiPLinkIdRoute._addFileChildren(
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
-  LandingRoute: LandingRoute,
   McpConsentRoute: McpConsentRoute,
   DotwellKnownOauthAuthorizationServerRoute:
     DotwellKnownOauthAuthorizationServerRoute,
