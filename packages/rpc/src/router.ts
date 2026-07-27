@@ -1404,19 +1404,25 @@ const proposeDraft = protectedProcedure
 const reopenDraft = protectedProcedure
   .input(z.object({ designId: z.string().min(1).max(128), id: draftIdSchema }))
   .handler(async ({ context, input }) => {
+    // A discarded draft is recoverable; an applied one is not — reopening
+    // that would resurrect work already merged into Main.
     const [updated] = await db
       .update(designDraft)
-      .set({ status: 'active', proposedAt: null, updatedAt: new Date() })
+      .set({ status: 'active', proposedAt: null, closedAt: null, updatedAt: new Date() })
       .where(
         and(
           eq(designDraft.id, input.id),
           eq(designDraft.designId, input.designId),
           eq(designDraft.userId, context.user.id),
-          eq(designDraft.status, 'proposed'),
+          or(eq(designDraft.status, 'proposed'), eq(designDraft.status, 'closed')),
         ),
       )
       .returning({ id: designDraft.id, status: designDraft.status })
-    if (!updated) throw new ORPCError('CONFLICT', { message: 'Only proposed drafts can be reopened.' })
+    if (!updated) {
+      throw new ORPCError('CONFLICT', {
+        message: 'Only proposed or discarded drafts can be reopened.',
+      })
+    }
     return updated
   })
 
