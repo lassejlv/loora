@@ -69,6 +69,12 @@ sync target controller deliberately live outside the canvas package. The agent
 accepts structured node descriptors only and returns permanent IDs for
 temporary refs. Destructive agent and MCP actions still require confirmation.
 
+`/app` is the file browser and `/app/design?id=<designId>` opens one document
+(`&draft=` selects a branch). `/` only redirects, including legacy
+`?design=`/`?d=` links. Both app routes mount through `AccountGate`, and the
+editor never picks a document for itself — the route supplies `designId` and
+remounts when it changes.
+
 ## Persistence and migration
 
 Designs, drafts, draft bases, and versions retain their V1 payload columns for

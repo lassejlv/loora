@@ -527,7 +527,7 @@ const getCanvas = protectedProcedure
         status: 'migration-required' as const,
         version: target.version,
         revision: target.revision,
-        openPath: `/?design=${encodeURIComponent(input.designId)}&migrate=canvas-v2`,
+        openPath: `/app/design?id=${encodeURIComponent(input.designId)}&migrate=canvas-v2`,
       }
     }
     const document = parseCanvasDocument(target.document)

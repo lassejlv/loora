@@ -63,7 +63,7 @@ export interface CanvasTarget {
 
 function migrationUrl(designId: string) {
   const origin = (process.env.LOORA_APP_URL?.trim() || 'https://loora.design').replace(/\/+$/, '')
-  return `${origin}/?design=${encodeURIComponent(designId)}`
+  return `${origin}/app/design?id=${encodeURIComponent(designId)}`
 }
 
 export async function listDesigns(userId: string) {

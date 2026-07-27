@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { Link, useNavigate } from '@tanstack/react-router'
 import {
   CheckIcon,
   ChevronDownIcon,
   FigmaIcon,
   FilePlus2Icon,
+  FolderIcon,
   PencilIcon,
   RefreshCwIcon,
   Trash2Icon,
@@ -18,10 +20,8 @@ import {
   CanvasSyncController,
   type CanvasSyncTarget,
 } from '#/lib/canvas-v2-client'
-import {
-  createEmptyCanvas,
-  createStarterCanvas,
-} from '#/lib/canvas-v2-fixtures'
+import { createStarterCanvas } from '#/lib/canvas-v2-fixtures'
+import { createDesign, type DesignSummary } from '#/lib/designs'
 import { migrateCanvasDesign, type CanvasMigrationOutcome } from '#/lib/canvas-v2-migration'
 import { orpc } from '#/lib/orpc-client'
 import { Button } from '#/components/ui/button'
@@ -46,13 +46,6 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '#/components/ui/dropdown-menu'
-
-interface DesignSummary {
-  id: string
-  name: string
-  revision: number
-  updatedAt: number
-}
 
 function CanvasV2DocSwitcher({
   documents,
@@ -87,6 +80,13 @@ function CanvasV2DocSwitcher({
         align="center"
         className="pointer-events-auto w-56"
       >
+        <DropdownMenuItem asChild>
+          <Link to="/app">
+            <FolderIcon data-slot="icon" />
+            All files
+          </Link>
+        </DropdownMenuItem>
+        <DropdownMenuSeparator />
         {documents.map((document) => (
           <DropdownMenuItem
             key={document.id}
@@ -131,17 +131,6 @@ function previewController(): CanvasEditorController {
   }
 }
 
-function urlDesignId() {
-  if (typeof window === 'undefined') return null
-  return new URLSearchParams(window.location.search).get('design')
-}
-
-function setUrlDesignId(id: string) {
-  const url = new URL(window.location.href)
-  url.searchParams.set('design', id)
-  window.history.replaceState(null, '', url)
-}
-
 function urlDraftId() {
   if (typeof window === 'undefined') return null
   return new URLSearchParams(window.location.search).get('draft')
@@ -156,13 +145,17 @@ function setUrlDraftId(id: string | null) {
 
 export function CanvasV2App({
   preview = false,
+  designId,
 }: {
   preview?: boolean
+  /** The document this editor opens. `/app/design` remounts on change. */
+  designId?: string
   userId?: string
 }) {
+  const navigate = useNavigate()
   const previewValue = useMemo(previewController, [])
   const [documents, setDocuments] = useState<DesignSummary[]>([])
-  const [activeId, setActiveId] = useState<string | null>(null)
+  const [activeId, setActiveId] = useState<string | null>(designId ?? null)
   const [activeDraftId, setActiveDraftId] = useState<string | null>(null)
   const [branches, setBranches] = useState<CanvasBranchSummary[]>([])
   const [controller, setController] = useState<CanvasSyncController | null>(null)
@@ -244,47 +237,22 @@ export function CanvasV2App({
     [activeId, openTarget],
   )
 
-  const createDesign = useCallback(async () => {
-    const id = `d${crypto.randomUUID().replaceAll('-', '')}`
-    const name = 'Untitled'
-    const document = createEmptyCanvas(id, name)
-    const created = await orpc.canvas.create({ designId: id, name, document })
-    const summary: DesignSummary = {
-      id,
-      name,
-      revision: created.revision,
-      updatedAt: Date.now(),
-    }
-    setDocuments((current) => [...current, summary])
-    setActiveId(id)
-    setUrlDesignId(id)
-    setActiveDraftId(null)
-    setUrlDraftId(null)
-    setBranches([])
-    await openTarget({ designId: id, draftId: null })
-  }, [openTarget])
+  const newDesign = useCallback(async () => {
+    const created = await createDesign()
+    await navigate({ to: '/app/design', search: { id: created.id } })
+  }, [navigate])
 
   useEffect(() => {
-    if (preview) return
+    if (preview || !designId) return
     let cancelled = false
     void (async () => {
       try {
         const found = await orpc.design.list()
         if (cancelled) return
         setDocuments(found)
-        const requested = urlDesignId()
-        const active =
-          found.find((document) => document.id === requested) ??
-          found[0] ??
-          null
-        if (!active) {
-          await createDesign()
-          return
-        }
-        setActiveId(active.id)
-        setUrlDesignId(active.id)
+        setActiveId(designId)
         const foundBranches = await orpc.draft.list({
-          designId: active.id,
+          designId,
           includeArchived: true,
         })
         if (cancelled) return
@@ -296,7 +264,7 @@ export function CanvasV2App({
             (branch.status === 'active' || branch.status === 'proposed'),
         )
         await openTarget({
-          designId: active.id,
+          designId,
           draftId: openDraft?.id ?? null,
         })
       } catch (cause) {
@@ -309,7 +277,7 @@ export function CanvasV2App({
     return () => {
       cancelled = true
     }
-  }, [createDesign, openTarget, preview])
+  }, [designId, openTarget, preview])
 
   useEffect(
     () => () => {
@@ -332,15 +300,20 @@ export function CanvasV2App({
         <div className="max-w-md rounded-xl border bg-card p-6 text-center shadow-sm">
           <h1 className="text-base font-semibold">Canvas V2 could not open</h1>
           <p className="mt-2 text-sm text-muted-foreground">{error}</p>
-          {activeId ? (
-            <Button
-              className="mt-4"
-              onClick={() => void openTarget({ designId: activeId, draftId: null })}
-            >
-              <RefreshCwIcon />
-              Retry
+          <div className="mt-4 flex items-center justify-center gap-2">
+            {activeId ? (
+              <Button
+                onClick={() => void openTarget({ designId: activeId, draftId: null })}
+              >
+                <RefreshCwIcon />
+                Retry
+              </Button>
+            ) : null}
+            <Button variant="outline" render={<Link to="/app" />}>
+              <FolderIcon />
+              All files
             </Button>
-          ) : null}
+          </div>
         </div>
       </main>
     )
@@ -384,19 +357,8 @@ export function CanvasV2App({
       return
     }
     await controller.flush()
-    setDocuments((current) => [
-      ...current.filter((entry) => entry.id !== result.design.id),
-      {
-        id: result.design.id,
-        name: result.design.name,
-        revision: result.design.revision,
-        updatedAt: result.design.updatedAt,
-      },
-    ])
-    setActiveId(result.design.id)
-    setUrlDesignId(result.design.id)
-    setBranches([])
-    await openTarget({ designId: result.design.id, draftId: null })
+    setUrlDraftId(null)
+    await navigate({ to: '/app/design', search: { id: result.design.id } })
   }
   const renameDesign = async () => {
     const name = renameName.trim()
@@ -428,38 +390,16 @@ export function CanvasV2App({
     await orpc.design.delete({ id: activeId })
     await controller.close()
     controllerRef.current = null
-    const remaining = documents.filter((entry) => entry.id !== activeId)
-    setDocuments(remaining)
     setController(null)
     setDeleteOpen(false)
-    const next = remaining[0]
-    if (!next) {
-      setActiveId(null)
-      await createDesign()
-      return
-    }
-    setActiveId(next.id)
-    setUrlDesignId(next.id)
-    const nextBranches = await orpc.draft.list({
-      designId: next.id,
-      includeArchived: true,
-    })
-    setBranches(nextBranches)
-    await openTarget({ designId: next.id, draftId: null })
+    await navigate({ to: '/app' })
   }
   const switchDesign = (id: string) => {
     if (id === activeId) return
-    setActiveId(id)
-    setUrlDesignId(id)
-    setBranches([])
-    void controller.flush().then(async () => {
-      const nextBranches = await orpc.draft.list({
-        designId: id,
-        includeArchived: true,
-      })
-      setBranches(nextBranches)
-      await openTarget({ designId: id, draftId: null })
-    })
+    setUrlDraftId(null)
+    void controller.flush().then(() =>
+      navigate({ to: '/app/design', search: { id } }),
+    )
   }
   return (
     <div className="h-screen min-h-0">
@@ -478,7 +418,7 @@ export function CanvasV2App({
               documents={documents}
               activeId={activeId}
               onSwitch={switchDesign}
-              onNew={() => void createDesign()}
+              onNew={() => void newDesign()}
               onImport={() => setFigmaOpen(true)}
               onRename={() => {
                 setRenameName(active?.name ?? '')

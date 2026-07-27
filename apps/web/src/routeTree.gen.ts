@@ -14,6 +14,8 @@ import { Route as LandingRouteImport } from './routes/landing'
 import { Route as McpConsentRouteImport } from './routes/mcp-consent'
 import { Route as DotwellKnownOauthAuthorizationServerRouteImport } from './routes/[.]well-known.oauth-authorization-server'
 import { Route as ApiChatRouteImport } from './routes/api.chat'
+import { Route as AppIndexRouteImport } from './routes/app.index'
+import { Route as AppDesignRouteImport } from './routes/app.design'
 import { Route as PLinkIdRouteImport } from './routes/p.$linkId'
 import { Route as ApiAssetIdRouteImport } from './routes/api.asset.$id'
 import { Route as ApiAuthSplatRouteImport } from './routes/api.auth.$'
@@ -55,6 +57,16 @@ const DotwellKnownOauthAuthorizationServerRoute =
 const ApiChatRoute = ApiChatRouteImport.update({
   id: '/api/chat',
   path: '/api/chat',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AppIndexRoute = AppIndexRouteImport.update({
+  id: '/app/',
+  path: '/app/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AppDesignRoute = AppDesignRouteImport.update({
+  id: '/app/design',
+  path: '/app/design',
   getParentRoute: () => rootRouteImport,
 } as any)
 const PLinkIdRoute = PLinkIdRouteImport.update({
@@ -144,7 +156,9 @@ export interface FileRoutesByFullPath {
   '/mcp-consent': typeof McpConsentRoute
   '/.well-known/oauth-authorization-server': typeof DotwellKnownOauthAuthorizationServerRoute
   '/api/chat': typeof ApiChatRoute
+  '/app/design': typeof AppDesignRoute
   '/p/$linkId': typeof PLinkIdRoute
+  '/app/': typeof AppIndexRoute
   '/api/asset/$id': typeof ApiAssetIdRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
   '/api/chatgpt/$': typeof ApiChatgptSplatRoute
@@ -167,7 +181,9 @@ export interface FileRoutesByTo {
   '/mcp-consent': typeof McpConsentRoute
   '/.well-known/oauth-authorization-server': typeof DotwellKnownOauthAuthorizationServerRoute
   '/api/chat': typeof ApiChatRoute
+  '/app/design': typeof AppDesignRoute
   '/p/$linkId': typeof PLinkIdRoute
+  '/app': typeof AppIndexRoute
   '/api/asset/$id': typeof ApiAssetIdRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
   '/api/chatgpt/$': typeof ApiChatgptSplatRoute
@@ -191,7 +207,9 @@ export interface FileRoutesById {
   '/mcp-consent': typeof McpConsentRoute
   '/.well-known/oauth-authorization-server': typeof DotwellKnownOauthAuthorizationServerRoute
   '/api/chat': typeof ApiChatRoute
+  '/app/design': typeof AppDesignRoute
   '/p/$linkId': typeof PLinkIdRoute
+  '/app/': typeof AppIndexRoute
   '/api/asset/$id': typeof ApiAssetIdRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
   '/api/chatgpt/$': typeof ApiChatgptSplatRoute
@@ -216,7 +234,9 @@ export interface FileRouteTypes {
     | '/mcp-consent'
     | '/.well-known/oauth-authorization-server'
     | '/api/chat'
+    | '/app/design'
     | '/p/$linkId'
+    | '/app/'
     | '/api/asset/$id'
     | '/api/auth/$'
     | '/api/chatgpt/$'
@@ -239,7 +259,9 @@ export interface FileRouteTypes {
     | '/mcp-consent'
     | '/.well-known/oauth-authorization-server'
     | '/api/chat'
+    | '/app/design'
     | '/p/$linkId'
+    | '/app'
     | '/api/asset/$id'
     | '/api/auth/$'
     | '/api/chatgpt/$'
@@ -262,7 +284,9 @@ export interface FileRouteTypes {
     | '/mcp-consent'
     | '/.well-known/oauth-authorization-server'
     | '/api/chat'
+    | '/app/design'
     | '/p/$linkId'
+    | '/app/'
     | '/api/asset/$id'
     | '/api/auth/$'
     | '/api/chatgpt/$'
@@ -286,7 +310,9 @@ export interface RootRouteChildren {
   McpConsentRoute: typeof McpConsentRoute
   DotwellKnownOauthAuthorizationServerRoute: typeof DotwellKnownOauthAuthorizationServerRoute
   ApiChatRoute: typeof ApiChatRoute
+  AppDesignRoute: typeof AppDesignRoute
   PLinkIdRoute: typeof PLinkIdRoute
+  AppIndexRoute: typeof AppIndexRoute
   ApiAssetIdRoute: typeof ApiAssetIdRoute
   ApiAuthSplatRoute: typeof ApiAuthSplatRoute
   ApiChatgptSplatRoute: typeof ApiChatgptSplatRoute
@@ -337,6 +363,20 @@ declare module '@tanstack/react-router' {
       path: '/api/chat'
       fullPath: '/api/chat'
       preLoaderRoute: typeof ApiChatRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/app/': {
+      id: '/app/'
+      path: '/app'
+      fullPath: '/app/'
+      preLoaderRoute: typeof AppIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/app/design': {
+      id: '/app/design'
+      path: '/app/design'
+      fullPath: '/app/design'
+      preLoaderRoute: typeof AppDesignRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/p/$linkId': {
@@ -485,7 +525,9 @@ const rootRouteChildren: RootRouteChildren = {
   DotwellKnownOauthAuthorizationServerRoute:
     DotwellKnownOauthAuthorizationServerRoute,
   ApiChatRoute: ApiChatRoute,
+  AppDesignRoute: AppDesignRoute,
   PLinkIdRoute: PLinkIdRoute,
+  AppIndexRoute: AppIndexRoute,
   ApiAssetIdRoute: ApiAssetIdRoute,
   ApiAuthSplatRoute: ApiAuthSplatRoute,
   ApiChatgptSplatRoute: ApiChatgptSplatRoute,

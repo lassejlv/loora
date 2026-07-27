@@ -39,6 +39,24 @@ export const editorValidateSearch = createStandardSchemaV1(editorSearchParams, {
   partialOutput: true,
 })
 
+/**
+ * `/app/design` keys the open document off `id`. The deep-link keys below are
+ * read straight from `window.location` by the editor, so they are declared here
+ * only to keep router navigations from dropping them.
+ */
+export const designSearchParams = {
+  ...editorSearchParams,
+  id: parseAsString,
+  node: parseAsString,
+  page: parseAsString,
+  instancePath: parseAsString,
+  migrate: parseAsString,
+}
+
+export const designValidateSearch = createStandardSchemaV1(designSearchParams, {
+  partialOutput: true,
+})
+
 export type EditorSearchParams = {
   d: string | null
   draft: string | null
