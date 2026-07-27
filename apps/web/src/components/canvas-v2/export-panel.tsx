@@ -340,6 +340,7 @@ export function CanvasV2Export({
   const [png, setPng] = useState<{ key: string; url: string } | null>(null)
   const [pngSize, setPngSize] = useState<{ width: number; height: number } | null>(null)
   const [pngBusy, setPngBusy] = useState(false)
+  const [dropped, setDropped] = useState<string[]>([])
   const [handoff, setHandoff] = useState<{ url: string; expiresAt: number } | null>(null)
   const [handoffBusy, setHandoffBusy] = useState(false)
   const [copied, setCopied] = useState(false)
@@ -447,12 +448,20 @@ export function CanvasV2Export({
     setPngBusy(true)
     setError(null)
     setPngSize(null)
+    setDropped([])
+    const missed = new Set<string>()
+    const captureOptions = {
+      pixelRatio: scale,
+      onSkippedImage: (src: string) => missed.add(src),
+    }
     const capture = target.ref
-      ? captureNodePng(registry, target.ref, scale)
-      : captureCanvasPng(document, registry, scale)
+      ? captureNodePng(registry, target.ref, captureOptions)
+      : captureCanvasPng(document, registry, captureOptions)
     void capture
       .then((url) => {
-        if (!cancelled) setPng({ key: pngKey, url })
+        if (cancelled) return
+        setPng({ key: pngKey, url })
+        setDropped([...missed])
       })
       .catch((cause) => {
         if (cancelled) return
@@ -718,6 +727,15 @@ export function CanvasV2Export({
                       ? `${pngSize.width} × ${pngSize.height} pixels`
                       : 'Captured from the rendered canvas.'}
                   </p>
+                  {dropped.length > 0 ? (
+                    <p className="text-[11px] text-muted-foreground">
+                      {dropped.length} image
+                      {dropped.length === 1 ? ' is' : 's are'} blank: hosted
+                      elsewhere, and that site does not allow reading it back.
+                      Upload {dropped.length === 1 ? 'it' : 'them'} to this
+                      design to include {dropped.length === 1 ? 'it' : 'them'}.
+                    </p>
+                  ) : null}
                 </Row>
               ) : null}
 

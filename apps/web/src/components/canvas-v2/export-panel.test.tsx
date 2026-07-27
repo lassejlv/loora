@@ -195,14 +195,31 @@ describe('CanvasV2Export', () => {
 
     const image = await view.findByAltText('Export preview')
     expect(image.getAttribute('src')).toBe(PNG)
-    expect(captureCanvasPng.mock.calls[0]![2]).toBe(2)
+    expect(captureCanvasPng.mock.calls[0]![2]).toMatchObject({ pixelRatio: 2 })
 
     fireEvent.click(view.getByRole('button', { name: '3×' }))
     await waitFor(() => expect(captureCanvasPng).toHaveBeenCalledTimes(2))
-    expect(captureCanvasPng.mock.calls[1]![2]).toBe(3)
+    expect(captureCanvasPng.mock.calls[1]![2]).toMatchObject({ pixelRatio: 3 })
 
     fireEvent.click(view.getByRole('button', { name: 'Download' }))
     expect(clicked?.download).toBe('export-fixture.png')
+  })
+
+  test('says which images the capture had to leave blank', async () => {
+    captureCanvasPng.mockImplementation(
+      async (
+        _document: unknown,
+        _registry: unknown,
+        options: { onSkippedImage?: (src: string) => void } = {},
+      ) => {
+        options.onSkippedImage?.('https://cdn.example.com/hero.png')
+        return PNG
+      },
+    )
+    const { view } = await openPanel()
+    fireEvent.click(view.getByText('Image'))
+
+    expect(await view.findByText(/1 image is blank/)).toBeTruthy()
   })
 
   test('reports a capture that failed instead of saving nothing', async () => {

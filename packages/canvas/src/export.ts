@@ -32,6 +32,8 @@ export interface CanvasPngRenderOptions {
   width?: number
   height?: number
   pixelRatio?: number
+  /** Called for each image that had to be left out of the capture. */
+  onSkippedImage?: (src: string) => void
 }
 
 function escapeHtml(value: string) {
@@ -743,33 +745,56 @@ function loadBrowserImage(src: string) {
   })
 }
 
-async function inlineBrowserImages(root: Element) {
-  const images = [...root.querySelectorAll('img')]
+/** 1×1 transparent GIF; stands in for an image that could not be embedded. */
+const BLANK_IMAGE =
+  'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7'
+
+async function blobToDataUrl(blob: Blob) {
+  const bytes = new Uint8Array(await blob.arrayBuffer())
+  let binary = ''
+  // String.fromCharCode is applied in chunks; a whole image at once overflows
+  // the argument stack.
+  for (let index = 0; index < bytes.length; index += 0x8000) {
+    binary += String.fromCharCode(...bytes.subarray(index, index + 0x8000))
+  }
+  return `data:${blob.type || 'application/octet-stream'};base64,${btoa(binary)}`
+}
+
+/**
+ * Rewrites every image in the clone to a data URL. A capture is rasterized by
+ * drawing the serialized markup as an SVG image, and a reference the browser
+ * loads from another origin taints the canvas — `toDataURL` then throws and
+ * the whole export dies. So an image that cannot be read is blanked rather
+ * than carried along, and reported to the caller.
+ */
+export async function inlineBrowserImages(root: Element) {
+  const images = [
+    ...root.querySelectorAll('img'),
+    ...(root.tagName === 'IMG' ? [root as HTMLImageElement] : []),
+  ]
+  const skipped: string[] = []
   await Promise.all(
     images.map(async (image) => {
-      if (!image.src || image.src.startsWith('data:')) return
+      // A srcset would reintroduce a remote candidate behind the src.
+      image.removeAttribute('srcset')
+      const source = image.getAttribute('src') ?? ''
+      if (!source || source.startsWith('data:')) return
       try {
         const response = await fetch(image.src, {
           credentials: 'same-origin',
         })
-        if (!response.ok) return
-        const blob = await response.blob()
-        image.src = await new Promise<string>((resolve, reject) => {
-          const reader = new FileReader()
-          reader.onload = () => resolve(String(reader.result))
-          reader.onerror = () =>
-            reject(
-              reader.error ??
-                new Error('Canvas export image could not be read'),
-            )
-          reader.readAsDataURL(blob)
-        })
+        if (!response.ok) throw new Error(`Image responded ${response.status}`)
+        image.setAttribute('src', await blobToDataUrl(await response.blob()))
       } catch {
-        // A caller may intentionally use a public CORS-enabled image. Leave a
-        // failed inline attempt intact and let the browser render it.
+        // Hosted elsewhere without permission to read it back. It cannot be
+        // part of a PNG either way; leaving the URL in place would only turn
+        // a missing image into a failed export.
+        skipped.push(source)
+        image.setAttribute('src', BLANK_IMAGE)
       }
     }),
   )
+  return skipped
 }
 
 export async function renderElementToPng(
@@ -783,7 +808,9 @@ export async function renderElementToPng(
   const width = Math.max(1, Math.ceil(options.width ?? bounds.width))
   const height = Math.max(1, Math.ceil(options.height ?? bounds.height))
   const clone = element.cloneNode(true) as HTMLElement | SVGElement
-  await inlineBrowserImages(clone)
+  for (const skipped of await inlineBrowserImages(clone)) {
+    options.onSkippedImage?.(skipped)
+  }
   clone.style.position = 'relative'
   clone.style.left = '0'
   clone.style.top = '0'
@@ -813,7 +840,15 @@ export async function renderElementToPng(
     if (!context) throw new Error('Canvas export context is unavailable')
     context.scale(pixelRatio, pixelRatio)
     context.drawImage(image, 0, 0, width, height)
-    return canvas.toDataURL('image/png')
+    try {
+      return canvas.toDataURL('image/png')
+    } catch {
+      // Every image is embedded before this point, so a tainted canvas here
+      // means something else in the design is loaded from another origin.
+      throw new Error(
+        'The browser refused to read the capture back because part of this design is loaded from another site.',
+      )
+    }
   } finally {
     URL.revokeObjectURL(url)
   }

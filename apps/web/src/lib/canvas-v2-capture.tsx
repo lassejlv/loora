@@ -16,17 +16,19 @@ import type { CanvasDomRegistry } from '@loora/canvas/react'
 const nextFrame = () =>
   new Promise<void>((resolve) => requestAnimationFrame(() => resolve()))
 
+export interface CanvasCaptureOptions {
+  pixelRatio?: number
+  /** Images that could not be embedded, and so are missing from the capture. */
+  onSkippedImage?: (src: string) => void
+}
+
 export async function elementToPng(
   element: HTMLElement | SVGElement,
   width = Math.max(1, Math.ceil(element.getBoundingClientRect().width)),
   height = Math.max(1, Math.ceil(element.getBoundingClientRect().height)),
-  pixelRatio?: number,
+  options: CanvasCaptureOptions = {},
 ) {
-  return renderElementToPng(element, {
-    width,
-    height,
-    ...(pixelRatio ? { pixelRatio } : {}),
-  })
+  return renderElementToPng(element, { width, height, ...options })
 }
 
 function loadImage(src: string) {
@@ -210,7 +212,7 @@ export async function renderPagePng(
 export async function captureNodePng(
   registry: CanvasDomRegistry,
   ref: NodeRef,
-  pixelRatio?: number,
+  options: CanvasCaptureOptions = {},
 ) {
   const element = registry.get(ref)
   if (!element) throw new Error('The node is not currently rendered')
@@ -219,14 +221,14 @@ export async function captureNodePng(
     element,
     Math.max(1, Math.ceil(bounds.width)),
     Math.max(1, Math.ceil(bounds.height)),
-    pixelRatio,
+    options,
   )
 }
 
 export async function captureCanvasPng(
   canvasDocument: CanvasDocumentV2,
   registry: CanvasDomRegistry,
-  pixelRatio?: number,
+  options: CanvasCaptureOptions = {},
 ) {
   const pages = Object.values(canvasDocument.nodes)
     .filter((node): node is PageNode => node.type === 'page' && !node.hidden)
@@ -285,7 +287,7 @@ export async function captureCanvasPng(
   }
   document.body.appendChild(host)
   try {
-    return await elementToPng(host, outputWidth, outputHeight, pixelRatio)
+    return await elementToPng(host, outputWidth, outputHeight, options)
   } finally {
     host.remove()
   }

@@ -1,8 +1,9 @@
-import { describe, expect, it } from 'bun:test'
+import { afterEach, describe, expect, it } from 'bun:test'
 import {
   compileCanvas,
   compileReactComponent,
   compileStandaloneHtml,
+  inlineBrowserImages,
   serializeCanvasDocument,
 } from './export'
 import {
@@ -144,5 +145,48 @@ describe('Canvas exports', () => {
       '[data-loora-node="buttonInstance"][data-loora-variant="hover"]',
     )
     expect(html).toContain('setVariant(instance,variant)')
+  })
+})
+
+describe('inlineBrowserImages', () => {
+  const originalFetch = globalThis.fetch
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch
+  })
+
+  it('blanks an image it cannot read rather than tainting the capture', async () => {
+    globalThis.fetch = (async (input: RequestInfo | URL) => {
+      if (String(input).includes('cdn.example.com')) throw new Error('CORS')
+      return new Response(new Uint8Array([137, 80, 78, 71]), {
+        headers: { 'Content-Type': 'image/png' },
+      })
+    }) as typeof fetch
+
+    const host = document.createElement('div')
+    host.innerHTML =
+      '<img src="https://cdn.example.com/hero.png" srcset="https://cdn.example.com/hero@2x.png 2x">' +
+      '<img src="/api/asset/a1">'
+
+    const skipped = await inlineBrowserImages(host)
+
+    expect(skipped).toEqual(['https://cdn.example.com/hero.png'])
+    const images = [...host.querySelectorAll('img')]
+    // A remote reference left in place is what makes `toDataURL` throw.
+    expect(images[0]!.getAttribute('src')).toStartWith('data:image/gif;base64,')
+    expect(images[0]!.hasAttribute('srcset')).toBe(false)
+    expect(images[1]!.getAttribute('src')).toStartWith('data:image/png')
+  })
+
+  it('leaves an image that is already inline alone', async () => {
+    globalThis.fetch = (async () => {
+      throw new Error('should not be called')
+    }) as unknown as typeof fetch
+    const host = document.createElement('div')
+    const inline = 'data:image/gif;base64,R0lGODlhAQABAAAAACw='
+    host.innerHTML = `<img src="${inline}">`
+
+    expect(await inlineBrowserImages(host)).toEqual([])
+    expect(host.querySelector('img')!.getAttribute('src')).toBe(inline)
   })
 })
