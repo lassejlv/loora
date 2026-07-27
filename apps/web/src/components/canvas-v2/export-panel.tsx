@@ -33,6 +33,7 @@ import {
   useCanvasSelection,
 } from '@loora/canvas/react'
 import { captureCanvasPng, captureNodePng } from '#/lib/canvas-v2-capture'
+import { copyText } from '#/lib/copy-text'
 import { orpc } from '#/lib/orpc-client'
 import { Button } from '#/components/ui/button'
 import {
@@ -114,21 +115,6 @@ function downloadDataUrl(filename: string, url: string) {
   anchor.href = url
   anchor.download = filename
   anchor.click()
-}
-
-async function copyText(value: string) {
-  if (navigator.clipboard?.writeText) {
-    await navigator.clipboard.writeText(value)
-    return
-  }
-  const textarea = document.createElement('textarea')
-  textarea.value = value
-  textarea.style.position = 'fixed'
-  textarea.style.opacity = '0'
-  document.body.appendChild(textarea)
-  textarea.select()
-  document.execCommand('copy')
-  textarea.remove()
 }
 
 function formatBytes(bytes: number) {

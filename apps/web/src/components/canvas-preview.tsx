@@ -19,9 +19,14 @@ function pageHeight(page: PageNode) {
     : page.viewport.minHeight
 }
 
-function visiblePages(document: CanvasDocumentV2) {
+function visiblePages(document: CanvasDocumentV2, pageId?: string) {
   return Object.values(document.nodes)
-    .filter((node): node is PageNode => node.type === 'page' && !node.hidden)
+    .filter(
+      (node): node is PageNode =>
+        node.type === 'page' &&
+        !node.hidden &&
+        (pageId === undefined || node.id === pageId),
+    )
     .sort((left, right) => left.order - right.order || left.id.localeCompare(right.id))
     .slice(0, MAX_PAGES)
 }
@@ -43,9 +48,12 @@ function tokenVariables(document: CanvasDocumentV2) {
  */
 export function CanvasDocumentPreview({
   document,
+  pageId,
   className,
 }: {
   document: CanvasDocumentV2 | null
+  /** Restricts the preview to one Page instead of the whole board. */
+  pageId?: string
   className?: string
 }) {
   const hostRef = useRef<HTMLDivElement | null>(null)
@@ -67,7 +75,7 @@ export function CanvasDocumentPreview({
 
   const board = useMemo(() => {
     if (!document) return null
-    const pages = visiblePages(document)
+    const pages = visiblePages(document, pageId)
     if (pages.length === 0) return null
     const minX = Math.min(...pages.map((page) => page.layout.x))
     const minY = Math.min(...pages.map((page) => page.layout.y))
@@ -80,7 +88,7 @@ export function CanvasDocumentPreview({
       width: Math.max(1, maxX - minX),
       height: Math.max(1, maxY - minY),
     }
-  }, [document])
+  }, [document, pageId])
 
   const engine = useMemo(
     () => (document ? new CanvasEngine(document) : null),

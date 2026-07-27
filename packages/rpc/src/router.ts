@@ -1686,8 +1686,33 @@ const createPublishLink = protectedProcedure
       .where(and(eq(publishLink.userId, context.user.id), lt(publishLink.expiresAt, new Date())))
     await sweepPublishEgress(context.user.id)
 
-    const id = publishLinkId()
     const expiresAt = new Date(Date.now() + PUBLISH_TTL_MS)
+
+    // Publishing the same target twice extends the link that is already out
+    // there rather than minting a second capability URL for it. A link that
+    // was explicitly unpublished is gone, so it never comes back this way.
+    const [live] = await db
+      .select({ id: publishLink.id })
+      .from(publishLink)
+      .where(
+        and(
+          eq(publishLink.userId, context.user.id),
+          eq(publishLink.designId, input.designId),
+          input.pageId
+            ? eq(publishLink.pageId, input.pageId)
+            : eq(publishLink.elementId, input.elementId!),
+        ),
+      )
+      .limit(1)
+    if (live) {
+      await db
+        .update(publishLink)
+        .set({ expiresAt })
+        .where(and(eq(publishLink.id, live.id), eq(publishLink.userId, context.user.id)))
+      return { id: live.id, expiresAt: expiresAt.getTime() }
+    }
+
+    const id = publishLinkId()
     await db.insert(publishLink).values({
       id,
       designId: input.designId,
