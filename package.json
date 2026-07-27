@@ -26,6 +26,7 @@
     "db:generate": "bun run --cwd packages/db generate",
     "db:migrate": "bun run --cwd packages/db migrate",
     "db:studio": "bun run --cwd packages/db studio",
+    "canvas:repair-layout": "bun run --cwd packages/rpc repair-layout",
     "polar:provision": "bun run --cwd packages/billing polar:provision"
   },
   "trustedDependencies": ["esbuild", "lightningcss"],

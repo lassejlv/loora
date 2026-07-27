@@ -6,6 +6,9 @@
     ".": "./src/router.ts",
     "./*": "./src/*.ts"
   },
+  "scripts": {
+    "repair-layout": "bun --env-file=../../.env run scripts/repair-canvas-layout.ts"
+  },
   "dependencies": {
     "@loora/agent": "workspace:*",
     "@loora/auth": "workspace:*",
