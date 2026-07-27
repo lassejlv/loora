@@ -20,8 +20,13 @@ export async function elementToPng(
   element: HTMLElement | SVGElement,
   width = Math.max(1, Math.ceil(element.getBoundingClientRect().width)),
   height = Math.max(1, Math.ceil(element.getBoundingClientRect().height)),
+  pixelRatio?: number,
 ) {
-  return renderElementToPng(element, { width, height })
+  return renderElementToPng(element, {
+    width,
+    height,
+    ...(pixelRatio ? { pixelRatio } : {}),
+  })
 }
 
 function loadImage(src: string) {
@@ -205,15 +210,23 @@ export async function renderPagePng(
 export async function captureNodePng(
   registry: CanvasDomRegistry,
   ref: NodeRef,
+  pixelRatio?: number,
 ) {
   const element = registry.get(ref)
   if (!element) throw new Error('The node is not currently rendered')
-  return elementToPng(element)
+  const bounds = element.getBoundingClientRect()
+  return elementToPng(
+    element,
+    Math.max(1, Math.ceil(bounds.width)),
+    Math.max(1, Math.ceil(bounds.height)),
+    pixelRatio,
+  )
 }
 
 export async function captureCanvasPng(
   canvasDocument: CanvasDocumentV2,
   registry: CanvasDomRegistry,
+  pixelRatio?: number,
 ) {
   const pages = Object.values(canvasDocument.nodes)
     .filter((node): node is PageNode => node.type === 'page' && !node.hidden)
@@ -272,7 +285,7 @@ export async function captureCanvasPng(
   }
   document.body.appendChild(host)
   try {
-    return await elementToPng(host, outputWidth, outputHeight)
+    return await elementToPng(host, outputWidth, outputHeight, pixelRatio)
   } finally {
     host.remove()
   }

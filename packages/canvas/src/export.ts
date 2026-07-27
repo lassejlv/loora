@@ -805,7 +805,7 @@ export async function renderElementToPng(
     const canvas = document.createElement('canvas')
     const pixelRatio = Math.max(
       0.1,
-      Math.min(options.pixelRatio ?? window.devicePixelRatio ?? 1, 2),
+      Math.min(options.pixelRatio ?? window.devicePixelRatio ?? 1, 4),
     )
     canvas.width = Math.max(1, Math.round(width * pixelRatio))
     canvas.height = Math.max(1, Math.round(height * pixelRatio))

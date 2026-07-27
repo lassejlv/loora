@@ -10,9 +10,6 @@ import {
 } from 'react'
 import {
   BringToFrontIcon,
-  CheckIcon,
-  ClipboardIcon,
-  CodeXmlIcon,
   CommandIcon,
   ComponentIcon,
   CopyIcon,
@@ -23,7 +20,6 @@ import {
   HandIcon,
   ImageIcon,
   LayersIcon,
-  Link2Icon,
   MaximizeIcon,
   MousePointer2Icon,
   PanelsTopLeftIcon,
@@ -47,7 +43,6 @@ import {
   type CanvasDropPlacement,
   type CanvasSurfaceControls,
   useCanvasDocument,
-  useCanvasDomRegistry,
   useCanvasHistory,
   useCanvasReadOnly,
   useCanvasSelection,
@@ -72,11 +67,6 @@ import {
   type NodeRef,
   type ShapeNode,
 } from '@loora/canvas/model'
-import {
-  compileReactComponent,
-  compileStandaloneHtml,
-  serializeCanvasDocument,
-} from '@loora/canvas/export'
 import type {
   CanvasSyncStatus,
   CanvasSyncTarget,
@@ -91,6 +81,7 @@ import { CanvasV2PropertiesPanel } from './properties-panel'
 import { CanvasV2AgentPanel } from './agent-panel'
 import { CanvasV2Comment } from './comment'
 import { CanvasV2ContextMenu } from './canvas-menu'
+import { CanvasV2Export } from './export-panel'
 import { CanvasV2History } from './history'
 import { CanvasV2Publish } from './publish'
 import {
@@ -106,7 +97,6 @@ import {
 } from '#/components/editor-command-menu'
 import { SettingsPanel } from '#/components/settings-panel'
 import { Button } from '#/components/ui/button'
-import { Spinner } from '#/components/ui/spinner'
 import {
   Tooltip,
   TooltipPopup,
@@ -143,19 +133,7 @@ import {
   type BuiltInShortcutId,
   type ShortcutConfig,
 } from '#/lib/shortcuts'
-import { cn } from '#/lib/utils'
-import {
-  captureCanvasPng,
-  captureNodePng,
-} from '#/lib/canvas-v2-capture'
-import {
-  Dialog,
-  DialogDescription,
-  DialogHeader,
-  DialogPanel,
-  DialogPopup,
-  DialogTitle,
-} from '#/components/ui/dialog'
+import { Dialog, DialogPopup } from '#/components/ui/dialog'
 
 const INSPECTOR_MIN_WIDTH = 220
 const INSPECTOR_MAX_WIDTH = 420
@@ -672,6 +650,12 @@ function CanvasV2Shell({
           run: () => controlsRef.current?.zoomToFit(),
         },
         {
+          id: 'export',
+          label: 'Export',
+          icon: DownloadIcon,
+          run: () => setExportOpen(true),
+        },
+        {
           id: 'settings',
           label: 'Settings',
           icon: SettingsIcon,
@@ -839,7 +823,7 @@ function CanvasV2Shell({
                 <DropdownMenuSeparator />
                 <DropdownMenuItem onClick={() => setExportOpen(true)}>
                   <DownloadIcon data-slot="icon" />
-                  Export and hand off
+                  Export…
                 </DropdownMenuItem>
                 <DropdownMenuItem
                   disabled={!controller.target}
@@ -2155,343 +2139,5 @@ function CanvasV2StatusBar({
         </div>
       ) : null}
     </footer>
-  )
-}
-function download(filename: string, content: string, type: string) {
-  const url = URL.createObjectURL(new Blob([content], { type }))
-  const anchor = document.createElement('a')
-  anchor.href = url
-  anchor.download = filename
-  anchor.click()
-  setTimeout(() => URL.revokeObjectURL(url), 0)
-}
-
-function downloadDataUrl(filename: string, url: string) {
-  const anchor = document.createElement('a')
-  anchor.href = url
-  anchor.download = filename
-  anchor.click()
-}
-
-function safeExportName(name: string, extension: string) {
-  const base =
-    name
-      .trim()
-      .replace(/[^\p{L}\p{N}_-]+/gu, '-')
-      .replace(/^-+|-+$/g, '')
-      .toLowerCase() || 'loora-design'
-  return `${base}.${extension}`
-}
-
-async function copyText(value: string) {
-  if (navigator.clipboard?.writeText) {
-    await navigator.clipboard.writeText(value)
-    return
-  }
-  const textarea = document.createElement('textarea')
-  textarea.value = value
-  textarea.style.position = 'fixed'
-  textarea.style.opacity = '0'
-  document.body.appendChild(textarea)
-  textarea.select()
-  document.execCommand('copy')
-  textarea.remove()
-}
-
-function CanvasV2Export({
-  controller,
-  open,
-  onOpenChange,
-}: {
-  controller: CanvasEditorController
-  open: boolean
-  onOpenChange: (open: boolean) => void
-}) {
-  const document = useCanvasDocument()
-  const registry = useCanvasDomRegistry()
-  const selection = useCanvasSelection()
-  const [format, setFormat] = useState<'react' | 'html' | 'json'>('react')
-  const [codeOpen, setCodeOpen] = useState(false)
-  const [pngBusy, setPngBusy] = useState(false)
-  const [handoffBusy, setHandoffBusy] = useState(false)
-  const [handoff, setHandoff] = useState<{
-    url: string
-    expiresAt: number
-  } | null>(null)
-  const [copied, setCopied] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-  const selectedRef =
-    selection.length === 1 && document.nodes[selection[0]!.nodeId]
-      ? selection[0]
-      : null
-  const selectedNode = selectedRef
-    ? resolveNodeRef(document, selectedRef)
-    : null
-  const exportOptions =
-    selectedRef?.instancePath.length === 0
-      ? selectedNode?.type === 'page'
-        ? { pageId: selectedNode.id }
-        : { nodeId: selectedRef.nodeId }
-      : {}
-  const exportName = selectedNode?.name ?? document.name
-  const output = useMemo(() => {
-    if (!open || !codeOpen) return ''
-    if (format === 'html') {
-      return compileStandaloneHtml(document, exportOptions)
-    }
-    if (format === 'json') return serializeCanvasDocument(document)
-    return compileReactComponent(document, exportOptions)
-  }, [
-    document,
-    exportOptions.nodeId,
-    exportOptions.pageId,
-    format,
-    codeOpen,
-    open,
-  ])
-  const handoffPrompt = handoff
-    ? `Fetch the Loora Canvas V2 handoff from ${handoff.url}. Read the version 3 JSON document and assets. Recreate the selected UI faithfully using its normalized nodes, parentId/order hierarchy, structured layout and styles, responsive overrides, components, instances, tokens, and declarative interactions. CanvasDocumentV2 is the source of truth; do not look for editable source strings.`
-    : ''
-
-  const exportPng = async () => {
-    setPngBusy(true)
-    setError(null)
-    try {
-      const image = selectedRef
-        ? await captureNodePng(registry, selectedRef)
-        : await captureCanvasPng(document, registry)
-      downloadDataUrl(safeExportName(exportName, 'png'), image)
-    } catch (cause) {
-      setError(
-        cause instanceof Error
-          ? cause.message
-          : 'Could not prepare the PNG export.',
-      )
-    } finally {
-      setPngBusy(false)
-    }
-  }
-
-  const createHandoff = async () => {
-    if (!controller.target) return
-    setHandoffBusy(true)
-    setError(null)
-    setCopied(false)
-    try {
-      await controller.flush?.()
-      const created = await orpc.handoff.create({
-        designId: controller.target.designId,
-        draftId: controller.target.draftId,
-      })
-      setHandoff({
-        url: `${window.location.origin}/api/handoff/${created.token}`,
-        expiresAt: created.expiresAt,
-      })
-    } catch {
-      setError('Could not create the handoff link. Try again.')
-    } finally {
-      setHandoffBusy(false)
-    }
-  }
-
-  const copyHandoff = async () => {
-    try {
-      await copyText(handoffPrompt)
-      setCopied(true)
-      window.setTimeout(() => setCopied(false), 1800)
-    } catch {
-      setError('Clipboard access was blocked. Copy the prompt manually.')
-    }
-  }
-
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogPopup
-        className={cn(
-          codeOpen
-            ? 'h-[min(84svh,50rem)] max-w-4xl'
-            : 'max-w-lg',
-        )}
-        bottomStickOnMobile={false}
-      >
-        <DialogHeader>
-          <DialogTitle>Export design</DialogTitle>
-          <DialogDescription>
-            {selectedNode
-              ? `Export “${selectedNode.name}” from the structured canvas.`
-              : 'Export the complete structured canvas.'}
-          </DialogDescription>
-        </DialogHeader>
-        <DialogPanel className="min-h-0 space-y-5 overflow-y-auto">
-          <div className="overflow-hidden rounded-xl border">
-            <button
-              type="button"
-              disabled={pngBusy}
-              onClick={() => void exportPng()}
-              className="flex w-full items-center gap-3 px-3 py-3 text-left outline-none transition-colors hover:bg-muted/60 focus-visible:bg-muted disabled:pointer-events-none disabled:opacity-50"
-            >
-              <span className="w-11 shrink-0 font-mono text-[11px] font-medium text-muted-foreground">
-                .PNG
-              </span>
-              <span className="min-w-0 flex-1">
-                <span className="block text-sm font-medium">Image</span>
-                <span className="block text-xs text-muted-foreground">
-                  High-resolution DOM snapshot
-                </span>
-              </span>
-              {pngBusy ? (
-                <Spinner className="size-4" />
-              ) : (
-                <DownloadIcon className="size-4 text-muted-foreground" />
-              )}
-            </button>
-            {[
-              {
-                format: 'html' as const,
-                extension: '.HTML',
-                name: 'Web page',
-                description: 'Standalone responsive HTML, CSS, and runtime',
-              },
-              {
-                format: 'react' as const,
-                extension: '.TSX',
-                name: 'React component',
-                description: 'Generated React component and scoped CSS',
-              },
-              {
-                format: 'json' as const,
-                extension: '.JSON',
-                name: 'Canvas V2 document',
-                description: 'Versioned structured source of truth',
-              },
-            ].map((item) => (
-              <button
-                key={item.format}
-                type="button"
-                onClick={() => {
-                  const next =
-                    item.format === 'html'
-                      ? compileStandaloneHtml(document, exportOptions)
-                      : item.format === 'json'
-                        ? serializeCanvasDocument(document)
-                        : compileReactComponent(document, exportOptions)
-                  download(
-                    safeExportName(
-                      exportName,
-                      item.format === 'react' ? 'tsx' : item.format,
-                    ),
-                    next,
-                    item.format === 'json'
-                      ? 'application/json'
-                      : 'text/plain',
-                  )
-                }}
-                className="flex w-full items-center gap-3 border-t px-3 py-3 text-left outline-none transition-colors hover:bg-muted/60 focus-visible:bg-muted"
-              >
-                <span className="w-11 shrink-0 font-mono text-[11px] font-medium text-muted-foreground">
-                  {item.extension}
-                </span>
-                <span className="min-w-0 flex-1">
-                  <span className="block text-sm font-medium">{item.name}</span>
-                  <span className="block text-xs text-muted-foreground">
-                    {item.description}
-                  </span>
-                </span>
-                <DownloadIcon className="size-4 text-muted-foreground" />
-              </button>
-            ))}
-          </div>
-
-          <section>
-            <div className="flex items-center justify-between gap-2">
-              <div>
-                <h3 className="text-sm font-semibold">Generated code</h3>
-                <p className="mt-0.5 text-xs text-muted-foreground">
-                  Read-only. Canvas V2 remains the source of truth.
-                </p>
-              </div>
-              <Button
-                size="xs"
-                variant="outline"
-                onClick={() => setCodeOpen((current) => !current)}
-              >
-                <CodeXmlIcon />
-                {codeOpen ? 'Hide preview' : 'Preview'}
-              </Button>
-            </div>
-            {codeOpen ? (
-              <div className="mt-3 flex min-h-0 flex-col gap-2">
-                <div className="flex gap-1">
-                  {(['react', 'html', 'json'] as const).map((item) => (
-                    <Button
-                      key={item}
-                      size="xs"
-                      variant={format === item ? 'secondary' : 'ghost'}
-                      onClick={() => setFormat(item)}
-                    >
-                      {item === 'react' ? 'TSX' : item.toUpperCase()}
-                    </Button>
-                  ))}
-                </div>
-                <pre className="max-h-[22rem] min-h-48 overflow-auto rounded-md border bg-muted p-3 text-[11px] leading-5">
-                  <code>{output}</code>
-                </pre>
-              </div>
-            ) : null}
-          </section>
-
-          {controller.target ? (
-            <section className="border-t pt-5">
-              <h3 className="text-sm font-semibold">Hand off to an agent</h3>
-              <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
-                Create a private prompt backed by the same Canvas V2 document.
-              </p>
-              {handoff ? (
-                <div className="mt-3 space-y-3">
-                  <textarea
-                    readOnly
-                    value={handoffPrompt}
-                    aria-label="Agent handoff prompt"
-                    className="min-h-28 w-full resize-none rounded-lg border bg-muted/40 p-3 font-mono text-[11px] leading-relaxed outline-none"
-                    onFocus={(event) => event.currentTarget.select()}
-                  />
-                  <div className="flex flex-wrap items-center gap-2">
-                    <Button onClick={() => void copyHandoff()}>
-                      {copied ? <CheckIcon /> : <ClipboardIcon />}
-                      {copied ? 'Copied' : 'Copy prompt'}
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      disabled={handoffBusy}
-                      onClick={() => void createHandoff()}
-                    >
-                      {handoffBusy ? <Spinner /> : null}
-                      New link
-                    </Button>
-                    <span className="ms-auto text-[11px] text-muted-foreground">
-                      Expires {new Date(handoff.expiresAt).toLocaleDateString()}
-                    </span>
-                  </div>
-                </div>
-              ) : (
-                <Button
-                  className="mt-3"
-                  variant="outline"
-                  disabled={handoffBusy}
-                  onClick={() => void createHandoff()}
-                >
-                  {handoffBusy ? <Spinner /> : <Link2Icon />}
-                  {handoffBusy ? 'Creating link…' : 'Create handoff link'}
-                </Button>
-              )}
-            </section>
-          ) : null}
-
-          {error ? (
-            <p className="text-xs text-destructive-foreground">{error}</p>
-          ) : null}
-        </DialogPanel>
-      </DialogPopup>
-    </Dialog>
   )
 }
