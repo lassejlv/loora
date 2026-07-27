@@ -1,4 +1,4 @@
-import { useMemo, useState, type DragEvent } from 'react'
+import { useEffect, useMemo, useState, type DragEvent } from 'react'
 import {
   BringToFrontIcon,
   ChevronDownIcon,
@@ -24,16 +24,104 @@ import {
 import {
   canvasId,
   orderedChildren,
+  type CanvasDocumentV2,
   type CanvasNode,
   type NodePatch,
   type NodeRef,
 } from '@loora/canvas/model'
-import type { CanvasOperation } from '@loora/canvas/engine'
+import {
+  preconditionsForNodeMove,
+  type CanvasOperation,
+} from '@loora/canvas/engine'
 import { Button } from '#/components/ui/button'
 import { Input } from '#/components/ui/input'
 import { cn } from '#/lib/utils'
 
 export type CanvasReorderDirection = 'forward' | 'front' | 'backward' | 'back'
+
+export type DropPosition = 'before' | 'after' | 'inside'
+
+const ORDER_STEP = 1024
+const CONTAINERS = new Set(['page', 'component', 'frame', 'group'])
+
+/**
+ * Where a pointer sitting `ratio` down a row wants to drop. Containers keep a
+ * middle band that means "put it inside"; everything else only reorders.
+ */
+export function dropPositionFor(node: CanvasNode, ratio: number): DropPosition {
+  if (!CONTAINERS.has(node.type)) return ratio < 0.5 ? 'before' : 'after'
+  if (ratio < 0.28) return 'before'
+  if (ratio > 0.72) return 'after'
+  return 'inside'
+}
+
+function isDescendant(
+  document: CanvasDocumentV2,
+  candidateId: string | null,
+  ancestorId: string,
+) {
+  let current = candidateId
+  while (current) {
+    if (current === ancestorId) return true
+    current = document.nodes[current]?.parentId ?? null
+  }
+  return false
+}
+
+/**
+ * The parent and order a drop resolves to, or null when the move is not legal:
+ * dropping a node into itself or its own subtree, moving a Page off the
+ * document root, dropping into something that cannot hold children, or a drag
+ * that would leave the tree exactly as it was.
+ */
+export function resolveDrop(
+  document: CanvasDocumentV2,
+  draggedId: string,
+  targetId: string,
+  position: DropPosition,
+): { parentId: string | null; order: number } | null {
+  const dragged = document.nodes[draggedId]
+  const target = document.nodes[targetId]
+  if (!dragged || !target || dragged.locked || draggedId === targetId) return null
+  if (position === 'inside' && !CONTAINERS.has(target.type)) return null
+
+  const parentId = position === 'inside' ? target.id : target.parentId
+  const isRootType = dragged.type === 'page' || dragged.type === 'component'
+  if (isRootType !== (parentId === null)) return null
+  if (parentId) {
+    const parent = document.nodes[parentId]
+    if (!parent || !CONTAINERS.has(parent.type)) return null
+    // Re-parenting a node under itself would detach the subtree from the tree.
+    if (isDescendant(document, parentId, draggedId)) return null
+  }
+
+  const siblings = orderedChildren(document, parentId).filter(
+    (node) => node.id !== draggedId,
+  )
+  if (position === 'inside') {
+    if (dragged.parentId === parentId && siblings.length === 0) return null
+    return { parentId, order: (siblings.at(-1)?.order ?? 0) + ORDER_STEP }
+  }
+
+  const index = siblings.findIndex((node) => node.id === targetId)
+  if (index === -1) return null
+  const insertAt = position === 'before' ? index : index + 1
+  if (dragged.parentId === parentId) {
+    const currentIndex = siblings.filter((node) => node.order < dragged.order).length
+    if (insertAt === currentIndex) return null
+  }
+  const before = siblings[insertAt - 1]?.order
+  const after = siblings[insertAt]?.order
+  const order =
+    before === undefined && after === undefined
+      ? ORDER_STEP
+      : before === undefined
+        ? after! - ORDER_STEP
+        : after === undefined
+          ? before + ORDER_STEP
+          : (before + after) / 2
+  return { parentId, order }
+}
 
 function keyFor(ref: NodeRef) {
   return ref.instancePath.length > 0
@@ -45,6 +133,16 @@ function nodeIcon(node: CanvasNode) {
   if (node.type === 'text') return TypeIcon
   if (node.type === 'component' || node.type === 'instance') return ComponentIcon
   return FrameIcon
+}
+
+interface LayerDragHandlers {
+  draggedId: string | null
+  target: { id: string; position: DropPosition } | null
+  onStart: (node: CanvasNode, event: DragEvent<HTMLDivElement>) => void
+  onEnd: () => void
+  onOver: (event: DragEvent<HTMLDivElement>, node: CanvasNode) => void
+  onLeave: (node: CanvasNode) => void
+  onDrop: (event: DragEvent<HTMLDivElement>, node: CanvasNode) => void
 }
 
 function patchOperation(ref: NodeRef, patch: NodePatch): CanvasOperation {
@@ -77,6 +175,10 @@ export function CanvasV2LayersPanel({
     () => new Set(Object.values(document.nodes).filter((node) => node.type === 'page').map((node) => node.id)),
   )
   const [draggedId, setDraggedId] = useState<string | null>(null)
+  const [dropTarget, setDropTarget] = useState<{
+    id: string
+    position: DropPosition
+  } | null>(null)
   const [query, setQuery] = useState('')
   const [renamingKey, setRenamingKey] = useState<string | null>(null)
   const search = query.trim().toLowerCase()
@@ -107,26 +209,87 @@ export function CanvasV2LayersPanel({
     })
   }
 
-  const dropInto = (event: DragEvent, parent: CanvasNode) => {
+  // Hovering a collapsed container opens it, so a drag can reach nested layers.
+  useEffect(() => {
+    if (!dropTarget || dropTarget.position !== 'inside') return
+    if (expanded.has(dropTarget.id)) return
+    const timer = window.setTimeout(() => {
+      setExpanded((current) => new Set(current).add(dropTarget.id))
+    }, 600)
+    return () => window.clearTimeout(timer)
+  }, [dropTarget, expanded])
+
+  const endDrag = () => {
+    setDraggedId(null)
+    setDropTarget(null)
+  }
+
+  const onRowDragOver = (
+    event: DragEvent<HTMLDivElement>,
+    node: CanvasNode,
+  ) => {
+    if (!draggedId || readOnly) return
+    const rect = event.currentTarget.getBoundingClientRect()
+    const ratio = rect.height > 0 ? (event.clientY - rect.top) / rect.height : 0.5
+    const position = dropPositionFor(node, ratio)
+    if (!resolveDrop(document, draggedId, node.id, position)) {
+      // No drop effect, so the row reads as rejected instead of silently eating
+      // the drag.
+      setDropTarget(null)
+      return
+    }
     event.preventDefault()
-    if (readOnly) return
-    if (!draggedId || draggedId === parent.id) return
+    event.dataTransfer.dropEffect = 'move'
+    setDropTarget((current) =>
+      current?.id === node.id && current.position === position
+        ? current
+        : { id: node.id, position },
+    )
+  }
+
+  const onRowDrop = (event: DragEvent<HTMLDivElement>, node: CanvasNode) => {
+    event.preventDefault()
+    const target = dropTarget
+    endDrag()
+    if (!draggedId || readOnly || !target || target.id !== node.id) return
     const dragged = document.nodes[draggedId]
-    if (!dragged || dragged.type === 'page' || dragged.type === 'component') return
-    if (!['page', 'component', 'frame', 'group'].includes(parent.type)) return
-    const children = orderedChildren(document, parent.id)
+    const resolved = resolveDrop(document, draggedId, node.id, target.position)
+    if (!dragged || !resolved) return
     transact({
       id: canvasId('tx'),
-      label: `Move ${dragged.name} into ${parent.name}`,
-      operations: [{
-        type: 'node.move',
-        id: dragged.id,
-        parentId: parent.id,
-        order: (children.at(-1)?.order ?? 0) + 1024,
-      }],
+      label:
+        target.position === 'inside'
+          ? `Move ${dragged.name} into ${node.name}`
+          : `Reorder ${dragged.name}`,
+      preconditions: preconditionsForNodeMove(document, dragged.id),
+      operations: [
+        {
+          type: 'node.move',
+          id: dragged.id,
+          parentId: resolved.parentId,
+          order: resolved.order,
+        },
+      ],
     })
-    setDraggedId(null)
-    setExpanded((current) => new Set(current).add(parent.id))
+    if (resolved.parentId) {
+      setExpanded((current) => new Set(current).add(resolved.parentId!))
+    }
+  }
+
+  const dragHandlers: LayerDragHandlers = {
+    draggedId,
+    target: dropTarget,
+    onStart: (node, event) => {
+      setDraggedId(node.id)
+      // Firefox refuses to start a drag without payload on the transfer.
+      event.dataTransfer.setData('text/plain', node.id)
+      event.dataTransfer.effectAllowed = 'move'
+    },
+    onEnd: endDrag,
+    onOver: onRowDragOver,
+    onLeave: (node) =>
+      setDropTarget((current) => (current?.id === node.id ? null : current)),
+    onDrop: onRowDrop,
   }
 
   return (
@@ -240,9 +403,7 @@ export function CanvasV2LayersPanel({
                 operations: [patchOperation(ref, patch)],
               })
             }
-            draggedId={draggedId}
-            onDrag={setDraggedId}
-            onDrop={dropInto}
+            drag={dragHandlers}
             readOnly={readOnly}
             renamingKey={renamingKey}
             onRenamingKeyChange={setRenamingKey}
@@ -271,9 +432,7 @@ export function CanvasV2LayersPanel({
                     operations: [patchOperation(ref, patch)],
                   })
                 }
-                draggedId={draggedId}
-                onDrag={setDraggedId}
-                onDrop={dropInto}
+                drag={dragHandlers}
                 readOnly={readOnly}
                 renamingKey={renamingKey}
                 onRenamingKeyChange={setRenamingKey}
@@ -296,9 +455,7 @@ function LayerRow({
   onToggle,
   onSelect,
   onPatch,
-  draggedId,
-  onDrag,
-  onDrop,
+  drag,
   readOnly,
   renamingKey,
   onRenamingKeyChange,
@@ -312,9 +469,7 @@ function LayerRow({
   onToggle: (key: string) => void
   onSelect: (ref: NodeRef) => void
   onPatch: (ref: NodeRef, patch: NodePatch) => void
-  draggedId: string | null
-  onDrag: (id: string | null) => void
-  onDrop: (event: DragEvent, parent: CanvasNode) => void
+  drag: LayerDragHandlers
   readOnly: boolean
   renamingKey: string | null
   onRenamingKeyChange: (key: string | null) => void
@@ -335,27 +490,38 @@ function LayerRow({
   const open = expanded.has(key)
   const Icon = nodeIcon(node)
   const sourceDraggable = refValue.instancePath.length === 0
+  const dropTarget =
+    drag.target?.id === node.id && sourceDraggable ? drag.target.position : null
+  const dropEdge = dropTarget === 'inside' ? null : dropTarget
+  const dropInside = dropTarget === 'inside'
   return (
     <>
       <div
         className={cn(
-          'group flex h-7 items-center gap-0.5 pe-1 text-[11px]',
+          'group relative flex h-7 items-center gap-0.5 pe-1 text-[11px]',
           selectedKey === key
             ? 'bg-secondary text-foreground'
             : 'hover:bg-secondary/60',
-          draggedId === node.id && 'opacity-40',
+          drag.draggedId === node.id && 'opacity-40',
+          dropInside && 'bg-cx-accent/12 ring-1 ring-cx-accent ring-inset',
         )}
         style={{ paddingInlineStart: 4 + depth * 14 }}
         draggable={sourceDraggable && !readOnly}
-        onDragStart={() => onDrag(node.id)}
-        onDragEnd={() => onDrag(null)}
-        onDragOver={(event) => {
-          if (draggedId && ['page', 'component', 'frame', 'group'].includes(node.type)) {
-            event.preventDefault()
-          }
-        }}
-        onDrop={(event) => onDrop(event, node)}
+        onDragStart={(event) => drag.onStart(node, event)}
+        onDragEnd={drag.onEnd}
+        onDragOver={(event) => sourceDraggable && drag.onOver(event, node)}
+        onDragLeave={() => drag.onLeave(node)}
+        onDrop={(event) => drag.onDrop(event, node)}
       >
+        {dropEdge ? (
+          <span
+            aria-hidden="true"
+            className={cn(
+              'pointer-events-none absolute inset-x-0 h-0.5 bg-cx-accent',
+              dropEdge === 'before' ? 'top-0' : 'bottom-0',
+            )}
+          />
+        ) : null}
         {sourceDraggable ? (
           <GripVerticalIcon className="size-3 shrink-0 cursor-grab opacity-0 group-hover:opacity-50" />
         ) : (
@@ -454,9 +620,7 @@ function LayerRow({
               onToggle={onToggle}
               onSelect={onSelect}
               onPatch={onPatch}
-              draggedId={draggedId}
-              onDrag={onDrag}
-              onDrop={onDrop}
+              drag={drag}
               readOnly={readOnly}
               renamingKey={renamingKey}
               onRenamingKeyChange={onRenamingKeyChange}
