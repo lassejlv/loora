@@ -89,6 +89,7 @@ import { CanvasV2LayersPanel } from './layers-panel'
 import { CanvasV2PropertiesPanel } from './properties-panel'
 import { CanvasV2AgentPanel } from './agent-panel'
 import { CanvasV2Comment } from './comment'
+import { CanvasV2ContextMenu } from './canvas-menu'
 import { CanvasV2History } from './history'
 import { CanvasV2Publish } from './publish'
 import {
@@ -102,7 +103,19 @@ import {
 import { SettingsPanel } from '#/components/settings-panel'
 import { Button } from '#/components/ui/button'
 import { Spinner } from '#/components/ui/spinner'
+import {
+  Tooltip,
+  TooltipPopup,
+  TooltipProvider,
+  TooltipTrigger,
+} from '#/components/ui/tooltip'
 import { orpc } from '#/lib/orpc-client'
+import {
+  buildClipboardPayload,
+  parseClipboardPayload,
+  pasteNodes,
+  validatePaste,
+} from '#/lib/canvas-v2-clipboard'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -368,6 +381,21 @@ function CanvasV2Shell({
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (isEditableTarget(event.target)) return
+      // Enter types into the selected text node, the way every canvas tool does.
+      if (
+        event.key === 'Enter' &&
+        !event.metaKey &&
+        !event.ctrlKey &&
+        !event.altKey &&
+        !event.shiftKey
+      ) {
+        const ref = actions.selection[0]
+        if (ref && controller.engine.getNode(ref.nodeId)?.type === 'text') {
+          event.preventDefault()
+          actions.editText(ref)
+          return
+        }
+      }
       const match = matchShortcut(event, shortcutConfig)
       if (!match) return
       if (match.kind === 'custom') {
@@ -404,6 +432,18 @@ function CanvasV2Shell({
         else if (hit === 'tool.image') setAssetsOpen(true)
         else if (hit === 'undo') actions.history.undo()
         else if (hit === 'redo') actions.history.redo()
+        else if (hit === 'copy' || hit === 'cut' || hit === 'paste') {
+          // The standard chords raise a native clipboard event that carries the
+          // data with it, so they are left alone. A rebound chord does not, and
+          // falls back to the async clipboard API.
+          const native =
+            (event.metaKey || event.ctrlKey) &&
+            ['c', 'x', 'v'].includes(event.key.toLowerCase())
+          if (native) return false
+          if (hit === 'copy') actions.copySelection()
+          else if (hit === 'cut') actions.cutSelection()
+          else actions.pasteClipboard()
+        }
         else if (hit === 'duplicate') actions.duplicateSelection()
         else if (hit === 'group') actions.groupSelection()
         else if (hit === 'ungroup') actions.ungroupSelection()
@@ -424,6 +464,42 @@ function CanvasV2Shell({
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
   }, [actions, shortcutConfig])
+
+  // Native clipboard events carry the data with them, so copy and paste work
+  // without asking for clipboard permission. The shortcut handler above skips
+  // copy/cut/paste while these are installed.
+  useEffect(() => {
+    const onCopy = (event: ClipboardEvent) => {
+      if (isEditableTarget(event.target)) return
+      const text = actions.clipboardText()
+      if (!text || !event.clipboardData) return
+      event.preventDefault()
+      event.clipboardData.setData('text/plain', text)
+    }
+    const onCut = (event: ClipboardEvent) => {
+      if (readOnly || isEditableTarget(event.target)) return
+      const text = actions.clipboardText()
+      if (!text || !event.clipboardData) return
+      event.preventDefault()
+      event.clipboardData.setData('text/plain', text)
+      actions.deleteSelection()
+    }
+    const onPaste = (event: ClipboardEvent) => {
+      if (readOnly || isEditableTarget(event.target)) return
+      const text = event.clipboardData?.getData('text/plain')
+      if (!text) return
+      event.preventDefault()
+      actions.pasteFromText(text)
+    }
+    window.addEventListener('copy', onCopy)
+    window.addEventListener('cut', onCut)
+    window.addEventListener('paste', onPaste)
+    return () => {
+      window.removeEventListener('copy', onCopy)
+      window.removeEventListener('cut', onCut)
+      window.removeEventListener('paste', onPaste)
+    }
+  }, [actions, readOnly])
 
   const commandGroups: EditorCommandGroup[] = [
     {
@@ -746,6 +822,7 @@ function CanvasV2Shell({
             interactionMode={interactionMode}
             onInteractionModeChange={setInteractionMode}
             onAssetsOpen={() => setAssetsOpen(true)}
+            shortcutLabel={shortcutLabel}
             comment={
               controller.target && !readOnly ? (
                 <CanvasV2Comment
@@ -762,20 +839,26 @@ function CanvasV2Shell({
           />
 
           <main className="relative min-w-0 flex-1 overflow-hidden">
-            <CanvasSurface
-              key={cameraKey}
-              controlsRef={controlsRef}
-              initialCamera={initialCamera}
-              interactionMode={interactionMode}
-              className="h-full w-full"
-              pageWidth={previewWidth}
-              onCameraChange={(camera) => {
-                setZoom(camera.zoom)
-                if (controller.target) {
-                  window.localStorage.setItem(cameraKey, JSON.stringify(camera))
-                }
-              }}
-            />
+            <CanvasV2ContextMenu
+              actions={actions}
+              shortcutLabel={shortcutLabel}
+              onZoomToSelection={() => controlsRef.current?.zoomToSelection()}
+            >
+              <CanvasSurface
+                key={cameraKey}
+                controlsRef={controlsRef}
+                initialCamera={initialCamera}
+                interactionMode={interactionMode}
+                className="h-full w-full"
+                pageWidth={previewWidth}
+                onCameraChange={(camera) => {
+                  setZoom(camera.zoom)
+                  if (controller.target) {
+                    window.localStorage.setItem(cameraKey, JSON.stringify(camera))
+                  }
+                }}
+              />
+            </CanvasV2ContextMenu>
 
             <Drawer
               open={assetsOpen}
@@ -969,7 +1052,7 @@ function insertionParent(document: ReturnType<typeof useCanvasDocument>, selecte
 
 type CanvasReorderDirection = 'forward' | 'front' | 'backward' | 'back'
 
-interface CanvasEditorActions {
+export interface CanvasEditorActions {
   parent: CanvasNode | null
   selection: NodeRef[]
   history: ReturnType<typeof useCanvasHistory>
@@ -981,6 +1064,15 @@ interface CanvasEditorActions {
   addPage: () => void
   addFrame: () => void
   addText: () => void
+  editText: (ref: NodeRef) => void
+  canCopy: boolean
+  canEditText: boolean
+  /** Serialized selection for a native copy/cut event, or null. */
+  clipboardText: () => string | null
+  copySelection: () => void
+  cutSelection: () => void
+  pasteClipboard: () => void
+  pasteFromText: (text: string) => void
   addShape: () => void
   addComponent: () => void
   insertAsset: (asset: AssetMeta) => void
@@ -1087,6 +1179,9 @@ function remapClonedNode(node: CanvasNode, ids: Map<string, string>) {
   return clone
 }
 
+/** Survives a clipboard the browser will not hand back (permissions, http). */
+let localClipboard = ''
+
 function useCanvasEditorActions(): CanvasEditorActions {
   const document = useCanvasDocument()
   const selection = useCanvasSelection()
@@ -1129,10 +1224,16 @@ function useCanvasEditorActions(): CanvasEditorActions {
     }))
   }
 
+  /** Puts an existing text node into edit mode; the renderer owns the caret. */
+  const editText = (ref: NodeRef) => {
+    if (readOnly) return
+    session.editText(ref)
+  }
+
   const addText = () => {
     if (!parent || readOnly) return
     const children = orderedChildren(document, parent.id)
-    insert(createTextNode('New text', {
+    const node = createTextNode('New text', {
       parentId: parent.id,
       order: (children.at(-1)?.order ?? 0) + 1024,
       layout: defaultLayout(240, 42, {
@@ -1141,7 +1242,11 @@ function useCanvasEditorActions(): CanvasEditorActions {
         y: 48,
         height: { unit: 'hug' },
       }),
-    }))
+    })
+    insert(node)
+    // Land in the box with the placeholder selected, so the next keystroke is
+    // the copy rather than a trip through the inspector.
+    editText({ nodeId: node.id, instancePath: [] })
   }
 
   const addShape = () => {
@@ -1347,6 +1452,88 @@ function useCanvasEditorActions(): CanvasEditorActions {
         nodeId: ids.get(ref.nodeId)!,
         instancePath: [],
       })),
+    )
+  }
+
+  const canCopy = sourceRoots.length > 0
+  const canEditText =
+    !readOnly &&
+    selection.length === 1 &&
+    resolveNodeRef(document, selection[0]!)?.type === 'text'
+
+  /**
+   * The payload for the current selection, also parked in memory so paste keeps
+   * working when the browser will not hand the clipboard back (permissions,
+   * insecure origin).
+   */
+  const clipboardText = () => {
+    const payload = buildClipboardPayload(
+      document,
+      sourceRoots.map((ref) => ref.nodeId),
+    )
+    if (!payload) return null
+    localClipboard = JSON.stringify(payload)
+    return localClipboard
+  }
+
+  const pasteFromText = (text: string) => {
+    if (!parent || readOnly || !text) return
+    const payload = parseClipboardPayload(text)
+    if (!payload) {
+      // Anything that is not ours arrives as copy.
+      const plain = text.trim()
+      if (plain) pasteText(plain)
+      return
+    }
+    const pasted = pasteNodes(document, payload, parent.id)
+    // The clipboard is untrusted: the nodes only land if the document they
+    // would produce still validates.
+    if (pasted.nodes.length === 0 || !validatePaste(document, pasted.nodes)) return
+    transact({
+      id: canvasId('tx'),
+      label: pasted.rootIds.length === 1 ? 'Paste node' : 'Paste nodes',
+      operations: pasted.nodes.map((node) => ({ type: 'node.insert', node })),
+    })
+    session.select(pasted.rootIds.map((nodeId) => ({ nodeId, instancePath: [] })))
+  }
+
+  const copySelection = () => {
+    const text = clipboardText()
+    if (!text) return false
+    void navigator.clipboard?.writeText(text).catch(() => undefined)
+    return true
+  }
+
+  const cutSelection = () => {
+    if (readOnly) return
+    if (copySelection()) deleteSelection()
+  }
+
+  const pasteClipboard = async () => {
+    let text = localClipboard
+    try {
+      const fromSystem = await navigator.clipboard?.readText()
+      if (fromSystem) text = fromSystem
+    } catch {
+      // Falls back to the in-memory copy.
+    }
+    pasteFromText(text)
+  }
+
+  const pasteText = (text: string) => {
+    if (!parent || readOnly) return
+    const children = orderedChildren(document, parent.id)
+    insert(
+      createTextNode(text.slice(0, 5_000), {
+        parentId: parent.id,
+        order: (children.at(-1)?.order ?? 0) + 1024,
+        layout: defaultLayout(320, 42, {
+          position: parent.layout.mode === 'absolute' ? 'absolute' : 'flow',
+          x: 48,
+          y: 48,
+          height: { unit: 'hug' },
+        }),
+      }),
     )
   }
 
@@ -1572,6 +1759,14 @@ function useCanvasEditorActions(): CanvasEditorActions {
     addPage,
     addFrame,
     addText,
+    editText,
+    canCopy,
+    canEditText,
+    clipboardText,
+    copySelection,
+    cutSelection,
+    pasteClipboard: () => void pasteClipboard(),
+    pasteFromText,
     addShape,
     addComponent,
     insertAsset,
@@ -1587,29 +1782,45 @@ function useCanvasEditorActions(): CanvasEditorActions {
 function CanvasV2ToolButton({
   icon: Icon,
   label,
+  shortcut,
   active = false,
   disabled = false,
   onClick,
 }: {
   icon: ElementType
   label: string
+  /** Chord shown beside the name, e.g. `⌘Z`. */
+  shortcut?: string
   active?: boolean
   disabled?: boolean
   onClick: () => void
 }) {
   return (
-    <Button
-      size="icon-sm"
-      variant="ghost"
-      aria-label={label}
-      title={label}
-      disabled={disabled}
-      data-active={active || undefined}
-      className="data-active:bg-secondary data-active:text-foreground"
-      onClick={onClick}
-    >
-      <Icon />
-    </Button>
+    <Tooltip>
+      <TooltipTrigger
+        render={
+          <Button
+            size="icon-sm"
+            variant="ghost"
+            aria-label={label}
+            disabled={disabled}
+            data-active={active || undefined}
+            className="data-active:bg-secondary data-active:text-foreground"
+            onClick={onClick}
+          >
+            <Icon />
+          </Button>
+        }
+      />
+      <TooltipPopup side="right" sideOffset={6}>
+        <span className="flex items-center gap-2 whitespace-nowrap">
+          {label}
+          {shortcut ? (
+            <span className="text-muted-foreground">{shortcut}</span>
+          ) : null}
+        </span>
+      </TooltipPopup>
+    </Tooltip>
   )
 }
 
@@ -1619,88 +1830,99 @@ function CanvasV2ToolStrip({
   interactionMode,
   onInteractionModeChange,
   onAssetsOpen,
+  shortcutLabel,
   comment,
 }: {
   actions: CanvasEditorActions
   interactionMode: 'select' | 'pan'
   onInteractionModeChange: (mode: 'select' | 'pan') => void
   onAssetsOpen: () => void
+  shortcutLabel: (id: BuiltInShortcutId) => string
   comment: ReactNode
 }) {
   return (
-    <div className="flex w-9 shrink-0 flex-col items-center gap-0.5 border-e py-1.5">
-      <CanvasV2ToolButton
-        icon={MousePointer2Icon}
-        label="Select"
-        active={interactionMode === 'select'}
-        onClick={() => onInteractionModeChange('select')}
-      />
-      <CanvasV2ToolButton
-        icon={HandIcon}
-        label="Hand"
-        active={interactionMode === 'pan'}
-        onClick={() => onInteractionModeChange('pan')}
-      />
-      <div className="my-1 h-px w-4 bg-border" />
-      <CanvasV2ToolButton
-        icon={FrameIcon}
-        label="Frame"
-        disabled={actions.readOnly || !actions.parent}
-        onClick={() => {
-          actions.addFrame()
-          onInteractionModeChange('select')
-        }}
-      />
-      <CanvasV2ToolButton
-        icon={TypeIcon}
-        label="Text"
-        disabled={actions.readOnly || !actions.parent}
-        onClick={() => {
-          actions.addText()
-          onInteractionModeChange('select')
-        }}
-      />
-      <CanvasV2ToolButton
-        icon={RectangleHorizontalIcon}
-        label="Rectangle"
-        disabled={actions.readOnly || !actions.parent}
-        onClick={() => {
-          actions.addShape()
-          onInteractionModeChange('select')
-        }}
-      />
-      <CanvasV2ToolButton
-        icon={ImageIcon}
-        label="Image"
-        disabled={actions.readOnly}
-        onClick={onAssetsOpen}
-      />
-      <CanvasV2ToolButton
-        icon={ComponentIcon}
-        label="Component"
-        disabled={actions.readOnly || !actions.parent}
-        onClick={() => {
-          actions.addComponent()
-          onInteractionModeChange('select')
-        }}
-      />
-      {comment}
-      <div className="mt-auto flex flex-col items-center gap-0.5">
+    <TooltipProvider delay={400} closeDelay={0}>
+      <div className="flex w-9 shrink-0 flex-col items-center gap-0.5 border-e py-1.5">
+        <CanvasV2ToolButton
+          icon={MousePointer2Icon}
+          label="Select"
+          shortcut={shortcutLabel('tool.select')}
+          active={interactionMode === 'select'}
+          onClick={() => onInteractionModeChange('select')}
+        />
+        <CanvasV2ToolButton
+          icon={HandIcon}
+          label="Hand"
+          shortcut={shortcutLabel('tool.hand')}
+          active={interactionMode === 'pan'}
+          onClick={() => onInteractionModeChange('pan')}
+        />
         <div className="my-1 h-px w-4 bg-border" />
         <CanvasV2ToolButton
-          icon={Undo2Icon}
-          label="Undo"
-          disabled={actions.readOnly || !actions.history.canUndo}
-          onClick={() => actions.history.undo()}
+          icon={FrameIcon}
+          label="Frame"
+          disabled={actions.readOnly || !actions.parent}
+          onClick={() => {
+            actions.addFrame()
+            onInteractionModeChange('select')
+          }}
         />
         <CanvasV2ToolButton
-          icon={Redo2Icon}
-          label="Redo"
-          disabled={actions.readOnly || !actions.history.canRedo}
-          onClick={() => actions.history.redo()}
+          icon={TypeIcon}
+          label="Text"
+          shortcut={shortcutLabel('tool.text')}
+          disabled={actions.readOnly || !actions.parent}
+          onClick={() => {
+            actions.addText()
+            onInteractionModeChange('select')
+          }}
         />
+        <CanvasV2ToolButton
+          icon={RectangleHorizontalIcon}
+          label="Rectangle"
+          shortcut={shortcutLabel('tool.box')}
+          disabled={actions.readOnly || !actions.parent}
+          onClick={() => {
+            actions.addShape()
+            onInteractionModeChange('select')
+          }}
+        />
+        <CanvasV2ToolButton
+          icon={ImageIcon}
+          label="Image"
+          shortcut={shortcutLabel('tool.image')}
+          disabled={actions.readOnly}
+          onClick={onAssetsOpen}
+        />
+        <CanvasV2ToolButton
+          icon={ComponentIcon}
+          label="Component"
+          disabled={actions.readOnly || !actions.parent}
+          onClick={() => {
+            actions.addComponent()
+            onInteractionModeChange('select')
+          }}
+        />
+        {comment}
+        <div className="mt-auto flex flex-col items-center gap-0.5">
+          <div className="my-1 h-px w-4 bg-border" />
+          <CanvasV2ToolButton
+            icon={Undo2Icon}
+            label="Undo"
+            shortcut={shortcutLabel('undo')}
+            disabled={actions.readOnly || !actions.history.canUndo}
+            onClick={() => actions.history.undo()}
+          />
+          <CanvasV2ToolButton
+            icon={Redo2Icon}
+            label="Redo"
+            shortcut={shortcutLabel('redo')}
+            disabled={actions.readOnly || !actions.history.canRedo}
+            onClick={() => actions.history.redo()}
+          />
+        </div>
       </div>
-    </div>
+    </TooltipProvider>
   )
 }
 

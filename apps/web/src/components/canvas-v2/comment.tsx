@@ -9,6 +9,11 @@ import type {
   CanvasDocumentV2,
 } from '@loora/canvas/model'
 import { Button } from '#/components/ui/button'
+import {
+  Tooltip,
+  TooltipPopup,
+  TooltipTrigger,
+} from '#/components/ui/tooltip'
 import { Input } from '#/components/ui/input'
 import {
   Dialog,
@@ -67,15 +72,24 @@ export function CanvasV2Comment({
 
   return (
     <>
-      <Button
-        size="icon-sm"
-        variant="ghost"
-        aria-label="Pin comment"
-        disabled={!target}
-        onClick={() => setOpen(true)}
-      >
-        <MessageSquarePlusIcon />
-      </Button>
+      <Tooltip>
+        <TooltipTrigger
+          render={
+            <Button
+              size="icon-sm"
+              variant="ghost"
+              aria-label="Pin comment"
+              disabled={!target}
+              onClick={() => setOpen(true)}
+            >
+              <MessageSquarePlusIcon />
+            </Button>
+          }
+        />
+        <TooltipPopup side="right" sideOffset={6}>
+          Pin comment
+        </TooltipPopup>
+      </Tooltip>
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogPopup className="max-w-md">
           <DialogHeader>

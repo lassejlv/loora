@@ -285,6 +285,26 @@ export function CanvasV2PropertiesPanel({
           </span>
         </div>
 
+        {node.type === 'text' ? (
+          // The field above renames the layer; this one is the copy itself.
+          <div className="border-b px-2 py-1.5">
+            <textarea
+              key={node.text}
+              aria-label="Text content"
+              defaultValue={node.text}
+              rows={2}
+              className={cn(
+                control,
+                'h-auto min-h-14 resize-y px-2 py-1 leading-snug',
+              )}
+              onBlur={(event) => {
+                const text = event.currentTarget.value
+                if (text !== node.text) commit({ text, runs: [] }, 'Edit text')
+              }}
+            />
+          </div>
+        ) : null}
+
         {document.breakpoints.length > 0 ? (
           <Section title="Responsive">
             <SelectCell

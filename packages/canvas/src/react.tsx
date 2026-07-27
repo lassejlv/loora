@@ -105,6 +105,7 @@ export class CanvasSession {
   #selection: NodeRef[] = []
   #editingRoot: NodeRef | null = null
   #listeners = new Set<Listener>()
+  #textEditListeners = new Set<(ref: NodeRef) => void>()
   #revision = 0
 
   get selection() {
@@ -146,6 +147,22 @@ export class CanvasSession {
     this.#listeners.add(listener)
     return () => {
       this.#listeners.delete(listener)
+    }
+  }
+
+  /**
+   * Puts a text node into edit mode with the caret in it. This is a one-shot
+   * signal rather than session state on purpose: revision state would rerender
+   * every node on the page just to focus one of them.
+   */
+  editText(ref: NodeRef) {
+    for (const listener of this.#textEditListeners) listener(ref)
+  }
+
+  onEditText = (listener: (ref: NodeRef) => void) => {
+    this.#textEditListeners.add(listener)
+    return () => {
+      this.#textEditListeners.delete(listener)
     }
   }
 
@@ -650,6 +667,36 @@ function RawCanvasNodeRenderer({
     },
     [registry, id, instancePath.join('/')],
   )
+  /** Places the caret in this node once it is contenteditable. */
+  const focusText = useCallback(() => {
+    requestAnimationFrame(() => {
+      const element = registry.get(nodeRefFor(id, instancePath))
+      if (!(element instanceof HTMLElement)) return
+      element.focus()
+      const range = document.createRange()
+      range.selectNodeContents(element)
+      const selection = window.getSelection()
+      selection?.removeAllRanges()
+      selection?.addRange(range)
+    })
+  }, [registry, id, instancePath.join('/')])
+  useEffect(
+    () =>
+      session.onEditText((target) => {
+        const node = engine.getNode(id)
+        if (
+          !sameRef(target, nodeRefFor(id, instancePath)) ||
+          node?.type !== 'text' ||
+          node.locked ||
+          readOnly
+        ) {
+          return
+        }
+        setEditingText(true)
+        focusText()
+      }),
+    [session, engine, focusText, id, instancePath.join('/'), readOnly],
+  )
   if (!source) return null
 
   const currentInstance =
@@ -745,17 +792,7 @@ function RawCanvasNodeRenderer({
     event.stopPropagation()
     if (node.type === 'text' && !node.locked && !readOnly) {
       setEditingText(true)
-      requestAnimationFrame(() => {
-        const element = registry.get(ref)
-        if (element instanceof HTMLElement) {
-          element.focus()
-          const range = document.createRange()
-          range.selectNodeContents(element)
-          const selection = window.getSelection()
-          selection?.removeAllRanges()
-          selection?.addRange(range)
-        }
-      })
+      focusText()
       return
     }
     if (
@@ -1916,6 +1953,17 @@ export function CanvasSurface({
         cameraY: cameraRef.current.y,
       }
       event.currentTarget.style.cursor = 'grabbing'
+      return
+    }
+    // A right-click selects what it lands on before the context menu opens, and
+    // leaves an existing multi-selection alone.
+    if (event.button === 2) {
+      const current = session.selection[0] ?? null
+      const hit = chooseHit(event, scene, session, engine.document, current)
+      const alreadySelected =
+        hit && session.selection.some((ref) => sameRef(ref, hit))
+      if (hit && !alreadySelected) session.select([hit])
+      if (!hit) session.select([])
       return
     }
     if (event.button !== 0) return
