@@ -10,6 +10,7 @@ import {
   inlineAssetUrls,
   LEGACY_CAPTURE_STYLE_PROPERTIES,
   REACT_GLOBALS_PRELUDE,
+  selectLegacyFontEmbedCss,
   stripModuleSyntax,
   type BabelLike,
 } from './element-frame'
@@ -290,6 +291,10 @@ describe('buildElementDoc', () => {
     expect(doc).toContain('options.height = scaledCaptureHeight')
   })
 
+  it('passes preloaded migration fonts into the capture sandbox', () => {
+    expect(doc).toContain('fontEmbedCSS: msg.fontEmbedCSS')
+  })
+
   it('tracks runtime changes and marks animated captures as volatile', () => {
     expect(doc).toContain("type: 'loora:dirty'")
     expect(doc).toContain('new MutationObserver(__markDirty)')
@@ -351,6 +356,24 @@ describe('buildElementDoc', () => {
     expect(doc).toContain('pixelRatio')
     expect(doc).toContain('fontsSkipped')
     expect(doc).toContain('skipFonts: !!skipFonts')
+  })
+})
+
+describe('selectLegacyFontEmbedCss', () => {
+  it('keeps only font faces used by the legacy snapshot', () => {
+    const css = `
+      @font-face { font-family: 'Archivo'; src: url(data:font/woff2;base64,AAAA); }
+      @font-face { font-family: 'Space Grotesk'; src: url(data:font/woff2;base64,BBBB); }
+    `
+    const selected = selectLegacyFontEmbedCss(css, {
+      tag: 'main',
+      attributes: {},
+      style: { fontFamily: '"Space Grotesk", sans-serif' },
+      rect: { x: 0, y: 0, width: 1440, height: 3547 },
+      children: [],
+    })
+    expect(selected).toContain("font-family: 'Space Grotesk'")
+    expect(selected).not.toContain("font-family: 'Archivo'")
   })
 })
 

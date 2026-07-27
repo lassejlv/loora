@@ -1256,6 +1256,7 @@ window.addEventListener('message', function (e) {
       var options = {
         pixelRatio: pixelRatio,
         includeStyleProperties: captureStyleProperties,
+        fontEmbedCSS: msg.fontEmbedCSS,
         skipFonts: !!skipFonts,
       }
       if (captureScale < 1) {
@@ -1661,6 +1662,41 @@ export interface LegacyElementSnapshot {
   error: string | null
 }
 
+let sandboxFontCss: Promise<string> | null = null
+
+function loadSandboxFontCss() {
+  if (!sandboxFontCss) {
+    sandboxFontCss = fetch(FONTS_URL, { cache: 'force-cache' })
+      .then((response) => (response.ok ? response.text() : ''))
+      .catch(() => '')
+  }
+  return sandboxFontCss
+}
+
+function normalizedFontFamily(value: string) {
+  return value.trim().replace(/^['"]|['"]$/g, '').toLowerCase()
+}
+
+export function selectLegacyFontEmbedCss(
+  css: string,
+  root: NonNullable<LegacyElementSnapshot['root']>,
+) {
+  const usedFamilies = new Set<string>()
+  const visit = (node: NonNullable<LegacyElementSnapshot['root']>) => {
+    for (const family of (node.style.fontFamily ?? '').split(',')) {
+      usedFamilies.add(normalizedFontFamily(family))
+    }
+    node.children.forEach(visit)
+  }
+  visit(root)
+  return (css.match(/@font-face\s*\{[\s\S]*?\}/gi) ?? [])
+    .filter((rule) => {
+      const family = rule.match(/font-family\s*:\s*([^;]+);/i)?.[1]
+      return family ? usedFamilies.has(normalizedFontFamily(family)) : false
+    })
+    .join('\n')
+}
+
 export async function snapshotLegacyElement(
   elementId: string,
   timeoutMs = 3_000,
@@ -1713,9 +1749,15 @@ export async function snapshotLegacyElement(
     window.addEventListener('message', onMessage)
     iframe.contentWindow!.postMessage({ type: 'loora:migration-snapshot', token }, '*')
   })
+  const fontEmbedCSS = root
+    ? selectLegacyFontEmbedCss(await loadSandboxFontCss(), root)
+    : ''
   const capture = await captureElement(elementId, timeoutMs, {
     pixelRatio: capturePixelRatio,
     maxDimension: captureMaxDimension,
+    // Supplying even an empty string prevents html-to-image from trying to
+    // fetch stylesheets inside the connect-src 'none' migration sandbox.
+    fontEmbedCSS,
   })
   return {
     root,
@@ -1789,7 +1831,11 @@ export function measureElement(
 export function captureElement(
   elementId: string,
   timeoutMs = 1500,
-  options: { pixelRatio?: number; maxDimension?: number } = {},
+  options: {
+    pixelRatio?: number
+    maxDimension?: number
+    fontEmbedCSS?: string
+  } = {},
 ): Promise<ElementCapture | null> {
   const iframe = document.querySelector<HTMLIFrameElement>(
     `iframe[data-element-frame="${CSS.escape(elementId)}"]`,
@@ -1836,6 +1882,7 @@ export function captureElement(
         token,
         pixelRatio: options.pixelRatio,
         maxDimension: options.maxDimension,
+        fontEmbedCSS: options.fontEmbedCSS,
       },
       '*',
     )
