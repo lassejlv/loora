@@ -524,6 +524,39 @@ interface Allocation {
   id: NodeId
   parentId: NodeId
   order: number
+  layout: CanvasLayout
+}
+
+/** Types with nothing to measure; hugging them would collapse the node to nothing. */
+const SIZED_TYPES = new Set<CanvasNodeType>(['image', 'shape', 'vector'])
+
+/**
+ * Placement for a descriptor that did not ask for one. Nested content flows
+ * inside its parent — the old absolute default stacked every child on the
+ * parent's origin, so a whole generated page piled up in one corner. Absolute
+ * is still the default for descriptors that carry coordinates or say so.
+ */
+function descriptorLayout(
+  descriptor: CanvasNodeDescriptor,
+  parent: CanvasLayout,
+): CanvasLayout {
+  const requested = descriptor.layout ?? {}
+  const positioned =
+    requested.position === 'absolute' ||
+    (requested.position === undefined &&
+      (requested.x !== undefined || requested.y !== undefined))
+  if (positioned) return { ...defaultLayout(), ...requested, position: 'absolute' }
+
+  // A row lays children out side by side, so they size to their content; a
+  // column, grid, or block parent gives every child the full inline axis.
+  const alongRow = parent.mode === 'flex' && (parent.direction ?? 'row') === 'row'
+  const flow: Partial<CanvasLayout> = SIZED_TYPES.has(descriptor.type)
+    ? {}
+    : {
+        width: alongRow || descriptor.type === 'text' ? { unit: 'hug' } : { unit: 'fill' },
+        height: { unit: 'hug' },
+      }
+  return { ...defaultLayout(), position: 'flow', ...flow, ...requested }
 }
 
 function baseNode(
@@ -531,6 +564,7 @@ function baseNode(
   id: NodeId,
   parentId: NodeId,
   order: number,
+  layout: CanvasLayout,
 ) {
   return {
     id,
@@ -540,7 +574,7 @@ function baseNode(
     hidden: descriptor.hidden ?? false,
     locked: descriptor.locked ?? false,
     rotation: descriptor.rotation ?? 0,
-    layout: { ...defaultLayout(), ...descriptor.layout },
+    layout,
     style: { ...defaultStyle(), ...descriptor.style },
     responsive: descriptor.responsive ?? {},
     interactions: descriptor.interactions ?? [],
@@ -552,9 +586,10 @@ function descriptorNode(
   id: NodeId,
   parentId: NodeId,
   order: number,
+  layout: CanvasLayout,
   refs: ReadonlyMap<string, NodeId>,
 ): CanvasNode {
-  const base = baseNode(descriptor, id, parentId, order)
+  const base = baseNode(descriptor, id, parentId, order, layout)
   if (descriptor.type === 'text') {
     const text = descriptor.text ?? descriptor.name ?? 'Text'
     const textBase = createTextNode(text)
@@ -632,23 +667,29 @@ export function materializeNodeDescriptors(
   }
   const refs = new Map<string, NodeId>()
   const allocations: Allocation[] = []
-  const allocate = (items: CanvasNodeDescriptor[], targetParentId: NodeId) => {
+  const allocate = (
+    items: CanvasNodeDescriptor[],
+    targetParentId: NodeId,
+    parentLayout: CanvasLayout,
+  ) => {
     for (const descriptor of items) {
       const id = canvasId(descriptor.type)
       if (descriptor.ref) {
         if (refs.has(descriptor.ref)) throw new Error(`Duplicate temporary ref "${descriptor.ref}"`)
         refs.set(descriptor.ref, id)
       }
+      const layout = descriptorLayout(descriptor, parentLayout)
       allocations.push({
         descriptor,
         id,
         parentId: targetParentId,
         order: 0,
+        layout,
       })
-      allocate(descriptor.children ?? [], id)
+      allocate(descriptor.children ?? [], id, layout)
     }
   }
-  allocate(descriptors, parentId)
+  allocate(descriptors, parentId, parent.layout)
 
   const nextOrder = new Map<NodeId, number>()
   for (const allocation of allocations) {
@@ -665,6 +706,7 @@ export function materializeNodeDescriptors(
       allocation.id,
       allocation.parentId,
       allocation.order,
+      allocation.layout,
       refs,
     ),
   )

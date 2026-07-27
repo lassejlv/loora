@@ -6,8 +6,12 @@ import {
   createInstanceNode,
   createPageNode,
   createTextNode,
+  defaultLayout,
+  type CanvasLayout,
+  type CanvasNode,
 } from '@loora/canvas/model'
 import {
+  materializeNodeDescriptors,
   normalizeDeletionNodeIds,
   patchOperationsForChanges,
   readCanvasNodeRef,
@@ -136,5 +140,104 @@ describe('Canvas V2 agent NodeRefs', () => {
     expect(
       normalizeDeletionNodeIds(document, [child.id, frame.id, child.id]),
     ).toEqual([frame.id])
+  })
+})
+
+function pageFixture(pageLayout: Partial<CanvasLayout> = {}) {
+  const document = createCanvasDocument('Layout fixture', 'layout-fixture')
+  const page = createPageNode('Home', {
+    id: 'page-home',
+    layout: {
+      ...defaultLayout(1440, 900),
+      mode: 'flex',
+      direction: 'column',
+      ...pageLayout,
+    },
+  })
+  document.nodes[page.id] = page
+  return { document, page }
+}
+
+const byName = (nodes: CanvasNode[], name: string) =>
+  nodes.find((node) => node.name === name)!
+
+describe('descriptor layout defaults', () => {
+  test('nested content flows instead of stacking on the parent origin', () => {
+    const { document, page } = pageFixture()
+    const { nodes } = materializeNodeDescriptors(document, page.id, [
+      {
+        type: 'frame',
+        name: 'Nav',
+        layout: { mode: 'flex', direction: 'row', gap: 28 },
+        children: [
+          { type: 'text', name: 'Brand', text: 'Mara Chen' },
+          { type: 'text', name: 'Work', text: 'Work' },
+        ],
+      },
+    ])
+
+    for (const node of nodes) {
+      expect(node.layout.position).toBe('flow')
+    }
+    // A column parent gives its sections the full inline axis; a row parent
+    // lets each child size to its own content.
+    expect(byName(nodes, 'Nav').layout.width).toEqual({ unit: 'fill' })
+    expect(byName(nodes, 'Brand').layout.width).toEqual({ unit: 'hug' })
+    expect(byName(nodes, 'Brand').layout.height).toEqual({ unit: 'hug' })
+  })
+
+  test('text never inherits the 320x200 placeholder box', () => {
+    const { document, page } = pageFixture()
+    const { nodes } = materializeNodeDescriptors(document, page.id, [
+      {
+        type: 'frame',
+        name: 'Button',
+        layout: {
+          mode: 'flex',
+          align: 'center',
+          justify: 'center',
+          width: { unit: 'px', value: 132 },
+          height: { unit: 'px', value: 44 },
+        },
+        children: [{ type: 'text', name: 'Label', text: 'VIEW WORK' }],
+      },
+    ])
+
+    expect(byName(nodes, 'Label').layout).toMatchObject({
+      position: 'flow',
+      width: { unit: 'hug' },
+      height: { unit: 'hug' },
+    })
+  })
+
+  test('coordinates and an explicit position still mean absolute', () => {
+    const { document, page } = pageFixture()
+    const { nodes } = materializeNodeDescriptors(document, page.id, [
+      { type: 'shape', name: 'Badge', layout: { x: 40, y: 24 } },
+      { type: 'frame', name: 'Overlay', layout: { position: 'absolute' } },
+      { type: 'frame', name: 'Section', layout: { position: 'flow', x: 12 } },
+    ])
+
+    expect(byName(nodes, 'Badge').layout).toMatchObject({
+      position: 'absolute',
+      x: 40,
+      y: 24,
+      width: { unit: 'px', value: 320 },
+    })
+    expect(byName(nodes, 'Overlay').layout.position).toBe('absolute')
+    expect(byName(nodes, 'Section').layout.position).toBe('flow')
+  })
+
+  test('images keep a real box so they do not hug to nothing', () => {
+    const { document, page } = pageFixture()
+    const { nodes } = materializeNodeDescriptors(document, page.id, [
+      { type: 'image', name: 'Shot', src: '/api/asset/one' },
+    ])
+
+    expect(byName(nodes, 'Shot').layout).toMatchObject({
+      position: 'flow',
+      width: { unit: 'px', value: 320 },
+      height: { unit: 'px', value: 200 },
+    })
   })
 })
