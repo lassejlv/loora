@@ -9,6 +9,7 @@ import {
   createInstanceNode,
   createPageNode,
   createTextNode,
+  defaultLayout,
 } from './model'
 import {
   CanvasProvider,
@@ -34,6 +35,49 @@ function fixture() {
     order: 1_024,
   })
   return document
+}
+
+/** jsdom has no layout, so drag tests describe the boxes themselves. */
+function stubRect(
+  element: HTMLElement,
+  box: { left?: number; top?: number; width?: number; height?: number },
+) {
+  const left = box.left ?? 0
+  const top = box.top ?? 0
+  const width = box.width ?? 0
+  const height = box.height ?? 0
+  const rect = {
+    left,
+    top,
+    width,
+    height,
+    right: left + width,
+    bottom: top + height,
+    x: left,
+    y: top,
+    toJSON: () => rect,
+  } as DOMRect
+  Object.defineProperty(element, 'getBoundingClientRect', {
+    configurable: true,
+    value: () => rect,
+  })
+}
+
+/** Runs `body` with hit testing pinned to the given stack, topmost first. */
+function withHits(stack: Element[], body: () => void) {
+  const original = document.elementsFromPoint
+  Object.defineProperty(document, 'elementsFromPoint', {
+    configurable: true,
+    value: () => stack,
+  })
+  try {
+    body()
+  } finally {
+    Object.defineProperty(document, 'elementsFromPoint', {
+      configurable: true,
+      value: original,
+    })
+  }
 }
 
 function SelectNode({ id }: { id: string }) {
@@ -211,6 +255,87 @@ describe('Canvas React surface', () => {
     expect(engine.getNode('frame')?.layout.x).toBe(1)
     fireEvent.keyDown(window, { key: 'ArrowDown', shiftKey: true })
     expect(engine.getNode('frame')?.layout.y).toBe(10)
+  })
+
+  it('reorders a flow child inside an arranging parent instead of ejecting it', () => {
+    const document = createCanvasDocument('Drag fixture', 'drag')
+    document.nodes.page = createPageNode('Home', {
+      id: 'page',
+      layout: { ...defaultLayout(1_440, 900), mode: 'flex', direction: 'column' },
+    })
+    for (const [index, id] of ['first', 'second', 'third'].entries()) {
+      document.nodes[id] = createFrameNode(id, {
+        id,
+        parentId: 'page',
+        order: (index + 1) * 1_024,
+        layout: { ...defaultLayout(), position: 'flow' },
+      })
+    }
+    const engine = new CanvasEngine(document)
+    const view = render(
+      <CanvasProvider engine={engine}>
+        <CanvasSurface pageWidth={1_440} initialCamera={{ x: 0, y: 0, zoom: 1 }} />
+      </CanvasProvider>,
+    )
+    const surface = view.container.querySelector<HTMLElement>(
+      '[data-loora-canvas-surface]',
+    )!
+    surface.setPointerCapture = () => undefined
+    const element = (id: string) =>
+      view.container.querySelector<HTMLElement>(`[data-loora-node="${id}"]`)!
+    stubRect(element('first'), { top: 0, height: 100 })
+    stubRect(element('second'), { top: 100, height: 100 })
+    stubRect(element('third'), { top: 200, height: 100 })
+
+    withHits([element('first'), element('page')], () => {
+      fireEvent.pointerDown(surface, { button: 0, clientX: 20, clientY: 50 })
+      fireEvent.pointerMove(surface, { button: 0, clientX: 20, clientY: 260 })
+      fireEvent.pointerUp(surface, { button: 0, clientX: 20, clientY: 260 })
+    })
+
+    // Dropped past the middle of the last sibling, so it sorts to the end and
+    // stays in flow rather than being pinned to the parent's origin.
+    expect(engine.getNode('first')?.layout.position).toBe('flow')
+    expect(engine.getNode('first')!.order).toBeGreaterThan(engine.getNode('third')!.order)
+  })
+
+  it('places a flow child dropped in a free parent at the box it was rendered in', () => {
+    const document = createCanvasDocument('Drag fixture', 'drag-free')
+    document.nodes.page = createPageNode('Home', { id: 'page' })
+    document.nodes.card = createFrameNode('Card', {
+      id: 'card',
+      parentId: 'page',
+      order: 1_024,
+      layout: { ...defaultLayout(), position: 'flow' },
+    })
+    const engine = new CanvasEngine(document)
+    const view = render(
+      <CanvasProvider engine={engine}>
+        <CanvasSurface pageWidth={1_440} initialCamera={{ x: 0, y: 0, zoom: 1 }} />
+      </CanvasProvider>,
+    )
+    const surface = view.container.querySelector<HTMLElement>(
+      '[data-loora-canvas-surface]',
+    )!
+    surface.setPointerCapture = () => undefined
+    const element = (id: string) =>
+      view.container.querySelector<HTMLElement>(`[data-loora-node="${id}"]`)!
+    stubRect(element('page'), { left: 100, top: 100, width: 1_440, height: 900 })
+    stubRect(element('card'), { left: 140, top: 260, width: 320, height: 200 })
+
+    withHits([element('card'), element('page')], () => {
+      fireEvent.pointerDown(surface, { button: 0, clientX: 150, clientY: 270 })
+      fireEvent.pointerMove(surface, { button: 0, clientX: 200, clientY: 300 })
+      fireEvent.pointerUp(surface, { button: 0, clientX: 200, clientY: 300 })
+    })
+
+    // Rendered at (40, 160) inside the page, dragged by (50, 30). Reading the
+    // stored x/y instead teleported it to the parent's corner.
+    expect(engine.getNode('card')?.layout).toMatchObject({
+      position: 'absolute',
+      x: 90,
+      y: 190,
+    })
   })
 
   it('commits plaintext editing once on blur and keeps undo available', async () => {

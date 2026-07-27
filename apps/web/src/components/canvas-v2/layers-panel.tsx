@@ -361,16 +361,19 @@ function LayerRow({
         ) : (
           <span className="w-3" />
         )}
-        <button
-          type="button"
-          className="grid size-5 shrink-0 place-items-center rounded hover:bg-secondary"
-          aria-label={open ? 'Collapse layer' : 'Expand layer'}
-          onClick={() => children.length > 0 && onToggle(key)}
-        >
-          {children.length > 0 ? (
-            open ? <ChevronDownIcon className="size-3" /> : <ChevronRightIcon className="size-3" />
-          ) : null}
-        </button>
+        {children.length > 0 ? (
+          <button
+            type="button"
+            className="grid size-5 shrink-0 place-items-center rounded hover:bg-secondary"
+            aria-label={open ? 'Collapse layer' : 'Expand layer'}
+            onClick={() => onToggle(key)}
+          >
+            {open ? <ChevronDownIcon className="size-3" /> : <ChevronRightIcon className="size-3" />}
+          </button>
+        ) : (
+          // A leaf still needs the indent, but not a hoverable button that does nothing.
+          <span className="size-5 shrink-0" />
+        )}
         {renamingKey === key ? (
           <input
             autoFocus

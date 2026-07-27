@@ -41,6 +41,7 @@ import {
   type NodePatch,
   type NodeRef,
   type PageNode,
+  DEFAULT_ORDER_STEP,
   canvasId,
   resolveNodeRef,
   resolveNodeAtWidth,
@@ -538,6 +539,50 @@ function nodeRefFor(nodeId: NodeId, instancePath: NodeId[] = []): NodeRef {
   return { nodeId, instancePath }
 }
 
+/** Repositions the selection overlay; `offset` tracks a live drag in world units. */
+type OverlaySync = (remeasure?: boolean, offset?: { x: number; y: number }) => void
+
+interface DropSibling {
+  order: number
+  rect: DOMRect
+}
+
+/**
+ * How many arranged siblings the drop point has passed. Flow children have no
+ * meaningful x/y of their own, so a drag inside a flex or grid parent is a
+ * reorder — turning it into an absolute offset tore the node out of the layout
+ * and pinned it to the parent's origin.
+ */
+function dropIndex(
+  siblings: DropSibling[],
+  point: { x: number; y: number },
+  axis: 'row' | 'column' | 'grid',
+) {
+  let index = 0
+  for (const { rect } of siblings) {
+    const passed =
+      axis === 'column'
+        ? point.y > rect.top + rect.height / 2
+        : axis === 'row'
+          ? point.x > rect.left + rect.width / 2
+          : point.y > rect.bottom ||
+            (point.y > rect.top && point.x > rect.left + rect.width / 2)
+    if (!passed) break
+    index += 1
+  }
+  return index
+}
+
+/** An order that lands the node between its new neighbours. */
+function orderAtIndex(siblings: DropSibling[], index: number) {
+  const before = siblings[index - 1]?.order
+  const after = siblings[index]?.order
+  if (before === undefined && after === undefined) return DEFAULT_ORDER_STEP
+  if (before === undefined) return after! - DEFAULT_ORDER_STEP
+  if (after === undefined) return before + DEFAULT_ORDER_STEP
+  return (before + after) / 2
+}
+
 const RenderChildren = memo(function RenderChildren({
   parentId,
   instance,
@@ -1018,7 +1063,7 @@ function SelectionOverlay({
 }: {
   sceneRef: RefObject<HTMLDivElement | null>
   cameraRef: MutableRefObject<CanvasCamera>
-  syncRef: MutableRefObject<((remeasure?: boolean) => void) | null>
+  syncRef: MutableRefObject<OverlaySync | null>
   marqueeRef: RefObject<SVGRectElement | null>
   verticalGuideRef: RefObject<SVGLineElement | null>
   horizontalGuideRef: RefObject<SVGLineElement | null>
@@ -1058,8 +1103,13 @@ function SelectionOverlay({
     }
   }, [cameraRef, element, sceneRef])
 
-  /** Attribute writes only, never a React render. */
-  const sync = useCallback((remeasure?: boolean) => {
+  /**
+   * Attribute writes only, never a React render. `offset` follows a drag
+   * preview in world units, which keeps the overlay glued to the node without
+   * remeasuring — reading the box back every frame forced a synchronous layout
+   * of the whole page and was what made dragging feel heavy.
+   */
+  const sync = useCallback((remeasure?: boolean, offset?: { x: number; y: number }) => {
     if (remeasure) measure()
     const group = groupRef.current
     if (!group) return
@@ -1070,8 +1120,8 @@ function SelectionOverlay({
     }
     group.style.display = ''
     const camera = cameraRef.current
-    const left = world.left * camera.zoom + camera.x
-    const top = world.top * camera.zoom + camera.y
+    const left = (world.left + (offset?.x ?? 0)) * camera.zoom + camera.x
+    const top = (world.top + (offset?.y ?? 0)) * camera.zoom + camera.y
     const width = world.width * camera.zoom
     const height = world.height * camera.zoom
     const outline = outlineRef.current
@@ -1432,7 +1482,7 @@ export function CanvasSurface({
     latestY: number
     additive: boolean
   } | null>(null)
-  const overlaySyncRef = useRef<((remeasure?: boolean) => void) | null>(null)
+  const overlaySyncRef = useRef<OverlaySync | null>(null)
   const marqueeElementRef = useRef<SVGRectElement | null>(null)
   const verticalGuideRef = useRef<SVGLineElement | null>(null)
   const horizontalGuideRef = useRef<SVGLineElement | null>(null)
@@ -2060,7 +2110,10 @@ export function CanvasSurface({
       if (!drag.current) return
       ;(drag.current.element as HTMLElement).style.transform =
         `translate3d(${drag.current.latestX}px, ${drag.current.latestY}px, 0) ${drag.current.originalTransform}`
-      overlaySyncRef.current?.(true)
+      overlaySyncRef.current?.(false, {
+        x: drag.current.latestX,
+        y: drag.current.latestY,
+      })
       const surfaceRect = surfaceRef.current?.getBoundingClientRect()
       if (verticalGuideRef.current) {
         verticalGuideRef.current.style.display =
@@ -2159,6 +2212,9 @@ export function CanvasSurface({
     drag.current = null
     if (!current) return
     ;(current.element as HTMLElement).style.transform = current.originalTransform
+    // The preview left the overlay offset; put it back on the resting box in
+    // case this drop commits nothing.
+    overlaySyncRef.current?.(true)
     if (Math.abs(current.latestX) < 0.01 && Math.abs(current.latestY) < 0.01) return
     if (current.ref.instancePath.length === 0) {
       const target = document
@@ -2246,12 +2302,79 @@ export function CanvasSurface({
         return
       }
     }
+    const parentId = current.source.parentId
+    const parentNode = parentId ? engine.getNode(parentId) : null
+    const arranged = parentNode?.layout.mode === 'flex' || parentNode?.layout.mode === 'grid'
+
+    // Inside a parent that arranges its own children, a drag reorders.
+    if (
+      current.ref.instancePath.length === 0 &&
+      parentId &&
+      parentNode &&
+      arranged &&
+      current.source.layout.position !== 'absolute'
+    ) {
+      const siblings = engine
+        .getChildren(parentId)
+        .filter((node) => node.id !== current.source.id)
+        .map((node) => ({
+          order: node.order,
+          rect: registry.get(nodeRefFor(node.id))?.getBoundingClientRect() ?? null,
+        }))
+        .filter((entry): entry is DropSibling => entry.rect !== null)
+      const axis =
+        parentNode.layout.mode === 'grid'
+          ? 'grid'
+          : (parentNode.layout.direction ?? 'row')
+      const index = dropIndex(
+        siblings,
+        { x: current.clientX, y: current.clientY },
+        axis,
+      )
+      const currentIndex = siblings.filter(
+        (sibling) => sibling.order < current.source.order,
+      ).length
+      if (index === currentIndex) return
+      transact({
+        id: canvasId('tx'),
+        label: `Reorder ${current.source.name}`,
+        preconditions: preconditionsForNodeMove(engine.document, current.source.id),
+        operations: [
+          {
+            type: 'node.move',
+            id: current.source.id,
+            parentId,
+            order: orderAtIndex(siblings, index),
+          },
+        ],
+      })
+      return
+    }
+
+    // Everything else lands at a real coordinate. A node arriving from flow has
+    // no x/y to add the drag to, so its offset is read off the rendered box.
+    const zoom = cameraRef.current.zoom
+    const parentElement = parentId
+      ? registry.get(nodeRefFor(parentId, current.ref.instancePath))
+      : null
+    const fromFlow = current.source.layout.position !== 'absolute'
+    const parentRect = fromFlow ? parentElement?.getBoundingClientRect() : null
+    // Measured after the preview transform was cleared, so this is where the
+    // node actually sat before the drag.
+    const restedRect = parentRect ? current.element.getBoundingClientRect() : null
     const patch: NodePatch = {
-      layout: {
-        position: 'absolute',
-        x: current.source.layout.x + current.latestX,
-        y: current.source.layout.y + current.latestY,
-      },
+      layout: parentRect && restedRect
+        ? {
+            position: 'absolute',
+            x: (restedRect.left - parentRect.left) / zoom + current.latestX,
+            y: (restedRect.top - parentRect.top) / zoom + current.latestY,
+          }
+        : {
+            // Canvas roots keep their placement; they are positioned by x/y already.
+            ...(parentId ? { position: 'absolute' as const } : {}),
+            x: current.source.layout.x + current.latestX,
+            y: current.source.layout.y + current.latestY,
+          },
     }
     const instanceId = current.ref.instancePath.at(-1)
     transact({
