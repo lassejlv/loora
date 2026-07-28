@@ -503,7 +503,7 @@ export function CanvasV2PropertiesPanel({ onClose }: { onClose?: () => void }) {
 
   if (!ref || !node) {
     return (
-      <aside className="flex h-full min-h-0 w-full flex-col bg-sidebar">
+      <aside className="flex h-full min-h-0 w-full flex-col bg-transparent">
         {header}
         <div className="grid min-h-0 flex-1 place-items-center px-6 text-center">
           <p className="text-[11px] text-muted-foreground">
@@ -649,7 +649,7 @@ export function CanvasV2PropertiesPanel({ onClose }: { onClose?: () => void }) {
   return (
     <aside
       className={cn(
-        'flex h-full min-h-0 w-full flex-col bg-sidebar',
+        'flex h-full min-h-0 w-full flex-col bg-transparent',
         readOnly && 'pointer-events-none opacity-70',
       )}
       aria-label="Properties"

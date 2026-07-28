@@ -159,7 +159,7 @@ function FileCard({
   onDelete: () => void
 }) {
   return (
-    <div className="group relative flex flex-col rounded-lg border bg-card p-2.5 transition-colors hover:border-foreground/20">
+    <div className="group relative flex flex-col rounded-lg border border-glass bg-glass/80 p-2 transition-colors hover:bg-glass">
       <Link
         to="/app/design"
         search={{ id: design.id }}
@@ -178,9 +178,9 @@ function FileCard({
         name={design.name}
         onRename={onRename}
         onDelete={onDelete}
-        className="absolute end-2 top-2 bg-card opacity-0 transition-opacity group-focus-within:opacity-100 group-hover:opacity-100 data-[state=open]:opacity-100"
+        className="absolute end-2 top-2 bg-glass opacity-0 transition-opacity group-focus-within:opacity-100 group-hover:opacity-100 data-[state=open]:opacity-100"
       />
-      <div className="mt-2.5 aspect-[4/3] overflow-hidden rounded-md border bg-cx-canvas">
+      <div className="mt-2 aspect-[4/3] overflow-hidden rounded-md border border-glass bg-cx-canvas">
         <DesignThumbnail designId={design.id} revision={design.revision} />
       </div>
     </div>
@@ -197,7 +197,7 @@ function FileRow({
   onDelete: () => void
 }) {
   return (
-    <div className="group relative flex items-center gap-2.5 border-b px-2.5 py-1.5 last:border-b-0 hover:bg-secondary/50">
+    <div className="group relative flex items-center gap-2.5 border-b border-glass px-2.5 py-1.5 last:border-b-0 hover:bg-secondary/40">
       <Link
         to="/app/design"
         search={{ id: design.id }}
@@ -371,15 +371,15 @@ export function DesignsDashboard() {
 
   return (
     <div className="flex h-screen min-h-0 bg-cx-canvas text-foreground">
-      <aside className="hidden w-48 shrink-0 flex-col border-e bg-background/72 md:flex">
-        <div className="p-2">
+      <aside className="hidden w-48 shrink-0 flex-col border-e border-glass bg-glass backdrop-glass md:flex">
+        <div className="border-b border-glass p-2">
           <AccountMenu
             name={accountName}
             onSettings={() => setSettingsOpen(true)}
             onSignOut={() => void signOut()}
           />
         </div>
-        <nav className="flex flex-col gap-0.5 px-2">
+        <nav className="flex flex-col gap-0.5 p-2">
           <span
             aria-current="page"
             className="flex items-center gap-1.5 rounded-md bg-secondary px-2 py-1 text-xs font-medium"
@@ -399,7 +399,7 @@ export function DesignsDashboard() {
       </aside>
 
       <main className="flex min-w-0 flex-1 flex-col overflow-y-auto">
-        <header className="flex flex-wrap items-center gap-2 px-5 pt-5 pb-3">
+        <header className="sticky top-0 z-10 flex flex-wrap items-center gap-2 border-b border-glass bg-glass px-4 py-2.5 backdrop-glass md:px-5">
           <div className="md:hidden">
             <AccountMenu
               compact
@@ -408,8 +408,8 @@ export function DesignsDashboard() {
               onSignOut={() => void signOut()}
             />
           </div>
-          <h1 className="flex-1 text-lg font-semibold tracking-tight">Recents</h1>
-          <div className="flex items-center rounded-md border bg-background p-0.5">
+          <h1 className="flex-1 text-sm font-semibold tracking-tight">Recents</h1>
+          <div className="flex items-center rounded-md border border-glass p-0.5">
             <Button
               variant={view === 'grid' ? 'secondary' : 'ghost'}
               size="icon-sm"
@@ -436,7 +436,7 @@ export function DesignsDashboard() {
               type="search"
               aria-label="Search files"
               placeholder="Search recents"
-              className="ps-6"
+              className="rounded-md border-glass bg-transparent ps-6"
               value={query}
               onChange={(event) => setQuery(event.target.value)}
             />
@@ -448,22 +448,22 @@ export function DesignsDashboard() {
         </header>
 
         {error ? (
-          <div className="mx-5 mb-3 rounded-md border border-destructive/32 bg-destructive/8 px-2.5 py-1.5 text-xs text-destructive-foreground">
+          <div className="mx-5 mb-3 mt-3 rounded-md border border-destructive/32 bg-destructive/8 px-2.5 py-1.5 text-xs text-destructive-foreground">
             {error}
           </div>
         ) : null}
 
-        <div className="min-h-0 flex-1 px-5 pb-8">
+        <div className="min-h-0 flex-1 px-5 pt-4 pb-8">
           {designs === null ? (
             <p className="cx-shimmer text-xs">Loading your files…</p>
           ) : visible.length === 0 ? (
-            <div className="rounded-lg border border-dashed px-5 py-12 text-center">
+            <div className="rounded-lg border border-dashed border-glass px-5 py-12 text-center">
               <p className="text-xs font-medium">
                 {designs.length === 0 ? 'No design files yet' : 'No files match that search'}
               </p>
               <p className="mt-1 text-xs text-muted-foreground">
                 {designs.length === 0
-                  ? 'Start a file and the agent builds on the canvas with you.'
+                  ? 'Start a file and open it on the canvas.'
                   : 'Try a different name.'}
               </p>
               {designs.length === 0 ? (
@@ -493,7 +493,7 @@ export function DesignsDashboard() {
               ))}
             </div>
           ) : (
-            <div className="overflow-hidden rounded-lg border bg-card">
+            <div className="overflow-hidden rounded-lg border border-glass bg-glass">
               {visible.map((design) => (
                 <FileRow
                   key={design.id}

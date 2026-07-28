@@ -57,6 +57,16 @@
   --skill: var(--color-violet-500);
   --warning: var(--color-amber-500);
   --warning-foreground: var(--color-amber-700);
+
+  /* Floating chrome materials (Cursor-like glass). */
+  --glass: --alpha(#f5f5f2 / 62%);
+  --glass-strong: --alpha(#fafaf8 / 78%);
+  --glass-border: --alpha(var(--color-black) / 8%);
+  --glass-blur: 16px;
+  /* Compact rails / clusters · panels · modals */
+  --glass-radius-sm: 10px;
+  --glass-radius: 14px;
+  --glass-radius-lg: 18px;
 }
 
 @theme inline {
@@ -117,6 +127,12 @@
   --color-skill: var(--skill);
   --color-info-foreground: var(--info-foreground);
   --color-info: var(--info);
+  --color-glass: var(--glass);
+  --color-glass-strong: var(--glass-strong);
+  --color-glass-border: var(--glass-border);
+  --radius-glass-sm: var(--glass-radius-sm);
+  --radius-glass: var(--glass-radius);
+  --radius-glass-lg: var(--glass-radius-lg);
   @keyframes skeleton {
   to {
     background-position: -200% 0;
@@ -257,6 +273,53 @@ body {
   }
 }
 
+.bg-glass {
+  background-color: var(--glass);
+}
+
+.bg-glass-strong {
+  background-color: var(--glass-strong);
+}
+
+.border-glass {
+  border-color: var(--glass-border);
+}
+
+.backdrop-glass {
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(1.35);
+  backdrop-filter: blur(var(--glass-blur)) saturate(1.35);
+}
+
+.rounded-glass-sm {
+  border-radius: var(--glass-radius-sm);
+}
+
+.rounded-t-glass-sm {
+  border-top-left-radius: var(--glass-radius-sm);
+  border-top-right-radius: var(--glass-radius-sm);
+}
+
+.rounded-glass {
+  border-radius: var(--glass-radius);
+}
+
+.rounded-glass-lg {
+  border-radius: var(--glass-radius-lg);
+}
+
+/* Inset hairline (+ soft lift). Prefer this over border so blur corners stay clean. */
+.shadow-glass {
+  box-shadow:
+    inset 0 0 0 1px var(--glass-border),
+    0 1px 2px --alpha(var(--color-black) / 6%);
+}
+
+.dark .shadow-glass {
+  box-shadow:
+    inset 0 0 0 1px var(--glass-border),
+    0 1px 3px --alpha(var(--color-black) / 45%);
+}
+
 .dark {
   /* Codex dark hierarchy: main surface, rail/card, raised control, divider. */
   --cx-canvas: #0f0f11;
@@ -301,4 +364,13 @@ body {
   --warning-foreground: var(--color-amber-400);
   --font-sans: 'Inter', ui-sans-serif, system-ui, sans-serif;
   --font-heading: 'Inter', ui-sans-serif, system-ui, sans-serif;
+
+  --glass: --alpha(#1c1c1f / 72%);
+  --glass-strong: --alpha(#232326 / 86%);
+  --glass-border: --alpha(var(--color-white) / 14%);
+  --glass-blur: 16px;
+  /* Compact rails / clusters · panels · modals */
+  --glass-radius-sm: 10px;
+  --glass-radius: 14px;
+  --glass-radius-lg: 18px;
 }

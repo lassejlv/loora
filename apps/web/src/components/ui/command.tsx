@@ -82,7 +82,7 @@ export function CommandDialogPopup({
       <CommandDialogViewport>
         <CommandDialogPrimitive.Popup
           className={cn(
-            "relative row-start-2 flex max-h-96 min-h-0 w-full min-w-0 max-w-lg -translate-y-[calc(1rem*var(--nested-dialogs))] scale-[calc(1-0.08*var(--nested-dialogs))] flex-col rounded-lg border bg-popover text-popover-foreground opacity-[calc(1-0.1*var(--nested-dialogs))] shadow-[0_18px_48px_-28px_rgba(30,29,26,0.45)] outline-none transition-[scale,opacity,translate] duration-160 ease-out will-change-transform data-nested:data-ending-style:translate-y-6 data-nested:data-starting-style:translate-y-6 data-nested-dialog-open:origin-top data-ending-style:scale-98 data-starting-style:scale-98 data-ending-style:opacity-0 data-starting-style:opacity-0 **:data-[slot=scroll-area-viewport]:data-has-overflow-y:pe-1",
+            "relative row-start-2 flex max-h-96 min-h-0 w-full min-w-0 max-w-lg -translate-y-[calc(1rem*var(--nested-dialogs))] scale-[calc(1-0.08*var(--nested-dialogs))] flex-col overflow-hidden rounded-glass-lg border-0 bg-glass-strong text-popover-foreground opacity-[calc(1-0.1*var(--nested-dialogs))] shadow-glass backdrop-glass outline-none transition-[scale,opacity,translate] duration-160 ease-out will-change-transform data-nested:data-ending-style:translate-y-6 data-nested:data-starting-style:translate-y-6 data-nested-dialog-open:origin-top data-ending-style:scale-98 data-starting-style:scale-98 data-ending-style:opacity-0 data-starting-style:opacity-0 **:data-[slot=scroll-area-viewport]:data-has-overflow-y:pe-1",
             className,
           )}
           data-slot="command-dialog-popup"
@@ -166,7 +166,7 @@ export function CommandPanel({
   return (
     <div
       className={cn(
-        "relative -mx-px not-has-[+[data-slot=command-footer]]:-mb-px min-h-0 rounded-t-md not-has-[+[data-slot=command-footer]]:rounded-b-lg border border-b-0 bg-popover [clip-path:inset(0_1px)] not-has-[+[data-slot=command-footer]]:[clip-path:inset(0_1px_1px_1px_round_0_0_calc(var(--radius-lg)-1px)_calc(var(--radius-lg)-1px))] **:data-[slot=scroll-area-scrollbar]:mt-1.5",
+        "relative -mx-px not-has-[+[data-slot=command-footer]]:-mb-px min-h-0 rounded-t-[calc(var(--glass-radius-lg)-1px)] not-has-[+[data-slot=command-footer]]:rounded-b-[calc(var(--glass-radius-lg)-1px)] border-0 border-b-0 bg-transparent [clip-path:inset(0_1px)] not-has-[+[data-slot=command-footer]]:[clip-path:inset(0_1px_1px_1px_round_0_0_calc(var(--radius-lg)-1px)_calc(var(--radius-lg)-1px))] **:data-[slot=scroll-area-scrollbar]:mt-1.5",
         className,
       )}
       {...props}

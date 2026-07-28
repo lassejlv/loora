@@ -26,8 +26,8 @@ export function PanelShell({
   bodyScroll?: boolean
 }) {
   return (
-    <aside className={cn('flex h-full min-h-0 w-full flex-col bg-card', className)}>
-      <header className="flex items-start justify-between gap-2 border-b px-2.5 py-2">
+    <aside className={cn('flex h-full min-h-0 w-full flex-col bg-glass-strong backdrop-glass', className)}>
+      <header className="flex items-start justify-between gap-2 border-b border-glass px-2.5 py-2">
         <div className="min-w-0">
           <h2 className="font-heading text-xs font-semibold">{title}</h2>
           {description ? (

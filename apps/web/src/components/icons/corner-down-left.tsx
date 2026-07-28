@@ -31,7 +31,7 @@ interface CornerDownLeftIconProps extends HTMLAttributes<HTMLDivElement> {
 const CornerDownLeftIcon = forwardRef<
   CornerDownLeftIconHandle,
   CornerDownLeftIconProps
->(({ onMouseEnter, onMouseLeave, className, size = 28, ...props }, ref) => {
+>(({onMouseEnter, onMouseLeave, className, size, style, ...props }, ref) => {
   const controls = useAnimation();
   const isControlledRef = useRef(false);
 
@@ -67,7 +67,12 @@ const CornerDownLeftIcon = forwardRef<
 
   return (
     <div
-      className={cn("inline-flex shrink-0 [&>svg]:size-full", className)}
+      className={cn(
+          "inline-flex shrink-0 items-center justify-center [&>svg]:block [&>svg]:size-full",
+          size == null && "size-3.5",
+          className,
+        )}
+        style={size != null ? { width: size, height: size, ...style } : style}
       onMouseEnter={handleMouseEnter}
       onMouseLeave={handleMouseLeave}
       {...props}

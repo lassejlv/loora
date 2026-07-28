@@ -9,7 +9,6 @@ import {
   type RefObject,
 } from 'react'
 import {
-  BringToFrontIcon,
   CommandIcon,
   ComponentIcon,
   EllipsisIcon,
@@ -19,11 +18,9 @@ import {
   PanelsTopLeftIcon,
   Redo2Icon,
   RectangleHorizontalIcon,
-  SendToBackIcon,
   Trash2Icon,
   TypeIcon,
   Undo2Icon,
-  UngroupIcon,
   ZoomInIcon,
   ZoomOutIcon,
 } from 'lucide-react'
@@ -603,9 +600,108 @@ function CanvasV2Shell({
   const inspectorTitle = inspector === 'layers' ? 'Layers' : 'Design'
 
   return (
-    <div className="flex h-full min-h-0 w-full bg-background">
-      <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
-        <header className="flex h-8 shrink-0 items-center gap-1 border-b px-1.5">
+    <div className="relative h-full min-h-0 w-full bg-cx-canvas">
+      <main className="absolute inset-0 overflow-hidden">
+        <CanvasV2ContextMenu
+          actions={actions}
+          shortcutLabel={shortcutLabel}
+          onZoomToSelection={() => controlsRef.current?.zoomToSelection()}
+        >
+          <CanvasSurface
+            key={cameraKey}
+            controlsRef={controlsRef}
+            initialCamera={initialCamera}
+            interactionMode={interactionMode}
+            className="h-full w-full"
+            pageWidth={previewWidth}
+            acceptsDrop={(event) =>
+              event.dataTransfer.types.includes(ASSET_DRAG_TYPE) ||
+              event.dataTransfer.types.includes('Files')
+            }
+            onDrop={(event, placement) => {
+              const payload = event.dataTransfer.getData(ASSET_DRAG_TYPE)
+              if (payload) {
+                try {
+                  actions.insertAsset(JSON.parse(payload) as AssetMeta, placement)
+                } catch {
+                  // A payload we cannot read is not ours to place.
+                }
+                return
+              }
+              void uploadDroppedImages([...event.dataTransfer.files], placement)
+            }}
+            onCameraChange={(camera) => {
+              setZoom(camera.zoom)
+              if (controller.target) {
+                window.localStorage.setItem(cameraKey, JSON.stringify(camera))
+              }
+            }}
+          />
+        </CanvasV2ContextMenu>
+
+        <Drawer
+          open={assetsOpen}
+          onOpenChange={setAssetsOpen}
+          position="bottom"
+        >
+          <DrawerPopup
+            position="bottom"
+            variant="inset"
+            className="h-[min(60svh,32rem)] overflow-hidden rounded-glass-lg bg-glass-strong shadow-glass backdrop-glass"
+          >
+            <CanvasV2Assets
+              onInsert={(asset) => {
+                actions.insertAsset(asset)
+                setAssetsOpen(false)
+              }}
+            />
+          </DrawerPopup>
+        </Drawer>
+
+        {isMobile ? (
+          <Drawer
+            open={inspector !== null}
+            onOpenChange={(open) => !open && setInspector(null)}
+            position="bottom"
+          >
+            <DrawerPopup
+              position="bottom"
+              variant="inset"
+              className="mx-auto h-[min(60svh,34rem)] w-full max-w-sm overflow-hidden rounded-glass-lg bg-glass-strong shadow-glass backdrop-glass"
+            >
+              {inspectorPanel}
+            </DrawerPopup>
+          </Drawer>
+        ) : null}
+
+        <Dialog open={settingsOpen} onOpenChange={setSettingsOpen}>
+          <DialogPopup
+            showCloseButton={false}
+            className="h-[min(70svh,36rem)] overflow-hidden p-0"
+          >
+            <SettingsPanel
+              onClose={() => setSettingsOpen(false)}
+              shortcutConfig={shortcutConfig}
+              onShortcutConfigChange={updateShortcutConfig}
+            />
+          </DialogPopup>
+        </Dialog>
+
+        <CanvasV2Export
+          controller={controller}
+          open={exportOpen}
+          onOpenChange={setExportOpen}
+        />
+
+        <EditorCommandMenu
+          open={commandMenuOpen}
+          onOpenChange={setCommandMenuOpen}
+          groups={commandGroups}
+        />
+      </main>
+
+      <div className="pointer-events-none absolute inset-0 z-20 flex flex-col">
+        <header className="pointer-events-auto flex h-9 shrink-0 items-center gap-1 border-b border-glass bg-glass px-2 backdrop-glass">
           <span className="shrink-0 ps-1 text-[11px] font-semibold tracking-tight">
             loora
           </span>
@@ -629,6 +725,12 @@ function CanvasV2Shell({
           </div>
 
           <div className="ms-auto flex shrink-0 items-center gap-0.5">
+            <div className="me-1 hidden md:block">
+              <CanvasV2Breakpoint
+                width={previewWidth}
+                onChange={setPreviewWidth}
+              />
+            </div>
             <Button
               variant="ghost"
               size="icon-sm"
@@ -664,7 +766,7 @@ function CanvasV2Shell({
                 />
               </>
             ) : null}
-            <div className="mx-1 h-4 w-px bg-border" />
+            <div className="mx-1 h-4 w-px bg-glass-border" />
             <Button
               variant="ghost"
               size="icon-sm"
@@ -724,123 +826,32 @@ function CanvasV2Shell({
         </header>
 
         <div className="flex min-h-0 flex-1">
-          <CanvasV2ToolStrip
-            actions={actions}
-            interactionMode={interactionMode}
-            onInteractionModeChange={setInteractionMode}
-            onAssetsOpen={() => setAssetsOpen(true)}
-            shortcutLabel={shortcutLabel}
-          />
-
-          <main className="relative min-w-0 flex-1 overflow-hidden">
-            <CanvasV2ContextMenu
-              actions={actions}
-              shortcutLabel={shortcutLabel}
-              onZoomToSelection={() => controlsRef.current?.zoomToSelection()}
-            >
-              <CanvasSurface
-                key={cameraKey}
-                controlsRef={controlsRef}
-                initialCamera={initialCamera}
+          <div className="pointer-events-auto flex w-9 shrink-0 flex-col border-e border-glass bg-glass backdrop-glass">
+            <TooltipProvider delay={400} closeDelay={0}>
+              <CanvasV2ToolStrip
+                actions={actions}
                 interactionMode={interactionMode}
-                className="h-full w-full"
-                pageWidth={previewWidth}
-                acceptsDrop={(event) =>
-                  event.dataTransfer.types.includes(ASSET_DRAG_TYPE) ||
-                  event.dataTransfer.types.includes('Files')
-                }
-                onDrop={(event, placement) => {
-                  const payload = event.dataTransfer.getData(ASSET_DRAG_TYPE)
-                  if (payload) {
-                    try {
-                      actions.insertAsset(JSON.parse(payload) as AssetMeta, placement)
-                    } catch {
-                      // A payload we cannot read is not ours to place.
-                    }
-                    return
-                  }
-                  void uploadDroppedImages([...event.dataTransfer.files], placement)
-                }}
-                onCameraChange={(camera) => {
-                  setZoom(camera.zoom)
-                  if (controller.target) {
-                    window.localStorage.setItem(cameraKey, JSON.stringify(camera))
-                  }
-                }}
+                onInteractionModeChange={setInteractionMode}
+                onAssetsOpen={() => setAssetsOpen(true)}
+                shortcutLabel={shortcutLabel}
+                controls={controlsRef}
+                zoom={zoom}
               />
-            </CanvasV2ContextMenu>
+            </TooltipProvider>
+          </div>
 
-            <Drawer
-              open={assetsOpen}
-              onOpenChange={setAssetsOpen}
-              position="bottom"
-            >
-              <DrawerPopup
-                position="bottom"
-                variant="inset"
-                className="h-[min(60svh,32rem)] overflow-hidden rounded-lg border"
-              >
-                <CanvasV2Assets
-                  onInsert={(asset) => {
-                    actions.insertAsset(asset)
-                    setAssetsOpen(false)
-                  }}
-                />
-              </DrawerPopup>
-            </Drawer>
-
-            {isMobile ? (
-              <Drawer
-                open={inspector !== null}
-                onOpenChange={(open) => !open && setInspector(null)}
-                position="bottom"
-              >
-                <DrawerPopup
-                  position="bottom"
-                  variant="inset"
-                  className="mx-auto h-[min(60svh,34rem)] w-full max-w-sm overflow-hidden rounded-lg border"
-                >
-                  {inspectorPanel}
-                </DrawerPopup>
-              </Drawer>
-            ) : null}
-
-            <Dialog open={settingsOpen} onOpenChange={setSettingsOpen}>
-              <DialogPopup
-                showCloseButton={false}
-                className="h-[min(70svh,36rem)] overflow-hidden p-0"
-              >
-                <SettingsPanel
-                  onClose={() => setSettingsOpen(false)}
-                  shortcutConfig={shortcutConfig}
-                  onShortcutConfigChange={updateShortcutConfig}
-                />
-              </DialogPopup>
-            </Dialog>
-
-            <CanvasV2Export
-              controller={controller}
-              open={exportOpen}
-              onOpenChange={setExportOpen}
-            />
-
-            <EditorCommandMenu
-              open={commandMenuOpen}
-              onOpenChange={setCommandMenuOpen}
-              groups={commandGroups}
-            />
-          </main>
+          <div className="min-w-0 flex-1" />
 
           {!isMobile && inspectorPanel ? (
             <div
-              className="relative flex shrink-0 border-s"
+              className="pointer-events-auto relative flex shrink-0 border-s border-glass bg-glass-strong backdrop-glass"
               style={{ width: inspectorWidth }}
             >
               <div
                 role="separator"
                 aria-label={`Resize ${inspectorTitle} panel`}
                 aria-orientation="vertical"
-                className="absolute inset-y-0 -start-1 z-20 w-2 cursor-col-resize touch-none hover:bg-border"
+                className="absolute inset-y-0 -start-1 z-20 w-2 cursor-col-resize touch-none hover:bg-glass-border"
                 onPointerDown={(event) => {
                   event.currentTarget.setPointerCapture(event.pointerId)
                   setResizingInspector(true)
@@ -867,14 +878,6 @@ function CanvasV2Shell({
             </div>
           ) : null}
         </div>
-
-        <CanvasV2StatusBar
-          actions={actions}
-          controls={controlsRef}
-          zoom={zoom}
-          previewWidth={previewWidth}
-          onPreviewWidthChange={setPreviewWidth}
-        />
       </div>
     </div>
   )
@@ -892,7 +895,7 @@ function CanvasV2Breakpoint({
     <select
       aria-label="Responsive preview"
       value={width}
-      className="h-6 rounded-md border bg-background px-1.5 text-[11px]"
+      className="h-6 rounded-md border border-glass bg-transparent px-1.5 text-[11px]"
       onChange={(event) => onChange(Number(event.target.value))}
     >
       {[...document.breakpoints]
@@ -1758,254 +1761,133 @@ function CanvasV2Assets({ onInsert }: { onInsert: (asset: AssetMeta) => void }) 
   return <AssetsPanel usage={usage} onInsert={onInsert} />
 }
 
-/** Flush vertical strip against the canvas, not a floating cluster. */
+/** Connected left rail: tools, undo/redo, then zoom. */
 function CanvasV2ToolStrip({
   actions,
   interactionMode,
   onInteractionModeChange,
   onAssetsOpen,
   shortcutLabel,
+  controls,
+  zoom,
 }: {
   actions: CanvasEditorActions
   interactionMode: 'select' | 'pan'
   onInteractionModeChange: (mode: 'select' | 'pan') => void
   onAssetsOpen: () => void
   shortcutLabel: (id: BuiltInShortcutId) => string
-}) {
-  return (
-    <TooltipProvider delay={400} closeDelay={0}>
-      <div className="flex w-8 shrink-0 flex-col items-center gap-0.5 border-e bg-sidebar py-1">
-        <CanvasV2ToolButton
-          icon={MousePointer2Icon}
-          label="Select"
-          shortcut={shortcutLabel('tool.select')}
-          active={interactionMode === 'select'}
-          onClick={() => onInteractionModeChange('select')}
-        />
-        <CanvasV2ToolButton
-          icon={HandIcon}
-          label="Hand"
-          shortcut={shortcutLabel('tool.hand')}
-          active={interactionMode === 'pan'}
-          onClick={() => onInteractionModeChange('pan')}
-        />
-        <div className="my-1 h-px w-4 bg-border" />
-        <CanvasV2ToolButton
-          icon={FrameIcon}
-          label="Frame"
-          disabled={actions.readOnly || !actions.parent}
-          onClick={() => {
-            actions.addFrame()
-            onInteractionModeChange('select')
-          }}
-        />
-        <CanvasV2ToolButton
-          icon={TypeIcon}
-          label="Text"
-          shortcut={shortcutLabel('tool.text')}
-          disabled={actions.readOnly || !actions.parent}
-          onClick={() => {
-            actions.addText()
-            onInteractionModeChange('select')
-          }}
-        />
-        <CanvasV2ToolButton
-          icon={RectangleHorizontalIcon}
-          label="Rectangle"
-          shortcut={shortcutLabel('tool.box')}
-          disabled={actions.readOnly || !actions.parent}
-          onClick={() => {
-            actions.addShape()
-            onInteractionModeChange('select')
-          }}
-        />
-        <CanvasV2ToolButton
-          icon={ImageIcon}
-          label="Image"
-          shortcut={shortcutLabel('tool.image')}
-          disabled={actions.readOnly}
-          onClick={onAssetsOpen}
-        />
-        <CanvasV2ToolButton
-          icon={ComponentIcon}
-          label="Component"
-          disabled={actions.readOnly || !actions.parent}
-          onClick={() => {
-            actions.addComponent()
-            onInteractionModeChange('select')
-          }}
-        />
-        <div className="mt-auto flex flex-col items-center gap-0.5">
-          <div className="my-1 h-px w-4 bg-border" />
-          <CanvasV2ToolButton
-            icon={Undo2Icon}
-            label="Undo"
-            shortcut={shortcutLabel('undo')}
-            disabled={actions.readOnly || !actions.history.canUndo}
-            onClick={() => actions.history.undo()}
-          />
-          <CanvasV2ToolButton
-            icon={Redo2Icon}
-            label="Redo"
-            shortcut={shortcutLabel('redo')}
-            disabled={actions.readOnly || !actions.history.canRedo}
-            onClick={() => actions.history.redo()}
-          />
-        </div>
-      </div>
-    </TooltipProvider>
-  )
-}
-
-/**
- * One slim strip along the bottom: view controls on the left, selection
- * actions on the right. Replaces two floating clusters that used to sit on
- * top of the artboard.
- */
-function CanvasV2StatusBar({
-  actions,
-  controls,
-  zoom,
-  previewWidth,
-  onPreviewWidthChange,
-}: {
-  actions: CanvasEditorActions
   controls: RefObject<CanvasSurfaceControls | null>
   zoom: number
-  previewWidth: number
-  onPreviewWidthChange: (width: number) => void
 }) {
-  const count = actions.selection.length
+  const selectionCount = actions.selection.length
   return (
-    <footer className="flex h-7 shrink-0 items-center gap-0.5 border-t px-1.5 text-[10px] text-muted-foreground">
-      <Button
-        size="icon-xs"
-        variant="ghost"
-        aria-label="Zoom out"
-        title="Zoom out"
-        onClick={() => controls.current?.zoomOut()}
-      >
-        <ZoomOutIcon />
-      </Button>
-      <Button
-        size="xs"
-        variant="ghost"
-        className="min-w-11 tabular-nums"
-        title="Reset zoom"
-        onClick={() => controls.current?.zoomReset()}
-      >
-        {Math.round(zoom * 100)}%
-      </Button>
-      <Button
-        size="icon-xs"
-        variant="ghost"
-        aria-label="Zoom in"
-        title="Zoom in"
-        onClick={() => controls.current?.zoomIn()}
-      >
-        <ZoomInIcon />
-      </Button>
-      <Button
-        size="icon-xs"
-        variant="ghost"
-        aria-label={count > 0 ? 'Zoom to selection' : 'Zoom to fit'}
-        title={count > 0 ? 'Zoom to selection' : 'Zoom to fit'}
-        onClick={() =>
-          count > 0
-            ? controls.current?.zoomToSelection()
-            : controls.current?.zoomToFit()
-        }
-      >
-        <MaximizeIcon />
-      </Button>
-      <div className="mx-1 hidden h-4 w-px bg-border md:block" />
-      <div className="hidden md:block">
-        <CanvasV2Breakpoint
-          width={previewWidth}
-          onChange={onPreviewWidthChange}
+    <div className="flex h-full w-full min-h-0 flex-col items-center gap-0.5 py-1.5">
+      <CanvasV2ToolButton
+        icon={MousePointer2Icon}
+        label="Select"
+        shortcut={shortcutLabel('tool.select')}
+        active={interactionMode === 'select'}
+        onClick={() => onInteractionModeChange('select')}
+      />
+      <CanvasV2ToolButton
+        icon={HandIcon}
+        label="Hand"
+        shortcut={shortcutLabel('tool.hand')}
+        active={interactionMode === 'pan'}
+        onClick={() => onInteractionModeChange('pan')}
+      />
+      <div className="my-1 h-px w-4 bg-glass-border" />
+      <CanvasV2ToolButton
+        icon={FrameIcon}
+        label="Frame"
+        disabled={actions.readOnly || !actions.parent}
+        onClick={() => {
+          actions.addFrame()
+          onInteractionModeChange('select')
+        }}
+      />
+      <CanvasV2ToolButton
+        icon={TypeIcon}
+        label="Text"
+        shortcut={shortcutLabel('tool.text')}
+        disabled={actions.readOnly || !actions.parent}
+        onClick={() => {
+          actions.addText()
+          onInteractionModeChange('select')
+        }}
+      />
+      <CanvasV2ToolButton
+        icon={RectangleHorizontalIcon}
+        label="Rectangle"
+        shortcut={shortcutLabel('tool.box')}
+        disabled={actions.readOnly || !actions.parent}
+        onClick={() => {
+          actions.addShape()
+          onInteractionModeChange('select')
+        }}
+      />
+      <CanvasV2ToolButton
+        icon={ImageIcon}
+        label="Image"
+        shortcut={shortcutLabel('tool.image')}
+        disabled={actions.readOnly}
+        onClick={onAssetsOpen}
+      />
+      <CanvasV2ToolButton
+        icon={ComponentIcon}
+        label="Component"
+        disabled={actions.readOnly || !actions.parent}
+        onClick={() => {
+          actions.addComponent()
+          onInteractionModeChange('select')
+        }}
+      />
+      <div className="mt-auto flex w-full flex-col items-center gap-0.5">
+        <div className="my-1 h-px w-4 bg-glass-border" />
+        <CanvasV2ToolButton
+          icon={Undo2Icon}
+          label="Undo"
+          shortcut={shortcutLabel('undo')}
+          disabled={actions.readOnly || !actions.history.canUndo}
+          onClick={() => actions.history.undo()}
+        />
+        <CanvasV2ToolButton
+          icon={Redo2Icon}
+          label="Redo"
+          shortcut={shortcutLabel('redo')}
+          disabled={actions.readOnly || !actions.history.canRedo}
+          onClick={() => actions.history.redo()}
+        />
+        <div className="my-1 h-px w-4 bg-glass-border" />
+        <CanvasV2ToolButton
+          icon={ZoomOutIcon}
+          label="Zoom out"
+          onClick={() => controls.current?.zoomOut()}
+        />
+        <Button
+          size="xs"
+          variant="ghost"
+          className="h-6 w-full min-w-0 px-0 text-[10px] tabular-nums"
+          title="Reset zoom"
+          onClick={() => controls.current?.zoomReset()}
+        >
+          {Math.round(zoom * 100)}%
+        </Button>
+        <CanvasV2ToolButton
+          icon={ZoomInIcon}
+          label="Zoom in"
+          onClick={() => controls.current?.zoomIn()}
+        />
+        <CanvasV2ToolButton
+          icon={MaximizeIcon}
+          label={selectionCount > 0 ? 'Zoom to selection' : 'Zoom to fit'}
+          onClick={() =>
+            selectionCount > 0
+              ? controls.current?.zoomToSelection()
+              : controls.current?.zoomToFit()
+          }
         />
       </div>
-
-      {count > 0 ? (
-        <div className="ms-auto flex items-center gap-0.5">
-          <span className="pe-1 tabular-nums">
-            {count === 1 ? '1 selected' : `${count} selected`}
-          </span>
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button
-                size="icon-xs"
-                variant="ghost"
-                aria-label="Arrange"
-                title="Arrange"
-                disabled={!actions.canReorder}
-              >
-                <BringToFrontIcon />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
-              <DropdownMenuItem onClick={() => actions.reorderSelection('front')}>
-                <BringToFrontIcon data-slot="icon" />
-                Bring to front
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => actions.reorderSelection('forward')}>
-                <BringToFrontIcon data-slot="icon" />
-                Bring forward
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => actions.reorderSelection('backward')}>
-                <SendToBackIcon data-slot="icon" />
-                Send backward
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => actions.reorderSelection('back')}>
-                <SendToBackIcon data-slot="icon" />
-                Send to back
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
-          {actions.canUngroup ? (
-            <Button
-              size="icon-xs"
-              variant="ghost"
-              aria-label="Ungroup"
-              title="Ungroup"
-              onClick={actions.ungroupSelection}
-            >
-              <UngroupIcon />
-            </Button>
-          ) : (
-            <Button
-              size="icon-xs"
-              variant="ghost"
-              aria-label="Group"
-              title="Group"
-              disabled={!actions.canGroup}
-              onClick={actions.groupSelection}
-            >
-              <GroupIcon />
-            </Button>
-          )}
-          <Button
-            size="icon-xs"
-            variant="ghost"
-            aria-label="Duplicate"
-            title="Duplicate"
-            disabled={!actions.canDuplicate}
-            onClick={actions.duplicateSelection}
-          >
-            <CopyIcon />
-          </Button>
-          <Button
-            size="icon-xs"
-            variant="ghost"
-            aria-label="Delete"
-            title="Delete"
-            disabled={actions.readOnly}
-            onClick={actions.deleteSelection}
-          >
-            <Trash2Icon />
-          </Button>
-        </div>
-      ) : null}
-    </footer>
+    </div>
   )
 }

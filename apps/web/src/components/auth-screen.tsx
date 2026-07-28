@@ -58,7 +58,7 @@ export function AuthScreen() {
                 setError('')
               }}
             >
-              <TabsList className="mb-4 grid w-full grid-cols-2">
+              <TabsList className="mb-4 grid w-full grid-cols-2 rounded-lg p-1">
                 <TabsTab value="sign-in">Login</TabsTab>
                 <TabsTab value="sign-up">Sign up</TabsTab>
               </TabsList>
@@ -84,6 +84,7 @@ export function AuthScreen() {
                       aria-label="Name"
                       autoComplete="name"
                       placeholder="Name"
+                      className="rounded-lg"
                       value={name}
                       onChange={(event) => setName(event.target.value)}
                       required
@@ -94,6 +95,7 @@ export function AuthScreen() {
                     autoComplete="email"
                     placeholder="you@example.com"
                     type="email"
+                    className="rounded-lg"
                     value={email}
                     onChange={(event) => setEmail(event.target.value)}
                     required
@@ -104,12 +106,13 @@ export function AuthScreen() {
                     minLength={8}
                     placeholder="Password"
                     type="password"
+                    className="rounded-lg"
                     value={password}
                     onChange={(event) => setPassword(event.target.value)}
                     required
                   />
                   {error && <p className="text-sm text-destructive-foreground">{error}</p>}
-                  <Button className="mt-1" disabled={pending} type="submit">
+                  <Button className="mt-1 rounded-lg" disabled={pending} type="submit">
                     {pending ? 'Working…' : mode === 'sign-in' ? 'Login' : 'Create account'}
                   </Button>
                 </form>

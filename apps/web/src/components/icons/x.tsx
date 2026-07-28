@@ -28,7 +28,7 @@ const PATH_VARIANTS: Variants = {
 };
 
 const XIcon = forwardRef<XIconHandle, XIconProps>(
-  ({ onMouseEnter, onMouseLeave, className, size = 28, ...props }, ref) => {
+  ({onMouseEnter, onMouseLeave, className, size, style, ...props }, ref) => {
     const controls = useAnimation();
     const isControlledRef = useRef(false);
 
@@ -64,7 +64,12 @@ const XIcon = forwardRef<XIconHandle, XIconProps>(
     );
     return (
       <div
-        className={cn("inline-flex shrink-0 [&>svg]:size-full", className)}
+        className={cn(
+          "inline-flex shrink-0 items-center justify-center [&>svg]:block [&>svg]:size-full",
+          size == null && "size-3.5",
+          className,
+        )}
+        style={size != null ? { width: size, height: size, ...style } : style}
         onMouseEnter={handleMouseEnter}
         onMouseLeave={handleMouseLeave}
         {...props}
