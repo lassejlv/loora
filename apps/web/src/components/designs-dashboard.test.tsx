@@ -15,7 +15,6 @@ mock.module('#/lib/orpc-client', () => ({
     preferences: {
       get: getPreferences,
       save: mock(),
-      saveAgentPrompt: mock(),
     },
   },
 }))
@@ -63,7 +62,7 @@ describe('DesignsDashboard', () => {
   beforeEach(() => {
     window.localStorage.clear()
     navigate.mockReset().mockResolvedValue(undefined)
-    getPreferences.mockReset().mockResolvedValue({ shortcuts: null, agentSystemPrompt: null })
+    getPreferences.mockReset().mockResolvedValue({ shortcuts: null })
     create.mockReset().mockResolvedValue({ revision: 1 })
     rename.mockReset()
     deleteDesign.mockReset().mockResolvedValue({ deleted: true })

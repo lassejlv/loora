@@ -29,10 +29,16 @@ const plans = [
     id: 'pro' as const,
     name: 'Pro',
     price: '$20',
-    credits: '100 AI credits each month after trial',
+    summary: 'Full canvas, branches, MCP, and publishing',
     note: '3-day free trial',
   },
-  { id: 'studio' as const, name: 'Studio', price: '$49', credits: '300 AI credits each month', note: '3× AI capacity' },
+  {
+    id: 'studio' as const,
+    name: 'Studio',
+    price: '$49',
+    summary: 'Pro plus higher publish bandwidth and priority support',
+    note: 'For teams',
+  },
 ]
 
 export function SubscriptionScreen({ userId, children, preview, redirect }: SubscriptionScreenProps) {
@@ -111,7 +117,8 @@ export function SubscriptionScreen({ userId, children, preview, redirect }: Subs
             </p>
             <DialogTitle>Choose your Loora plan</DialogTitle>
             <DialogDescription>
-              Both plans include the full editor, saving, history, exports, and handoffs.
+              Both plans include the full editor, saving, history, branches, exports, handoffs, and
+              the MCP server for driving the canvas from your own agent.
             </DialogDescription>
           </DialogHeader>
           <DialogPanel className="flex flex-col gap-4 pt-1">
@@ -121,7 +128,7 @@ export function SubscriptionScreen({ userId, children, preview, redirect }: Subs
                   <div className="flex flex-wrap items-start justify-between gap-x-3 gap-y-1">
                     <div className="min-w-0">
                       <h2 className="text-sm font-semibold">{plan.name}</h2>
-                      <p className="mt-1 text-xs text-muted-foreground">{plan.credits}</p>
+                      <p className="mt-1 text-xs text-muted-foreground">{plan.summary}</p>
                     </div>
                     {plan.note ? (
                       <span className="shrink-0 whitespace-nowrap rounded-full bg-secondary px-2 py-1 text-[10px] font-medium">
@@ -134,8 +141,8 @@ export function SubscriptionScreen({ userId, children, preview, redirect }: Subs
                   </p>
                   {plan.id === 'pro' ? (
                     <p className="mt-2 text-xs text-muted-foreground">
-                      Free for 3 days, then $20/month unless canceled. During the trial, connect ChatGPT for AI;
-                      managed AI and credit top-ups unlock afterward.
+                      Free for 3 days, then $20/month unless canceled. Everything is unlocked during
+                      the trial.
                     </p>
                   ) : null}
                   <div className="mt-4 flex flex-1 flex-col justify-end">

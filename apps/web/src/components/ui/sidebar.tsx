@@ -109,7 +109,7 @@ export function SidebarProvider({
 }): React.ReactElement {
   const isMobile = useMediaQuery("max-md");
   // Keep mobile sheet state in sync with desktop `open` so controlled
-  // consumers (e.g. agent panel) don't write one path and read the other.
+  // consumers don't write one path and read the other.
   const [openMobile, setOpenMobileState] = React.useState(
     () => openProp ?? defaultOpen,
   );

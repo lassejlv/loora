@@ -1,4 +1,6 @@
-export function isPreviewAccessRequired(value = process.env.REQUIRE_PREVIEW_ACCESS) {
+export function isPreviewAccessRequired(
+  value: string | null | undefined = process.env.REQUIRE_PREVIEW_ACCESS,
+) {
   return value?.trim().toLowerCase() !== 'false'
 }
 

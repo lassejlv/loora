@@ -22,7 +22,6 @@ const noPlan = {
   currentPeriodEnd: null,
   cancelAtPeriodEnd: false,
   trial: null,
-  credits: null,
   stale: false,
   source: 'polar' as const,
 }

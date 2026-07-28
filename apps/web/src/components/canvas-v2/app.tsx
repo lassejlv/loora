@@ -166,10 +166,6 @@ export function CanvasV2App({
   const [progress, setProgress] = useState('Opening Canvas V2')
   const [error, setError] = useState<string | null>(null)
   const [migration, setMigration] = useState<CanvasMigrationOutcome | null>(null)
-  const [migrationAgentPrompt, setMigrationAgentPrompt] = useState<{
-    id: string
-    message: string
-  } | null>(null)
   const [figmaOpen, setFigmaOpen] = useState(false)
   const [renameOpen, setRenameOpen] = useState(false)
   const [renameName, setRenameName] = useState('')
@@ -412,8 +408,6 @@ export function CanvasV2App({
           activeBranch?.status === 'applied' ||
           activeBranch?.status === 'closed'
         }
-        queuedAgentPrompt={migrationAgentPrompt}
-        onQueuedAgentPromptConsumed={() => setMigrationAgentPrompt(null)}
         topBar={
           <>
             <CanvasV2DocSwitcher
@@ -530,26 +524,6 @@ export function CanvasV2App({
             ))}
           </DialogPanel>
           <DialogFooter>
-            {migration?.reports.some(
-              ({ report }) => report.fallbackElementIds.length > 0,
-            ) ? (
-              <Button
-                variant="outline"
-                onClick={() => {
-                  const ids = migration.reports.flatMap(
-                    ({ report }) => report.fallbackElementIds,
-                  )
-                  setMigrationAgentPrompt({
-                    id: crypto.randomUUID(),
-                    message:
-                      `Rebuild these raster migration fallbacks as editable structured Canvas V2 nodes: ${ids.join(', ')}. Preserve their current appearance and replace each fallback image only after the editable result is ready.`,
-                  })
-                  setMigration(null)
-                }}
-              >
-                Rebuild as editable
-              </Button>
-            ) : null}
             <Button onClick={() => setMigration(null)}>Continue</Button>
           </DialogFooter>
         </DialogPopup>

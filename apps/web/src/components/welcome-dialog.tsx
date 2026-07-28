@@ -31,16 +31,16 @@ export function clearWelcomeSeen() {
 
 const BEATS = [
   {
-    title: 'Describe, don’t draw first',
-    body: 'Tell the agent what you want. It builds editable, structured UI directly on the board.',
+    title: 'Design on an infinite canvas',
+    body: 'Every element is structured, responsive UI you can select, group, and nudge.',
   },
   {
-    title: 'Arrange like a design tool',
-    body: 'Select, group, nudge, and peek at code when you want control.',
+    title: 'Connect your own agent',
+    body: 'Point Claude or Cursor at the Loora MCP server and it edits the same document you do.',
   },
   {
-    title: 'Point and revise',
-    body: 'Comment on a spot or keep chatting — the canvas stays the source of truth.',
+    title: 'Branch, merge, and ship',
+    body: 'Fork a design, compare any two points, then export or publish from Main.',
   },
 ] as const
 
@@ -147,8 +147,8 @@ export function WelcomeDialog({
             The design harness.
           </p>
           <DialogDescription className="text-sm leading-relaxed">
-            Put an agent on an infinite canvas. It builds real UI in place — you steer, arrange, and
-            ship from the board.
+            An infinite canvas of real, structured UI — open to your own agent over MCP. Design in
+            the browser, drive it from your editor, ship from the board.
           </DialogDescription>
         </DialogHeader>
 

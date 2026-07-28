@@ -8,9 +8,7 @@ export interface PolarConfig {
   webhookSecret: string
   proProductId: string
   studioProductId: string
-  topUpProductId: string
   accessBenefitId: string
-  aiMeterId: string
   origin: string
 }
 
@@ -30,9 +28,7 @@ export function resolvePolarConfig(
     'POLAR_WEBHOOK_SECRET',
     'POLAR_PRO_PRODUCT_ID',
     'POLAR_STUDIO_PRODUCT_ID',
-    'POLAR_TOP_UP_PRODUCT_ID',
     'POLAR_ACCESS_BENEFIT_ID',
-    'POLAR_AI_METER_ID',
     'BETTER_AUTH_URL',
   ] as const
   const values = Object.fromEntries(names.map((name) => [name, env[name]?.trim()])) as Record<
@@ -64,9 +60,7 @@ export function resolvePolarConfig(
       webhookSecret: values.POLAR_WEBHOOK_SECRET!,
       proProductId: values.POLAR_PRO_PRODUCT_ID!,
       studioProductId: values.POLAR_STUDIO_PRODUCT_ID!,
-      topUpProductId: values.POLAR_TOP_UP_PRODUCT_ID!,
       accessBenefitId: values.POLAR_ACCESS_BENEFIT_ID!,
-      aiMeterId: values.POLAR_AI_METER_ID!,
       origin,
     },
   }

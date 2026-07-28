@@ -15,43 +15,16 @@ export interface NormalizedEntitlement {
   trialStart: Date | null
   trialEnd: Date | null
   cancelAtPeriodEnd: boolean
-  meterBalance: number
-  creditedUnits: number
-  consumedUnits: number
   syncedAt: Date
-}
-
-export function remainingCredits(balance: number) {
-  return Math.max(0, balance)
-}
-
-export function creditUnitsForCost(costMicroUsd: number) {
-  return Math.max(1, Math.ceil(costMicroUsd / 10_000))
 }
 
 export function shouldApplyWebhook(lastEventAt: Date | null, eventAt: Date) {
   return !lastEventAt || eventAt.getTime() >= lastEventAt.getTime()
 }
 
-export function usesPolarCredits(usingUserProvider: boolean, source: string) {
-  return !usingUserProvider && source === 'cache'
-}
-
-export function polarIngestAcknowledged(response: { inserted: number; duplicates: number }) {
-  return response.inserted + response.duplicates > 0
-}
-
-export function leaseAvailable(expiresAt: Date | null, now = new Date()) {
-  return !expiresAt || expiresAt.getTime() <= now.getTime()
-}
-
-export function leaseTokenCanRelease(activeToken: string | null, token: string) {
-  return activeToken === token
-}
-
 export function normalizeCustomerState(
   state: CustomerState,
-  config: Pick<PolarConfig, 'proProductId' | 'studioProductId' | 'accessBenefitId' | 'aiMeterId'>,
+  config: Pick<PolarConfig, 'proProductId' | 'studioProductId' | 'accessBenefitId'>,
   now = new Date(),
 ): NormalizedEntitlement {
   const recognized = state.activeSubscriptions
@@ -76,7 +49,6 @@ export function normalizeCustomerState(
   const accessBenefit = state.grantedBenefits.some(
     (benefit) => benefit.benefitId === config.accessBenefitId,
   )
-  const meter = state.activeMeters.find((item) => item.meterId === config.aiMeterId)
 
   return {
     polarCustomerId: state.id,
@@ -96,9 +68,6 @@ export function normalizeCustomerState(
     trialStart: subscription?.trialStart ?? null,
     trialEnd: subscription?.trialEnd ?? null,
     cancelAtPeriodEnd: subscription?.cancelAtPeriodEnd ?? false,
-    meterBalance: Math.round(meter?.balance ?? 0),
-    creditedUnits: meter?.creditedUnits ?? 0,
-    consumedUnits: Math.round(meter?.consumedUnits ?? 0),
     syncedAt: now,
   }
 }
@@ -115,15 +84,6 @@ export function entitlementIsTrial(entitlement: TrialEntitlement | null, now = n
     entitlement.subscriptionStatus === 'trialing' &&
     entitlement.trialEnd && entitlement.trialEnd.getTime() > now.getTime(),
   )
-}
-
-export function entitlementCapabilities(entitlement: TrialEntitlement | null, now = new Date()) {
-  const trial = entitlementIsTrial(entitlement, now)
-  return {
-    trial,
-    managedAiAccess: !trial,
-    topUpAccess: !trial,
-  }
 }
 
 export function cachedEntitlementGrantsAccess(

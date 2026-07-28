@@ -34,7 +34,6 @@ const BUILTIN_IDS = [
   'nudgeRight',
   'nudgeUp',
   'nudgeDown',
-  'toggleAgent',
   'toggleLayers',
   'toggleAssets',
   'toggleHistory',
@@ -55,20 +54,9 @@ const keyChordSchema = z.object({
 
 const chordOrChordsSchema = z.union([keyChordSchema, z.array(keyChordSchema).min(1).max(8)])
 
-const customShortcutSchema = z.object({
-  id: z.string().min(1).max(64),
-  name: z.string().min(1).max(80),
-  chord: keyChordSchema,
-  action: z.object({
-    type: z.literal('agentPrompt'),
-    prompt: z.string().min(1).max(4000),
-  }),
-})
-
 export const shortcutConfigSchema = z
   .object({
     overrides: z.record(z.string(), z.union([chordOrChordsSchema, z.null()])).optional(),
-    custom: z.array(customShortcutSchema).max(50).optional(),
   })
   .superRefine((value, ctx) => {
     const overrides = value.overrides ?? {}
@@ -113,17 +101,16 @@ export const shortcutConfigSchema = z
       const chords = Array.isArray(binding) ? binding : [binding]
       for (const chord of chords) add(chord, id)
     }
-    for (const custom of value.custom ?? []) {
-      add(custom.chord, custom.name)
-    }
   })
   .transform((value): ShortcutConfig => ({
     overrides: (value.overrides ?? {}) as ShortcutConfig['overrides'],
-    custom: value.custom ?? [],
+    custom: Array.isArray((value as { custom?: unknown }).custom)
+      ? ((value as { custom: ShortcutConfig['custom'] }).custom)
+      : [],
   }))
 
 export function parseShortcutConfig(input: unknown): ShortcutConfig {
   const parsed = shortcutConfigSchema.safeParse(input)
-  if (!parsed.success) return { ...EMPTY_SHORTCUT_CONFIG, custom: [] }
+  if (!parsed.success) return { ...EMPTY_SHORTCUT_CONFIG }
   return parsed.data
 }

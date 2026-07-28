@@ -36,7 +36,6 @@ import {
   MaximizeIcon,
   SettingsIcon,
   SlidersHorizontalIcon,
-  SparklesIcon,
 } from '#/components/icons'
 import {
   CanvasProvider,
@@ -80,8 +79,6 @@ import type {
 } from '@loora/canvas/engine'
 import { CanvasV2LayersPanel } from './layers-panel'
 import { CanvasV2PropertiesPanel } from './properties-panel'
-import { CanvasV2AgentPanel } from './agent-panel'
-import { CanvasV2Comment } from './comment'
 import { CanvasV2ContextMenu } from './canvas-menu'
 import { CanvasV2Export } from './export-panel'
 import { CanvasV2History } from './history'
@@ -116,14 +113,9 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
-  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '#/components/ui/dropdown-menu'
 import { Drawer, DrawerPopup } from '#/components/ui/drawer'
-import {
-  Sidebar,
-  SidebarProvider,
-} from '#/components/ui/sidebar'
 import { useIsMobile } from '#/hooks/use-media-query'
 import {
   cacheShortcuts,
@@ -154,15 +146,11 @@ export function CanvasV2Editor({
   name,
   topBar,
   readOnly = false,
-  queuedAgentPrompt,
-  onQueuedAgentPromptConsumed,
 }: {
   controller: CanvasEditorController
   name: string
   topBar?: ReactNode
   readOnly?: boolean
-  queuedAgentPrompt?: { id: string; message: string } | null
-  onQueuedAgentPromptConsumed?: () => void
 }) {
   return (
     <CanvasProvider
@@ -175,8 +163,6 @@ export function CanvasV2Editor({
         name={name}
         topBar={topBar}
         readOnly={readOnly}
-        queuedAgentPrompt={queuedAgentPrompt}
-        onQueuedAgentPromptConsumed={onQueuedAgentPromptConsumed}
       />
     </CanvasProvider>
   )
@@ -212,28 +198,16 @@ function requestedPreviewWidth(fallback: number) {
   return Number.isFinite(width) && width > 0 ? width : fallback
 }
 
-function initialAgentOpen() {
-  if (typeof window === 'undefined') return true
-  const requested = new URLSearchParams(window.location.search).get('agent')
-  if (requested === '0' || requested === 'false') return false
-  if (requested === '1' || requested === 'true') return true
-  return window.localStorage.getItem('loora:agent') !== '0'
-}
-
 function CanvasV2Shell({
   controller,
   name,
   topBar,
   readOnly,
-  queuedAgentPrompt,
-  onQueuedAgentPromptConsumed,
 }: {
   controller: CanvasEditorController
   name: string
   topBar?: ReactNode
   readOnly: boolean
-  queuedAgentPrompt?: { id: string; message: string } | null
-  onQueuedAgentPromptConsumed?: () => void
 }) {
   const isMobile = useIsMobile()
   const canvasSession = useCanvasSession()
@@ -242,30 +216,18 @@ function CanvasV2Shell({
     () => (isMobile ? null : 'layers'),
   )
   const [assetsOpen, setAssetsOpen] = useState(false)
-  const [agentOpen, setAgentOpen] = useState(initialAgentOpen)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [exportOpen, setExportOpen] = useState(false)
   const [commandMenuOpen, setCommandMenuOpen] = useState(false)
   const [interactionMode, setInteractionMode] = useState<'select' | 'pan'>(
     'select',
   )
-  const [queuedPrompt, setQueuedPrompt] = useState<{
-    id: string
-    message: string
-  } | null>(null)
   const [previewWidth, setPreviewWidth] = useState(() =>
     requestedPreviewWidth(
       controller.engine.document.breakpoints.at(-1)?.previewWidth ?? 1440,
     ),
   )
   const [zoom, setZoom] = useState(0.75)
-  const [agentWidth, setAgentWidth] = useState(() => {
-    if (typeof window === 'undefined') return 340
-    const value = Number(window.localStorage.getItem('loora:agent-width'))
-    return Number.isFinite(value)
-      ? Math.min(640, Math.max(280, Math.round(value)))
-      : 340
-  })
   const [inspectorWidth, setInspectorWidth] = useState(() => {
     if (typeof window === 'undefined') return 280
     const value = Number(window.localStorage.getItem('loora:layers-width'))
@@ -279,16 +241,9 @@ function CanvasV2Shell({
       ? loadCachedShortcuts()
       : { overrides: {}, custom: [] },
   )
-  const [agentSystemPrompt, setAgentSystemPrompt] = useState<string | null>(
-    controller.target ? null : '',
-  )
   const cameraKey = cameraStorageKey(controller.target)
   const initialCamera = useMemo(() => loadCamera(cameraKey), [cameraKey])
   const actions = useCanvasEditorActions()
-
-  useEffect(() => {
-    window.localStorage.setItem('loora:agent', agentOpen ? '1' : '0')
-  }, [agentOpen])
 
   useEffect(() => {
     if (typeof window === 'undefined') return
@@ -316,13 +271,6 @@ function CanvasV2Shell({
   }, [canvasSession, controller.engine])
 
   useEffect(() => {
-    if (!queuedAgentPrompt) return
-    setAgentOpen(true)
-    setQueuedPrompt(queuedAgentPrompt)
-    onQueuedAgentPromptConsumed?.()
-  }, [onQueuedAgentPromptConsumed, queuedAgentPrompt?.id])
-
-  useEffect(() => {
     if (!controller.target) return
     let cancelled = false
     void orpc.preferences
@@ -331,12 +279,10 @@ function CanvasV2Shell({
         if (cancelled) return
         const next = normalizeConfig(preferences.shortcuts)
         setShortcutConfig(next)
-        setAgentSystemPrompt(preferences.agentSystemPrompt)
         cacheShortcuts(next)
       })
       .catch((cause) => {
         console.error('[preferences] Failed to load preferences:', cause)
-        if (!cancelled) setAgentSystemPrompt('')
       })
     return () => {
       cancelled = true
@@ -352,11 +298,6 @@ function CanvasV2Shell({
       .catch((cause) =>
         console.error('[preferences] Failed to save shortcuts:', cause),
       )
-  }
-
-  const saveAgentSystemPrompt = async (prompt: string) => {
-    const saved = await orpc.preferences.saveAgentPrompt({ prompt })
-    setAgentSystemPrompt(saved.agentSystemPrompt)
   }
 
   const shortcutLabel = (id: BuiltInShortcutId) =>
@@ -413,22 +354,10 @@ function CanvasV2Shell({
           return
         }
       }
-      const match = matchShortcut(event, shortcutConfig)
-      if (!match) return
-      if (match.kind === 'custom') {
-        event.preventDefault()
-        if (!controller.target) return
-        setAgentOpen(true)
-        setQueuedPrompt({
-          id: crypto.randomUUID(),
-          message: match.prompt,
-        })
-        return
-      }
-      const hit = match.id
+      const hit = matchShortcut(event, shortcutConfig)
+      if (!hit) return
       const run = () => {
-        if (hit === 'toggleAgent') setAgentOpen((open) => !open)
-        else if (hit === 'toggleLayers') {
+        if (hit === 'toggleLayers') {
           setInspector((current) =>
             current === 'layers' ? null : 'layers',
           )
@@ -636,15 +565,6 @@ function CanvasV2Shell({
             ),
         },
         {
-          id: 'view-agent',
-          label: 'Agent panel',
-          icon: SparklesIcon,
-          active: agentOpen,
-          shortcut: shortcutLabel('toggleAgent'),
-          disabled: !controller.target,
-          run: () => setAgentOpen((open) => !open),
-        },
-        {
           id: 'zoom-fit',
           label: 'Zoom to fit',
           icon: MaximizeIcon,
@@ -683,35 +603,7 @@ function CanvasV2Shell({
   const inspectorTitle = inspector === 'layers' ? 'Layers' : 'Design'
 
   return (
-    <SidebarProvider
-      open={agentOpen}
-      onOpenChange={setAgentOpen}
-      enableKeyboardShortcut={false}
-      width={agentWidth}
-      onWidthChange={(width) => {
-        setAgentWidth(width)
-        window.localStorage.setItem('loora:agent-width', String(width))
-      }}
-      className="h-full min-h-0 bg-background"
-    >
-      {controller.target ? (
-        <Sidebar
-          side="left"
-          variant="sidebar"
-          collapsible="offcanvas"
-          resizable
-          className="[&_[data-slot=sidebar-inner]]:overflow-hidden [&_[data-slot=sidebar-inner]]:border-e"
-        >
-          <CanvasV2AgentPanel
-            target={controller.target}
-            readOnly={readOnly}
-            queuedPrompt={queuedPrompt}
-            onQueuedPromptConsumed={() => setQueuedPrompt(null)}
-            onClose={() => setAgentOpen(false)}
-          />
-        </Sidebar>
-      ) : null}
-
+    <div className="flex h-full min-h-0 w-full bg-background">
       <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
         <header className="flex h-8 shrink-0 items-center gap-1 border-b px-1.5">
           <span className="shrink-0 ps-1 text-[11px] font-semibold tracking-tight">
@@ -815,14 +707,6 @@ function CanvasV2Shell({
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" className="w-52">
-                <DropdownMenuItem
-                  disabled={!controller.target}
-                  onClick={() => setAgentOpen((open) => !open)}
-                >
-                  <SparklesIcon data-slot="icon" />
-                  Agent panel
-                </DropdownMenuItem>
-                <DropdownMenuSeparator />
                 <DropdownMenuItem onClick={() => setExportOpen(true)}>
                   <DownloadIcon data-slot="icon" />
                   Export…
@@ -846,19 +730,6 @@ function CanvasV2Shell({
             onInteractionModeChange={setInteractionMode}
             onAssetsOpen={() => setAssetsOpen(true)}
             shortcutLabel={shortcutLabel}
-            comment={
-              controller.target && !readOnly ? (
-                <CanvasV2Comment
-                  onComment={(message) => {
-                    setAgentOpen(true)
-                    setQueuedPrompt({
-                      id: crypto.randomUUID(),
-                      message,
-                    })
-                  }}
-                />
-              ) : null
-            }
           />
 
           <main className="relative min-w-0 flex-1 overflow-hidden">
@@ -943,8 +814,6 @@ function CanvasV2Shell({
                   onClose={() => setSettingsOpen(false)}
                   shortcutConfig={shortcutConfig}
                   onShortcutConfigChange={updateShortcutConfig}
-                  agentSystemPrompt={agentSystemPrompt}
-                  onSaveAgentSystemPrompt={saveAgentSystemPrompt}
                 />
               </DialogPopup>
             </Dialog>
@@ -1007,7 +876,7 @@ function CanvasV2Shell({
           onPreviewWidthChange={setPreviewWidth}
         />
       </div>
-    </SidebarProvider>
+    </div>
   )
 }
 
@@ -1896,14 +1765,12 @@ function CanvasV2ToolStrip({
   onInteractionModeChange,
   onAssetsOpen,
   shortcutLabel,
-  comment,
 }: {
   actions: CanvasEditorActions
   interactionMode: 'select' | 'pan'
   onInteractionModeChange: (mode: 'select' | 'pan') => void
   onAssetsOpen: () => void
   shortcutLabel: (id: BuiltInShortcutId) => string
-  comment: ReactNode
 }) {
   return (
     <TooltipProvider delay={400} closeDelay={0}>
@@ -1968,7 +1835,6 @@ function CanvasV2ToolStrip({
             onInteractionModeChange('select')
           }}
         />
-        {comment}
         <div className="mt-auto flex flex-col items-center gap-0.5">
           <div className="my-1 h-px w-4 bg-border" />
           <CanvasV2ToolButton

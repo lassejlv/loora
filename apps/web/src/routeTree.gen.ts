@@ -12,13 +12,11 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as McpConsentRouteImport } from './routes/mcp-consent'
 import { Route as DotwellKnownOauthAuthorizationServerRouteImport } from './routes/[.]well-known.oauth-authorization-server'
-import { Route as ApiChatRouteImport } from './routes/api.chat'
 import { Route as AppIndexRouteImport } from './routes/app.index'
 import { Route as AppDesignRouteImport } from './routes/app.design'
 import { Route as PLinkIdRouteImport } from './routes/p.$linkId'
 import { Route as ApiAssetIdRouteImport } from './routes/api.asset.$id'
 import { Route as ApiAuthSplatRouteImport } from './routes/api.auth.$'
-import { Route as ApiChatgptSplatRouteImport } from './routes/api.chatgpt.$'
 import { Route as ApiFigmaCallbackRouteImport } from './routes/api.figma.callback'
 import { Route as ApiFigmaConnectRouteImport } from './routes/api.figma.connect'
 import { Route as ApiGithubCallbackRouteImport } from './routes/api.github.callback'
@@ -48,11 +46,6 @@ const DotwellKnownOauthAuthorizationServerRoute =
     path: '/.well-known/oauth-authorization-server',
     getParentRoute: () => rootRouteImport,
   } as any)
-const ApiChatRoute = ApiChatRouteImport.update({
-  id: '/api/chat',
-  path: '/api/chat',
-  getParentRoute: () => rootRouteImport,
-} as any)
 const AppIndexRoute = AppIndexRouteImport.update({
   id: '/app/',
   path: '/app/',
@@ -76,11 +69,6 @@ const ApiAssetIdRoute = ApiAssetIdRouteImport.update({
 const ApiAuthSplatRoute = ApiAuthSplatRouteImport.update({
   id: '/api/auth/$',
   path: '/api/auth/$',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const ApiChatgptSplatRoute = ApiChatgptSplatRouteImport.update({
-  id: '/api/chatgpt/$',
-  path: '/api/chatgpt/$',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ApiFigmaCallbackRoute = ApiFigmaCallbackRouteImport.update({
@@ -148,13 +136,11 @@ export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/mcp-consent': typeof McpConsentRoute
   '/.well-known/oauth-authorization-server': typeof DotwellKnownOauthAuthorizationServerRoute
-  '/api/chat': typeof ApiChatRoute
   '/app/design': typeof AppDesignRoute
   '/p/$linkId': typeof PLinkIdRoute
   '/app/': typeof AppIndexRoute
   '/api/asset/$id': typeof ApiAssetIdRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
-  '/api/chatgpt/$': typeof ApiChatgptSplatRoute
   '/api/figma/callback': typeof ApiFigmaCallbackRoute
   '/api/figma/connect': typeof ApiFigmaConnectRoute
   '/api/github/callback': typeof ApiGithubCallbackRoute
@@ -172,13 +158,11 @@ export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/mcp-consent': typeof McpConsentRoute
   '/.well-known/oauth-authorization-server': typeof DotwellKnownOauthAuthorizationServerRoute
-  '/api/chat': typeof ApiChatRoute
   '/app/design': typeof AppDesignRoute
   '/p/$linkId': typeof PLinkIdRoute
   '/app': typeof AppIndexRoute
   '/api/asset/$id': typeof ApiAssetIdRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
-  '/api/chatgpt/$': typeof ApiChatgptSplatRoute
   '/api/figma/callback': typeof ApiFigmaCallbackRoute
   '/api/figma/connect': typeof ApiFigmaConnectRoute
   '/api/github/callback': typeof ApiGithubCallbackRoute
@@ -197,13 +181,11 @@ export interface FileRoutesById {
   '/': typeof IndexRoute
   '/mcp-consent': typeof McpConsentRoute
   '/.well-known/oauth-authorization-server': typeof DotwellKnownOauthAuthorizationServerRoute
-  '/api/chat': typeof ApiChatRoute
   '/app/design': typeof AppDesignRoute
   '/p/$linkId': typeof PLinkIdRoute
   '/app/': typeof AppIndexRoute
   '/api/asset/$id': typeof ApiAssetIdRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
-  '/api/chatgpt/$': typeof ApiChatgptSplatRoute
   '/api/figma/callback': typeof ApiFigmaCallbackRoute
   '/api/figma/connect': typeof ApiFigmaConnectRoute
   '/api/github/callback': typeof ApiGithubCallbackRoute
@@ -223,13 +205,11 @@ export interface FileRouteTypes {
     | '/'
     | '/mcp-consent'
     | '/.well-known/oauth-authorization-server'
-    | '/api/chat'
     | '/app/design'
     | '/p/$linkId'
     | '/app/'
     | '/api/asset/$id'
     | '/api/auth/$'
-    | '/api/chatgpt/$'
     | '/api/figma/callback'
     | '/api/figma/connect'
     | '/api/github/callback'
@@ -247,13 +227,11 @@ export interface FileRouteTypes {
     | '/'
     | '/mcp-consent'
     | '/.well-known/oauth-authorization-server'
-    | '/api/chat'
     | '/app/design'
     | '/p/$linkId'
     | '/app'
     | '/api/asset/$id'
     | '/api/auth/$'
-    | '/api/chatgpt/$'
     | '/api/figma/callback'
     | '/api/figma/connect'
     | '/api/github/callback'
@@ -271,13 +249,11 @@ export interface FileRouteTypes {
     | '/'
     | '/mcp-consent'
     | '/.well-known/oauth-authorization-server'
-    | '/api/chat'
     | '/app/design'
     | '/p/$linkId'
     | '/app/'
     | '/api/asset/$id'
     | '/api/auth/$'
-    | '/api/chatgpt/$'
     | '/api/figma/callback'
     | '/api/figma/connect'
     | '/api/github/callback'
@@ -296,13 +272,11 @@ export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   McpConsentRoute: typeof McpConsentRoute
   DotwellKnownOauthAuthorizationServerRoute: typeof DotwellKnownOauthAuthorizationServerRoute
-  ApiChatRoute: typeof ApiChatRoute
   AppDesignRoute: typeof AppDesignRoute
   PLinkIdRoute: typeof PLinkIdRoute
   AppIndexRoute: typeof AppIndexRoute
   ApiAssetIdRoute: typeof ApiAssetIdRoute
   ApiAuthSplatRoute: typeof ApiAuthSplatRoute
-  ApiChatgptSplatRoute: typeof ApiChatgptSplatRoute
   ApiFigmaCallbackRoute: typeof ApiFigmaCallbackRoute
   ApiFigmaConnectRoute: typeof ApiFigmaConnectRoute
   ApiGithubCallbackRoute: typeof ApiGithubCallbackRoute
@@ -338,13 +312,6 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof DotwellKnownOauthAuthorizationServerRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/api/chat': {
-      id: '/api/chat'
-      path: '/api/chat'
-      fullPath: '/api/chat'
-      preLoaderRoute: typeof ApiChatRouteImport
-      parentRoute: typeof rootRouteImport
-    }
     '/app/': {
       id: '/app/'
       path: '/app'
@@ -378,13 +345,6 @@ declare module '@tanstack/react-router' {
       path: '/api/auth/$'
       fullPath: '/api/auth/$'
       preLoaderRoute: typeof ApiAuthSplatRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/api/chatgpt/$': {
-      id: '/api/chatgpt/$'
-      path: '/api/chatgpt/$'
-      fullPath: '/api/chatgpt/$'
-      preLoaderRoute: typeof ApiChatgptSplatRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/api/figma/callback': {
@@ -503,13 +463,11 @@ const rootRouteChildren: RootRouteChildren = {
   McpConsentRoute: McpConsentRoute,
   DotwellKnownOauthAuthorizationServerRoute:
     DotwellKnownOauthAuthorizationServerRoute,
-  ApiChatRoute: ApiChatRoute,
   AppDesignRoute: AppDesignRoute,
   PLinkIdRoute: PLinkIdRoute,
   AppIndexRoute: AppIndexRoute,
   ApiAssetIdRoute: ApiAssetIdRoute,
   ApiAuthSplatRoute: ApiAuthSplatRoute,
-  ApiChatgptSplatRoute: ApiChatgptSplatRoute,
   ApiFigmaCallbackRoute: ApiFigmaCallbackRoute,
   ApiFigmaConnectRoute: ApiFigmaConnectRoute,
   ApiGithubCallbackRoute: ApiGithubCallbackRoute,

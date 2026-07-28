@@ -5,30 +5,19 @@ import {
   parseAsStringLiteral,
 } from 'nuqs'
 
-export const SETTINGS_TABS = ['account', 'agent', 'integrations', 'billing', 'shortcuts', 'admin'] as const
+export const SETTINGS_TABS = ['account', 'integrations', 'billing', 'shortcuts', 'admin'] as const
 export type SettingsTab = (typeof SETTINGS_TABS)[number]
 
-export const INTEGRATION_TABS = ['providers', 'github', 'figma', 'mcp'] as const
+export const INTEGRATION_TABS = ['github', 'figma', 'mcp'] as const
 export type IntegrationTab = (typeof INTEGRATION_TABS)[number]
 
-const LEGACY_INTEGRATION_SETTINGS = new Set<string>([
-  ...INTEGRATION_TABS,
-  'chatgpt',
-  'openrouter',
-])
-
-function integrationTab(value: string): IntegrationTab {
-  return value === 'chatgpt' || value === 'openrouter'
-    ? 'providers'
-    : value as IntegrationTab
-}
+const INTEGRATION_SETTINGS = new Set<string>(INTEGRATION_TABS)
 
 export const editorSearchParams = {
   d: parseAsString,
   draft: parseAsString,
   settings: parseAsStringLiteral(SETTINGS_TABS),
   integration: parseAsStringLiteral(INTEGRATION_TABS),
-  agent: parseAsBoolean.withDefault(true),
   layers: parseAsBoolean.withDefault(false),
   assets: parseAsBoolean.withDefault(false),
   history: parseAsBoolean.withDefault(false),
@@ -62,7 +51,6 @@ export type EditorSearchParams = {
   draft: string | null
   settings: SettingsTab | null
   integration: IntegrationTab | null
-  agent: boolean
   layers: boolean
   assets: boolean
   history: boolean
@@ -74,7 +62,6 @@ export function bootstrapEditorSearch(activeId: string): Partial<{
   d: string
   settings: SettingsTab
   integration: IntegrationTab
-  agent: boolean
   layers: boolean
 }> {
   if (typeof window === 'undefined') return {}
@@ -83,31 +70,25 @@ export function bootstrapEditorSearch(activeId: string): Partial<{
     d: string
     settings: SettingsTab
     integration: IntegrationTab
-    agent: boolean
     layers: boolean
   }> = {}
 
   const settingsRaw = raw.get('settings')
-  if (settingsRaw && LEGACY_INTEGRATION_SETTINGS.has(settingsRaw)) {
+  if (settingsRaw && INTEGRATION_SETTINGS.has(settingsRaw)) {
     patch.settings = 'integrations'
-    patch.integration = integrationTab(settingsRaw)
+    patch.integration = settingsRaw as IntegrationTab
   } else if (settingsRaw === 'integrations') {
     patch.settings = 'integrations'
     const integrationRaw = raw.get('integration')
-    if (integrationRaw && LEGACY_INTEGRATION_SETTINGS.has(integrationRaw)) {
-      patch.integration = integrationTab(integrationRaw)
+    if (integrationRaw && INTEGRATION_SETTINGS.has(integrationRaw)) {
+      patch.integration = integrationRaw as IntegrationTab
     }
   } else if (settingsRaw && (SETTINGS_TABS as readonly string[]).includes(settingsRaw)) {
     patch.settings = settingsRaw as SettingsTab
-  } else if (raw.get('topup') === 'success') {
-    patch.settings = 'billing'
   }
 
   if (!raw.get('d') && activeId) patch.d = activeId
 
-  if (raw.get('agent') === null && window.localStorage.getItem('loora:agent') === '0') {
-    patch.agent = false
-  }
   if (raw.get('layers') === null && window.localStorage.getItem('loora:layers') === '1') {
     patch.layers = true
   }

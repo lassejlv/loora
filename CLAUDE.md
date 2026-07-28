@@ -27,8 +27,9 @@ generated SQL and metadata.
 
 Loora is a Bun workspaces monorepo. The product is a TanStack Start/React 19 app
 under `apps/web`; oRPC lives in `packages/rpc`, Drizzle/Postgres in
-`packages/db`, authentication in `packages/auth`, model orchestration in
-`packages/agent`, and the MCP server in `apps/mcp`.
+`packages/db`, authentication in `packages/auth`, shared MCP canvas tools in
+`packages/agent`, and the MCP server in `apps/mcp`. There is no in-app chat
+agent — external agents use MCP or handoff.
 
 Canvas V2 is the dependency-light `@loora/canvas` package:
 
@@ -53,7 +54,7 @@ themes, instance overrides, and interactions are structured values. Never add
 an arbitrary code node, CSS/class string escape hatch, or two-way source sync.
 
 All mutations are validated `CanvasTransaction`s. Use the same operations and
-engine through React, oRPC, web agent tools, and MCP. Transactions need stable
+engine through React, oRPC, MCP tools, and handoff. Transactions need stable
 idempotency IDs and touched-field preconditions. Pointer previews may update
 temporary DOM transforms, but commit one transaction on pointer-up; never
 replace or serialize the full document on every move.
@@ -65,9 +66,10 @@ isolation are ephemeral. Subscribe nodes to their own revision and parent order
 instead of rerendering the full tree.
 
 The web editor is under `apps/web/src/components/canvas-v2`. Its branch UI and
-sync target controller deliberately live outside the canvas package. The agent
-accepts structured node descriptors only and returns permanent IDs for
-temporary refs. Destructive agent and MCP actions still require confirmation.
+sync target controller deliberately live outside the canvas package. External
+agents accept structured node descriptors only and return permanent IDs for
+temporary refs. Destructive MCP actions still require confirmation where
+applicable. There is no in-app agent panel.
 
 `/` is the public landing page, `/app` is the file browser, and
 `/app/design?id=<designId>` opens one document (`&draft=` selects a branch).
@@ -112,18 +114,19 @@ Figma import maps frames, auto-layout, text, paints, vectors, components, and
 instances directly to V2. Rasterize complete unsupported visual blocks instead
 of inventing a partially editable approximation.
 
-The model prompt receives a compact semantic tree, not source code. Keep the
-agent/MCP tool vocabulary aligned:
+Keep the MCP / handoff tool vocabulary aligned via `@loora/agent/canvas-v2-tools`:
 `createPage`, `insertNodes`, `patchNodes`, `moveNodes`, `deleteNodes`,
 `readNode`, `readTree`, `searchNodes`, `createComponent`, `createInstance`,
 `setTokens`, `viewNode`, `viewPage`, and `viewCanvas`.
 
+Billing is Polar plan access only (no AI credits or top-ups).
+
 ## Security and access
 
-Credentials and provider sessions stay server-only. Everything user-scoped is
-checked through protected oRPC/MCP paths. Image and interaction URLs, SVG path
-data, CSS-like values, metadata, geometry, responsive overrides, and document
-size are validated at the canvas model boundary.
+Credentials stay server-only. Everything user-scoped is checked through
+protected oRPC/MCP paths. Image and interaction URLs, SVG path data, CSS-like
+values, metadata, geometry, responsive overrides, and document size are
+validated at the canvas model boundary.
 
 Capability URLs must not leak into automatic analytics. Public pages use
 no-referrer behavior and link-scoped asset routes. Main is the only publishable

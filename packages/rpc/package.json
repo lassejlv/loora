@@ -16,7 +16,6 @@
     "@loora/canvas": "workspace:*",
     "@loora/db": "workspace:*",
     "@orpc/server": "^1.14.8",
-    "ai": "catalog:",
     "drizzle-orm": "catalog:",
     "zod": "catalog:"
   },

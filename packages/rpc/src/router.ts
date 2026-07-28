@@ -6,7 +6,6 @@ import {
   asset,
   canvasTransaction as canvasTransactionLog,
   design,
-  designChat,
   designDraft,
   designGithubRepository,
   designVersion,
@@ -39,7 +38,6 @@ import {
 } from '@loora/canvas/merge'
 import { EMPTY_SHORTCUT_CONFIG } from '@loora/db/shortcuts'
 import { parseShortcutConfig, shortcutConfigSchema } from './shortcuts'
-import { agentSystemPromptSchema } from './agent-prompt'
 import { googleOAuthEnabled, type getSession } from '@loora/auth'
 import { legacyArray, type CanvasElement, type CanvasPage } from '@loora/db/canvas'
 import {
@@ -64,16 +62,7 @@ import {
   refreshBillingStatus,
 } from '@loora/billing/billing'
 import { canUseApp, isPreviewAccessRequired } from '@loora/auth/preview-access'
-import { completeTopUpCheckout, createTopUpCheckout } from '@loora/billing/credit-top-ups'
-import { MAX_TOP_UP_CENTS, MIN_TOP_UP_CENTS } from '@loora/billing/top-up-policy'
 import { sortCommitsOldestFirst, toHistoryPage } from './history'
-import {
-  DAILY_LIMIT_USD,
-  WEEKLY_LIMIT_USD,
-  getUsageStatus,
-  listUserUsage,
-  resetUsage,
-} from '@loora/agent/usage'
 import {
   disconnectGitHub,
   getGitHubStatus,
@@ -82,27 +71,12 @@ import {
   listGitHubRepositories,
   syncGitHubInstallations,
 } from '@loora/auth/github'
-import { sanitizeChatMessagesForStorage } from './chat-storage'
 import { summarizeMcpSessions } from './mcp-sessions'
 import {
   disconnectFigma,
   FigmaIntegrationError,
   getFigmaStatus,
 } from '@loora/auth/figma'
-import {
-  connectOpenRouter,
-  disconnectOpenRouter,
-  getOpenRouterStatus,
-  OpenRouterIntegrationError,
-} from '@loora/auth/openrouter'
-import {
-  AiProviderCredentialError,
-  connectAiProvider,
-  CUSTOM_AI_PROVIDERS,
-  disconnectAiProvider,
-  getAiProviderConnection,
-  listAiProviderConnections,
-} from '@loora/auth/ai-provider-credentials'
 import { importFigmaDesign } from './figma-import'
 
 type Session = Awaited<ReturnType<typeof getSession>>
@@ -2355,146 +2329,6 @@ const restoreCanvasVersion = protectedProcedure
     }
   })
 
-const listChats = protectedProcedure
-  .input(z.object({ designId: z.string().min(1).max(128) }))
-  .handler(async ({ context, input }) => {
-    const chats = await db
-      .select({
-        id: designChat.id,
-        draftId: designChat.draftId,
-        title: designChat.title,
-        githubRepositoryId: designChat.githubRepositoryId,
-        githubRepositoryFullName: designChat.githubRepositoryFullName,
-        updatedAt: designChat.updatedAt,
-      })
-      .from(designChat)
-      .where(
-        and(eq(designChat.designId, input.designId), eq(designChat.userId, context.user.id)),
-      )
-      .orderBy(desc(designChat.updatedAt))
-
-    return chats.map(({ updatedAt, ...chat }) => ({ ...chat, updatedAt: updatedAt.getTime() }))
-  })
-
-const createChat = protectedProcedure
-  .input(
-    z.object({
-      id: z.string().min(1).max(128),
-      designId: z.string().min(1).max(128),
-      draftId: optionalDraftIdSchema,
-      title: z.string().trim().min(1).max(200).default('New chat'),
-    }),
-  )
-  .handler(async ({ context, input }) => {
-    await ensureDesign(input.designId, context.user.id)
-    if (input.draftId) {
-      const draft = await getOwnedDraft(context.user.id, input.designId, input.draftId)
-      if (draft.status !== 'active') {
-        throw new ORPCError('CONFLICT', { message: 'Chats can only start on active drafts.' })
-      }
-    }
-    const [repository] = await db
-      .select({
-        id: designGithubRepository.repositoryId,
-        fullName: designGithubRepository.owner,
-        name: designGithubRepository.name,
-      })
-      .from(designGithubRepository)
-      .where(
-        and(
-          eq(designGithubRepository.designId, input.designId),
-          eq(designGithubRepository.userId, context.user.id),
-        ),
-      )
-      .limit(1)
-    const [chat] = await db
-      .insert(designChat)
-      .values({
-        ...input,
-        draftId: input.draftId ?? null,
-        userId: context.user.id,
-        messages: [],
-        githubRepositoryId: repository?.id ?? null,
-        githubRepositoryFullName: repository
-          ? `${repository.fullName}/${repository.name}`
-          : null,
-      })
-      .onConflictDoNothing({ target: [designChat.id, designChat.userId] })
-      .returning({
-        id: designChat.id,
-        draftId: designChat.draftId,
-        title: designChat.title,
-        githubRepositoryId: designChat.githubRepositoryId,
-        githubRepositoryFullName: designChat.githubRepositoryFullName,
-        updatedAt: designChat.updatedAt,
-      })
-
-    if (chat) return { ...chat, updatedAt: chat.updatedAt.getTime() }
-
-    const [existing] = await db
-      .select({
-        id: designChat.id,
-        draftId: designChat.draftId,
-        title: designChat.title,
-        githubRepositoryId: designChat.githubRepositoryId,
-        githubRepositoryFullName: designChat.githubRepositoryFullName,
-        updatedAt: designChat.updatedAt,
-      })
-      .from(designChat)
-      .where(and(eq(designChat.id, input.id), eq(designChat.userId, context.user.id)))
-      .limit(1)
-
-    if (!existing) throw new ORPCError('INTERNAL_SERVER_ERROR')
-    return { ...existing, updatedAt: existing.updatedAt.getTime() }
-  })
-
-const getChat = protectedProcedure
-  .input(z.object({ id: z.string().min(1).max(128) }))
-  .handler(async ({ context, input }) => {
-    const [chat] = await db
-      .select({ messages: designChat.messages })
-      .from(designChat)
-      .where(and(eq(designChat.id, input.id), eq(designChat.userId, context.user.id)))
-      .limit(1)
-
-    if (!chat) throw new ORPCError('NOT_FOUND')
-    return { messages: chat.messages }
-  })
-
-const saveChat = protectedProcedure
-  .input(
-    z.object({
-      id: z.string().min(1).max(128),
-      title: z.string().trim().min(1).max(200),
-      messages: z.array(z.unknown()).max(1_000),
-    }),
-  )
-  .handler(async ({ context, input }) => {
-    const saved = await db
-      .update(designChat)
-      .set({
-        title: input.title,
-        messages: sanitizeChatMessagesForStorage(input.messages),
-        updatedAt: new Date(),
-      })
-      .where(and(eq(designChat.id, input.id), eq(designChat.userId, context.user.id)))
-      .returning({ id: designChat.id })
-
-    if (saved.length === 0) throw new ORPCError('NOT_FOUND')
-    return { saved: input.messages.length }
-  })
-
-const deleteChat = protectedProcedure
-  .input(z.object({ id: z.string().min(1).max(128) }))
-  .handler(async ({ context, input }) => {
-    const deleted = await db
-      .delete(designChat)
-      .where(and(eq(designChat.id, input.id), eq(designChat.userId, context.user.id)))
-      .returning({ id: designChat.id })
-
-    return { deleted: deleted.length > 0 }
-  })
-
 const MAX_ASSET_BYTES = 5 * 1024 * 1024
 
 const listAssets = protectedProcedure.handler(async ({ context }) => {
@@ -2565,10 +2399,6 @@ const deleteAsset = protectedProcedure
     return { deleted: deleted.length > 0 }
   })
 
-const getCurrentUsage = protectedProcedure.handler(({ context }) =>
-  getUsageStatus(context.user.id),
-)
-
 function githubProcedureError(error: unknown): never {
   if (error instanceof GitHubIntegrationError) {
     if (error.code === 'RECONNECT_REQUIRED') {
@@ -2606,115 +2436,6 @@ function figmaProcedureError(error: unknown): never {
   }
   throw error
 }
-
-function openRouterProcedureError(error: unknown): never {
-  if (error instanceof OpenRouterIntegrationError) {
-    if (error.code === 'RECONNECT_REQUIRED') {
-      throw new ORPCError('UNAUTHORIZED', { message: error.message })
-    }
-    if (error.code === 'RATE_LIMITED') {
-      throw new ORPCError('TOO_MANY_REQUESTS', { message: error.message })
-    }
-    if (error.code === 'INVALID_KEY') {
-      throw new ORPCError('BAD_REQUEST', { message: error.message })
-    }
-    throw new ORPCError('INTERNAL_SERVER_ERROR', { message: error.message })
-  }
-  throw error
-}
-
-function aiProviderProcedureError(error: unknown): never {
-  if (error instanceof AiProviderCredentialError) {
-    if (error.code === 'RECONNECT_REQUIRED') {
-      throw new ORPCError('UNAUTHORIZED', { message: error.message })
-    }
-    if (error.code === 'RATE_LIMITED') {
-      throw new ORPCError('TOO_MANY_REQUESTS', { message: error.message })
-    }
-    if (error.code === 'INVALID_KEY') {
-      throw new ORPCError('BAD_REQUEST', { message: error.message })
-    }
-    throw new ORPCError('INTERNAL_SERVER_ERROR', { message: error.message })
-  }
-  throw error
-}
-
-const customAiProviderSchema = z.enum(CUSTOM_AI_PROVIDERS)
-
-const listCustomAiProviderConnections = protectedProcedure.handler(
-  async ({ context }) => {
-    try {
-      return await listAiProviderConnections(context.user.id)
-    } catch (error) {
-      return aiProviderProcedureError(error)
-    }
-  },
-)
-
-const getCustomAiProviderConnection = protectedProcedure
-  .input(z.object({ provider: customAiProviderSchema }))
-  .handler(async ({ context, input }) => {
-    try {
-      return await getAiProviderConnection(context.user.id, input.provider)
-    } catch (error) {
-      return aiProviderProcedureError(error)
-    }
-  })
-
-const connectCustomAiProvider = protectedProcedure
-  .input(
-    z.object({
-      provider: customAiProviderSchema,
-      apiKey: z.string().trim().min(10).max(512),
-    }),
-  )
-  .handler(async ({ context, input }) => {
-    try {
-      return await connectAiProvider(context.user.id, input.provider, input.apiKey)
-    } catch (error) {
-      return aiProviderProcedureError(error)
-    }
-  })
-
-const disconnectCustomAiProvider = protectedProcedure
-  .input(z.object({ provider: customAiProviderSchema }))
-  .handler(async ({ context, input }) => {
-    try {
-      return await disconnectAiProvider(context.user.id, input.provider)
-    } catch (error) {
-      return aiProviderProcedureError(error)
-    }
-  })
-
-const getOpenRouterConnection = protectedProcedure.handler(async ({ context }) => {
-  try {
-    return await getOpenRouterStatus(context.user.id)
-  } catch (error) {
-    return openRouterProcedureError(error)
-  }
-})
-
-const connectOpenRouterAccount = protectedProcedure
-  .input(
-    z.object({
-      apiKey: z.string().trim().min(10).max(512),
-    }),
-  )
-  .handler(async ({ context, input }) => {
-    try {
-      return await connectOpenRouter(context.user.id, input.apiKey)
-    } catch (error) {
-      return openRouterProcedureError(error)
-    }
-  })
-
-const disconnectOpenRouterAccount = protectedProcedure.handler(async ({ context }) => {
-  try {
-    return await disconnectOpenRouter(context.user.id)
-  } catch (error) {
-    return openRouterProcedureError(error)
-  }
-})
 
 const getFigmaConnection = protectedProcedure.handler(async ({ context }) => {
   try {
@@ -2984,7 +2705,7 @@ async function deleteUserAccountData(userId: string) {
     }
   }
 
-  // Everything else (designs, chats, sessions, oauth tokens, usage) cascades.
+  // Everything else (designs, drafts, sessions, oauth tokens) cascades.
   await db.delete(user).where(eq(user.id, userId))
 }
 
@@ -3013,36 +2734,19 @@ const createSubscriptionCheckout = previewProcedure
     return createPlanCheckout(context.user, input.plan)
   })
 
-const createCreditTopUp = protectedProcedure
-  .input(z.object({
-    amountCents: z.number().int().min(MIN_TOP_UP_CENTS).max(MAX_TOP_UP_CENTS),
-  }))
-  .handler(async ({ context, input }) => {
-    const billing = await authorizeBilling(context.user)
-    if (!billing.topUpAccess) {
-      throw new ORPCError('FORBIDDEN', {
-        message: 'Credit top-ups become available after the Pro trial.',
-      })
-    }
-    return createTopUpCheckout(context.user, input.amountCents)
-  })
-
-const completeCreditTopUp = previewProcedure
-  .input(z.object({ checkoutId: z.string().min(1).max(128) }))
-  .handler(async ({ context, input }) => {
-    const order = await completeTopUpCheckout(context.user.id, input.checkoutId)
-    return {
-      completed: order !== null,
-      addedCredits: order?.creditUnits ?? 0,
-      billing: await getBillingStatus(context.user),
-    }
-  })
-
 const listUsersWithUsage = adminProcedure.handler(async () => {
-  // Separate grouped query instead of a second join in listUserUsage — joining
-  // aiUsage and publishEgress together would cross-product both sums.
   const [accounts, egress] = await Promise.all([
-    listUserUsage(),
+    db
+      .select({
+        id: user.id,
+        name: user.name,
+        email: user.email,
+        isAdmin: user.isAdmin,
+        previewAccess: user.previewAccess,
+        previewAccessRequestedAt: user.previewAccessRequestedAt,
+      })
+      .from(user)
+      .orderBy(asc(user.email)),
     db
       .select({
         userId: publishEgress.userId,
@@ -3059,32 +2763,6 @@ const listUsersWithUsage = adminProcedure.handler(async () => {
     publishEgressLimitBytes: PUBLISH_EGRESS_LIMIT_BYTES,
   }))
 })
-
-const resetUserUsage = adminProcedure
-  .input(z.object({ userId: z.string().min(1).max(128) }))
-  .handler(async ({ input }) => ({ deleted: await resetUsage(input.userId) }))
-
-const setUserUsageMultiplier = adminProcedure
-  .input(
-    z.object({
-      userId: z.string().min(1).max(128),
-      multiplier: z.number().int().min(1).max(1_000_000),
-    }),
-  )
-  .handler(async ({ input }) => {
-    const [updated] = await db
-      .update(user)
-      .set({ usageMultiplier: input.multiplier, updatedAt: new Date() })
-      .where(eq(user.id, input.userId))
-      .returning({ userId: user.id, usageMultiplier: user.usageMultiplier })
-
-    if (!updated) throw new ORPCError('NOT_FOUND')
-    return {
-      ...updated,
-      dailyLimitUsd: DAILY_LIMIT_USD * updated.usageMultiplier,
-      weeklyLimitUsd: WEEKLY_LIMIT_USD * updated.usageMultiplier,
-    }
-  })
 
 const setUserPreviewAccess = adminProcedure
   .input(
@@ -3145,16 +2823,12 @@ const deleteUserAccount = adminProcedure
 
 const getPreferences = protectedProcedure.handler(async ({ context }) => {
   const [row] = await db
-    .select({
-      shortcuts: userPreferences.shortcuts,
-      agentSystemPrompt: userPreferences.agentSystemPrompt,
-    })
+    .select({ shortcuts: userPreferences.shortcuts })
     .from(userPreferences)
     .where(eq(userPreferences.userId, context.user.id))
     .limit(1)
   return {
-    shortcuts: row ? parseShortcutConfig(row.shortcuts) : { ...EMPTY_SHORTCUT_CONFIG, custom: [] },
-    agentSystemPrompt: row?.agentSystemPrompt ?? '',
+    shortcuts: row ? parseShortcutConfig(row.shortcuts) : EMPTY_SHORTCUT_CONFIG,
   }
 })
 
@@ -3179,27 +2853,6 @@ const savePreferences = protectedProcedure
     return { shortcuts }
   })
 
-const saveAgentPrompt = protectedProcedure
-  .input(z.object({ prompt: agentSystemPromptSchema }))
-  .handler(async ({ context, input }) => {
-    const agentSystemPrompt = input.prompt
-    await db
-      .insert(userPreferences)
-      .values({
-        userId: context.user.id,
-        agentSystemPrompt,
-        updatedAt: new Date(),
-      })
-      .onConflictDoUpdate({
-        target: userPreferences.userId,
-        set: {
-          agentSystemPrompt,
-          updatedAt: new Date(),
-        },
-      })
-    return { agentSystemPrompt }
-  })
-
 export const appRouter = {
   auth: {
     config: getAuthConfig,
@@ -3210,14 +2863,11 @@ export const appRouter = {
   preferences: {
     get: getPreferences,
     save: savePreferences,
-    saveAgentPrompt,
   },
   billing: {
     status: getCurrentBilling,
     refresh: refreshCurrentBilling,
     checkout: createSubscriptionCheckout,
-    createTopUp: createCreditTopUp,
-    completeTopUp: completeCreditTopUp,
   },
   design: {
     list: listDesigns,
@@ -3268,20 +2918,10 @@ export const appRouter = {
     commitMigration: commitCanvasVersionMigration,
     restoreV2: restoreCanvasVersion,
   },
-  chat: {
-    list: listChats,
-    create: createChat,
-    get: getChat,
-    save: saveChat,
-    delete: deleteChat,
-  },
   asset: {
     list: listAssets,
     upload: uploadAsset,
     delete: deleteAsset,
-  },
-  usage: {
-    get: getCurrentUsage,
   },
   github: {
     status: getGithubStatus,
@@ -3297,25 +2937,12 @@ export const appRouter = {
     import: importFigma,
     disconnect: disconnectFigmaAccount,
   },
-  openrouter: {
-    status: getOpenRouterConnection,
-    connect: connectOpenRouterAccount,
-    disconnect: disconnectOpenRouterAccount,
-  },
-  aiProvider: {
-    list: listCustomAiProviderConnections,
-    status: getCustomAiProviderConnection,
-    connect: connectCustomAiProvider,
-    disconnect: disconnectCustomAiProvider,
-  },
   mcp: {
     sessions: listMcpSessions,
     revoke: revokeMcpSession,
   },
   admin: {
     listUsers: listUsersWithUsage,
-    resetUsage: resetUserUsage,
-    setUsageMultiplier: setUserUsageMultiplier,
     setPreviewAccess: setUserPreviewAccess,
     deleteUser: deleteUserAccount,
   },

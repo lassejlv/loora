@@ -60,11 +60,10 @@ describe('resolveBuiltIn / matchShortcut', () => {
   test('uses defaults when no overrides', () => {
     const config: ShortcutConfig = { overrides: {}, custom: [] }
     expect(resolveBuiltIn('undo', config)).toEqual([{ key: 'z', meta: true }])
-    const hit = matchShortcut(keyEvent({ key: 'z', metaKey: true }), config)
-    expect(hit).toEqual({ kind: 'builtIn', id: 'undo' })
+    expect(matchShortcut(keyEvent({ key: 'z', metaKey: true }), config)).toBe('undo')
     expect(
       matchShortcut(keyEvent({ key: 'k', metaKey: true }), config),
-    ).toEqual({ kind: 'builtIn', id: 'openCommandMenu' })
+    ).toBe('openCommandMenu')
   })
 
   test('honors null unbind and remaps', () => {
@@ -77,32 +76,7 @@ describe('resolveBuiltIn / matchShortcut', () => {
     }
     expect(resolveBuiltIn('undo', config)).toBeNull()
     expect(matchShortcut(keyEvent({ key: 'z', metaKey: true }), config)).toBeNull()
-    expect(matchShortcut(keyEvent({ key: 'q' }), config)).toEqual({
-      kind: 'builtIn',
-      id: 'tool.select',
-    })
-  })
-
-  test('matches custom agent prompts', () => {
-    const config: ShortcutConfig = {
-      overrides: {},
-      custom: [
-        {
-          id: 'c1',
-          name: 'Polish',
-          chord: { key: 'p', meta: true, shift: true },
-          action: { type: 'agentPrompt', prompt: 'Polish the selection' },
-        },
-      ],
-    }
-    expect(
-      matchShortcut(keyEvent({ key: 'p', metaKey: true, shiftKey: true }), config),
-    ).toEqual({
-      kind: 'custom',
-      id: 'c1',
-      prompt: 'Polish the selection',
-      name: 'Polish',
-    })
+    expect(matchShortcut(keyEvent({ key: 'q' }), config)).toBe('tool.select')
   })
 })
 

@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { cleanup, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, mock, test } from 'bun:test'
 import { createContext, useContext, type ReactNode } from 'react'
 import { withNuqsTestingAdapter } from 'nuqs/adapters/testing'
@@ -6,12 +6,6 @@ import { withNuqsTestingAdapter } from 'nuqs/adapters/testing'
 const billingStatus = mock()
 const listPublished = mock()
 const publishedEgress = mock()
-const openRouterStatus = mock()
-const connectOpenRouter = mock()
-const disconnectOpenRouter = mock()
-const aiProviderStatus = mock()
-const connectAiProvider = mock()
-const disconnectAiProvider = mock()
 
 const TabsContext = createContext('')
 
@@ -21,16 +15,6 @@ mock.module('#/lib/orpc-client', () => ({
     publish: {
       listAll: listPublished,
       egress: publishedEgress,
-    },
-    openrouter: {
-      status: openRouterStatus,
-      connect: connectOpenRouter,
-      disconnect: disconnectOpenRouter,
-    },
-    aiProvider: {
-      status: aiProviderStatus,
-      connect: connectAiProvider,
-      disconnect: disconnectAiProvider,
     },
   },
 }))
@@ -97,19 +81,13 @@ const disabledBilling = {
   currentPeriodEnd: null,
   cancelAtPeriodEnd: false,
   trial: null,
-  credits: null,
   stale: false,
   source: 'disabled' as const,
 }
 
 function renderSettings(searchParams = '?settings=billing') {
   return render(
-    <SettingsPanel
-      shortcutConfig={{} as never}
-      onShortcutConfigChange={() => {}}
-      agentSystemPrompt=""
-      onSaveAgentSystemPrompt={async () => {}}
-    />,
+    <SettingsPanel shortcutConfig={{} as never} onShortcutConfigChange={() => {}} />,
     { wrapper: withNuqsTestingAdapter({ searchParams }) },
   )
 }
@@ -124,22 +102,6 @@ describe('SettingsPanel billing visibility', () => {
       windowDays: 30,
       unlimited: true,
     })
-    openRouterStatus.mockReset().mockResolvedValue({
-      connected: false,
-      label: null,
-      updatedAt: null,
-    })
-    connectOpenRouter.mockReset().mockResolvedValue({
-      connected: true,
-      label: 'Loora key',
-    })
-    disconnectOpenRouter.mockReset().mockResolvedValue({ disconnected: true })
-    aiProviderStatus.mockReset().mockResolvedValue({
-      connected: false,
-      updatedAt: null,
-    })
-    connectAiProvider.mockReset().mockResolvedValue({ connected: true })
-    disconnectAiProvider.mockReset().mockResolvedValue({ disconnected: true })
   })
 
   afterEach(() => cleanup())
@@ -149,7 +111,7 @@ describe('SettingsPanel billing visibility', () => {
 
     expect(await screen.findByText('Signed in to loora.')).toBeTruthy()
     expect(screen.queryByRole('tab', { name: 'Billing' })).toBeNull()
-    expect(screen.queryByText('Manage your plan and monthly AI credits.')).toBeNull()
+    expect(screen.queryByText(/Manage the plan/)).toBeNull()
   })
 
   test('shows the billing tab when billing is required', async () => {
@@ -159,57 +121,14 @@ describe('SettingsPanel billing visibility', () => {
     await waitFor(() => expect(screen.getByRole('tab', { name: 'Billing' })).toBeTruthy())
   })
 
-  test('keeps every AI provider under one integration tab', async () => {
-    renderSettings('?settings=integrations&integration=providers')
+  // Children of the integrations panel are deliberately left unmocked: this file
+  // renders before their own suites, and `mock.module` is process-global, so a
+  // stub here would leak into `mcp-sessions.test.tsx` and friends.
+  test('offers no agent tab', async () => {
+    renderSettings('?settings=shortcuts')
 
-    expect(await screen.findByRole('tab', { name: 'AI providers' })).toBeTruthy()
-    expect(screen.queryByRole('tab', { name: 'ChatGPT' })).toBeNull()
-    expect(screen.queryByRole('tab', { name: 'OpenRouter' })).toBeNull()
-    expect(await screen.findByText('Google Gemini')).toBeTruthy()
-    expect(await screen.findByText('OpenAI')).toBeTruthy()
-    expect(await screen.findByText('Anthropic')).toBeTruthy()
-  })
-
-  test('connects OpenRouter with a masked custom API key', async () => {
-    openRouterStatus
-      .mockResolvedValueOnce({ connected: false, label: null, updatedAt: null })
-      .mockResolvedValue({
-        connected: true,
-        label: 'Loora key',
-        updatedAt: new Date(),
-      })
-    renderSettings('?settings=integrations&integration=providers')
-
-    const input = await screen.findByPlaceholderText('sk-or-v1-…')
-    expect((input as HTMLInputElement).type).toBe('password')
-    fireEvent.change(input, { target: { value: 'sk-or-v1-user-secret' } })
-    fireEvent.click(screen.getByRole('button', { name: 'Connect OpenRouter' }))
-
-    await waitFor(() =>
-      expect(connectOpenRouter).toHaveBeenCalledWith({
-        apiKey: 'sk-or-v1-user-secret',
-      }),
-    )
-    expect(await screen.findByText(/OpenRouter Auto is available/)).toBeTruthy()
-  })
-
-  test('connects Google Gemini with a masked custom API key', async () => {
-    aiProviderStatus
-      .mockResolvedValueOnce({ connected: false, updatedAt: null })
-      .mockResolvedValue({ connected: true, updatedAt: new Date() })
-    renderSettings('?settings=integrations&integration=providers')
-
-    const input = await screen.findByPlaceholderText('AIza…')
-    expect((input as HTMLInputElement).type).toBe('password')
-    fireEvent.change(input, { target: { value: 'AIza-user-secret' } })
-    fireEvent.click(screen.getByRole('button', { name: 'Connect Google Gemini' }))
-
-    await waitFor(() =>
-      expect(connectAiProvider).toHaveBeenCalledWith({
-        provider: 'google',
-        apiKey: 'AIza-user-secret',
-      }),
-    )
-    expect(await screen.findByText(/Gemini 3.5 Flash.*agent model picker/)).toBeTruthy()
+    expect(await screen.findByRole('tab', { name: 'Shortcuts' })).toBeTruthy()
+    expect(screen.queryByRole('tab', { name: 'Agent' })).toBeNull()
+    expect(screen.getByRole('tab', { name: 'Integrations' })).toBeTruthy()
   })
 })

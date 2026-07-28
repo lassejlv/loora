@@ -14,127 +14,40 @@ import {
 import { Button } from '#/components/ui/button'
 import { Input } from '#/components/ui/input'
 import { Tabs, TabsList, TabsPanel, TabsTab } from '#/components/ui/tabs'
-import {
-  Progress,
-  ProgressIndicator,
-  ProgressLabel,
-  ProgressTrack,
-  ProgressValue,
-} from '#/components/ui/progress'
 import { authClient } from '@loora/auth/client'
 import { orpc } from '#/lib/orpc-client'
-import { ChatGPTAccount } from '#/components/chatgpt-account'
-import { OpenRouterAccount } from '#/components/openrouter-account'
-import { CustomAiProviderAccounts } from '#/components/custom-ai-provider-accounts'
-import { CreditTopUp } from '#/components/credit-top-up'
 import { GitHubAccount } from '#/components/github-account'
 import { FigmaAccount } from '#/components/figma-account'
 import { McpSessions } from '#/components/mcp-sessions'
 import { PanelLoading, PanelShell } from '#/components/panel-shell'
 import { ShortcutsSettings } from '#/components/shortcuts-settings'
-import { AgentInstructionsSettings } from '#/components/agent-instructions-settings'
 import { clearWelcomeSeen } from '#/components/welcome-dialog'
 import { editorSearchParams, type IntegrationTab, type SettingsTab } from '#/lib/url-state'
 import type { ShortcutConfig } from '#/lib/shortcuts'
 import { getThemePreference, setThemePreference, type ThemePreference } from '#/lib/theme'
 
-interface UsageStatus {
-  dailyUsd: number
-  weeklyUsd: number
-  dailyLimitUsd: number
-  weeklyLimitUsd: number
-}
-
 type BillingStatus = Awaited<ReturnType<typeof orpc.billing.status>>
 
-interface AdminUserUsage {
+interface AdminUser {
   id: string
   name: string
   email: string
   isAdmin: boolean
   previewAccess: boolean
   previewAccessRequestedAt: Date | null
-  usageMultiplier: number
-  dailyUsd: number
-  weeklyUsd: number
-  dailyLimitUsd: number
-  weeklyLimitUsd: number
   publishEgressBytes: number
   publishEgressLimitBytes: number
 }
 
-const MULTIPLIER_PRESETS = [1, 5, 10, 20] as const
-
-function UsageMeter({ label, used, limit }: { label: string; used: number; limit: number }) {
-  const leftPct = Math.max(0, Math.round((1 - used / limit) * 100))
-  return (
-    <Progress value={leftPct} className="flex flex-col gap-1.5">
-      <div className="flex items-baseline justify-between">
-        <ProgressLabel className="text-xs font-medium">{label}</ProgressLabel>
-        <ProgressValue className="font-mono text-xs text-muted-foreground">
-          {() => `${leftPct}% left`}
-        </ProgressValue>
-      </div>
-      <ProgressTrack className="h-2">
-        <ProgressIndicator />
-      </ProgressTrack>
-      <p className="text-[11px] text-muted-foreground">
-        Resets on a rolling window as older usage ages out.
-      </p>
-    </Progress>
-  )
-}
-
-function UsageTab() {
-  const [usage, setUsage] = useState<UsageStatus | null>(null)
-  const [error, setError] = useState(false)
-
-  useEffect(() => {
-    let cancelled = false
-    orpc.usage
-      .get()
-      .then((data) => {
-        if (!cancelled) setUsage(data)
-      })
-      .catch(() => {
-        if (!cancelled) setError(true)
-      })
-    return () => {
-      cancelled = true
-    }
-  }, [])
-
-  if (error) {
-    return <p className="text-xs text-destructive-foreground">Could not load usage.</p>
-  }
-  if (!usage) {
-    return <PanelLoading label="Loading usage…" />
-  }
-
-  return (
-    <div className="flex flex-col gap-4">
-      <div>
-        <h2 className="text-sm font-semibold">AI usage</h2>
-        <p className="mt-1 text-xs text-muted-foreground">
-          Each request counts toward a daily (24h) and weekly (7d) allowance.
-        </p>
-      </div>
-      <UsageMeter label="Daily" used={usage.dailyUsd} limit={usage.dailyLimitUsd} />
-      <UsageMeter label="Weekly" used={usage.weeklyUsd} limit={usage.weeklyLimitUsd} />
-    </div>
-  )
-}
-
 function BillingTab({
   isAdmin,
-  initialBilling,
+  billing,
   loadError,
 }: {
   isAdmin: boolean
-  initialBilling: BillingStatus | null
+  billing: BillingStatus | null
   loadError: boolean
 }) {
-  const [billing, setBilling] = useState(initialBilling)
   const [error, setError] = useState(loadError ? 'Could not load billing.' : '')
   const [openingPortal, setOpeningPortal] = useState(false)
 
@@ -144,10 +57,9 @@ function BillingTab({
         <div>
           <h2 className="text-sm font-semibold">Internal access</h2>
           <p className="mt-1 text-xs text-muted-foreground">
-            Admin accounts bypass subscriptions and use local rolling AI limits.
+            Admin accounts bypass subscriptions and keep full editor access.
           </p>
         </div>
-        <UsageTab />
       </div>
     )
   }
@@ -161,7 +73,9 @@ function BillingTab({
     <div className="flex flex-col gap-5">
       <div>
         <h2 className="text-sm font-semibold">Billing</h2>
-        <p className="mt-1 text-xs text-muted-foreground">Manage your plan and monthly AI credits.</p>
+        <p className="mt-1 text-xs text-muted-foreground">
+          Manage the plan that unlocks the editor, branches, MCP, and publishing.
+        </p>
       </div>
       <div className="rounded-lg border border-border p-4">
         <p className="text-xs text-muted-foreground">Current plan</p>
@@ -170,25 +84,9 @@ function BillingTab({
           <div className="mt-3 rounded-md bg-secondary px-3 py-2 text-xs">
             <p>Your trial ends {new Date(billing.trial.endsAt).toLocaleDateString()}.</p>
             <p className="mt-1 text-muted-foreground">
-              Connect ChatGPT or add your own provider API key to use AI. Managed AI and credit
-              top-ups unlock after trial.
+              Full canvas, branches, exports, and the MCP server are included for the whole trial.
             </p>
           </div>
-        ) : null}
-        {billing.credits ? (
-          <div className="mt-3">
-            <p className="text-sm">{billing.credits.remaining} AI credits remaining</p>
-            {billing.credits.topUpPurchased > 0 ? (
-              <p className="mt-1 text-xs text-muted-foreground">
-                {billing.credits.includedRemaining} monthly + {billing.credits.topUpRemaining} prepaid
-              </p>
-            ) : null}
-          </div>
-        ) : null}
-        {billing.credits?.resetsAt ? (
-          <p className="mt-1 text-xs text-muted-foreground">
-            Monthly credits reset {new Date(billing.credits.resetsAt).toLocaleDateString()}
-          </p>
         ) : null}
         {billing.cancelAtPeriodEnd && billing.currentPeriodEnd ? (
           <p className="mt-3 rounded-md bg-secondary px-3 py-2 text-xs">
@@ -196,7 +94,6 @@ function BillingTab({
           </p>
         ) : null}
       </div>
-      {!billing.trial ? <CreditTopUp onBillingChange={setBilling} /> : null}
       <Button
         variant="outline"
         disabled={openingPortal || !billing.plan}
@@ -223,9 +120,9 @@ function AdminDeleteUserDialog({
   deleting,
   onDelete,
 }: {
-  account: AdminUserUsage
+  account: AdminUser
   deleting: boolean
-  onDelete: (account: AdminUserUsage, email: string) => Promise<void>
+  onDelete: (account: AdminUser, email: string) => Promise<void>
 }) {
   const [open, setOpen] = useState(false)
   const [email, setEmail] = useState('')
@@ -250,7 +147,7 @@ function AdminDeleteUserDialog({
         <AlertDialogHeader>
           <AlertDialogTitle>Delete {account.name}?</AlertDialogTitle>
           <AlertDialogDescription>
-            This permanently deletes {account.email} and all of their designs, chats, assets, and
+            This permanently deletes {account.email} and all of their designs, assets, and
             integrations. Type their email to confirm. This cannot be undone.
           </AlertDialogDescription>
         </AlertDialogHeader>
@@ -288,25 +185,17 @@ function AdminDeleteUserDialog({
 }
 
 function AdminTab({ currentUserId }: { currentUserId: string }) {
-  const [users, setUsers] = useState<AdminUserUsage[] | null>(null)
+  const [users, setUsers] = useState<AdminUser[] | null>(null)
   const [error, setError] = useState<string | null>(null)
-  const [resetting, setResetting] = useState<string | null>(null)
   const [savingAccess, setSavingAccess] = useState<string | null>(null)
-  const [savingMultiplier, setSavingMultiplier] = useState<string | null>(null)
   const [deleting, setDeleting] = useState<string | null>(null)
-  const [multiplierDrafts, setMultiplierDrafts] = useState<Record<string, string>>({})
 
   useEffect(() => {
     let cancelled = false
     orpc.admin
       .listUsers()
       .then((data) => {
-        if (!cancelled) {
-          setUsers(data)
-          setMultiplierDrafts(
-            Object.fromEntries(data.map((account) => [account.id, String(account.usageMultiplier)])),
-          )
-        }
+        if (!cancelled) setUsers(data)
       })
       .catch(() => {
         if (!cancelled) setError('Could not load users.')
@@ -316,56 +205,7 @@ function AdminTab({ currentUserId }: { currentUserId: string }) {
     }
   }, [])
 
-  async function handleReset(account: AdminUserUsage) {
-    if (!window.confirm(`Reset all AI usage for ${account.email}?`)) return
-
-    setResetting(account.id)
-    setError(null)
-    try {
-      await orpc.admin.resetUsage({ userId: account.id })
-      setUsers((current) =>
-        current?.map((user) =>
-          user.id === account.id ? { ...user, dailyUsd: 0, weeklyUsd: 0 } : user,
-        ) ?? null,
-      )
-    } catch {
-      setError(`Could not reset usage for ${account.email}.`)
-    } finally {
-      setResetting(null)
-    }
-  }
-
-  async function handleMultiplier(account: AdminUserUsage, multiplier: number) {
-    if (!Number.isInteger(multiplier) || multiplier < 1 || multiplier > 1_000_000) {
-      setError('Usage multiplier must be a whole number between 1 and 1,000,000.')
-      return
-    }
-
-    setSavingMultiplier(account.id)
-    setError(null)
-    try {
-      const updated = await orpc.admin.setUsageMultiplier({ userId: account.id, multiplier })
-      setUsers((current) =>
-        current?.map((user) =>
-          user.id === account.id
-            ? {
-                ...user,
-                usageMultiplier: updated.usageMultiplier,
-                dailyLimitUsd: updated.dailyLimitUsd,
-                weeklyLimitUsd: updated.weeklyLimitUsd,
-              }
-            : user,
-        ) ?? null,
-      )
-      setMultiplierDrafts((current) => ({ ...current, [account.id]: String(multiplier) }))
-    } catch {
-      setError(`Could not update limits for ${account.email}.`)
-    } finally {
-      setSavingMultiplier(null)
-    }
-  }
-
-  async function handlePreviewAccess(account: AdminUserUsage) {
+  async function handlePreviewAccess(account: AdminUser) {
     const granted = !account.previewAccess
     setSavingAccess(account.id)
     setError(null)
@@ -391,17 +231,12 @@ function AdminTab({ currentUserId }: { currentUserId: string }) {
     }
   }
 
-  async function handleDelete(account: AdminUserUsage, email: string) {
+  async function handleDelete(account: AdminUser, email: string) {
     setDeleting(account.id)
     setError(null)
     try {
       await orpc.admin.deleteUser({ userId: account.id, email })
       setUsers((current) => current?.filter((user) => user.id !== account.id) ?? null)
-      setMultiplierDrafts((current) => {
-        const next = { ...current }
-        delete next[account.id]
-        return next
-      })
     } catch (err) {
       setError(err instanceof Error ? err.message : `Could not delete ${account.email}.`)
       throw err
@@ -419,7 +254,7 @@ function AdminTab({ currentUserId }: { currentUserId: string }) {
       <div>
         <h2 className="text-sm font-semibold">Admin</h2>
         <p className="mt-1 text-xs text-muted-foreground">
-          Manage preview access and internal AI usage limits.
+          Manage preview access and review publish bandwidth.
         </p>
       </div>
       {error ? <p className="text-xs text-destructive-foreground">{error}</p> : null}
@@ -444,11 +279,8 @@ function AdminTab({ currentUserId }: { currentUserId: string }) {
                 ) : null}
               </p>
               <p className="truncate text-xs text-muted-foreground">{account.email}</p>
-              <p className="mt-1 font-mono text-[11px] text-muted-foreground">
-                {`$${account.dailyUsd.toFixed(4)} / $${account.dailyLimitUsd.toFixed(2)} today · $${account.weeklyUsd.toFixed(4)} / $${account.weeklyLimitUsd.toFixed(2)} this week`}
-              </p>
               <p
-                className={`font-mono text-[11px] ${
+                className={`mt-1 font-mono text-[11px] ${
                   !account.isAdmin && account.publishEgressBytes >= account.publishEgressLimitBytes
                     ? 'text-destructive'
                     : 'text-muted-foreground'
@@ -472,54 +304,6 @@ function AdminTab({ currentUserId }: { currentUserId: string }) {
                       : 'Grant preview access'}
                 </Button>
               ) : null}
-              <div className="flex flex-wrap gap-1">
-                {MULTIPLIER_PRESETS.map((multiplier) => (
-                  <Button
-                    key={multiplier}
-                    size="xs"
-                    variant={account.usageMultiplier === multiplier ? 'secondary' : 'outline'}
-                    disabled={savingMultiplier === account.id}
-                    onClick={() => handleMultiplier(account, multiplier)}
-                  >
-                    {multiplier}×
-                  </Button>
-                ))}
-              </div>
-              <div className="flex gap-2">
-                <Input
-                  aria-label={`Custom usage multiplier for ${account.email}`}
-                  className="h-7 w-24 text-xs"
-                  min={1}
-                  max={1_000_000}
-                  step={1}
-                  type="number"
-                  value={multiplierDrafts[account.id] ?? String(account.usageMultiplier)}
-                  onChange={(event) =>
-                    setMultiplierDrafts((current) => ({
-                      ...current,
-                      [account.id]: event.target.value,
-                    }))
-                  }
-                />
-                <Button
-                  size="xs"
-                  variant="outline"
-                  disabled={savingMultiplier === account.id}
-                  onClick={() =>
-                    handleMultiplier(account, Number(multiplierDrafts[account.id]))
-                  }
-                >
-                  {savingMultiplier === account.id ? 'Saving…' : 'Apply'}
-                </Button>
-                <Button
-                  variant="outline"
-                  size="xs"
-                  disabled={resetting === account.id}
-                  onClick={() => handleReset(account)}
-                >
-                  {resetting === account.id ? 'Resetting…' : 'Reset usage'}
-                </Button>
-              </div>
               {!account.isAdmin && account.id !== currentUserId ? (
                 <AdminDeleteUserDialog
                   account={account}
@@ -756,7 +540,6 @@ function DeleteAccountSection() {
     try {
       await orpc.auth.deleteAccount()
       clearWelcomeSeen()
-      await fetch('/api/chatgpt/logout', { method: 'POST' }).catch(() => undefined)
       window.location.href = '/'
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to delete account.')
@@ -769,7 +552,7 @@ function DeleteAccountSection() {
       <div>
         <h2 className="text-sm font-semibold text-destructive">Danger zone</h2>
         <p className="mt-1 text-xs text-muted-foreground">
-          Permanently delete your account, designs, chats, and assets.
+          Permanently delete your account, designs, and assets.
         </p>
       </div>
       {error ? <p className="text-xs text-destructive">{error}</p> : null}
@@ -786,8 +569,8 @@ function DeleteAccountSection() {
             <AlertDialogHeader>
               <AlertDialogTitle>Delete account?</AlertDialogTitle>
               <AlertDialogDescription>
-                This permanently deletes your account and all designs, chats, assets, and
-                connected integrations. This cannot be undone.
+                This permanently deletes your account and all designs, assets, and connected
+                integrations. This cannot be undone.
               </AlertDialogDescription>
             </AlertDialogHeader>
             <AlertDialogFooter>
@@ -811,14 +594,10 @@ export function SettingsPanel({
   onClose,
   shortcutConfig,
   onShortcutConfigChange,
-  agentSystemPrompt,
-  onSaveAgentSystemPrompt,
 }: {
   onClose?: () => void
   shortcutConfig: ShortcutConfig
   onShortcutConfigChange: (next: ShortcutConfig) => void
-  agentSystemPrompt: string | null
-  onSaveAgentSystemPrompt: (prompt: string) => Promise<void>
 }) {
   const { data: session } = authClient.useSession()
   const isAdmin = session?.user.isAdmin === true
@@ -831,7 +610,7 @@ export function SettingsPanel({
   const tab: SettingsTab = settings === 'billing' && billing?.required === false
     ? 'account'
     : settings ?? 'account'
-  const integrationTab: IntegrationTab = integration ?? 'providers'
+  const integrationTab: IntegrationTab = integration ?? 'mcp'
 
   useEffect(() => {
     let cancelled = false
@@ -848,9 +627,7 @@ export function SettingsPanel({
   }, [])
 
   async function signOut() {
-    // Do not leave one Loora account's ChatGPT cookie available after switching users.
     clearWelcomeSeen()
-    await fetch('/api/chatgpt/logout', { method: 'POST' }).catch(() => undefined)
     await authClient.signOut()
   }
 
@@ -868,12 +645,11 @@ export function SettingsPanel({
         <TabsList
           className={`grid w-full grid-cols-3 ${
             isAdmin
-              ? showBilling ? 'sm:grid-cols-6' : 'sm:grid-cols-5'
-              : showBilling ? 'sm:grid-cols-5' : 'sm:grid-cols-4'
+              ? showBilling ? 'sm:grid-cols-5' : 'sm:grid-cols-4'
+              : showBilling ? 'sm:grid-cols-4' : 'sm:grid-cols-3'
           }`}
         >
           <TabsTab value="account">Account</TabsTab>
-          <TabsTab value="agent">Agent</TabsTab>
           <TabsTab value="integrations">Integrations</TabsTab>
           {showBilling ? <TabsTab value="billing">Billing</TabsTab> : null}
           <TabsTab value="shortcuts">Shortcuts</TabsTab>
@@ -905,17 +681,6 @@ export function SettingsPanel({
           <DeleteAccountSection />
         </TabsPanel>
 
-        <TabsPanel value="agent">
-          {agentSystemPrompt === null ? (
-            <PanelLoading label="Loading agent instructions…" />
-          ) : (
-            <AgentInstructionsSettings
-              savedPrompt={agentSystemPrompt}
-              onSave={onSaveAgentSystemPrompt}
-            />
-          )}
-        </TabsPanel>
-
         <TabsPanel value="integrations" className="flex flex-col gap-4">
           <div>
             <h2 className="text-sm font-semibold">Integrations</h2>
@@ -933,18 +698,13 @@ export function SettingsPanel({
             }}
             className="flex flex-col gap-4"
           >
-            <TabsList className="grid w-full grid-cols-2 sm:grid-cols-4">
-              <TabsTab value="providers">AI providers</TabsTab>
+            <TabsList className="grid w-full grid-cols-3">
+              <TabsTab value="mcp">MCP</TabsTab>
               <TabsTab value="github">GitHub</TabsTab>
               <TabsTab value="figma">Figma</TabsTab>
-              <TabsTab value="mcp">MCP</TabsTab>
             </TabsList>
-            <TabsPanel value="providers" id="integration-providers">
-              <div className="flex flex-col gap-4">
-                <ChatGPTAccount />
-                <OpenRouterAccount />
-                <CustomAiProviderAccounts />
-              </div>
+            <TabsPanel value="mcp" id="integration-mcp">
+              <McpSessions />
             </TabsPanel>
             <TabsPanel value="github" id="integration-github">
               <GitHubAccount />
@@ -952,19 +712,12 @@ export function SettingsPanel({
             <TabsPanel value="figma" id="integration-figma">
               <FigmaAccount />
             </TabsPanel>
-            <TabsPanel value="mcp" id="integration-mcp">
-              <McpSessions />
-            </TabsPanel>
           </Tabs>
         </TabsPanel>
 
         {showBilling ? (
           <TabsPanel value="billing">
-            <BillingTab
-              isAdmin={isAdmin}
-              initialBilling={billing}
-              loadError={billingLoadFailed}
-            />
+            <BillingTab isAdmin={isAdmin} billing={billing} loadError={billingLoadFailed} />
           </TabsPanel>
         ) : null}
 

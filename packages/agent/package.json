@@ -3,29 +3,11 @@
   "private": true,
   "type": "module",
   "exports": {
-    "./models": "./src/models.ts",
-    "./messages": "./src/messages.ts",
     "./canvas-v2-tools": "./src/canvas-v2-tools.ts",
-    "./prompts": "./src/prompts.ts",
-    "./repair-layout": "./src/repair-layout.ts",
-    "./tools": "./src/tools.ts",
-    "./usage": "./src/usage.ts",
-    "./server": "./src/server.ts"
+    "./repair-layout": "./src/repair-layout.ts"
   },
   "dependencies": {
     "@loora/canvas": "workspace:*",
-    "@ai-sdk/anthropic": "^4.0.20",
-    "@ai-sdk/google": "^4.0.24",
-    "@ai-sdk/openai": "^4.0.20",
-    "@loora/auth": "workspace:*",
-    "@loora/billing": "workspace:*",
-    "@loora/db": "workspace:*",
-    "@neondatabase/ai-sdk-provider": "^0.7.2",
-    "@opencoredev/loginwithchatgpt-ai": "^0.2.0",
-    "@opencoredev/loginwithchatgpt-server": "^0.2.0",
-    "@openrouter/ai-sdk-provider": "^3.0.0",
-    "ai": "catalog:",
-    "drizzle-orm": "catalog:",
     "zod": "catalog:"
   },
   "devDependencies": {

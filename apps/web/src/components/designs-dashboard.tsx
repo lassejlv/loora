@@ -243,7 +243,6 @@ export function DesignsDashboard() {
   const [deleteTarget, setDeleteTarget] = useState<DesignSummary | null>(null)
   const [deleting, setDeleting] = useState(false)
   const [shortcutConfig, setShortcutConfig] = useState<ShortcutConfig>(loadCachedShortcuts)
-  const [agentSystemPrompt, setAgentSystemPrompt] = useState<string | null>(null)
 
   useEffect(() => {
     let cancelled = false
@@ -270,12 +269,9 @@ export function DesignsDashboard() {
         if (cancelled) return
         const next = normalizeConfig(preferences.shortcuts)
         setShortcutConfig(next)
-        setAgentSystemPrompt(preferences.agentSystemPrompt)
         cacheShortcuts(next)
       })
-      .catch(() => {
-        if (!cancelled) setAgentSystemPrompt('')
-      })
+      .catch(() => undefined)
     return () => {
       cancelled = true
     }
@@ -367,9 +363,7 @@ export function DesignsDashboard() {
   }
 
   const signOut = async () => {
-    // Do not leave one Loora account's ChatGPT cookie available after switching users.
     clearWelcomeSeen()
-    await fetch('/api/chatgpt/logout', { method: 'POST' }).catch(() => undefined)
     await authClient.signOut()
   }
 
@@ -579,11 +573,6 @@ export function DesignsDashboard() {
               setShortcutConfig(normalized)
               cacheShortcuts(normalized)
               void orpc.preferences.save({ shortcuts: normalized }).catch(() => undefined)
-            }}
-            agentSystemPrompt={agentSystemPrompt}
-            onSaveAgentSystemPrompt={async (prompt) => {
-              const saved = await orpc.preferences.saveAgentPrompt({ prompt })
-              setAgentSystemPrompt(saved.agentSystemPrompt)
             }}
           />
         </DialogPopup>

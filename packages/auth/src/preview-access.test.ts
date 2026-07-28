@@ -7,7 +7,8 @@ import {
 
 describe('preview access', () => {
   test('is required by default and disabled explicitly', () => {
-    expect(isPreviewAccessRequired(undefined)).toBe(true)
+    expect(isPreviewAccessRequired(null)).toBe(true)
+    expect(isPreviewAccessRequired('')).toBe(true)
     expect(isPreviewAccessRequired('true')).toBe(true)
     expect(isPreviewAccessRequired(' false ')).toBe(false)
   })
