@@ -3,7 +3,7 @@ import type * as React from "react";
 import { cn } from "#/lib/utils.ts";
 
 const alertVariants = cva(
-  "relative grid w-full items-start gap-x-2 gap-y-0.5 rounded-xl border px-3.5 py-3 text-card-foreground text-sm has-[>svg]:has-data-[slot=alert-action]:grid-cols-[calc(var(--spacing)*4)_1fr_auto] has-[>svg]:grid-cols-[calc(var(--spacing)*4)_1fr] has-data-[slot=alert-action]:grid-cols-[1fr_auto] has-[>svg]:gap-x-2 [&>svg]:h-lh [&>svg]:w-4",
+  "relative grid w-full items-start gap-x-1.5 gap-y-0.5 rounded-md border px-2.5 py-2 text-xs text-card-foreground has-[>svg]:has-data-[slot=alert-action]:grid-cols-[calc(var(--spacing)*3.5)_1fr_auto] has-[>svg]:grid-cols-[calc(var(--spacing)*3.5)_1fr] has-data-[slot=alert-action]:grid-cols-[1fr_auto] [&>svg]:h-lh [&>svg]:w-3.5",
   {
     defaultVariants: {
       variant: "default",

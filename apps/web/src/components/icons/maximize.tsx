@@ -65,6 +65,7 @@ const MaximizeIcon = forwardRef<MaximizeIconHandle, MaximizeIconProps>(
         {...props}
       >
         <svg
+          className="size-full"
           fill="none"
           height={size}
           stroke="currentColor"

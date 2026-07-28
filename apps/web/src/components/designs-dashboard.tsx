@@ -1,18 +1,20 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useNavigate } from '@tanstack/react-router'
 import {
-  ChevronDownIcon,
-  ClockIcon,
   EllipsisIcon,
   FilePlus2Icon,
-  LayoutGridIcon,
   ListIcon,
-  LogOutIcon,
   PencilIcon,
-  SearchIcon,
-  SettingsIcon,
   Trash2Icon,
 } from 'lucide-react'
+import {
+  ChevronDownIcon,
+  ClockIcon,
+  LayoutGridIcon,
+  LogOutIcon,
+  SearchIcon,
+  SettingsIcon,
+} from '#/components/icons'
 import { authClient } from '@loora/auth/client'
 import { DesignThumbnail } from '#/components/design-thumbnail'
 import { SettingsPanel } from '#/components/settings-panel'
@@ -157,17 +159,17 @@ function FileCard({
   onDelete: () => void
 }) {
   return (
-    <div className="group relative flex flex-col rounded-xl border bg-card p-3 transition-colors hover:border-foreground/24">
+    <div className="group relative flex flex-col rounded-lg border bg-card p-2.5 transition-colors hover:border-foreground/20">
       <Link
         to="/app/design"
         search={{ id: design.id }}
         aria-label={`Open ${design.name}`}
-        className="absolute inset-0 rounded-xl focus-visible:outline-2 focus-visible:outline-ring focus-visible:outline-offset-2"
+        className="absolute inset-0 rounded-lg focus-visible:outline-2 focus-visible:outline-ring focus-visible:outline-offset-2"
       />
       <div className="pointer-events-none flex items-start gap-2">
         <div className="min-w-0 flex-1">
-          <p className="truncate text-sm font-medium">{design.name}</p>
-          <p className="mt-0.5 truncate text-xs text-muted-foreground">
+          <p className="truncate text-xs font-medium">{design.name}</p>
+          <p className="mt-0.5 truncate text-[11px] text-muted-foreground">
             Edited {relativeTime(design.updatedAt)}
           </p>
         </div>
@@ -178,7 +180,7 @@ function FileCard({
         onDelete={onDelete}
         className="absolute end-2 top-2 bg-card opacity-0 transition-opacity group-focus-within:opacity-100 group-hover:opacity-100 data-[state=open]:opacity-100"
       />
-      <div className="mt-3 aspect-[4/3] overflow-hidden rounded-lg border bg-cx-canvas">
+      <div className="mt-2.5 aspect-[4/3] overflow-hidden rounded-md border bg-cx-canvas">
         <DesignThumbnail designId={design.id} revision={design.revision} />
       </div>
     </div>
@@ -195,20 +197,20 @@ function FileRow({
   onDelete: () => void
 }) {
   return (
-    <div className="group relative flex items-center gap-3 border-b px-3 py-2 last:border-b-0 hover:bg-secondary/50">
+    <div className="group relative flex items-center gap-2.5 border-b px-2.5 py-1.5 last:border-b-0 hover:bg-secondary/50">
       <Link
         to="/app/design"
         search={{ id: design.id }}
         aria-label={`Open ${design.name}`}
         className="absolute inset-0 focus-visible:outline-2 focus-visible:outline-ring focus-visible:-outline-offset-2"
       />
-      <div className="pointer-events-none size-10 shrink-0 overflow-hidden rounded-md border bg-cx-canvas">
+      <div className="pointer-events-none size-8 shrink-0 overflow-hidden rounded-sm border bg-cx-canvas">
         <DesignThumbnail designId={design.id} revision={design.revision} />
       </div>
-      <p className="pointer-events-none min-w-0 flex-1 truncate text-sm font-medium">
+      <p className="pointer-events-none min-w-0 flex-1 truncate text-xs font-medium">
         {design.name}
       </p>
-      <p className="pointer-events-none hidden shrink-0 text-xs text-muted-foreground sm:block">
+      <p className="pointer-events-none hidden shrink-0 text-[11px] text-muted-foreground sm:block">
         Edited {relativeTime(design.updatedAt)}
       </p>
       <FileActions
@@ -375,7 +377,7 @@ export function DesignsDashboard() {
 
   return (
     <div className="flex h-screen min-h-0 bg-cx-canvas text-foreground">
-      <aside className="hidden w-56 shrink-0 flex-col border-e bg-background/60 md:flex">
+      <aside className="hidden w-48 shrink-0 flex-col border-e bg-background/72 md:flex">
         <div className="p-2">
           <AccountMenu
             name={accountName}
@@ -386,24 +388,24 @@ export function DesignsDashboard() {
         <nav className="flex flex-col gap-0.5 px-2">
           <span
             aria-current="page"
-            className="flex items-center gap-2 rounded-md bg-secondary px-2 py-1.5 text-sm font-medium"
+            className="flex items-center gap-1.5 rounded-md bg-secondary px-2 py-1 text-xs font-medium"
           >
-            <ClockIcon className="size-4 text-muted-foreground" />
+            <ClockIcon className="size-3.5 text-muted-foreground" />
             Recents
           </span>
           <button
             type="button"
             onClick={() => setSettingsOpen(true)}
-            className="flex items-center gap-2 rounded-md px-2 py-1.5 text-start text-sm text-muted-foreground hover:bg-secondary hover:text-foreground"
+            className="flex items-center gap-1.5 rounded-md px-2 py-1 text-start text-xs text-muted-foreground hover:bg-secondary hover:text-foreground"
           >
-            <SettingsIcon className="size-4" />
+            <SettingsIcon className="size-3.5" />
             Settings
           </button>
         </nav>
       </aside>
 
       <main className="flex min-w-0 flex-1 flex-col overflow-y-auto">
-        <header className="flex flex-wrap items-center gap-3 px-6 pt-6 pb-4">
+        <header className="flex flex-wrap items-center gap-2 px-5 pt-5 pb-3">
           <div className="md:hidden">
             <AccountMenu
               compact
@@ -412,8 +414,8 @@ export function DesignsDashboard() {
               onSignOut={() => void signOut()}
             />
           </div>
-          <h1 className="flex-1 text-2xl font-semibold tracking-tight">Recents</h1>
-          <div className="flex items-center rounded-lg border bg-background p-0.5">
+          <h1 className="flex-1 text-lg font-semibold tracking-tight">Recents</h1>
+          <div className="flex items-center rounded-md border bg-background p-0.5">
             <Button
               variant={view === 'grid' ? 'secondary' : 'ghost'}
               size="icon-sm"
@@ -433,7 +435,7 @@ export function DesignsDashboard() {
               <ListIcon />
             </Button>
           </div>
-          <div className="relative w-56">
+          <div className="relative w-48">
             <SearchIcon className="pointer-events-none absolute start-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
             <Input
               ref={searchRef}
@@ -452,17 +454,17 @@ export function DesignsDashboard() {
         </header>
 
         {error ? (
-          <div className="mx-6 mb-4 rounded-lg border border-destructive/32 bg-destructive/8 px-3 py-2 text-sm text-destructive-foreground">
+          <div className="mx-5 mb-3 rounded-md border border-destructive/32 bg-destructive/8 px-2.5 py-1.5 text-xs text-destructive-foreground">
             {error}
           </div>
         ) : null}
 
-        <div className="min-h-0 flex-1 px-6 pb-10">
+        <div className="min-h-0 flex-1 px-5 pb-8">
           {designs === null ? (
-            <p className="cx-shimmer text-sm">Loading your files…</p>
+            <p className="cx-shimmer text-xs">Loading your files…</p>
           ) : visible.length === 0 ? (
-            <div className="rounded-xl border border-dashed px-6 py-16 text-center">
-              <p className="text-sm font-medium">
+            <div className="rounded-lg border border-dashed px-5 py-12 text-center">
+              <p className="text-xs font-medium">
                 {designs.length === 0 ? 'No design files yet' : 'No files match that search'}
               </p>
               <p className="mt-1 text-xs text-muted-foreground">
@@ -471,7 +473,7 @@ export function DesignsDashboard() {
                   : 'Try a different name.'}
               </p>
               {designs.length === 0 ? (
-                <Button className="mt-4" onClick={() => void newFile()} disabled={creating}>
+                <Button className="mt-3" onClick={() => void newFile()} disabled={creating}>
                   {creating ? <Spinner /> : <FilePlus2Icon />}
                   New file
                 </Button>
@@ -480,8 +482,8 @@ export function DesignsDashboard() {
           ) : view === 'grid' ? (
             <div
               className={cn(
-                'grid gap-4',
-                'sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4',
+                'grid gap-3',
+                'sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5',
               )}
             >
               {visible.map((design) => (
@@ -497,7 +499,7 @@ export function DesignsDashboard() {
               ))}
             </div>
           ) : (
-            <div className="overflow-hidden rounded-xl border bg-card">
+            <div className="overflow-hidden rounded-lg border bg-card">
               {visible.map((design) => (
                 <FileRow
                   key={design.id}

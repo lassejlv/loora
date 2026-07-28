@@ -43,7 +43,7 @@ export function AgentInstructionsSettings({
   }
 
   return (
-    <div className="flex flex-col gap-6">
+    <div className="flex flex-col gap-4">
       <section aria-labelledby="built-in-agent-instructions">
         <h2 id="built-in-agent-instructions" className="text-sm font-semibold">
           Loora&apos;s built-in instructions

@@ -10,24 +10,26 @@ import {
   type MotionValue,
 } from 'motion/react'
 import {
-  ArrowRightIcon,
-  CheckIcon,
   CodeIcon,
-  FigmaIcon,
-  GitCompareIcon,
-  GithubIcon,
   ImageIcon,
   KeyRoundIcon,
-  LinkIcon,
   MessagesSquareIcon,
-  MoonIcon,
   MousePointer2Icon,
   Share2Icon,
   SquareIcon,
-  SunIcon,
-  TerminalIcon,
   TypeIcon,
 } from 'lucide-react'
+import {
+  ArrowRightIcon,
+  CheckIcon,
+  FigmaIcon,
+  GitCompareIcon,
+  GithubIcon,
+  LinkIcon,
+  MoonIcon,
+  SunIcon,
+  TerminalIcon,
+} from '#/components/icons'
 import { Button } from '#/components/ui/button'
 import {
   getThemePreference,
@@ -128,22 +130,22 @@ const LIGHT: Palette = {
 }
 
 const DARK: Palette = {
-  accent: '#738af4',
-  accentSoft: 'rgba(115,138,244,0.14)',
-  accentFaint: 'rgba(115,138,244,0.07)',
-  accentWire: 'rgba(115,138,244,0.40)',
-  wireStrong: '#4a4f5c',
-  wireMid: '#3c404b',
-  wireSoft: '#31343d',
-  surface: '#1c1e24',
-  tint: '#232630',
-  line: '#2e3138',
-  dot: '#2e3038',
-  page: '#101114',
+  accent: '#1e3dea',
+  accentSoft: 'rgba(30,61,234,0.14)',
+  accentFaint: 'rgba(30,61,234,0.07)',
+  accentWire: 'rgba(30,61,234,0.40)',
+  wireStrong: '#5a5a5f',
+  wireMid: '#47474c',
+  wireSoft: '#343438',
+  surface: '#19191b',
+  tint: '#1f1f21',
+  line: '#343436',
+  dot: '#29292c',
+  page: '#0f0f11',
   ok: '#34d399',
-  dotAccent: 'rgba(115,138,244,0.40)',
-  glow: 'rgba(233,234,238,0.05)',
-  accentInk: '#101114',
+  dotAccent: 'rgba(30,61,234,0.40)',
+  glow: 'rgba(227,228,230,0.05)',
+  accentInk: '#ffffff',
 }
 
 const PaletteContext = createContext<Palette>(LIGHT)
@@ -1242,9 +1244,9 @@ function BranchDemo({ reduceMotion }: { reduceMotion: boolean | null }) {
           >
             <p className="font-mono text-[8.5px] leading-none text-muted-foreground/70">compare</p>
             <div className="mt-1.5 flex items-center gap-2 font-mono text-[9px] leading-none">
-              <span className="text-emerald-600">+3</span>
+              <span className="text-diff-added">+3</span>
               <span className="text-muted-foreground">~2</span>
-              <span className="text-red-700">−1</span>
+              <span className="text-diff-removed">−1</span>
             </div>
             <div className="mt-2 flex flex-col gap-1">
               <Wire w="80%" h={5} tone="soft" />

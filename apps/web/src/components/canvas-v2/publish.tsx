@@ -1,12 +1,12 @@
 import { useEffect, useMemo, useState } from 'react'
+import { UnlinkIcon } from 'lucide-react'
 import {
   CheckIcon,
   CopyIcon,
   ExternalLinkIcon,
   Globe2Icon,
   RefreshCwIcon,
-  UnlinkIcon,
-} from 'lucide-react'
+} from '#/components/icons'
 import type { CanvasDocumentV2, PageNode } from '@loora/canvas/model'
 import { useCanvasDocument, useCanvasSelection } from '@loora/canvas/react'
 import type { CanvasSyncTarget } from '#/lib/canvas-v2-client'

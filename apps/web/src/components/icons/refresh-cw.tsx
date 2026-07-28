@@ -52,6 +52,7 @@ const RefreshCWIcon = forwardRef<RefreshCCWIconWIcon, RefreshCCWIcoWIcon>(
         {...props}
       >
         <motion.svg
+          className="size-full"
           animate={controls}
           fill="none"
           height={size}

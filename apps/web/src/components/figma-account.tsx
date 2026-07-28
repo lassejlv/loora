@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
-import { FigmaIcon, UnplugIcon } from 'lucide-react'
+import { UnplugIcon } from 'lucide-react'
+import { FigmaIcon } from '#/components/icons'
 import { Button } from '#/components/ui/button'
 import { IntegrationCard, IntegrationStatus } from '#/components/integration-card'
 import { orpc } from '#/lib/orpc-client'

@@ -3,10 +3,7 @@ import {
   BringToFrontIcon,
   ClipboardPasteIcon,
   ComponentIcon,
-  CopyIcon,
-  FrameIcon,
   GroupIcon,
-  MaximizeIcon,
   RectangleHorizontalIcon,
   ScissorsIcon,
   SendToBackIcon,
@@ -14,6 +11,7 @@ import {
   TypeIcon,
   UngroupIcon,
 } from 'lucide-react'
+import { CopyIcon, FrameIcon, MaximizeIcon } from '#/components/icons'
 import {
   ContextMenu,
   ContextMenuItem,

@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
-import { ExternalLinkIcon, KeyRoundIcon, UnplugIcon } from 'lucide-react'
+import { KeyRoundIcon, UnplugIcon } from 'lucide-react'
+import { ExternalLinkIcon } from '#/components/icons'
 import { Button } from '#/components/ui/button'
 import { Input } from '#/components/ui/input'
 import { IntegrationCard, IntegrationStatus } from '#/components/integration-card'

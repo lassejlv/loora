@@ -1,16 +1,14 @@
 import { useEffect, useMemo, useState } from 'react'
+import { ListTreeIcon, PencilIcon, Trash2Icon } from 'lucide-react'
 import {
   CheckIcon,
   ChevronDownIcon,
   GitBranchIcon,
   GitMergeIcon,
-  ListTreeIcon,
-  PencilIcon,
   PlusIcon,
   RotateCcwIcon,
   SendIcon,
-  Trash2Icon,
-} from 'lucide-react'
+} from '#/components/icons'
 import type { CanvasDocumentV2 } from '@loora/canvas/model'
 import { diffDocuments } from '@loora/canvas/merge'
 import { orpc } from '#/lib/orpc-client'

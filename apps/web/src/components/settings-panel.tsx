@@ -112,7 +112,7 @@ function UsageTab() {
   }
 
   return (
-    <div className="flex flex-col gap-6">
+    <div className="flex flex-col gap-4">
       <div>
         <h2 className="text-sm font-semibold">AI usage</h2>
         <p className="mt-1 text-xs text-muted-foreground">
@@ -140,7 +140,7 @@ function BillingTab({
 
   if (isAdmin) {
     return (
-      <div className="flex flex-col gap-6">
+      <div className="flex flex-col gap-4">
         <div>
           <h2 className="text-sm font-semibold">Internal access</h2>
           <p className="mt-1 text-xs text-muted-foreground">
@@ -254,7 +254,7 @@ function AdminDeleteUserDialog({
             integrations. Type their email to confirm. This cannot be undone.
           </AlertDialogDescription>
         </AlertDialogHeader>
-        <div className="px-6 pb-2">
+        <div className="px-4 pb-1.5">
           <Input
             autoComplete="off"
             autoFocus
@@ -855,7 +855,7 @@ export function SettingsPanel({
   }
 
   return (
-    <PanelShell title="Settings" onClose={onClose} bodyClassName="p-6" className="bg-transparent">
+    <PanelShell title="Settings" onClose={onClose} bodyClassName="p-4" className="bg-transparent">
       <Tabs
         value={tab}
         onValueChange={(value) => {
@@ -863,7 +863,7 @@ export function SettingsPanel({
           if (next === 'integrations') void setUrlState({ settings: next })
           else void setUrlState({ settings: next, integration: null })
         }}
-        className="flex flex-col gap-6"
+        className="flex flex-col gap-4"
       >
         <TabsList
           className={`grid w-full grid-cols-3 ${
@@ -880,7 +880,7 @@ export function SettingsPanel({
           {isAdmin ? <TabsTab value="admin">Admin</TabsTab> : null}
         </TabsList>
 
-        <TabsPanel value="account" className="flex flex-col gap-6">
+        <TabsPanel value="account" className="flex flex-col gap-4">
           <div>
             <h2 className="text-sm font-semibold">Account</h2>
             <p className="mt-1 text-xs text-muted-foreground">Signed in to loora.</p>

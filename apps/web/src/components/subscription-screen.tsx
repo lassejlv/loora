@@ -129,7 +129,7 @@ export function SubscriptionScreen({ userId, children, preview, redirect }: Subs
                       </span>
                     ) : null}
                   </div>
-                  <p className="mt-3 text-2xl font-semibold tracking-tight sm:mt-5">
+                  <p className="mt-3 text-xl font-semibold tracking-tight sm:mt-4">
                     {plan.price}<span className="text-xs font-normal text-muted-foreground">/month</span>
                   </p>
                   {plan.id === 'pro' ? (

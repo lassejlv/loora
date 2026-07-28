@@ -66,6 +66,7 @@ const CopyIcon = forwardRef<CopyIconHandle, CopyIconProps>(
         {...props}
       >
         <svg
+          className="size-full"
           fill="none"
           height={size}
           stroke="currentColor"

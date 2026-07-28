@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { MessageSquarePlusIcon } from 'lucide-react'
+import { MessageSquarePlusIcon } from '#/components/icons'
 import {
   useCanvasDocument,
   useCanvasSelection,

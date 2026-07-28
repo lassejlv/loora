@@ -1,15 +1,17 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useNavigate } from '@tanstack/react-router'
 import {
-  CheckIcon,
-  ChevronDownIcon,
-  FigmaIcon,
   FilePlus2Icon,
   FolderIcon,
   PencilIcon,
-  RefreshCwIcon,
   Trash2Icon,
 } from 'lucide-react'
+import {
+  CheckIcon,
+  ChevronDownIcon,
+  FigmaIcon,
+  RefreshCwIcon,
+} from '#/components/icons'
 import { CanvasEngine, type CanvasTransaction } from '@loora/canvas/engine'
 import { CanvasV2Editor, type CanvasEditorController } from './editor'
 import {
@@ -70,10 +72,10 @@ function CanvasV2DocSwitcher({
       <DropdownMenuTrigger asChild>
         <button
           type="button"
-          className="pointer-events-auto flex min-w-0 max-w-44 items-center gap-1 rounded-md px-1.5 py-0.5 text-sm text-muted-foreground hover:bg-secondary hover:text-foreground"
+          className="pointer-events-auto flex min-w-0 max-w-40 items-center gap-1 rounded-sm px-1 py-0.5 text-[11px] leading-none text-muted-foreground hover:bg-secondary hover:text-foreground"
         >
           <span className="truncate">{active?.name ?? 'Untitled'}</span>
-          <ChevronDownIcon className="size-3.5 shrink-0" />
+          <ChevronDownIcon className="size-3 shrink-0" />
         </button>
       </DropdownMenuTrigger>
       <DropdownMenuContent
@@ -296,8 +298,8 @@ export function CanvasV2App({
 
   if (error) {
     return (
-      <main className="grid h-screen place-items-center bg-cx-canvas p-6">
-        <div className="max-w-md rounded-xl border bg-card p-6 text-center shadow-sm">
+      <main className="grid h-screen place-items-center bg-cx-canvas p-4">
+        <div className="max-w-sm rounded-lg border bg-card p-4 text-center">
           <h1 className="text-base font-semibold">Canvas V2 could not open</h1>
           <p className="mt-2 text-sm text-muted-foreground">{error}</p>
           <div className="mt-4 flex items-center justify-center gap-2">

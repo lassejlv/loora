@@ -14,6 +14,7 @@ export interface GithubIconHandle {
 
 interface GithubIconProps extends HTMLAttributes<HTMLDivElement> {
   size?: number;
+  strokeWidth?: number;
 }
 
 const BODY_VARIANTS: Variants = {
@@ -62,7 +63,7 @@ const TAIL_VARIANTS: Variants = {
 };
 
 const GithubIcon = forwardRef<GithubIconHandle, GithubIconProps>(
-  ({ onMouseEnter, onMouseLeave, className, size = 28, ...props }, ref) => {
+  ({ onMouseEnter, onMouseLeave, className, size = 28, strokeWidth = 2, ...props }, ref) => {
     const bodyControls = useAnimation();
     const tailControls = useAnimation();
     const isControlledRef = useRef(false);
@@ -116,12 +117,13 @@ const GithubIcon = forwardRef<GithubIconHandle, GithubIconProps>(
         {...props}
       >
         <svg
+          className="size-full"
           fill="none"
           height={size}
           stroke="currentColor"
           strokeLinecap="round"
           strokeLinejoin="round"
-          strokeWidth="2"
+          strokeWidth={strokeWidth}
           viewBox="0 0 24 24"
           width={size}
           xmlns="http://www.w3.org/2000/svg"

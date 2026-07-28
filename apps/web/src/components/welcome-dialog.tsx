@@ -51,7 +51,7 @@ function WelcomeHero() {
   return (
     <div
       aria-hidden="true"
-      className="relative h-40 w-full shrink-0 overflow-hidden border-b border-border bg-cx-canvas sm:h-44"
+      className="relative h-36 w-full shrink-0 overflow-hidden border-b border-border bg-cx-canvas sm:h-40"
     >
       <div
         className="absolute inset-0"
@@ -139,11 +139,11 @@ export function WelcomeDialog({
       >
         <WelcomeHero />
 
-        <DialogHeader className="gap-3 pt-5">
-          <DialogTitle className="text-2xl font-semibold tracking-tight">
+        <DialogHeader className="gap-2.5 pt-4">
+          <DialogTitle className="text-xl font-semibold tracking-tight">
             loora<span className="text-cx-accent">.</span>
           </DialogTitle>
-          <p className="text-base font-medium leading-snug text-muted-foreground">
+          <p className="text-sm font-medium leading-snug text-muted-foreground">
             The design harness.
           </p>
           <DialogDescription className="text-sm leading-relaxed">

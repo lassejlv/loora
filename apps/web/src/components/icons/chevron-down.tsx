@@ -70,6 +70,7 @@ const ChevronDownIcon = forwardRef<ChevronDownIconHandle, ChevronDownIconProps>(
         {...props}
       >
         <svg
+          className="size-full"
           fill="none"
           stroke="currentColor"
           strokeLinecap="round"

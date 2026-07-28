@@ -79,6 +79,7 @@ const ZapIcon = forwardRef<ZapHandle, ZapProps>(
         {...props}
       >
         <svg
+          className="size-full"
           fill="none"
           height={size}
           stroke="currentColor"

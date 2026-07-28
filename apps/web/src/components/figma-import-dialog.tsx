@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
-import { FigmaIcon, ImportIcon } from 'lucide-react'
+import { ImportIcon } from 'lucide-react'
+import { FigmaIcon } from '#/components/icons'
 import { Button } from '#/components/ui/button'
 import {
   Dialog,

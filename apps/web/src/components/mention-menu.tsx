@@ -1,10 +1,12 @@
-import { GithubIcon, ImageIcon, SquareIcon } from 'lucide-react'
+import type { ElementType } from 'react'
+import { ImageIcon, SquareIcon } from 'lucide-react'
+import { GithubIcon } from '#/components/icons'
 import { cn } from '#/lib/utils'
 import type { MentionItem, MentionKind } from '#/lib/mentions'
 
 const MENTION_KIND_META: Record<
   MentionKind,
-  { title: string; icon: typeof SquareIcon }
+  { title: string; icon: ElementType }
 > = {
   element: { title: 'Canvas nodes', icon: SquareIcon },
   asset: { title: 'Assets', icon: ImageIcon },
@@ -47,7 +49,7 @@ export function MentionMenu({
     <div
       role="listbox"
       aria-label="Mention suggestions"
-      className="absolute inset-x-3 bottom-full z-50 mb-1 max-h-64 overflow-y-auto rounded-lg border bg-popover p-1 text-popover-foreground shadow-md"
+      className="absolute inset-x-3 bottom-full z-50 mb-1 max-h-64 overflow-y-auto rounded-md border bg-popover p-1 text-popover-foreground shadow-[0_12px_32px_-24px_rgba(30,29,26,0.45)]"
     >
       {items.map((item, index) => {
         const meta = MENTION_KIND_META[item.kind]

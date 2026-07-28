@@ -102,6 +102,7 @@ const SparklesIcon = forwardRef<SparklesIconHandle, SparklesIconProps>(
         {...props}
       >
         <svg
+          className="size-full"
           fill="none"
           height={size}
           stroke="currentColor"

@@ -70,6 +70,7 @@ const XIcon = forwardRef<XIconHandle, XIconProps>(
         {...props}
       >
         <svg
+          className="size-full"
           fill="none"
           height={size}
           stroke="currentColor"

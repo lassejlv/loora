@@ -3,9 +3,9 @@ import {
   LoginWithChatGPT,
   openLoginWithChatGPTConsentPopup,
 } from '@opencoredev/loginwithchatgpt-react'
-import { CopyIcon, LogOutIcon } from '#/components/icons'
+import { CopyIcon, ExternalLinkIcon, LogOutIcon } from '#/components/icons'
 import { Spinner } from '#/components/ui/spinner'
-import { ExternalLinkIcon } from 'lucide-react'
+
 import { Button } from '#/components/ui/button'
 import { IntegrationCard, IntegrationStatus } from '#/components/integration-card'
 

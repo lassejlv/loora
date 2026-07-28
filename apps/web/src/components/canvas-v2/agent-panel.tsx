@@ -20,22 +20,24 @@ import {
 } from '@opencoredev/loginwithchatgpt-ai'
 import {
   BookOpenIcon,
-  BoxesIcon,
-  CheckIcon,
-  ChevronDownIcon,
   ComponentIcon,
-  EyeIcon,
-  FileTextIcon,
-  LayersIcon,
   MoveIcon,
   PaletteIcon,
   PaperclipIcon,
   PenLineIcon,
+  Trash2Icon,
+} from 'lucide-react'
+import {
+  BoxesIcon,
+  CheckIcon,
+  ChevronDownIcon,
+  EyeIcon,
+  FileTextIcon,
+  LayersIcon,
   PlusIcon,
   SearchIcon,
-  Trash2Icon,
   XIcon,
-} from 'lucide-react'
+} from '#/components/icons'
 import {
   canvasId,
   createInstanceNode,
@@ -267,7 +269,7 @@ function isThinking(status: ChatState['status'], messages: UIMessage[]) {
 function AgentThinking({ label = 'Thinking' }: { label?: string }) {
   const text = `${label}…`
   return (
-    <p className="w-fit text-sm" role="status" aria-label={text}>
+    <p className="w-fit text-[13px]" role="status" aria-label={text}>
       <span className="cx-agent-thinking" aria-hidden="true">
         {text}
       </span>
@@ -408,7 +410,7 @@ export function CanvasV2AgentPanel({
 
   return (
     <aside className="flex h-full min-h-0 w-full flex-col bg-sidebar">
-      <header className="flex h-9 shrink-0 items-center gap-1 border-b px-2">
+      <header className="flex h-8 shrink-0 items-center gap-1 border-b px-1.5">
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <button
@@ -473,7 +475,7 @@ export function CanvasV2AgentPanel({
           <Spinner aria-label="Opening chat" className="size-4" />
         </div>
       ) : error ? (
-        <div className="p-4 text-sm text-destructive">{error}</div>
+        <div className="p-3 text-xs text-destructive">{error}</div>
       ) : mountedChats.length > 0 ? (
         mountedChats.map((chat) => (
           <CanvasV2AgentSession
@@ -491,7 +493,7 @@ export function CanvasV2AgentPanel({
           />
         ))
       ) : (
-        <div className="p-4 text-sm text-muted-foreground">
+        <div className="p-3 text-xs text-muted-foreground">
           This branch is read-only and has no agent chat.
         </div>
       )}
@@ -1203,7 +1205,7 @@ export function CanvasV2AgentSession({
   return (
     <>
       <Conversation className="min-h-0 flex-1">
-        <ConversationContent className="gap-3">
+        <ConversationContent className="gap-2.5">
           {messages.length === 0 ? (
             <ConversationEmptyState
               title="Direct the canvas"

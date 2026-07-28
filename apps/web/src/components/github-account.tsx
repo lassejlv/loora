@@ -1,10 +1,11 @@
 import { useEffect, useState } from 'react'
 import {
+  ExternalLinkIcon,
   GithubIcon,
   PlusIcon,
   RefreshCwIcon,
 } from '#/components/icons'
-import { ExternalLinkIcon, UnplugIcon } from 'lucide-react'
+import { UnplugIcon } from 'lucide-react'
 import { Button } from '#/components/ui/button'
 import { IntegrationCard, IntegrationStatus } from '#/components/integration-card'
 import { orpc } from '#/lib/orpc-client'

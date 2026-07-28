@@ -1,10 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import {
-  ImagePlusIcon,
-  LinkIcon,
-  SearchIcon,
-  Trash2Icon,
-} from 'lucide-react'
+import { ImagePlusIcon, Trash2Icon } from 'lucide-react'
+import { LinkIcon, SearchIcon } from '#/components/icons'
 import { Button } from '#/components/ui/button'
 import {
   Dialog,

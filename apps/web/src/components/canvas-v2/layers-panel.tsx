@@ -1,19 +1,21 @@
 import { useEffect, useMemo, useRef, useState, type DragEvent } from 'react'
 import {
   BringToFrontIcon,
+  ComponentIcon,
+  SendToBackIcon,
+  TypeIcon,
+} from 'lucide-react'
+import {
   ChevronDownIcon,
   ChevronRightIcon,
-  ComponentIcon,
   EyeIcon,
   EyeOffIcon,
   FrameIcon,
   GripVerticalIcon,
   LockIcon,
-  SendToBackIcon,
-  TypeIcon,
   UnlockIcon,
   XIcon,
-} from 'lucide-react'
+} from '#/components/icons'
 import {
   useCanvasDocument,
   useCanvasReadOnly,
@@ -420,7 +422,7 @@ export function CanvasV2LayersPanel({
 
   return (
     <aside
-      className="flex h-full min-h-0 w-full flex-col bg-background"
+      className="flex h-full min-h-0 w-full flex-col bg-sidebar"
       aria-label="Layers"
     >
       <header className="shrink-0 border-b px-2 py-1.5">

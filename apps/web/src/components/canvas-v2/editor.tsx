@@ -12,23 +12,14 @@ import {
   BringToFrontIcon,
   CommandIcon,
   ComponentIcon,
-  CopyIcon,
-  DownloadIcon,
   EllipsisIcon,
-  FrameIcon,
   GroupIcon,
-  HandIcon,
   ImageIcon,
-  LayersIcon,
-  MaximizeIcon,
   MousePointer2Icon,
   PanelsTopLeftIcon,
   Redo2Icon,
   RectangleHorizontalIcon,
   SendToBackIcon,
-  SettingsIcon,
-  SlidersHorizontalIcon,
-  SparklesIcon,
   Trash2Icon,
   TypeIcon,
   Undo2Icon,
@@ -36,6 +27,17 @@ import {
   ZoomInIcon,
   ZoomOutIcon,
 } from 'lucide-react'
+import {
+  CopyIcon,
+  DownloadIcon,
+  FrameIcon,
+  HandIcon,
+  LayersIcon,
+  MaximizeIcon,
+  SettingsIcon,
+  SlidersHorizontalIcon,
+  SparklesIcon,
+} from '#/components/icons'
 import {
   CanvasProvider,
   CanvasSurface,
@@ -711,14 +713,14 @@ function CanvasV2Shell({
       ) : null}
 
       <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
-        <header className="flex h-9 shrink-0 items-center gap-1.5 border-b px-2">
-          <span className="shrink-0 ps-1 text-xs font-semibold tracking-tight">
+        <header className="flex h-8 shrink-0 items-center gap-1 border-b px-1.5">
+          <span className="shrink-0 ps-1 text-[11px] font-semibold tracking-tight">
             loora
           </span>
           <span className="text-muted-foreground/40 max-sm:hidden">/</span>
           <div className="flex min-w-0 items-center gap-1.5 overflow-hidden max-sm:max-w-40">
             {topBar ?? (
-              <span className="max-w-48 truncate text-xs text-muted-foreground">
+              <span className="max-w-48 truncate text-[11px] text-muted-foreground">
                 {name}
               </span>
             )}
@@ -905,7 +907,7 @@ function CanvasV2Shell({
               <DrawerPopup
                 position="bottom"
                 variant="inset"
-                className="h-[min(60svh,32rem)] overflow-hidden rounded-xl border"
+                className="h-[min(60svh,32rem)] overflow-hidden rounded-lg border"
               >
                 <CanvasV2Assets
                   onInsert={(asset) => {
@@ -925,7 +927,7 @@ function CanvasV2Shell({
                 <DrawerPopup
                   position="bottom"
                   variant="inset"
-                  className="mx-auto h-[min(60svh,34rem)] w-full max-w-sm overflow-hidden rounded-xl border"
+                  className="mx-auto h-[min(60svh,34rem)] w-full max-w-sm overflow-hidden rounded-lg border"
                 >
                   {inspectorPanel}
                 </DrawerPopup>
@@ -1905,7 +1907,7 @@ function CanvasV2ToolStrip({
 }) {
   return (
     <TooltipProvider delay={400} closeDelay={0}>
-      <div className="flex w-9 shrink-0 flex-col items-center gap-0.5 border-e py-1.5">
+      <div className="flex w-8 shrink-0 flex-col items-center gap-0.5 border-e bg-sidebar py-1">
         <CanvasV2ToolButton
           icon={MousePointer2Icon}
           label="Select"
@@ -2009,7 +2011,7 @@ function CanvasV2StatusBar({
 }) {
   const count = actions.selection.length
   return (
-    <footer className="flex h-8 shrink-0 items-center gap-0.5 border-t px-1.5 text-[11px] text-muted-foreground">
+    <footer className="flex h-7 shrink-0 items-center gap-0.5 border-t px-1.5 text-[10px] text-muted-foreground">
       <Button
         size="icon-xs"
         variant="ghost"

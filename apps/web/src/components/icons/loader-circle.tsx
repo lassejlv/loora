@@ -80,6 +80,7 @@ const LoaderCircleIcon = forwardRef<
       {...props}
     >
       <svg
+        className="size-full"
         fill="none"
         height={size}
         stroke="currentColor"

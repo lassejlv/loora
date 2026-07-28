@@ -71,6 +71,7 @@ const ChevronRightIcon = forwardRef<
       {...props}
     >
       <svg
+        className="size-full"
         fill="none"
         stroke="currentColor"
         strokeLinecap="round"

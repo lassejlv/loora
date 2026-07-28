@@ -16,17 +16,17 @@ export function IntegrationCard({
   className?: string
 }) {
   return (
-    <section className={cn('flex flex-col gap-4', className)}>
+    <section className={cn('flex flex-col gap-3', className)}>
       <header className="flex flex-col gap-1">
         <div className="flex flex-wrap items-center gap-2">
-          <h3 className="text-sm font-semibold leading-none">{title}</h3>
+          <h3 className="text-xs font-semibold leading-none">{title}</h3>
           {status}
         </div>
         {description ? (
-          <div className="text-xs leading-relaxed text-muted-foreground">{description}</div>
+          <div className="text-[11px] leading-relaxed text-muted-foreground">{description}</div>
         ) : null}
       </header>
-      {children ? <div className="flex flex-col gap-3">{children}</div> : null}
+      {children ? <div className="flex flex-col gap-2.5">{children}</div> : null}
     </section>
   )
 }
@@ -41,7 +41,7 @@ export function IntegrationStatus({
   return (
     <span
       className={cn(
-        'inline-flex max-w-full items-center rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide',
+        'inline-flex max-w-full items-center rounded-sm border border-current/10 px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-wide',
         tone === 'success' && 'bg-success/10 text-success-foreground',
         tone === 'warning' && 'bg-warning/10 text-warning-foreground',
         tone === 'neutral' && 'bg-muted text-muted-foreground',

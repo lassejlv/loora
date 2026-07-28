@@ -71,6 +71,7 @@ const LayersIcon = forwardRef<LayersIconHandle, LayersIconProps>(
         {...props}
       >
         <svg
+          className="size-full"
           fill="none"
           height={size}
           stroke="currentColor"

@@ -73,6 +73,7 @@ const DownloadIcon = forwardRef<DownloadIconHandle, DownloadIconProps>(
         {...props}
       >
         <svg
+          className="size-full"
           fill="none"
           height={size}
           stroke="currentColor"

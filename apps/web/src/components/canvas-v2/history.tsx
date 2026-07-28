@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { HistoryIcon, RotateCcwIcon } from 'lucide-react'
+import { HistoryIcon, RotateCcwIcon } from '#/components/icons'
 import type { CanvasDocumentV2 } from '@loora/canvas/model'
 import { diffDocuments } from '@loora/canvas/merge'
 import { useCanvasDocument } from '@loora/canvas/react'

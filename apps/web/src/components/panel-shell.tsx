@@ -27,11 +27,11 @@ export function PanelShell({
 }) {
   return (
     <aside className={cn('flex h-full min-h-0 w-full flex-col bg-card', className)}>
-      <header className="flex items-start justify-between gap-2 border-b px-3 py-2.5">
+      <header className="flex items-start justify-between gap-2 border-b px-2.5 py-2">
         <div className="min-w-0">
-          <h2 className="font-heading text-sm font-semibold">{title}</h2>
+          <h2 className="font-heading text-xs font-semibold">{title}</h2>
           {description ? (
-            <div className="mt-0.5 text-xs leading-relaxed text-muted-foreground">
+            <div className="mt-0.5 text-[11px] leading-relaxed text-muted-foreground">
               {description}
             </div>
           ) : null}
@@ -82,19 +82,19 @@ export function PanelEmpty({
   onClick?: () => void
 }) {
   const classes = cn(
-    'flex flex-1 flex-col items-center justify-center gap-2 px-4 py-8 text-center',
-    onClick && 'cursor-pointer rounded-lg border border-dashed hover:bg-secondary/60',
+    'flex flex-1 flex-col items-center justify-center gap-1.5 px-3 py-6 text-center',
+    onClick && 'cursor-pointer rounded-md border border-dashed hover:bg-secondary/60',
     className,
   )
 
   const body = (
     <>
-      {title ? <p className="font-heading text-sm font-semibold text-foreground">{title}</p> : null}
+      {title ? <p className="font-heading text-xs font-semibold text-foreground">{title}</p> : null}
       {description ? (
-        <p className="max-w-[16rem] text-xs leading-relaxed text-muted-foreground">{description}</p>
+        <p className="max-w-[15rem] text-[11px] leading-relaxed text-muted-foreground">{description}</p>
       ) : null}
       {children && !title && !description ? (
-        <div className="text-xs text-muted-foreground">{children}</div>
+        <div className="text-[11px] text-muted-foreground">{children}</div>
       ) : null}
       {action ? <div className="mt-1">{action}</div> : null}
     </>
@@ -118,10 +118,10 @@ export function PanelLoading({
   rows?: number
 }) {
   return (
-    <div className="flex flex-col gap-2 p-3" aria-busy="true" aria-label={label}>
-      <p className="cx-shimmer text-xs">{label}</p>
+    <div className="flex flex-col gap-1.5 p-2.5" aria-busy="true" aria-label={label}>
+      <p className="cx-shimmer text-[11px]">{label}</p>
       {Array.from({ length: rows }, (_, index) => (
-        <Skeleton key={index} className="h-8 w-full" />
+        <Skeleton key={index} className="h-7 w-full" />
       ))}
     </div>
   )

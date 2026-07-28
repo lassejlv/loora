@@ -96,6 +96,7 @@ const ClockIcon = forwardRef<ClockIconHandle, ClockIconProps>(
         {...props}
       >
         <svg
+          className="size-full"
           fill="none"
           height={size}
           stroke="currentColor"

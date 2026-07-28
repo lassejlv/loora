@@ -14,6 +14,7 @@ export interface CheckIconHandle {
 
 interface CheckIconProps extends HTMLAttributes<HTMLDivElement> {
   size?: number;
+  strokeWidth?: number;
 }
 
 const PATH_VARIANTS: Variants = {
@@ -38,7 +39,7 @@ const PATH_VARIANTS: Variants = {
 };
 
 const CheckIcon = forwardRef<CheckIconHandle, CheckIconProps>(
-  ({ onMouseEnter, onMouseLeave, className, size = 28, ...props }, ref) => {
+  ({ onMouseEnter, onMouseLeave, className, size = 28, strokeWidth = 2, ...props }, ref) => {
     const controls = useAnimation();
     const isControlledRef = useRef(false);
 
@@ -81,12 +82,13 @@ const CheckIcon = forwardRef<CheckIconHandle, CheckIconProps>(
         {...props}
       >
         <svg
+          className="size-full"
           fill="none"
           height={size}
           stroke="currentColor"
           strokeLinecap="round"
           strokeLinejoin="round"
-          strokeWidth="2"
+          strokeWidth={strokeWidth}
           viewBox="0 0 24 24"
           width={size}
           xmlns="http://www.w3.org/2000/svg"

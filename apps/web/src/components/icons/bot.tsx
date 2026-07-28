@@ -59,6 +59,7 @@ const BotIcon = forwardRef<BotIconHandle, BotIconProps>(
         {...props}
       >
         <svg
+          className="size-full"
           fill="none"
           height={size}
           stroke="currentColor"

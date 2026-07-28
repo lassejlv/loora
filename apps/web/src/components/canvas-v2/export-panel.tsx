@@ -5,14 +5,13 @@ import {
   useState,
   type ReactNode,
 } from 'react'
+import { ClipboardIcon, CodeXmlIcon } from 'lucide-react'
 import {
   CheckIcon,
-  ClipboardIcon,
-  CodeXmlIcon,
   DownloadIcon,
   EyeIcon,
   Link2Icon,
-} from 'lucide-react'
+} from '#/components/icons'
 import {
   compileReactComponent,
   compileStandaloneHtml,

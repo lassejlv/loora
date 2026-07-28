@@ -1,4 +1,10 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react'
+import {
+  useEffect,
+  useRef,
+  useState,
+  type ElementType,
+  type ReactNode,
+} from 'react'
 import {
   canvasId,
   type CanvasInsets,
@@ -22,25 +28,27 @@ import {
 import type { CanvasOperation } from '@loora/canvas/engine'
 import {
   AlignCenterHorizontalIcon,
-  AlignCenterIcon,
   AlignCenterVerticalIcon,
   AlignEndHorizontalIcon,
   AlignEndVerticalIcon,
   AlignHorizontalSpaceAroundIcon,
   AlignHorizontalSpaceBetweenIcon,
   AlignJustifyIcon,
-  AlignLeftIcon,
-  AlignRightIcon,
   AlignStartHorizontalIcon,
   AlignStartVerticalIcon,
-  ChevronDownIcon,
-  ChevronRightIcon,
-  Link2Icon,
   StretchHorizontalIcon,
   Trash2Icon,
   Unlink2Icon,
-  XIcon,
 } from 'lucide-react'
+import {
+  AlignCenterIcon,
+  AlignLeftIcon,
+  AlignRightIcon,
+  ChevronDownIcon,
+  ChevronRightIcon,
+  Link2Icon,
+  XIcon,
+} from '#/components/icons'
 import { Button } from '#/components/ui/button'
 import { cn } from '#/lib/utils'
 
@@ -283,7 +291,7 @@ function SelectCell({
 interface Choice<T extends string> {
   value: T
   label: string
-  icon?: typeof AlignLeftIcon
+  icon?: ElementType
 }
 
 /** Segmented control; the label sits inline so a row stays one line tall. */
@@ -478,7 +486,7 @@ export function CanvasV2PropertiesPanel({ onClose }: { onClose?: () => void }) {
   }, [breakpoint, document.breakpoints])
 
   const header = (
-    <header className="flex h-9 shrink-0 items-center justify-between gap-2 border-b px-2">
+    <header className="flex h-8 shrink-0 items-center justify-between gap-2 border-b px-1.5">
       <h2 className="ps-1 text-[11px] font-medium text-muted-foreground">Design</h2>
       {onClose ? (
         <Button
@@ -495,7 +503,7 @@ export function CanvasV2PropertiesPanel({ onClose }: { onClose?: () => void }) {
 
   if (!ref || !node) {
     return (
-      <aside className="flex h-full min-h-0 w-full flex-col bg-background">
+      <aside className="flex h-full min-h-0 w-full flex-col bg-sidebar">
         {header}
         <div className="grid min-h-0 flex-1 place-items-center px-6 text-center">
           <p className="text-[11px] text-muted-foreground">
@@ -641,7 +649,7 @@ export function CanvasV2PropertiesPanel({ onClose }: { onClose?: () => void }) {
   return (
     <aside
       className={cn(
-        'flex h-full min-h-0 w-full flex-col bg-background',
+        'flex h-full min-h-0 w-full flex-col bg-sidebar',
         readOnly && 'pointer-events-none opacity-70',
       )}
       aria-label="Properties"
