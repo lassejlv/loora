@@ -91,6 +91,27 @@ function round(value: number, places = 2) {
   return Math.round(value * factor) / factor
 }
 
+function inspectedLength(
+  node: CanvasNode,
+  axis: 'width' | 'height',
+): CanvasLength {
+  const length = node.layout[axis]
+  if (
+    node.type !== 'page' ||
+    length.unit !== 'px' ||
+    length.value > 1
+  ) {
+    return length
+  }
+  return {
+    unit: 'px',
+    value:
+      axis === 'width'
+        ? node.viewport.width
+        : node.viewport.minHeight,
+  }
+}
+
 function Section({
   title,
   children,
@@ -758,13 +779,31 @@ export function CanvasPropertiesPanel({ onClose }: { onClose?: () => void }) {
             />
             <LengthCell
               label="W"
-              value={layout((item) => item.layout.width)}
-              onCommit={(width) => commit({ layout: { width } })}
+              value={layout((item) => inspectedLength(item, 'width'))}
+              onCommit={(width) =>
+                commitEach((current) => ({
+                  layout: { width },
+                  ...(breakpoint === 'base' &&
+                  current.type === 'page' &&
+                  width.unit === 'px'
+                    ? { viewport: { width: width.value } }
+                    : {}),
+                }))
+              }
             />
             <LengthCell
               label="H"
-              value={layout((item) => item.layout.height)}
-              onCommit={(height) => commit({ layout: { height } })}
+              value={layout((item) => inspectedLength(item, 'height'))}
+              onCommit={(height) =>
+                commitEach((current) => ({
+                  layout: { height },
+                  ...(breakpoint === 'base' &&
+                  current.type === 'page' &&
+                  height.unit === 'px'
+                    ? { viewport: { minHeight: height.value } }
+                    : {}),
+                }))
+              }
             />
           </Pair>
           <Pair>

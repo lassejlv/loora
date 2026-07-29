@@ -30,6 +30,7 @@ import {
 import {
   CopyIcon,
   DownloadIcon,
+  EyeIcon,
   FrameIcon,
   HandIcon,
   LayersIcon,
@@ -869,6 +870,7 @@ function CanvasShell({
                 actions={actions}
                 interactionMode={interactionMode}
                 onInteractionModeChange={setInteractionMode}
+                onPreview={() => setExportOpen(true)}
                 onAddPage={addPageAndFocus}
                 onAssetsOpen={() => setAssetsOpen(true)}
                 shortcutLabel={shortcutLabel}
@@ -1998,6 +2000,7 @@ function CanvasToolStrip({
   actions,
   interactionMode,
   onInteractionModeChange,
+  onPreview,
   onAddPage,
   onAssetsOpen,
   shortcutLabel,
@@ -2007,6 +2010,7 @@ function CanvasToolStrip({
   actions: CanvasEditorActions
   interactionMode: 'select' | 'pan'
   onInteractionModeChange: (mode: 'select' | 'pan') => void
+  onPreview: () => void
   onAddPage: () => void
   onAssetsOpen: () => void
   shortcutLabel: (id: BuiltInShortcutId) => string
@@ -2035,6 +2039,11 @@ function CanvasToolStrip({
           shortcut={shortcutLabel('tool.hand')}
           active={interactionMode === 'pan'}
           onClick={() => onInteractionModeChange('pan')}
+        />
+        <CanvasToolButton
+          icon={EyeIcon}
+          label="Preview interactions"
+          onClick={onPreview}
         />
         <CanvasToolDivider />
         <CanvasToolButton

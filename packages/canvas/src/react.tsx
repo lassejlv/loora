@@ -38,6 +38,7 @@ import {
   type CanvasPaint,
   type InstanceNode,
   type NodeId,
+  type NodeMutationPatch,
   type NodePatch,
   type NodeRef,
   type PageNode,
@@ -1089,6 +1090,10 @@ function nearestSnap(
   return best
 }
 
+function clampDragDelta(value: number, first: number, second: number) {
+  return Math.min(Math.max(first, second), Math.max(Math.min(first, second), value))
+}
+
 const HANDLES: [string, -1 | 0 | 1, -1 | 0 | 1, CSSProperties['cursor']][] = [
   ['nw', -1, -1, 'nwse-resize'],
   ['n', 0, -1, 'ns-resize'],
@@ -1281,23 +1286,22 @@ function SelectionOverlay({
       element.setAttribute('style', original)
       const width = Math.max(
         1,
-        source.layout.width.unit === 'px'
-          ? source.layout.width.value + latestX * horizontal
-          : start.width / cameraRef.current.zoom + latestX * horizontal,
+        start.width / cameraRef.current.zoom + latestX * horizontal,
       )
       const height = Math.max(
         1,
-        source.layout.height.unit === 'px'
-          ? source.layout.height.value + latestY * vertical
-          : start.height / cameraRef.current.zoom + latestY * vertical,
+        start.height / cameraRef.current.zoom + latestY * vertical,
       )
-      const patch: NodePatch = {
+      const patch: NodeMutationPatch = {
         layout: {
           width: { unit: 'px', value: width },
           height: { unit: 'px', value: height },
           x: source.layout.x + (horizontal < 0 ? latestX : 0),
           y: source.layout.y + (vertical < 0 ? latestY : 0),
         },
+        ...(source.type === 'page'
+          ? { viewport: { width, minHeight: height } }
+          : {}),
       }
       transact({
         id: canvasId('tx'),
@@ -1310,7 +1314,7 @@ function SelectionOverlay({
               type: 'instance.patchOverride',
               id: instanceId,
               targetId: source.id,
-              patch,
+              patch: patch as NodePatch,
             }]
           : [{ type: 'node.patch', id: source.id, patch }],
       })
@@ -1431,6 +1435,18 @@ function SelectionOverlay({
   )
 }
 
+function pageRenderWidth(page: PageNode) {
+  return page.layout.width.unit === 'px' && page.layout.width.value > 1
+    ? page.layout.width.value
+    : page.viewport.width
+}
+
+function pageRenderHeight(page: PageNode) {
+  return page.layout.height.unit === 'px'
+    ? Math.max(page.layout.height.value, page.viewport.minHeight)
+    : page.viewport.minHeight
+}
+
 function RootNodes({ width }: { width: number }) {
   const { engine, session } = useCanvasContext()
   const roots = useChildren(null)
@@ -1460,14 +1476,20 @@ function RootNodes({ width }: { width: number }) {
   }
   return roots
     .filter((node) => node.type !== 'component')
-    .map((node) => (
-      <CanvasNodeRenderer
-        key={node.id}
-        id={node.id}
-        width={width}
-        topLevel
-      />
-    ))
+    .map((node) => {
+      const rootWidth =
+        node.type === 'page'
+          ? pageRenderWidth(node)
+          : width
+      return (
+        <CanvasNodeRenderer
+          key={node.id}
+          id={node.id}
+          width={rootWidth}
+          topLevel
+        />
+      )
+    })
 }
 
 function CanvasTokenStyles() {
@@ -1524,6 +1546,12 @@ export function CanvasSurface({
     snapY: number[]
     guideX: number | null
     guideY: number | null
+    containment: {
+      minX: number
+      maxX: number
+      minY: number
+      maxY: number
+    } | null
     originalTransform: string
   } | null>(null)
   const pan = useRef<{ x: number; y: number; cameraX: number; cameraY: number } | null>(null)
@@ -1647,18 +1675,14 @@ export function CanvasSurface({
             ...pages.map(
               (page) =>
                 page.layout.x +
-                (page.layout.width.unit === 'px'
-                  ? page.layout.width.value
-                  : page.viewport.width),
+                pageRenderWidth(page),
             ),
           ),
           bottom: Math.max(
             ...pages.map(
               (page) =>
                 page.layout.y +
-                (page.layout.height.unit === 'px'
-                  ? page.layout.height.value
-                  : page.viewport.minHeight),
+                pageRenderHeight(page),
             ),
           ),
         })
@@ -2061,6 +2085,17 @@ export function CanvasSurface({
     }
     event.currentTarget.setPointerCapture(event.pointerId)
     const startRect = element.getBoundingClientRect()
+    const parentNode = source.parentId
+      ? engine.getNode(source.parentId)
+      : null
+    const parentElement = source.parentId
+      ? registry.get(nodeRefFor(source.parentId, selected.instancePath))
+      : null
+    const parentRect =
+      source.layout.position === 'absolute' &&
+      parentNode?.style.overflow === 'hidden'
+        ? parentElement?.getBoundingClientRect() ?? null
+        : null
     const snapCandidates = registry
       .entries()
       .filter(({ ref, element: candidate }) => {
@@ -2097,6 +2132,14 @@ export function CanvasSurface({
       ]),
       guideX: null,
       guideY: null,
+      containment: parentRect
+        ? {
+            minX: parentRect.left - startRect.left,
+            maxX: parentRect.right - startRect.right,
+            minY: parentRect.top - startRect.top,
+            maxY: parentRect.bottom - startRect.bottom,
+          }
+        : null,
       originalTransform: (element as HTMLElement).style.transform,
     }
   }
@@ -2191,14 +2234,42 @@ export function CanvasSurface({
       ],
       activeDrag.snapY,
     )
+    const snappedX = rawX + (xSnap?.delta ?? 0)
+    const snappedY = rawY + (ySnap?.delta ?? 0)
+    const boundedX = activeDrag.containment
+      ? clampDragDelta(
+          snappedX,
+          activeDrag.containment.minX,
+          activeDrag.containment.maxX,
+        )
+      : snappedX
+    const boundedY = activeDrag.containment
+      ? clampDragDelta(
+          snappedY,
+          activeDrag.containment.minY,
+          activeDrag.containment.maxY,
+        )
+      : snappedY
     activeDrag.latestX =
-      (rawX + (xSnap?.delta ?? 0)) / cameraRef.current.zoom
+      boundedX / cameraRef.current.zoom
     activeDrag.latestY =
-      (rawY + (ySnap?.delta ?? 0)) / cameraRef.current.zoom
+      boundedY / cameraRef.current.zoom
     activeDrag.clientX = event.clientX
     activeDrag.clientY = event.clientY
-    activeDrag.guideX = xSnap?.position ?? null
-    activeDrag.guideY = ySnap?.position ?? null
+    activeDrag.guideX = activeDrag.containment
+      ? Math.abs(boundedX - activeDrag.containment.minX) < 0.01
+        ? activeDrag.startRect.left + activeDrag.containment.minX
+        : Math.abs(boundedX - activeDrag.containment.maxX) < 0.01
+          ? activeDrag.startRect.right + activeDrag.containment.maxX
+          : xSnap?.position ?? null
+      : xSnap?.position ?? null
+    activeDrag.guideY = activeDrag.containment
+      ? Math.abs(boundedY - activeDrag.containment.minY) < 0.01
+        ? activeDrag.startRect.top + activeDrag.containment.minY
+        : Math.abs(boundedY - activeDrag.containment.maxY) < 0.01
+          ? activeDrag.startRect.bottom + activeDrag.containment.maxY
+          : ySnap?.position ?? null
+      : ySnap?.position ?? null
     schedule(() => {
       if (!drag.current) return
       ;(drag.current.element as HTMLElement).style.transform =

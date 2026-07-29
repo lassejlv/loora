@@ -62,8 +62,8 @@ describe('Canvas exports', () => {
     const document = fixture()
     const react = compileReactComponent(document)
     expect(react).toContain('export default function LooraDesign')
-    expect(react).toContain("document.addEventListener('click', click)")
-    expect(react).toContain('applyActions(actionsFor(target, trigger))')
+    expect(react).toContain("root.addEventListener('click', click)")
+    expect(react).toContain('applyActions(actionsFor(target, trigger, scope)')
     expect(JSON.parse(serializeCanvasDocument(document))).toMatchObject({
       schema: 'loora.canvas',
       version: 2,
@@ -118,6 +118,101 @@ describe('Canvas exports', () => {
     expect(tailwind).not.toContain('style={{')
   })
 
+  it('exports typed state, event conditions, and a bounded local runtime', () => {
+    const document = fixture()
+    const page = document.nodes.page
+    if (page.type !== 'page') throw new Error('Fixture Page is missing')
+    page.states = {
+      menuOpen: {
+        id: 'menuOpen',
+        name: 'Menu open',
+        type: 'boolean',
+        initial: false,
+      },
+    }
+    document.nodes.hero.interactions = [
+      {
+        trigger: 'click',
+        actions: [{ type: 'toggle-state', stateId: 'menuOpen' }],
+      },
+    ]
+    page.interactions = [
+      {
+        trigger: 'state-change',
+        stateId: 'menuOpen',
+        when: [
+          {
+            stateId: 'menuOpen',
+            operator: 'equals',
+            value: true,
+          },
+        ],
+        actions: [
+          { type: 'visibility', nodeId: 'headline', value: 'show' },
+        ],
+      },
+      {
+        trigger: 'state-change',
+        stateId: 'menuOpen',
+        when: [
+          {
+            stateId: 'menuOpen',
+            operator: 'equals',
+            value: false,
+          },
+        ],
+        actions: [
+          { type: 'visibility', nodeId: 'headline', value: 'hide' },
+        ],
+      },
+    ]
+
+    const compiled = compileCanvas(document)
+    const react = compileReactComponent(document)
+    const jsx = compileJsxComponent(document)
+    const tailwind = compileTailwindComponent(document)
+
+    expect(compiled.html).toContain('data-loora-states=')
+    expect(compiled.html).toContain('toggle-state')
+    expect(compiled.runtime).toContain("action.type==='toggle-state'")
+    expect(compiled.runtime).toContain('if(depth>20)return')
+    expect(react).toContain('useState(0)')
+    expect(react).toContain("handle('double-click')")
+    expect(jsx).toContain('data-loora-interactions=')
+    expect(tailwind).toContain('data-loora-states=')
+    expect(jsx).toContain('useLooraRuntime(rootRef)')
+    expect(tailwind).toContain('useLooraRuntime(rootRef)')
+    expect(() => new Function(compiled.runtime)).not.toThrow()
+    const transpiler = new Bun.Transpiler({ loader: 'tsx' })
+    expect(() => transpiler.transformSync(react)).not.toThrow()
+    expect(() => transpiler.transformSync(jsx)).not.toThrow()
+    expect(() => transpiler.transformSync(tailwind)).not.toThrow()
+
+    const sandbox =
+      globalThis.document.implementation.createHTMLDocument('runtime')
+    sandbox.body.innerHTML = compiled.html
+    new Function('document', 'window', 'CSS', compiled.runtime)(
+      sandbox,
+      { open: () => null },
+      { escape: (value: string) => value },
+    )
+    const headline = sandbox.querySelector<HTMLElement>(
+      '[data-loora-node="headline"]',
+    )!
+    expect(headline.hidden).toBe(true)
+    const click = sandbox.createEvent('Event')
+    click.initEvent('click', true, true)
+    sandbox
+      .querySelector('[data-loora-node="hero"]')!
+      .dispatchEvent(click)
+    expect(headline.hidden).toBe(false)
+    expect(
+      sandbox
+        .querySelector('[data-loora-node="page"]')
+        ?.getAttribute('data-loora-state-values'),
+    ).toContain('"menuOpen":true')
+  })
+
   it('renders component variant overrides and exports switching rules', () => {
     const document = fixture()
     document.nodes.button = createComponentNode('Button', {
@@ -165,6 +260,103 @@ describe('Canvas exports', () => {
       '[data-loora-node="buttonInstance"][data-loora-variant="hover"]',
     )
     expect(html).toContain('setVariant(instance,variant)')
+  })
+
+  it('keeps component state local to each rendered instance', () => {
+    const document = createCanvasDocument('Local state', 'local-state')
+    document.nodes.page = createPageNode('Home', { id: 'page' })
+    document.nodes.component = createComponentNode('Toggle', {
+      id: 'component',
+      order: 2_048,
+      states: {
+        active: {
+          id: 'active',
+          name: 'Active',
+          type: 'boolean',
+          initial: false,
+        },
+      },
+      interactions: [
+        {
+          trigger: 'state-change',
+          stateId: 'active',
+          when: [
+            { stateId: 'active', operator: 'equals', value: false },
+          ],
+          actions: [
+            { type: 'visibility', nodeId: 'label', value: 'hide' },
+          ],
+        },
+        {
+          trigger: 'state-change',
+          stateId: 'active',
+          when: [
+            { stateId: 'active', operator: 'equals', value: true },
+          ],
+          actions: [
+            { type: 'visibility', nodeId: 'label', value: 'show' },
+          ],
+        },
+      ],
+    })
+    document.nodes.button = createFrameNode('Toggle', {
+      id: 'button',
+      parentId: 'component',
+      order: 1_024,
+      semanticTag: 'button',
+      interactions: [
+        {
+          trigger: 'click',
+          actions: [{ type: 'toggle-state', stateId: 'active' }],
+        },
+      ],
+    })
+    document.nodes.label = createTextNode('Active', {
+      id: 'label',
+      parentId: 'component',
+      order: 2_048,
+    })
+    document.nodes.first = createInstanceNode('component', 'First', {
+      id: 'first',
+      parentId: 'page',
+      order: 1_024,
+    })
+    document.nodes.second = createInstanceNode('component', 'Second', {
+      id: 'second',
+      parentId: 'page',
+      order: 2_048,
+    })
+
+    const compiled = compileCanvas(document)
+    const sandbox =
+      globalThis.document.implementation.createHTMLDocument('instances')
+    sandbox.body.innerHTML = compiled.html
+    new Function('document', 'window', 'CSS', compiled.runtime)(
+      sandbox,
+      { open: () => null },
+      { escape: (value: string) => value },
+    )
+
+    const scopes = sandbox.querySelectorAll<HTMLElement>(
+      '[data-loora-component-root]',
+    )
+    expect(scopes).toHaveLength(2)
+    const firstLabel = scopes[0]!.querySelector<HTMLElement>(
+      '[data-loora-node="label"]',
+    )!
+    const secondLabel = scopes[1]!.querySelector<HTMLElement>(
+      '[data-loora-node="label"]',
+    )!
+    expect(firstLabel.hidden).toBe(true)
+    expect(secondLabel.hidden).toBe(true)
+
+    const click = sandbox.createEvent('Event')
+    click.initEvent('click', true, true)
+    scopes[0]!
+      .querySelector('[data-loora-node="button"]')!
+      .dispatchEvent(click)
+    expect(firstLabel.hidden).toBe(false)
+    expect(secondLabel.hidden).toBe(true)
   })
 })
 

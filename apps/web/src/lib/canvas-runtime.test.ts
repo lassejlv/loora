@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'bun:test'
 import {
   applyCanvasActions,
+  canvasInteractionActions,
+  initialCanvasState,
   setCanvasVariant,
 } from './canvas-runtime'
 
@@ -69,5 +71,77 @@ describe('Canvas declarative runtime', () => {
     ])
     expect(target.hidden).toBe(false)
     expect(overlay.dataset.looraOverlay).toBeUndefined()
+  })
+
+  it('keeps typed state ephemeral and selects conditional state-change actions', () => {
+    const state = initialCanvasState({
+      menuOpen: {
+        id: 'menuOpen',
+        name: 'Menu open',
+        type: 'boolean',
+        initial: false,
+      },
+      count: {
+        id: 'count',
+        name: 'Count',
+        type: 'number',
+        initial: 1,
+      },
+    })
+    const changed: string[] = []
+
+    applyCanvasActions(
+      document.createElement('div'),
+      [
+        { type: 'toggle-state', stateId: 'menuOpen' },
+        { type: 'increment-state', stateId: 'count', amount: 2 },
+      ],
+      {
+        state,
+        onStateChange: (stateId) => changed.push(stateId),
+      },
+    )
+
+    expect(state).toEqual({ menuOpen: true, count: 3 })
+    expect(changed).toEqual(['menuOpen', 'count'])
+    expect(
+      canvasInteractionActions(
+        [
+          {
+            trigger: 'state-change',
+            stateId: 'menuOpen',
+            when: [
+              {
+                stateId: 'menuOpen',
+                operator: 'equals',
+                value: true,
+              },
+            ],
+            actions: [
+              { type: 'visibility', nodeId: 'menu', value: 'show' },
+            ],
+          },
+          {
+            trigger: 'state-change',
+            stateId: 'menuOpen',
+            when: [
+              {
+                stateId: 'menuOpen',
+                operator: 'equals',
+                value: false,
+              },
+            ],
+            actions: [
+              { type: 'visibility', nodeId: 'menu', value: 'hide' },
+            ],
+          },
+        ],
+        'state-change',
+        state,
+        'menuOpen',
+      ),
+    ).toEqual([
+      { type: 'visibility', nodeId: 'menu', value: 'show' },
+    ])
   })
 })

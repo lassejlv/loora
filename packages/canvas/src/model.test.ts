@@ -41,6 +41,58 @@ describe('CanvasDocument', () => {
     expect(canvasDocumentSchema.safeParse(document).success).toBe(true)
   })
 
+  it('validates typed local state and declarative event transitions', () => {
+    const document = documentFixture()
+    const page = document.nodes.page
+    if (page.type !== 'page') throw new Error('Fixture Page is missing')
+    page.states = {
+      menuOpen: {
+        id: 'menuOpen',
+        name: 'Menu open',
+        type: 'boolean',
+        initial: false,
+      },
+    }
+    document.nodes.hero.interactions = [
+      {
+        trigger: 'click',
+        actions: [{ type: 'toggle-state', stateId: 'menuOpen' }],
+      },
+    ]
+    page.interactions = [
+      {
+        trigger: 'state-change',
+        stateId: 'menuOpen',
+        when: [
+          {
+            stateId: 'menuOpen',
+            operator: 'equals',
+            value: true,
+          },
+        ],
+        actions: [
+          { type: 'visibility', nodeId: 'headline', value: 'show' },
+        ],
+      },
+    ]
+
+    expect(validateDocument(document).ok).toBe(true)
+
+    document.nodes.hero.interactions = [
+      {
+        trigger: 'click',
+        actions: [
+          { type: 'increment-state', stateId: 'menuOpen', amount: 1 },
+        ],
+      },
+    ]
+    expect(
+      validateDocument(document).issues.some(
+        (issue) => issue.path === 'nodes.hero.interactions',
+      ),
+    ).toBe(true)
+  })
+
   it('rejects content roots and hierarchy cycles', () => {
     const document = documentFixture()
     document.nodes.hero.parentId = null

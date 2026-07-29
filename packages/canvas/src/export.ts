@@ -12,6 +12,7 @@ import {
   assertDocument,
   orderedChildren,
   resolveNodeAtWidth,
+  stateDefinitionsForNode,
 } from './model'
 
 export interface CanvasExportOptions {
@@ -245,6 +246,19 @@ function renderInteractions(
   return escapeAttribute(JSON.stringify(interactions))
 }
 
+function renderedStateDefinitions(
+  document: CanvasDocument,
+  node: CanvasNode,
+  exportedRoot: boolean,
+) {
+  const own =
+    node.type === 'page' || node.type === 'component'
+      ? node.states ?? {}
+      : {}
+  if (Object.keys(own).length > 0) return own
+  return exportedRoot ? stateDefinitionsForNode(document, node.id) : {}
+}
+
 function textMarkup(document: CanvasDocument, node: Extract<CanvasNode, { type: 'text' }>) {
   if (node.runs.length === 0) return escapeHtml(node.text)
   const boundaries = new Set([0, node.text.length])
@@ -342,6 +356,7 @@ function renderNode(
   const clickActions = node.interactions.flatMap((interaction) =>
     interaction.trigger === 'click' ? interaction.actions : [],
   )
+  const states = renderedStateDefinitions(document, rawNode, exportedRoot)
   const common = `class="${classes}" data-loora-node="${escapeAttribute(node.id)}"${
     exportedRoot ? ' data-loora-export-root="true"' : ''
   }${
@@ -349,6 +364,10 @@ function renderNode(
   }${
     node.interactions.length > 0
       ? ` data-loora-interactions="${renderInteractions(node.interactions)}"`
+      : ''
+  }${
+    Object.keys(states).length > 0
+      ? ` data-loora-states="${escapeAttribute(JSON.stringify(states))}"`
       : ''
   }`
   if (node.type === 'text') {
@@ -535,13 +554,37 @@ export function compileCanvas(
     .join('')
   const css = `:root{${tokenCss}}\n${themeCss}\n${collectCss(document)}\n[data-loora-export-root="true"]{position:relative;left:0;top:0}`
   const runtime = `(function(){
-function actionsFor(target,trigger){
-  var interactions=[];try{interactions=JSON.parse(target.getAttribute('data-loora-interactions')||'[]')}catch(error){return[]}
-  return interactions.filter(function(item){return item.trigger===trigger}).flatMap(function(item){return item.actions||[]})
+var stateByScope=new WeakMap();
+function read(target,name,fallback){try{return JSON.parse(target.getAttribute(name)||fallback)}catch(error){return JSON.parse(fallback)}}
+function scopeFor(target){return target.closest('[data-loora-states]')||document.body}
+function stateFor(scope){
+  var current=stateByScope.get(scope);if(current)return current;
+  var definitions=read(scope,'data-loora-states','{}');current={};
+  Object.keys(definitions).forEach(function(id){current[id]=definitions[id].initial});
+  stateByScope.set(scope,current);scope.setAttribute('data-loora-state-values',JSON.stringify(current));return current
+}
+function matches(item,state){
+  return (item.when||[]).every(function(condition){
+    var equal=Object.is(state[condition.stateId],condition.value);
+    return condition.operator==='equals'?equal:!equal
+  })
+}
+function actionsFor(target,trigger,scope,changedStateId){
+  var state=stateFor(scope);
+  return read(target,'data-loora-interactions','[]').filter(function(item){
+    return item.trigger===trigger&&
+      (trigger!=='state-change'||changedStateId===undefined||item.stateId===changedStateId)&&
+      matches(item,state)
+  }).flatMap(function(item){return item.actions||[]})
+}
+function findNode(scope,id){
+  if(scope.matches&&scope.matches('[data-loora-node="'+CSS.escape(id)+'"]'))return scope;
+  return scope.querySelector('[data-loora-node="'+CSS.escape(id)+'"]')||
+    document.querySelector('[data-loora-node="'+CSS.escape(id)+'"]')
 }
 function setVariant(instance,variant){
   instance.dataset.looraVariant=variant;
-  var variants={};try{variants=JSON.parse(instance.getAttribute('data-loora-variant-content')||'{}')}catch(error){return}
+  var variants=read(instance,'data-loora-variant-content','{}');
   var values=variants[variant]||{};
   Object.keys(values).forEach(function(nodeId){
     var node=instance.querySelector('[data-loora-node="'+CSS.escape(nodeId)+'"]');if(!node)return;
@@ -552,28 +595,51 @@ function setVariant(instance,variant){
     if(typeof value.variant==='string'&&node.hasAttribute('data-loora-component'))setVariant(node,value.variant);
   })
 }
-function applyActions(actions){
-  actions.forEach(function(action){
-    if(action.type==='open-url')window.open(action.url,action.target||'_self',action.target==='_blank'?'noopener,noreferrer':undefined);
-    if(action.type==='navigate'){var page=document.querySelector('[data-loora-node="'+CSS.escape(action.pageId)+'"]');if(page)page.scrollIntoView({behavior:'smooth'})}
-    if(action.type==='visibility'){var node=document.querySelector('[data-loora-node="'+CSS.escape(action.nodeId)+'"]');if(node){var hidden=node.hidden||node.style.display==='none';var show=action.value==='show'||(action.value==='toggle'&&hidden);node.hidden=!show}}
-    if(action.type==='open-overlay'){var overlay=document.querySelector('[data-loora-node="'+CSS.escape(action.pageId)+'"]');if(overlay)overlay.dataset.looraOverlay='open'}
-    if(action.type==='close-overlay'){var open=document.querySelector('[data-loora-overlay="open"]');if(open)delete open.dataset.looraOverlay}
-    if(action.type==='set-variant'){var instance=document.querySelector('[data-loora-node="'+CSS.escape(action.instanceId)+'"]');if(instance)setVariant(instance,action.variant)}
+function interactionTargets(scope){
+  var targets=Array.from(scope.querySelectorAll('[data-loora-interactions]'));
+  if(scope.matches&&scope.matches('[data-loora-interactions]'))targets.unshift(scope);
+  return targets.filter(function(target){return scopeFor(target)===scope})
+}
+function runState(scope,stateId,depth){
+  if(depth>20)return;
+  interactionTargets(scope).forEach(function(target){
+    applyActions(actionsFor(target,'state-change',scope,stateId),scope,depth+1)
   })
 }
-document.addEventListener('click',function(event){
-  var target=event.target&&event.target.closest&&event.target.closest('[data-loora-interactions]');
-  if(target)applyActions(actionsFor(target,'click'))
-});
-document.addEventListener('pointerover',function(event){
-  var target=event.target&&event.target.closest&&event.target.closest('[data-loora-interactions]');
-  if(target)applyActions(actionsFor(target,'hover'))
-});
-document.addEventListener('submit',function(event){
-  var target=event.target&&event.target.closest&&event.target.closest('[data-loora-interactions]');
-  if(target){event.preventDefault();applyActions(actionsFor(target,'submit'))}
-});
+function applyActions(actions,scope,depth){
+  actions.forEach(function(action){
+    if(action.type==='set-state'||action.type==='toggle-state'||action.type==='increment-state'){
+      var state=stateFor(scope),current=state[action.stateId],next=
+        action.type==='set-state'?action.value:
+        action.type==='toggle-state'?!current:
+        (typeof current==='number'?current:0)+action.amount;
+      if(!Object.is(current,next)){state[action.stateId]=next;scope.setAttribute('data-loora-state-values',JSON.stringify(state));runState(scope,action.stateId,depth+1)}
+      return
+    }
+    if(action.type==='open-url'){window.open(action.url,action.target||'_self',action.target==='_blank'?'noopener,noreferrer':undefined);return}
+    if(action.type==='navigate'){var page=findNode(document,action.pageId);if(page)page.scrollIntoView({behavior:'smooth'});return}
+    if(action.type==='visibility'){var node=findNode(scope,action.nodeId);if(node){var hidden=node.hidden||node.style.display==='none';var show=action.value==='show'||(action.value==='toggle'&&hidden);node.hidden=!show}return}
+    if(action.type==='open-overlay'){var overlay=findNode(document,action.pageId);if(overlay)overlay.dataset.looraOverlay='open';return}
+    if(action.type==='close-overlay'){var open=document.querySelector('[data-loora-overlay="open"]');if(open)delete open.dataset.looraOverlay;return}
+    if(action.type==='set-variant'){var instance=findNode(scope,action.instanceId);if(instance)setVariant(instance,action.variant)}
+  })
+}
+function dispatch(trigger,event){
+  var target=event.target&&event.target.closest&&event.target.closest('[data-loora-interactions]');if(!target)return;
+  if((trigger==='hover'||trigger==='hover-end')&&event.relatedTarget&&target.contains(event.relatedTarget))return;
+  if(trigger==='submit')event.preventDefault();
+  var scope=scopeFor(target);applyActions(actionsFor(target,trigger,scope),scope,0)
+}
+document.addEventListener('click',function(event){dispatch('click',event)});
+document.addEventListener('dblclick',function(event){dispatch('double-click',event)});
+document.addEventListener('pointerover',function(event){dispatch('hover',event)});
+document.addEventListener('pointerout',function(event){dispatch('hover-end',event)});
+document.addEventListener('submit',function(event){dispatch('submit',event)});
+document.addEventListener('change',function(event){dispatch('change',event)});
+document.addEventListener('input',function(event){dispatch('input',event)});
+document.addEventListener('focusin',function(event){dispatch('focus',event)});
+document.addEventListener('focusout',function(event){dispatch('blur',event)});
+document.querySelectorAll('[data-loora-states]').forEach(function(scope){stateFor(scope);runState(scope,undefined,0)});
 })()`
   return { html, css, runtime }
 }
@@ -605,37 +671,31 @@ export function compileReactComponent(
   const compiled = compileCanvas(document, options)
   const html = JSON.stringify(compiled.html)
   const css = JSON.stringify(compiled.css)
-  return `import { useEffect } from 'react'
+  return `import { useEffect, useRef, useState } from 'react'
 
 const html = ${html}
 const css = ${css}
 
-function actionsFor(target, trigger) {
+function readJson(target, name, fallback) {
   try {
-    return JSON.parse(target.getAttribute('data-loora-interactions') || '[]')
-      .filter((interaction) => interaction.trigger === trigger)
-      .flatMap((interaction) => interaction.actions || [])
+    return JSON.parse(target.getAttribute(name) || fallback)
   } catch {
-    return []
+    return JSON.parse(fallback)
   }
 }
 
-function targetNode(nodeId) {
-  return document.querySelector(
+function targetNode(root, scope, nodeId) {
+  if (scope.matches?.('[data-loora-node="' + CSS.escape(nodeId) + '"]')) {
+    return scope
+  }
+  return scope.querySelector(
     '[data-loora-node="' + CSS.escape(nodeId) + '"]',
-  )
+  ) || root.querySelector('[data-loora-node="' + CSS.escape(nodeId) + '"]')
 }
 
 function setVariant(instance, variant) {
   instance.dataset.looraVariant = variant
-  let variants = {}
-  try {
-    variants = JSON.parse(
-      instance.getAttribute('data-loora-variant-content') || '{}',
-    )
-  } catch {
-    return
-  }
+  const variants = readJson(instance, 'data-loora-variant-content', '{}')
   const values = variants[variant] || {}
   for (const [nodeId, value] of Object.entries(values)) {
     const node = instance.querySelector(
@@ -658,70 +718,184 @@ function setVariant(instance, variant) {
   }
 }
 
-function applyActions(actions) {
-  for (const action of actions) {
-    if (action.type === 'open-url') {
-      window.open(
-        action.url,
-        action.target || '_self',
-        action.target === '_blank' ? 'noopener,noreferrer' : undefined,
-      )
-    }
-    if (action.type === 'navigate') {
-      targetNode(action.pageId)?.scrollIntoView({ behavior: 'smooth' })
-    }
-    if (action.type === 'visibility') {
-      const node = targetNode(action.nodeId)
-      if (node) {
-        const hidden = node.hidden || node.style.display === 'none'
-        const show =
-          action.value === 'show' ||
-          (action.value === 'toggle' && hidden)
-        node.hidden = !show
-      }
-    }
-    if (action.type === 'open-overlay') {
-      const overlay = targetNode(action.pageId)
-      if (overlay) overlay.dataset.looraOverlay = 'open'
-    }
-    if (action.type === 'close-overlay') {
-      const overlay = document.querySelector('[data-loora-overlay="open"]')
-      if (overlay) delete overlay.dataset.looraOverlay
-    }
-    if (action.type === 'set-variant') {
-      const instance = targetNode(action.instanceId)
-      if (instance) setVariant(instance, action.variant)
-    }
-  }
-}
-
 export default function LooraDesign() {
+  const rootRef = useRef(null)
+  const [, renderState] = useState(0)
+
   useEffect(() => {
+    const root = rootRef.current
+    if (!root) return
     const style = document.createElement('style')
     style.dataset.looraExport = 'true'
     style.textContent = css
     document.head.appendChild(style)
 
+    const stateByScope = new WeakMap()
+    const scopeFor = (target) =>
+      target.closest('[data-loora-states]') || root
+    const stateFor = (scope) => {
+      const existing = stateByScope.get(scope)
+      if (existing) return existing
+      const definitions = readJson(scope, 'data-loora-states', '{}')
+      const state = Object.fromEntries(
+        Object.entries(definitions).map(([id, definition]) => [
+          id,
+          definition.initial,
+        ]),
+      )
+      stateByScope.set(scope, state)
+      scope.dataset.looraStateValues = JSON.stringify(state)
+      return state
+    }
+    const matches = (interaction, state) =>
+      (interaction.when || []).every((condition) => {
+        const equal = Object.is(state[condition.stateId], condition.value)
+        return condition.operator === 'equals' ? equal : !equal
+      })
+    const actionsFor = (target, trigger, scope, changedStateId) => {
+      const state = stateFor(scope)
+      return readJson(target, 'data-loora-interactions', '[]')
+        .filter(
+          (interaction) =>
+            interaction.trigger === trigger &&
+            (trigger !== 'state-change' ||
+              changedStateId === undefined ||
+              interaction.stateId === changedStateId) &&
+            matches(interaction, state),
+        )
+        .flatMap((interaction) => interaction.actions || [])
+    }
+    const interactionTargets = (scope) => {
+      const targets = [
+        ...scope.querySelectorAll('[data-loora-interactions]'),
+      ]
+      if (scope.matches?.('[data-loora-interactions]')) targets.unshift(scope)
+      return targets.filter((target) => scopeFor(target) === scope)
+    }
+    const runState = (scope, stateId, depth) => {
+      if (depth > 20) return
+      for (const target of interactionTargets(scope)) {
+        applyActions(
+          actionsFor(target, 'state-change', scope, stateId),
+          scope,
+          depth + 1,
+        )
+      }
+    }
+    const applyActions = (actions, scope, depth) => {
+      for (const action of actions) {
+        if (
+          action.type === 'set-state' ||
+          action.type === 'toggle-state' ||
+          action.type === 'increment-state'
+        ) {
+          const state = stateFor(scope)
+          const current = state[action.stateId]
+          const next =
+            action.type === 'set-state'
+              ? action.value
+              : action.type === 'toggle-state'
+                ? !current
+                : (typeof current === 'number' ? current : 0) + action.amount
+          if (!Object.is(current, next)) {
+            state[action.stateId] = next
+            scope.dataset.looraStateValues = JSON.stringify(state)
+            renderState((version) => version + 1)
+            runState(scope, action.stateId, depth + 1)
+          }
+          continue
+        }
+        if (action.type === 'open-url') {
+          window.open(
+            action.url,
+            action.target || '_self',
+            action.target === '_blank' ? 'noopener,noreferrer' : undefined,
+          )
+          continue
+        }
+        if (action.type === 'navigate') {
+          targetNode(root, root, action.pageId)?.scrollIntoView({
+            behavior: 'smooth',
+          })
+          continue
+        }
+        if (action.type === 'visibility') {
+          const node = targetNode(root, scope, action.nodeId)
+          if (node) {
+            const hidden = node.hidden || node.style.display === 'none'
+            const show =
+              action.value === 'show' ||
+              (action.value === 'toggle' && hidden)
+            node.hidden = !show
+          }
+          continue
+        }
+        if (action.type === 'open-overlay') {
+          const overlay = targetNode(root, root, action.pageId)
+          if (overlay) overlay.dataset.looraOverlay = 'open'
+          continue
+        }
+        if (action.type === 'close-overlay') {
+          const overlay = root.querySelector('[data-loora-overlay="open"]')
+          if (overlay) delete overlay.dataset.looraOverlay
+          continue
+        }
+        if (action.type === 'set-variant') {
+          const instance = targetNode(root, scope, action.instanceId)
+          if (instance) setVariant(instance, action.variant)
+        }
+      }
+    }
     const handle = (trigger) => (event) => {
       const target = event.target?.closest?.('[data-loora-interactions]')
-      if (!target) return
+      if (!target || !root.contains(target)) return
+      if (
+        (trigger === 'hover' || trigger === 'hover-end') &&
+        event.relatedTarget &&
+        target.contains(event.relatedTarget)
+      ) {
+        return
+      }
       if (trigger === 'submit') event.preventDefault()
-      applyActions(actionsFor(target, trigger))
+      const scope = scopeFor(target)
+      applyActions(actionsFor(target, trigger, scope), scope, 0)
     }
     const click = handle('click')
+    const doubleClick = handle('double-click')
     const hover = handle('hover')
+    const hoverEnd = handle('hover-end')
     const submit = handle('submit')
-    document.addEventListener('click', click)
-    document.addEventListener('pointerover', hover)
-    document.addEventListener('submit', submit)
+    const change = handle('change')
+    const input = handle('input')
+    const focus = handle('focus')
+    const blur = handle('blur')
+    root.addEventListener('click', click)
+    root.addEventListener('dblclick', doubleClick)
+    root.addEventListener('pointerover', hover)
+    root.addEventListener('pointerout', hoverEnd)
+    root.addEventListener('submit', submit)
+    root.addEventListener('change', change)
+    root.addEventListener('input', input)
+    root.addEventListener('focusin', focus)
+    root.addEventListener('focusout', blur)
+    for (const scope of root.querySelectorAll('[data-loora-states]')) {
+      stateFor(scope)
+      runState(scope, undefined, 0)
+    }
     return () => {
       style.remove()
-      document.removeEventListener('click', click)
-      document.removeEventListener('pointerover', hover)
-      document.removeEventListener('submit', submit)
+      root.removeEventListener('click', click)
+      root.removeEventListener('dblclick', doubleClick)
+      root.removeEventListener('pointerover', hover)
+      root.removeEventListener('pointerout', hoverEnd)
+      root.removeEventListener('submit', submit)
+      root.removeEventListener('change', change)
+      root.removeEventListener('input', input)
+      root.removeEventListener('focusin', focus)
+      root.removeEventListener('focusout', blur)
     }
   }, [])
-  return <div dangerouslySetInnerHTML={{ __html: html }} />
+  return <div ref={rootRef} dangerouslySetInnerHTML={{ __html: html }} />
 }
 `
 }
@@ -852,6 +1026,30 @@ function portableAttributes(
       ? `className=${JSON.stringify(tailwindClasses(declarations))}`
       : `style=${jsxStyle(declarations)}`,
   ]
+  if (patched.interactions.length > 0) {
+    attributes.push(
+      `data-loora-interactions={${JSON.stringify(JSON.stringify(patched.interactions))}}`,
+    )
+  }
+  const states = renderedStateDefinitions(document, node, exportedRoot)
+  if (Object.keys(states).length > 0) {
+    attributes.push(
+      `data-loora-states={${JSON.stringify(JSON.stringify(states))}}`,
+    )
+  }
+  if (patched.type === 'instance') {
+    const component = document.nodes[patched.componentId]
+    if (component?.type === 'component') {
+      const variant = patched.variant ?? component.defaultVariant ?? ''
+      attributes.push(
+        `data-loora-component=${JSON.stringify(component.id)}`,
+        `data-loora-variant=${JSON.stringify(variant)}`,
+        `data-loora-variant-content={${JSON.stringify(JSON.stringify(
+          instanceVariantContent(document, component.id, patched, options),
+        ))}}`,
+      )
+    }
+  }
   const openUrl = patched.interactions
     .flatMap((interaction) =>
       interaction.trigger === 'click' ? interaction.actions : [],
@@ -938,12 +1136,14 @@ ${indent(children.join('\n'), 2)}
   }
   if (node.type === 'component') {
     if (!instance) return ''
-    return orderedChildren(document, node.id)
+    const children = orderedChildren(document, node.id)
       .map((child) =>
         renderPortableNode(document, child, options, format, instance),
       )
       .filter(Boolean)
-      .join('\n')
+    return `<div ${attributes}>
+${indent(children.join('\n'), 2)}
+</div>`
   }
   const tag =
     node.type === 'frame'
@@ -969,6 +1169,203 @@ function tokenDeclarations(document: CanvasDocument) {
       String(token.modes?.[document.activeThemeId] ?? token.value),
     ]),
   )
+}
+
+function portableRuntimeSource() {
+  return `function useLooraRuntime(rootRef) {
+  const [, renderState] = useState(0)
+
+  useEffect(() => {
+    const root = rootRef.current
+    if (!root) return
+    const stores = new WeakMap()
+    const read = (target, name, fallback) => {
+      try {
+        return JSON.parse(target.getAttribute(name) || fallback)
+      } catch {
+        return JSON.parse(fallback)
+      }
+    }
+    const scopeFor = (target) =>
+      target.closest('[data-loora-states]') || root
+    const stateFor = (scope) => {
+      const existing = stores.get(scope)
+      if (existing) return existing
+      const definitions = read(scope, 'data-loora-states', '{}')
+      const state = Object.fromEntries(
+        Object.entries(definitions).map(([id, definition]) => [
+          id,
+          definition.initial,
+        ]),
+      )
+      stores.set(scope, state)
+      scope.dataset.looraStateValues = JSON.stringify(state)
+      return state
+    }
+    const findNode = (scope, id) => {
+      const selector = '[data-loora-node="' + CSS.escape(id) + '"]'
+      return (scope.matches?.(selector) ? scope : null) ||
+        scope.querySelector(selector) ||
+        root.querySelector(selector)
+    }
+    const setVariant = (instance, variant) => {
+      instance.dataset.looraVariant = variant
+      const variants = read(instance, 'data-loora-variant-content', '{}')
+      for (const [nodeId, value] of Object.entries(variants[variant] || {})) {
+        const node = instance.querySelector(
+          '[data-loora-node="' + CSS.escape(nodeId) + '"]',
+        )
+        if (!node) continue
+        if (typeof value.html === 'string') node.innerHTML = value.html
+        if (typeof value.src === 'string' && node.tagName === 'IMG') {
+          node.setAttribute('src', value.src)
+        }
+        if (typeof value.alt === 'string' && node.tagName === 'IMG') {
+          node.setAttribute('alt', value.alt)
+        }
+        if (
+          typeof value.variant === 'string' &&
+          node.hasAttribute('data-loora-component')
+        ) {
+          setVariant(node, value.variant)
+        }
+      }
+    }
+    const matches = (interaction, state) =>
+      (interaction.when || []).every((condition) => {
+        const equal = Object.is(state[condition.stateId], condition.value)
+        return condition.operator === 'equals' ? equal : !equal
+      })
+    const actionsFor = (target, trigger, scope, changedStateId) =>
+      read(target, 'data-loora-interactions', '[]')
+        .filter(
+          (interaction) =>
+            interaction.trigger === trigger &&
+            (trigger !== 'state-change' ||
+              changedStateId === undefined ||
+              interaction.stateId === changedStateId) &&
+            matches(interaction, stateFor(scope)),
+        )
+        .flatMap((interaction) => interaction.actions || [])
+    const interactionTargets = (scope) => {
+      const targets = [
+        ...scope.querySelectorAll('[data-loora-interactions]'),
+      ]
+      if (scope.matches?.('[data-loora-interactions]')) targets.unshift(scope)
+      return targets.filter((target) => scopeFor(target) === scope)
+    }
+    const runState = (scope, stateId, depth) => {
+      if (depth > 20) return
+      for (const target of interactionTargets(scope)) {
+        applyActions(
+          actionsFor(target, 'state-change', scope, stateId),
+          scope,
+          depth + 1,
+        )
+      }
+    }
+    const applyActions = (actions, scope, depth) => {
+      for (const action of actions) {
+        if (
+          action.type === 'set-state' ||
+          action.type === 'toggle-state' ||
+          action.type === 'increment-state'
+        ) {
+          const state = stateFor(scope)
+          const current = state[action.stateId]
+          const next =
+            action.type === 'set-state'
+              ? action.value
+              : action.type === 'toggle-state'
+                ? !current
+                : (typeof current === 'number' ? current : 0) + action.amount
+          if (!Object.is(current, next)) {
+            state[action.stateId] = next
+            scope.dataset.looraStateValues = JSON.stringify(state)
+            renderState((version) => version + 1)
+            runState(scope, action.stateId, depth + 1)
+          }
+          continue
+        }
+        if (action.type === 'open-url') {
+          window.open(
+            action.url,
+            action.target || '_self',
+            action.target === '_blank' ? 'noopener,noreferrer' : undefined,
+          )
+          continue
+        }
+        if (action.type === 'navigate') {
+          findNode(root, action.pageId)?.scrollIntoView({ behavior: 'smooth' })
+          continue
+        }
+        if (action.type === 'visibility') {
+          const node = findNode(scope, action.nodeId)
+          if (node) {
+            const hidden = node.hidden || node.style.display === 'none'
+            const show =
+              action.value === 'show' ||
+              (action.value === 'toggle' && hidden)
+            node.hidden = !show
+          }
+          continue
+        }
+        if (action.type === 'open-overlay') {
+          const overlay = findNode(root, action.pageId)
+          if (overlay) overlay.dataset.looraOverlay = 'open'
+          continue
+        }
+        if (action.type === 'close-overlay') {
+          const overlay = root.querySelector('[data-loora-overlay="open"]')
+          if (overlay) delete overlay.dataset.looraOverlay
+          continue
+        }
+        if (action.type === 'set-variant') {
+          const instance = findNode(scope, action.instanceId)
+          if (instance) setVariant(instance, action.variant)
+        }
+      }
+    }
+    const handle = (trigger) => (event) => {
+      const target = event.target?.closest?.('[data-loora-interactions]')
+      if (!target || !root.contains(target)) return
+      if (
+        (trigger === 'hover' || trigger === 'hover-end') &&
+        event.relatedTarget &&
+        target.contains(event.relatedTarget)
+      ) {
+        return
+      }
+      if (trigger === 'submit') event.preventDefault()
+      const scope = scopeFor(target)
+      applyActions(actionsFor(target, trigger, scope), scope, 0)
+    }
+    const listeners = [
+      ['click', handle('click')],
+      ['dblclick', handle('double-click')],
+      ['pointerover', handle('hover')],
+      ['pointerout', handle('hover-end')],
+      ['submit', handle('submit')],
+      ['change', handle('change')],
+      ['input', handle('input')],
+      ['focusin', handle('focus')],
+      ['focusout', handle('blur')],
+    ]
+    for (const [event, listener] of listeners) {
+      root.addEventListener(event, listener)
+    }
+    for (const scope of root.querySelectorAll('[data-loora-states]')) {
+      stateFor(scope)
+      runState(scope, undefined, 0)
+    }
+    return () => {
+      for (const [event, listener] of listeners) {
+        root.removeEventListener(event, listener)
+      }
+    }
+  }, [rootRef])
+}
+`
 }
 
 function compilePortableComponent(
@@ -1006,9 +1403,30 @@ ${indent(roots.join('\n'), 2)}
 ${indent(content, 2)}
 </div>`
     : content
-  return `export default function LooraDesign() {
+  const interactive = Object.values(document.nodes).some(
+    (node) =>
+      node.interactions.length > 0 ||
+      ((node.type === 'page' || node.type === 'component') &&
+        Object.keys(node.states ?? {}).length > 0),
+  )
+  if (!interactive) {
+    return `export default function LooraDesign() {
   return (
 ${indent(wrapped, 4)}
+  )
+}
+`
+  }
+  return `import { useEffect, useRef, useState } from 'react'
+
+${portableRuntimeSource()}
+export default function LooraDesign() {
+  const rootRef = useRef(null)
+  useLooraRuntime(rootRef)
+  return (
+    <div ref={rootRef} className="contents">
+${indent(wrapped, 6)}
+    </div>
   )
 }
 `

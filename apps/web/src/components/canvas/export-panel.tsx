@@ -508,7 +508,7 @@ export function CanvasExport({
   }, [format, png, compiled])
 
   const handoffPrompt = handoff
-    ? `Fetch the Loora Canvas handoff from ${handoff.url}. Read the version 3 JSON document and assets. Recreate the selected UI faithfully using its normalized nodes, parentId/order hierarchy, structured layout and styles, responsive overrides, components, instances, tokens, and declarative interactions. CanvasDocument is the source of truth; do not look for editable source strings.`
+    ? `Fetch the Loora Canvas handoff from ${handoff.url}. Read the version 3 JSON document and assets. Recreate the selected UI faithfully using its normalized nodes, parentId/order hierarchy, structured layout and styles, responsive overrides, components, instances, tokens, typed local states, and declarative event interactions. Runtime state is ephemeral; CanvasDocument remains the authoring source of truth. Do not look for editable source strings.`
     : ''
 
   const createHandoff = async () => {

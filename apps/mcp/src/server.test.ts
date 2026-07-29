@@ -54,6 +54,22 @@ describe('MCP agent workflow', () => {
 
   test('exports the first Page as Tailwind, JSX, or standalone HTML', () => {
     const document = documentFixture()
+    const page = document.nodes['page-home']
+    if (page?.type !== 'page') throw new Error('Fixture Page is missing')
+    page.states = {
+      active: {
+        id: 'active',
+        name: 'Active',
+        type: 'boolean',
+        initial: false,
+      },
+    }
+    document.nodes['text-title']!.interactions = [
+      {
+        trigger: 'click',
+        actions: [{ type: 'toggle-state', stateId: 'active' }],
+      },
+    ]
 
     const tailwind = exportCanvasCode(document, {
       format: 'tailwind',
@@ -73,6 +89,7 @@ describe('MCP agent workflow', () => {
     expect(tailwind.pageId).toBe('page-home')
     expect(tailwind.code).toContain('className=')
     expect(tailwind.code).toContain('[font-size:16px]')
+    expect(tailwind.code).toContain('useLooraRuntime(rootRef)')
     expect(jsx.code).toContain('style={{')
     expect(html.code).toStartWith('<!doctype html>')
     expect(html.nodeId).toBe('text-title')
@@ -134,6 +151,13 @@ describe('MCP agent workflow', () => {
       expect(names.has('getDesignContext')).toBe(true)
       expect(names.has('exportCode')).toBe(true)
       expect(names.has('getScreenshot')).toBe(true)
+      const createPage = tools.tools.find(
+        (tool) => tool.name === 'createPage',
+      )
+      expect(createPage?.description).toContain('typed local state')
+      expect(JSON.stringify(createPage?.inputSchema)).toContain(
+        'toggle-state',
+      )
       expect(
         tools.tools.find((tool) => tool.name === 'getScreenshot')
           ?.annotations?.readOnlyHint,

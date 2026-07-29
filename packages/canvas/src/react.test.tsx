@@ -156,6 +156,69 @@ describe('Canvas React surface', () => {
     expect(surface?.style.backgroundImage).toBe('')
   })
 
+  it('recovers a collapsed page and keeps repeated resizes aligned', async () => {
+    const document = createCanvasDocument('Page resize fixture', 'page-resize')
+    document.nodes.page = createPageNode('Home', {
+      id: 'page',
+      // An older resize bug could persist the 1px clamp while leaving the
+      // Page's actual viewport intact.
+      layout: { ...defaultLayout(1, 900), x: 0, y: 0 },
+      viewport: { width: 800, minHeight: 900 },
+    })
+    const engine = new CanvasEngine(document)
+    const view = render(
+      <CanvasProvider engine={engine}>
+        <SelectNode id="page" />
+        <CanvasSurface
+          pageWidth={1_440}
+          initialCamera={{ x: 0, y: 0, zoom: 1 }}
+        />
+      </CanvasProvider>,
+    )
+    const page = view.container.querySelector<HTMLElement>(
+      '[data-loora-node="page"]',
+    )!
+    expect(page.style.width).toBe('800px')
+
+    const resizeEast = async (
+      renderedWidth: number,
+      nextPointerX: number,
+      expectedWidth: number,
+    ) => {
+      stubRect(page, { width: renderedWidth, height: 900 })
+      const handle = await waitFor(() =>
+        view.getByRole('button', { name: 'Resize e' }),
+      )
+      handle.setPointerCapture = () => undefined
+      fireEvent.pointerDown(handle, {
+        pointerId: 1,
+        clientX: renderedWidth,
+        clientY: 450,
+      })
+      fireEvent.pointerMove(window, {
+        pointerId: 1,
+        clientX: nextPointerX,
+        clientY: 450,
+      })
+      fireEvent.pointerUp(window, {
+        pointerId: 1,
+        clientX: nextPointerX,
+        clientY: 450,
+      })
+      await waitFor(() => expect(page.style.width).toBe(`${expectedWidth}px`))
+      expect(engine.getNode('page')?.layout.width).toEqual({
+        unit: 'px',
+        value: expectedWidth,
+      })
+      expect(engine.getNode('page')).toMatchObject({
+        viewport: { width: expectedWidth, minHeight: 900 },
+      })
+    }
+
+    await resizeEast(800, 600, 600)
+    await resizeEast(600, 500, 500)
+  })
+
   it('selects top-level layers, drills into frames, and deep-selects descendants', async () => {
     const view = render(
       <CanvasProvider engine={new CanvasEngine(fixture())}>
@@ -345,6 +408,88 @@ describe('Canvas React surface', () => {
       x: 90,
       y: 190,
     })
+  })
+
+  it('keeps an absolute child inside a clipped parent and guides it to the walls', async () => {
+    const document = createCanvasDocument('Contained drag fixture', 'contained-drag')
+    document.nodes.page = createPageNode('Home', {
+      id: 'page',
+      layout: { ...defaultLayout(800, 600), x: 0, y: 0 },
+      viewport: { width: 800, minHeight: 600 },
+    })
+    document.nodes.card = createFrameNode('Card', {
+      id: 'card',
+      parentId: 'page',
+      order: 1_024,
+      layout: {
+        ...defaultLayout(200, 100),
+        position: 'absolute',
+        x: 100,
+        y: 100,
+      },
+    })
+    const engine = new CanvasEngine(document)
+    const view = render(
+      <CanvasProvider engine={engine}>
+        <CanvasSurface
+          pageWidth={800}
+          initialCamera={{ x: 0, y: 0, zoom: 1 }}
+        />
+      </CanvasProvider>,
+    )
+    const surface = view.container.querySelector<HTMLElement>(
+      '[data-loora-canvas-surface]',
+    )!
+    surface.setPointerCapture = () => undefined
+    const page = view.container.querySelector<HTMLElement>(
+      '[data-loora-node="page"]',
+    )!
+    const card = view.container.querySelector<HTMLElement>(
+      '[data-loora-node="card"]',
+    )!
+    stubRect(page, { left: 100, top: 100, width: 800, height: 600 })
+    stubRect(card, { left: 200, top: 200, width: 200, height: 100 })
+
+    withHits([card, page], () => {
+      fireEvent.pointerDown(surface, {
+        button: 0,
+        clientX: 250,
+        clientY: 250,
+      })
+      fireEvent.pointerMove(surface, {
+        button: 0,
+        clientX: 2_000,
+        clientY: 2_000,
+      })
+    })
+
+    const verticalGuide = view.container.querySelector<SVGLineElement>(
+      '[data-loora-guide="vertical"]',
+    )!
+    const horizontalGuide = view.container.querySelector<SVGLineElement>(
+      '[data-loora-guide="horizontal"]',
+    )!
+    await waitFor(() => {
+      expect(verticalGuide.style.display).toBe('block')
+      expect(horizontalGuide.style.display).toBe('block')
+    })
+    expect(verticalGuide.getAttribute('x1')).toBe('900')
+    expect(horizontalGuide.getAttribute('y1')).toBe('700')
+
+    withHits([card, page], () => {
+      fireEvent.pointerUp(surface, {
+        button: 0,
+        clientX: 2_000,
+        clientY: 2_000,
+      })
+    })
+    expect(engine.getNode('card')?.layout).toMatchObject({
+      position: 'absolute',
+      x: 600,
+      y: 500,
+    })
+    expect(verticalGuide.style.display).toBe('none')
+    expect(horizontalGuide.style.display).toBe('none')
   })
 
   it('resolves where an outside drop lands, in flow and in free space', () => {

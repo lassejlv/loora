@@ -126,6 +126,7 @@ const mutationPatchKeys = new Set<keyof NodeMutationPatch>([
   'fit',
   'componentId',
   'overrides',
+  'states',
   'responsive',
   'metadata',
 ])

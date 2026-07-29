@@ -258,6 +258,7 @@ export function createLooraServer(userId: string) {
                   ? page.layout.width.value
                   : page.viewport.width,
               minHeight: page.viewport.minHeight,
+              states: page.states ?? {},
             })),
           components: roots
             .filter((node) => node.type === 'component')
@@ -266,6 +267,7 @@ export function createLooraServer(userId: string) {
               name: component.name,
               variants: component.variants,
               defaultVariant: component.defaultVariant,
+              states: component.states ?? {},
             })),
           tree: semanticTree(found.document, null, args.depth),
         }
@@ -359,7 +361,7 @@ export function createLooraServer(userId: string) {
     'createPage',
     {
       description:
-        'Create an editable responsive Page with nested structured nodes in one engine transaction. Model normal Tailwind layouts with flex/grid, gap, padding, fill, and hug; use absolute positioning only intentionally.',
+        'Create an editable responsive Page with typed local state and nested structured nodes in one engine transaction. Event interactions can set, toggle, or increment state and react through conditional state-change rules. Model normal Tailwind layouts with flex/grid, gap, padding, fill, and hug; use absolute positioning only intentionally.',
       inputSchema: { ...targetShape, ...createPageInputSchema.shape },
     },
     tool(
@@ -422,7 +424,7 @@ export function createLooraServer(userId: string) {
     'patchNodes',
     {
       description:
-        'Patch structured layout, visual, text, responsive, variant, and interaction fields atomically through the Canvas engine.',
+        'Patch structured layout, visual, text, responsive, variant, typed Page/component state, and declarative event interaction fields atomically through the Canvas engine. Runtime state stays ephemeral and never replaces the Canvas document.',
       inputSchema: { ...targetShape, ...patchNodesInputSchema.shape },
     },
     tool(
@@ -540,7 +542,8 @@ export function createLooraServer(userId: string) {
   server.registerTool(
     'createComponent',
     {
-      description: 'Create an off-canvas reusable component definition.',
+      description:
+        'Create an off-canvas reusable component definition with optional instance-local typed state and declarative event interactions.',
       inputSchema: { ...targetShape, ...createComponentInputSchema.shape },
     },
     tool(

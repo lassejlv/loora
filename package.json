@@ -1,18 +1,11 @@
 {
   "name": "loora",
-  "private": true,
-  "type": "module",
-  "packageManager": "bun@1.3.14",
-  "workspaces": {
-    "packages": ["apps/*", "packages/*"],
-    "catalog": {
-      "better-auth": "^1.6.23",
-      "drizzle-orm": "^0.45.2",
-      "zod": "^4.4.3",
-      "@polar-sh/sdk": "0.49.0",
-      "typescript": "^6.0.3"
-    }
+  "devDependencies": {
+    "typescript": "catalog:",
+    "vite": "^8.1.5"
   },
+  "packageManager": "bun@1.3.14",
+  "private": true,
   "scripts": {
     "dev": "bun run --cwd apps/web dev",
     "build": "bun run --cwd apps/web build",
@@ -29,11 +22,15 @@
     "polar:provision": "bun run --cwd packages/billing polar:provision"
   },
   "trustedDependencies": ["esbuild", "lightningcss"],
-  "devDependencies": {
-    "typescript": "catalog:",
-    "vite": "^8.1.5"
-  },
-  "dependencies": {
-    "@opencode-ai/cli": "^0.0.0-next-15919"
+  "type": "module",
+  "workspaces": {
+    "packages": ["apps/*", "packages/*"],
+    "catalog": {
+      "better-auth": "^1.6.23",
+      "drizzle-orm": "^0.45.2",
+      "zod": "^4.4.3",
+      "@polar-sh/sdk": "0.49.0",
+      "typescript": "^6.0.3"
+    }
   }
 }

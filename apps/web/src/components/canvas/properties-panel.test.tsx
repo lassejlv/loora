@@ -80,6 +80,41 @@ describe('CanvasPropertiesPanel', () => {
     expect((view.getByLabelText('Y') as HTMLInputElement).value).toBe('292.57')
   })
 
+  test('shows the intact Page viewport when an old resize collapsed its layout', () => {
+    const document = fixture()
+    document.nodes.page = createPageNode('Home', {
+      id: 'page',
+      layout: defaultLayout(1, 1),
+      viewport: { width: 800, minHeight: 900 },
+    })
+    const engine = new CanvasEngine(document)
+    const view = render(
+      <CanvasProvider engine={engine}>
+        <Select ids={['page']} />
+        <CanvasPropertiesPanel />
+      </CanvasProvider>,
+    )
+
+    const width = view.getByLabelText('W') as HTMLInputElement
+    const height = view.getByLabelText('H') as HTMLInputElement
+    expect(width.value).toBe('800')
+    expect(height.value).toBe('900')
+
+    commit(width, '640')
+    commit(height, '720')
+    expect(engine.getNode('page')?.layout.width).toEqual({
+      unit: 'px',
+      value: 640,
+    })
+    expect(engine.getNode('page')?.layout.height).toEqual({
+      unit: 'px',
+      value: 720,
+    })
+    expect(engine.getNode('page')).toMatchObject({
+      viewport: { width: 640, minHeight: 720 },
+    })
+  })
+
   test('keeps hug and fill sizing reachable', () => {
     const { engine, view } = setup(['card'])
     fireEvent.change(view.getByLabelText('W unit'), { target: { value: 'hug' } })

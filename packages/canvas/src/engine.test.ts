@@ -53,6 +53,40 @@ describe('Canvas transactions', () => {
     expect(engine.getNode('headline')?.type).toBe('text')
   })
 
+  it('keeps state declarations on the existing node transaction path', () => {
+    const engine = engineFixture()
+    engine.apply({
+      id: 'add-page-state',
+      label: 'Add Page state',
+      operations: [
+        {
+          type: 'node.patch',
+          id: 'page',
+          patch: {
+            states: {
+              menuOpen: {
+                id: 'menuOpen',
+                name: 'Menu open',
+                type: 'boolean',
+                initial: false,
+              },
+            },
+          },
+        },
+      ],
+    })
+
+    const page = engine.getNode('page')
+    expect(page?.type === 'page' ? page.states?.menuOpen?.initial : null).toBe(
+      false,
+    )
+    engine.undo()
+    const restored = engine.getNode('page')
+    expect(
+      restored?.type === 'page' ? restored.states?.menuOpen : undefined,
+    ).toBeUndefined()
+  })
+
   it('leaves the source untouched when final validation fails', () => {
     const engine = engineFixture()
     const before = structuredClone(engine.document)

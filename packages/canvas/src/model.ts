@@ -7,6 +7,7 @@ export type NodeId = string
 export type BreakpointId = string
 export type TokenId = string
 export type ThemeId = string
+export type StateId = string
 
 export interface CanvasBreakpoint {
   id: BreakpointId
@@ -112,6 +113,21 @@ export interface TextRun {
   color?: CanvasColor
 }
 
+export type CanvasStateValue = string | number | boolean
+
+export interface CanvasStateDefinition {
+  id: StateId
+  name: string
+  type: 'string' | 'number' | 'boolean'
+  initial: CanvasStateValue
+}
+
+export interface CanvasStateCondition {
+  stateId: StateId
+  operator: 'equals' | 'not-equals'
+  value: CanvasStateValue
+}
+
 export type CanvasAction =
   | { type: 'navigate'; pageId: NodeId }
   | { type: 'open-url'; url: string; target?: '_self' | '_blank' }
@@ -119,9 +135,26 @@ export type CanvasAction =
   | { type: 'open-overlay'; pageId: NodeId }
   | { type: 'close-overlay' }
   | { type: 'set-variant'; instanceId: NodeId; variant: string }
+  | { type: 'set-state'; stateId: StateId; value: CanvasStateValue }
+  | { type: 'toggle-state'; stateId: StateId }
+  | { type: 'increment-state'; stateId: StateId; amount: number }
+
+export type CanvasEventTrigger =
+  | 'click'
+  | 'double-click'
+  | 'hover'
+  | 'hover-end'
+  | 'submit'
+  | 'change'
+  | 'input'
+  | 'focus'
+  | 'blur'
+  | 'state-change'
 
 export interface CanvasInteraction {
-  trigger: 'click' | 'hover' | 'submit'
+  trigger: CanvasEventTrigger
+  stateId?: StateId
+  when?: CanvasStateCondition[]
   actions: CanvasAction[]
 }
 
@@ -153,6 +186,7 @@ export interface NodeMutationPatch extends NodePatch {
   fit?: ImageNode['fit']
   componentId?: NodeId
   overrides?: InstanceNode['overrides']
+  states?: Record<StateId, CanvasStateDefinition>
   responsive?: ResponsiveOverrides
   metadata?: Record<string, unknown>
 }
@@ -201,6 +235,7 @@ export interface CanvasNodeBase {
 
 export interface PageNode extends CanvasNodeBase {
   type: 'page'
+  states?: Record<StateId, CanvasStateDefinition>
   viewport: {
     width: number
     minHeight: number
@@ -209,6 +244,7 @@ export interface PageNode extends CanvasNodeBase {
 
 export interface ComponentNode extends CanvasNodeBase {
   type: 'component'
+  states?: Record<StateId, CanvasStateDefinition>
   variants: string[]
   defaultVariant?: string
   variantOverrides: Record<string, Record<NodeId, NodePatch>>
@@ -429,6 +465,7 @@ export function createPageNode(
     style: defaultStyle({ fills: [{ type: 'solid', color: '#ffffff' }], overflow: 'hidden' }),
     responsive: {},
     interactions: [],
+    states: {},
     viewport: { width: 1440, minHeight: 900 },
   } satisfies PageNode, patch)
 }
@@ -462,6 +499,7 @@ export function createComponentNode(
   return withDefined({
     ...base,
     type: 'component',
+    states: {},
     variants: ['default'],
     defaultVariant: 'default',
     variantOverrides: {},
@@ -517,6 +555,22 @@ export function orderedChildren(document: CanvasDocument, parentId: NodeId | nul
   return Object.values(document.nodes)
     .filter((node) => node.parentId === parentId)
     .sort((left, right) => left.order - right.order || left.id.localeCompare(right.id))
+}
+
+export function stateDefinitionsForNode(
+  document: CanvasDocument,
+  nodeId: NodeId,
+) {
+  let node: CanvasNode | undefined = document.nodes[nodeId]
+  const seen = new Set<NodeId>()
+  while (node && !seen.has(node.id)) {
+    seen.add(node.id)
+    if (node.type === 'page' || node.type === 'component') {
+      return node.states ?? {}
+    }
+    node = node.parentId ? document.nodes[node.parentId] : undefined
+  }
+  return {}
 }
 
 export function findBreakpoint(document: CanvasDocument, width: number) {
@@ -1007,22 +1061,125 @@ function validStylePatch(
   return true
 }
 
+function validStateValue(
+  value: unknown,
+  type?: CanvasStateDefinition['type'],
+): value is CanvasStateValue {
+  if (typeof value === 'string') {
+    return (!type || type === 'string') && value.length <= 10_000
+  }
+  if (typeof value === 'number') {
+    return (!type || type === 'number') && finite(value)
+  }
+  return typeof value === 'boolean' && (!type || type === 'boolean')
+}
+
+function validStateDefinitions(
+  value: unknown,
+): value is Record<StateId, CanvasStateDefinition> {
+  return (
+    isRecord(value) &&
+    Object.keys(value).length <= 100 &&
+    Object.entries(value).every(
+      ([id, definition]) =>
+        safeDictionaryId(id) &&
+        isRecord(definition) &&
+        Object.keys(definition).every((key) =>
+          ['id', 'name', 'type', 'initial'].includes(key),
+        ) &&
+        definition.id === id &&
+        typeof definition.name === 'string' &&
+        definition.name.length > 0 &&
+        definition.name.length <= 200 &&
+        ['string', 'number', 'boolean'].includes(String(definition.type)) &&
+        validStateValue(
+          definition.initial,
+          definition.type as CanvasStateDefinition['type'],
+        ),
+    )
+  )
+}
+
+const interactionTriggers = new Set<CanvasEventTrigger>([
+  'click',
+  'double-click',
+  'hover',
+  'hover-end',
+  'submit',
+  'change',
+  'input',
+  'focus',
+  'blur',
+  'state-change',
+])
+
 function validInteractions(
   value: unknown,
   document: CanvasDocument,
+  states?: Record<StateId, CanvasStateDefinition>,
 ) {
   if (!Array.isArray(value) || value.length > 100) return false
   return value.every((interaction) => {
     if (
       !isRecord(interaction) ||
-      !['click', 'hover', 'submit'].includes(String(interaction.trigger)) ||
+      !interactionTriggers.has(interaction.trigger as CanvasEventTrigger) ||
       !Array.isArray(interaction.actions) ||
       interaction.actions.length > 100
     ) {
       return false
     }
+    const stateChange = interaction.trigger === 'state-change'
+    if (
+      (stateChange &&
+        (!safeDictionaryId(interaction.stateId) ||
+          (states && !states[interaction.stateId]))) ||
+      (!stateChange && interaction.stateId !== undefined)
+    ) {
+      return false
+    }
+    if (
+      interaction.when !== undefined &&
+      (!Array.isArray(interaction.when) ||
+        interaction.when.length > 20 ||
+        interaction.when.some(
+          (condition) =>
+            !isRecord(condition) ||
+            !safeDictionaryId(condition.stateId) ||
+            (states && !states[condition.stateId]) ||
+            !['equals', 'not-equals'].includes(String(condition.operator)) ||
+            !validStateValue(
+              condition.value,
+              states?.[condition.stateId]?.type,
+            ),
+        ))
+    ) {
+      return false
+    }
     return interaction.actions.every((action) => {
       if (!isRecord(action) || typeof action.type !== 'string') return false
+      if (
+        action.type === 'set-state' ||
+        action.type === 'toggle-state' ||
+        action.type === 'increment-state'
+      ) {
+        if (
+          !safeDictionaryId(action.stateId) ||
+          (states && !states[action.stateId])
+        ) {
+          return false
+        }
+        const definition = states?.[action.stateId]
+        if (action.type === 'set-state') {
+          return validStateValue(action.value, definition?.type)
+        }
+        if (action.type === 'toggle-state') {
+          return !definition || definition.type === 'boolean'
+        }
+        return (
+          (!definition || definition.type === 'number') &&
+          finite(action.amount)
+        )
+      }
       if (action.type === 'open-url') {
         return (
           typeof action.url === 'string' &&
@@ -1457,8 +1614,8 @@ export function validateDocument(value: unknown): DocumentValidationResult {
     'metadata',
   ]
   const specificNodeKeys: Record<CanvasNodeType, string[]> = {
-    page: ['viewport'],
-    component: ['variants', 'defaultVariant', 'variantOverrides'],
+    page: ['states', 'viewport'],
+    component: ['states', 'variants', 'defaultVariant', 'variantOverrides'],
     frame: ['semanticTag'],
     group: [],
     text: ['text', 'runs'],
@@ -1635,6 +1792,13 @@ export function validateDocument(value: unknown): DocumentValidationResult {
         )
       }
     }
+    if (
+      (node.type === 'page' || node.type === 'component') &&
+      node.states !== undefined &&
+      !validStateDefinitions(node.states)
+    ) {
+      pushIssue(issues, `${path}.states`, 'State definitions are invalid')
+    }
     if (node.type === 'image' && (typeof node.src !== 'string' || !validUrl(node.src))) {
       pushIssue(issues, `${path}.src`, 'Image URL is not allowed')
     }
@@ -1652,7 +1816,13 @@ export function validateDocument(value: unknown): DocumentValidationResult {
       pushIssue(issues, `${path}.interactions`, 'Interactions must be an array')
       continue
     }
-    if (!validInteractions(node.interactions, document)) {
+    if (
+      !validInteractions(
+        node.interactions,
+        document,
+        stateDefinitionsForNode(document, node.id),
+      )
+    ) {
       pushIssue(issues, `${path}.interactions`, 'Interactions are invalid')
     }
     for (const interaction of node.interactions) {

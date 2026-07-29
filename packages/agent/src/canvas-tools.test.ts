@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test'
+import { applyTransaction } from '@loora/canvas/engine'
 import {
   createCanvasDocument,
   createComponentNode,
@@ -11,6 +12,8 @@ import {
   type CanvasNode,
 } from '@loora/canvas/model'
 import {
+  createPageInputSchema,
+  createPageTransaction,
   materializeNodeDescriptors,
   normalizeDeletionNodeIds,
   patchOperationsForChanges,
@@ -54,6 +57,51 @@ function componentFixture() {
 }
 
 describe('Canvas agent NodeRefs', () => {
+  test('creates readable Page state and event rules without source code', () => {
+    const source = createCanvasDocument('Agent state fixture', 'agent-state')
+    const input = createPageInputSchema.parse({
+      name: 'Interactive',
+      states: {
+        menuOpen: {
+          id: 'menuOpen',
+          name: 'Menu open',
+          type: 'boolean',
+          initial: false,
+        },
+      },
+      children: [
+        {
+          ref: 'toggle',
+          type: 'frame',
+          name: 'Toggle menu',
+          semanticTag: 'button',
+          interactions: [
+            {
+              trigger: 'click',
+              actions: [
+                { type: 'toggle-state', stateId: 'menuOpen' },
+              ],
+            },
+          ],
+        },
+      ],
+    })
+    const created = createPageTransaction(source, input)
+    const document = applyTransaction(source, created.transaction).document
+    const tree = semanticTree(document, created.pageId, 2) as {
+      states: Record<string, { initial: boolean }>
+      children: Array<{ interactions?: unknown[] }>
+    }
+
+    expect(tree.states.menuOpen?.initial).toBe(false)
+    expect(tree.children[0]?.interactions).toEqual([
+      {
+        trigger: 'click',
+        actions: [{ type: 'toggle-state', stateId: 'menuOpen' }],
+      },
+    ])
+  })
+
   test('reads source and effective instance state', () => {
     const { document, label, instance } = componentFixture()
     const result = readCanvasNodeRef(document, {

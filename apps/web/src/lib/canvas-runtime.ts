@@ -1,4 +1,10 @@
-import type { CanvasAction } from '@loora/canvas/model'
+import type {
+  CanvasAction,
+  CanvasEventTrigger,
+  CanvasInteraction,
+  CanvasStateDefinition,
+  CanvasStateValue,
+} from '@loora/canvas/model'
 
 function findCanvasNode(root: ParentNode, id: string) {
   for (const node of root.querySelectorAll<HTMLElement>('[data-loora-node]')) {
@@ -40,11 +46,67 @@ export function setCanvasVariant(instance: HTMLElement, variant: string) {
   }
 }
 
+export function initialCanvasState(
+  definitions: Record<string, CanvasStateDefinition>,
+) {
+  return Object.fromEntries(
+    Object.entries(definitions).map(([id, definition]) => [
+      id,
+      definition.initial,
+    ]),
+  ) as Record<string, CanvasStateValue>
+}
+
+export function canvasInteractionActions(
+  interactions: CanvasInteraction[],
+  trigger: CanvasEventTrigger,
+  state: Record<string, CanvasStateValue>,
+  changedStateId?: string,
+) {
+  return interactions
+    .filter(
+      (interaction) =>
+        interaction.trigger === trigger &&
+        (trigger !== 'state-change' ||
+          changedStateId === undefined ||
+          interaction.stateId === changedStateId) &&
+        (interaction.when ?? []).every((condition) => {
+          const equal = Object.is(state[condition.stateId], condition.value)
+          return condition.operator === 'equals' ? equal : !equal
+        }),
+    )
+    .flatMap((interaction) => interaction.actions)
+}
+
+export interface CanvasActionContext {
+  state?: Record<string, CanvasStateValue>
+  onStateChange?: (stateId: string) => void
+}
+
 export function applyCanvasActions(
   root: HTMLElement,
   actions: CanvasAction[],
+  context: CanvasActionContext = {},
 ) {
   for (const action of actions) {
+    if (
+      action.type === 'set-state' ||
+      action.type === 'toggle-state' ||
+      action.type === 'increment-state'
+    ) {
+      if (!context.state) continue
+      const current = context.state[action.stateId]
+      const next =
+        action.type === 'set-state'
+          ? action.value
+          : action.type === 'toggle-state'
+            ? !current
+            : (typeof current === 'number' ? current : 0) + action.amount
+      if (Object.is(current, next)) continue
+      context.state[action.stateId] = next
+      context.onStateChange?.(action.stateId)
+      continue
+    }
     if (action.type === 'open-url') {
       window.open(
         action.url,
@@ -80,7 +142,9 @@ export function applyCanvasActions(
       if (overlay) delete overlay.dataset.looraOverlay
       continue
     }
-    const instance = findCanvasNode(root, action.instanceId)
-    if (instance) setCanvasVariant(instance, action.variant)
+    if (action.type === 'set-variant') {
+      const instance = findCanvasNode(root, action.instanceId)
+      if (instance) setCanvasVariant(instance, action.variant)
+    }
   }
 }

@@ -153,6 +153,51 @@ export const canvasStylePatchSchema = z.object({
   typography: typographySchema.optional(),
 })
 
+const stateIdSchema = z
+  .string()
+  .regex(/^[a-zA-Z0-9_-]{1,128}$/)
+
+const stateValueSchema = z.union([
+  z.string().max(10_000),
+  z.number().finite(),
+  z.boolean(),
+])
+
+const stateDefinitionSchema = z.discriminatedUnion('type', [
+  z.object({
+    id: stateIdSchema,
+    name: z.string().trim().min(1).max(200),
+    type: z.literal('string'),
+    initial: z.string().max(10_000),
+  }),
+  z.object({
+    id: stateIdSchema,
+    name: z.string().trim().min(1).max(200),
+    type: z.literal('number'),
+    initial: z.number().finite(),
+  }),
+  z.object({
+    id: stateIdSchema,
+    name: z.string().trim().min(1).max(200),
+    type: z.literal('boolean'),
+    initial: z.boolean(),
+  }),
+])
+
+const stateDefinitionsSchema = z
+  .record(stateIdSchema, stateDefinitionSchema)
+  .superRefine((states, context) => {
+    for (const [id, state] of Object.entries(states)) {
+      if (state.id !== id) {
+        context.addIssue({
+          code: 'custom',
+          path: [id, 'id'],
+          message: 'State ids must match their record keys',
+        })
+      }
+    }
+  })
+
 const actionSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('navigate'), pageId: z.string().min(1).max(128) }),
   z.object({
@@ -188,12 +233,65 @@ const actionSchema = z.discriminatedUnion('type', [
     instanceId: z.string().min(1).max(128),
     variant: z.string().min(1).max(128),
   }),
+  z.object({
+    type: z.literal('set-state'),
+    stateId: stateIdSchema,
+    value: stateValueSchema,
+  }),
+  z.object({
+    type: z.literal('toggle-state'),
+    stateId: stateIdSchema,
+  }),
+  z.object({
+    type: z.literal('increment-state'),
+    stateId: stateIdSchema,
+    amount: z.number().finite(),
+  }),
 ])
 
-const interactionSchema = z.object({
-  trigger: z.enum(['click', 'hover', 'submit']),
-  actions: z.array(actionSchema).min(1).max(20),
-})
+const interactionSchema = z
+  .object({
+    trigger: z.enum([
+      'click',
+      'double-click',
+      'hover',
+      'hover-end',
+      'submit',
+      'change',
+      'input',
+      'focus',
+      'blur',
+      'state-change',
+    ]),
+    stateId: stateIdSchema.optional(),
+    when: z
+      .array(
+        z.object({
+          stateId: stateIdSchema,
+          operator: z.enum(['equals', 'not-equals']),
+          value: stateValueSchema,
+        }),
+      )
+      .max(20)
+      .optional(),
+    actions: z.array(actionSchema).min(1).max(20),
+  })
+  .superRefine((interaction, context) => {
+    if (interaction.trigger === 'state-change' && !interaction.stateId) {
+      context.addIssue({
+        code: 'custom',
+        path: ['stateId'],
+        message: 'state-change interactions require a stateId',
+      })
+    }
+    if (interaction.trigger !== 'state-change' && interaction.stateId) {
+      context.addIssue({
+        code: 'custom',
+        path: ['stateId'],
+        message: 'stateId is only valid for state-change interactions',
+      })
+    }
+  })
 
 const imageUrlSchema = z
   .string()
@@ -261,6 +359,7 @@ const nodePatchFields = {
 export const canvasNodePatchSchema = z.object({
   ...nodePatchFields,
   order: z.number().finite().optional(),
+  states: stateDefinitionsSchema.optional(),
   viewport: z
     .object({
       width: z.number().finite().positive().optional(),
@@ -390,6 +489,7 @@ export const createPageInputSchema = z.object({
   minHeight: z.number().finite().positive().max(100_000).default(900),
   layout: canvasLayoutPatchSchema.optional(),
   style: canvasStylePatchSchema.optional(),
+  states: stateDefinitionsSchema.default({}),
   children: z.array(canvasNodeDescriptorSchema).max(5_000).default([]),
 })
 
@@ -437,6 +537,7 @@ export const createComponentInputSchema = z.object({
     .default(['default']),
   layout: canvasLayoutPatchSchema.optional(),
   style: canvasStylePatchSchema.optional(),
+  states: stateDefinitionsSchema.default({}),
   children: z.array(canvasNodeDescriptorSchema).max(5_000).default([]),
 })
 
@@ -903,6 +1004,7 @@ export function createPageTransaction(
       ...input.layout,
     },
     style: { ...defaultStyle({ fills: [{ type: 'solid', color: '#ffffff' }] }), ...input.style },
+    states: input.states,
     viewport: { width: input.width, minHeight: input.minHeight },
   })
   const withPage: CanvasDocument = {
@@ -934,6 +1036,7 @@ export function createComponentTransaction(
     order: (roots.at(-1)?.order ?? 0) + DEFAULT_ORDER_STEP,
     layout: { ...defaultLayout(input.width, input.height), ...input.layout },
     style: { ...defaultStyle(), ...input.style },
+    states: input.states,
     variants: input.variants,
     defaultVariant: input.variants[0],
   })
@@ -998,6 +1101,12 @@ export function semanticTree(
         height: node.layout.height,
       },
       ...(node.type === 'text' ? { text: node.text } : {}),
+      ...(node.interactions.length > 0
+        ? { interactions: node.interactions }
+        : {}),
+      ...(node.type === 'page' || node.type === 'component'
+        ? { states: node.states ?? {} }
+        : {}),
       ...(node.type === 'instance'
         ? { componentId: node.componentId, variant: node.variant }
         : {}),
@@ -1076,7 +1185,7 @@ export function createCanvasAgentTools({
   return {
     createPage: {
       description:
-        'Create an editable responsive Page root and optional nested structured nodes. Use flex/grid for normal UI flow and absolute positioning only when intentional.',
+        'Create an editable responsive Page root with optional typed local states and nested structured nodes. Use interactions to handle events and state-change rules; use flex/grid for normal UI flow and absolute positioning only when intentional.',
       inputSchema: createPageInputSchema,
     },
     insertNodes: {
@@ -1086,7 +1195,7 @@ export function createCanvasAgentTools({
     },
     patchNodes: {
       description:
-        'Patch structured layout, style, text, visibility, responsive properties, variants, or interactions. NodeRefs can address descendants inside component instances.',
+        'Patch structured layout, style, text, visibility, responsive properties, variants, typed Page/component states, or declarative event interactions. State values are ephemeral at runtime; definitions and rules stay transactional. NodeRefs can address descendants inside component instances.',
       inputSchema: patchNodesInputSchema,
     },
     moveNodes: {
