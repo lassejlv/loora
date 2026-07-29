@@ -10,6 +10,8 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as FeaturesRouteImport } from './routes/features'
+import { Route as McpRouteImport } from './routes/mcp'
 import { Route as McpConsentRouteImport } from './routes/mcp-consent'
 import { Route as PricingRouteImport } from './routes/pricing'
 import { Route as DotwellKnownOauthAuthorizationServerRouteImport } from './routes/[.]well-known.oauth-authorization-server'
@@ -35,6 +37,16 @@ import { Route as ApiHandoffTokenAssetIdRouteImport } from './routes/api.handoff
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const FeaturesRoute = FeaturesRouteImport.update({
+  id: '/features',
+  path: '/features',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const McpRoute = McpRouteImport.update({
+  id: '/mcp',
+  path: '/mcp',
   getParentRoute: () => rootRouteImport,
 } as any)
 const McpConsentRoute = McpConsentRouteImport.update({
@@ -146,6 +158,8 @@ const ApiHandoffTokenAssetIdRoute = ApiHandoffTokenAssetIdRouteImport.update({
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/features': typeof FeaturesRoute
+  '/mcp': typeof McpRoute
   '/mcp-consent': typeof McpConsentRoute
   '/pricing': typeof PricingRoute
   '/.well-known/oauth-authorization-server': typeof DotwellKnownOauthAuthorizationServerRoute
@@ -170,6 +184,8 @@ export interface FileRoutesByFullPath {
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/features': typeof FeaturesRoute
+  '/mcp': typeof McpRoute
   '/mcp-consent': typeof McpConsentRoute
   '/pricing': typeof PricingRoute
   '/.well-known/oauth-authorization-server': typeof DotwellKnownOauthAuthorizationServerRoute
@@ -195,6 +211,8 @@ export interface FileRoutesByTo {
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/features': typeof FeaturesRoute
+  '/mcp': typeof McpRoute
   '/mcp-consent': typeof McpConsentRoute
   '/pricing': typeof PricingRoute
   '/.well-known/oauth-authorization-server': typeof DotwellKnownOauthAuthorizationServerRoute
@@ -221,6 +239,8 @@ export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | '/'
+    | '/features'
+    | '/mcp'
     | '/mcp-consent'
     | '/pricing'
     | '/.well-known/oauth-authorization-server'
@@ -245,6 +265,8 @@ export interface FileRouteTypes {
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
+    | '/features'
+    | '/mcp'
     | '/mcp-consent'
     | '/pricing'
     | '/.well-known/oauth-authorization-server'
@@ -269,6 +291,8 @@ export interface FileRouteTypes {
   id:
     | '__root__'
     | '/'
+    | '/features'
+    | '/mcp'
     | '/mcp-consent'
     | '/pricing'
     | '/.well-known/oauth-authorization-server'
@@ -294,6 +318,8 @@ export interface FileRouteTypes {
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  FeaturesRoute: typeof FeaturesRoute
+  McpRoute: typeof McpRoute
   McpConsentRoute: typeof McpConsentRoute
   PricingRoute: typeof PricingRoute
   DotwellKnownOauthAuthorizationServerRoute: typeof DotwellKnownOauthAuthorizationServerRoute
@@ -323,6 +349,20 @@ declare module '@tanstack/react-router' {
       path: '/'
       fullPath: '/'
       preLoaderRoute: typeof IndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/features': {
+      id: '/features'
+      path: '/features'
+      fullPath: '/features'
+      preLoaderRoute: typeof FeaturesRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/mcp': {
+      id: '/mcp'
+      path: '/mcp'
+      fullPath: '/mcp'
+      preLoaderRoute: typeof McpRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/mcp-consent': {
@@ -489,6 +529,8 @@ const ApiHandoffTokenRouteWithChildren = ApiHandoffTokenRoute._addFileChildren(
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  FeaturesRoute: FeaturesRoute,
+  McpRoute: McpRoute,
   McpConsentRoute: McpConsentRoute,
   PricingRoute: PricingRoute,
   DotwellKnownOauthAuthorizationServerRoute:

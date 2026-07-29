@@ -7,12 +7,13 @@ export function NavSep() {
 }
 
 /**
- * Canvas and Features are anchors on the landing page, so they never carry an
- * active state — only Pricing is a route of its own.
+ * Canvas is an anchor on the landing page, so it never carries an active state;
+ * the rest are routes of their own.
  */
 const NAV = [
   { label: 'Canvas', to: '/', hash: 'canvas', marksActive: false },
-  { label: 'Features', to: '/', hash: 'features', marksActive: false },
+  { label: 'Features', to: '/features', hash: undefined, marksActive: true },
+  { label: 'MCP', to: '/mcp', hash: undefined, marksActive: true },
   { label: 'Pricing', to: '/pricing', hash: undefined, marksActive: true },
 ] as const
 
@@ -66,6 +67,14 @@ function SiteFooter() {
           Get started
         </Link>
         <NavSep />
+        <Link to="/features" className="transition-colors hover:text-foreground">
+          Features
+        </Link>
+        <NavSep />
+        <Link to="/mcp" className="transition-colors hover:text-foreground">
+          MCP
+        </Link>
+        <NavSep />
         <Link to="/pricing" className="transition-colors hover:text-foreground">
           Pricing
         </Link>
@@ -77,15 +86,6 @@ function SiteFooter() {
           className="transition-colors hover:text-foreground"
         >
           GitHub
-        </a>
-        <NavSep />
-        <a
-          href="https://mcp.loora.design"
-          target="_blank"
-          rel="noreferrer"
-          className="transition-colors hover:text-foreground"
-        >
-          MCP
         </a>
       </div>
     </footer>
