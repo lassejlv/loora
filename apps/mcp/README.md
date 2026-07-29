@@ -31,6 +31,10 @@ Same `.env` as the web app (`DATABASE_URL`, `BETTER_AUTH_SECRET`,
 - `LOORA_MCP_USER` — stdio mode only: email or id of the acting user
 - `PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH` — optional local Chromium override;
   the Railway image installs Chromium at `/usr/bin/chromium`
+- `MCP_SCREENSHOT_CONCURRENCY` — concurrent Chromium captures, defaults to `2`
+- `MCP_SCREENSHOT_QUEUE_LIMIT` — queued captures before returning busy,
+  defaults to `8`
+- `MCP_SCREENSHOT_QUEUE_TIMEOUT_MS` — maximum queue wait, defaults to `20000`
 
 Optionally set `MCP_RESOURCE_URL=https://mcp.loora.design/mcp` for the web app
 so Better Auth's own protected-resource metadata names the right resource.

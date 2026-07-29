@@ -1,4 +1,16 @@
-import { and, asc, desc, eq, gt, inArray, isNotNull, isNull, lt, or } from 'drizzle-orm'
+import {
+  and,
+  asc,
+  desc,
+  eq,
+  gt,
+  inArray,
+  isNotNull,
+  isNull,
+  lt,
+  lte,
+  or,
+} from 'drizzle-orm'
 import { ORPCError, os } from '@orpc/server'
 import { z } from 'zod'
 import { db } from '@loora/db'
@@ -37,6 +49,7 @@ import {
 import { EMPTY_SHORTCUT_CONFIG } from '@loora/db/shortcuts'
 import { getCanvasAgentActivity } from '@loora/db/canvas-agent-activity'
 import { publishCanvasRealtimeEvent } from '@loora/db/canvas-realtime'
+import { canvasTransactionPruneBefore } from '@loora/db/canvas-transactions'
 import { parseShortcutConfig, shortcutConfigSchema } from './shortcuts'
 import { googleOAuthEnabled, type getSession } from '@loora/auth'
 import { type CanvasElement, type CanvasPage } from '@loora/db/canvas'
@@ -432,6 +445,7 @@ async function canvasInterveningTransactions(
   designId: string,
   draftId: string | null | undefined,
   revision: number,
+  throughRevision: number,
 ) {
   return db
     .select({
@@ -445,10 +459,45 @@ async function canvasInterveningTransactions(
         eq(canvasTransactionLog.designId, designId),
         eq(canvasTransactionLog.targetKey, canvasTargetKey(draftId)),
         gt(canvasTransactionLog.revision, revision),
+        lte(canvasTransactionLog.revision, throughRevision),
       ),
     )
     .orderBy(asc(canvasTransactionLog.revision))
     .limit(101)
+}
+
+async function canvasTargetSnapshot(
+  userId: string,
+  designId: string,
+  draftId: string | null | undefined,
+) {
+  return draftId
+    ? db
+        .select({
+          version: designDraft.canvasVersion,
+          document: designDraft.canvasDocument,
+          revision: designDraft.revision,
+        })
+        .from(designDraft)
+        .where(
+          and(
+            eq(designDraft.id, draftId),
+            eq(designDraft.designId, designId),
+            eq(designDraft.userId, userId),
+          ),
+        )
+        .limit(1)
+        .then((rows) => rows[0] ?? null)
+    : db
+        .select({
+          version: design.canvasVersion,
+          document: design.canvasDocument,
+          revision: design.revision,
+        })
+        .from(design)
+        .where(and(eq(design.id, designId), eq(design.userId, userId)))
+        .limit(1)
+        .then((rows) => rows[0] ?? null)
 }
 
 const getCanvas = protectedProcedure
@@ -458,53 +507,96 @@ const getCanvas = protectedProcedure
     }),
   )
   .handler(async ({ context, input }) => {
-    const target = input.draftId
-      ? await db
-          .select({
-            version: designDraft.canvasVersion,
-            document: designDraft.canvasDocument,
-            revision: designDraft.revision,
-            status: designDraft.status,
-          })
-          .from(designDraft)
-          .where(
-            and(
-              eq(designDraft.id, input.draftId),
-              eq(designDraft.designId, input.designId),
-              eq(designDraft.userId, context.user.id),
-            ),
-          )
-          .limit(1)
-          .then((rows) => rows[0])
-      : await db
-          .select({
-            version: design.canvasVersion,
-            document: design.canvasDocument,
-            revision: design.revision,
-          })
-          .from(design)
-          .where(and(eq(design.id, input.designId), eq(design.userId, context.user.id)))
-          .limit(1)
-          .then((rows) => rows[0])
+    const targetPromise =
+      input.sinceRevision === undefined
+        ? input.draftId
+          ? db
+              .select({
+                version: designDraft.canvasVersion,
+                document: designDraft.canvasDocument,
+                revision: designDraft.revision,
+              })
+              .from(designDraft)
+              .where(
+                and(
+                  eq(designDraft.id, input.draftId),
+                  eq(designDraft.designId, input.designId),
+                  eq(designDraft.userId, context.user.id),
+                ),
+              )
+              .limit(1)
+              .then((rows) => rows[0])
+          : db
+              .select({
+                version: design.canvasVersion,
+                document: design.canvasDocument,
+                revision: design.revision,
+              })
+              .from(design)
+              .where(
+                and(
+                  eq(design.id, input.designId),
+                  eq(design.userId, context.user.id),
+                ),
+              )
+              .limit(1)
+              .then((rows) => rows[0])
+        : input.draftId
+          ? db
+              .select({
+                version: designDraft.canvasVersion,
+                revision: designDraft.revision,
+              })
+              .from(designDraft)
+              .where(
+                and(
+                  eq(designDraft.id, input.draftId),
+                  eq(designDraft.designId, input.designId),
+                  eq(designDraft.userId, context.user.id),
+                ),
+              )
+              .limit(1)
+              .then((rows) => rows[0])
+          : db
+              .select({
+                version: design.canvasVersion,
+                revision: design.revision,
+              })
+              .from(design)
+              .where(
+                and(
+                  eq(design.id, input.designId),
+                  eq(design.userId, context.user.id),
+                ),
+              )
+              .limit(1)
+              .then((rows) => rows[0])
+    const [target, activity] = await Promise.all([
+      targetPromise,
+      getCanvasAgentActivity(context.user.id, input),
+    ])
     if (!target) throw new ORPCError('NOT_FOUND')
-    if (target.version !== CANVAS_SCHEMA_VERSION || !target.document) {
+    if (target.version !== CANVAS_SCHEMA_VERSION) {
       return {
         status: 'unsupported' as const,
         version: target.version,
         revision: target.revision,
       }
     }
-    const document = parseCanvasDocument(target.document)
-    const activity = await getCanvasAgentActivity(
-      context.user.id,
-      input,
-    )
     if (input.sinceRevision === undefined) {
+      const document = 'document' in target ? target.document : null
+      if (!document) {
+        return {
+          status: 'unsupported' as const,
+          version: target.version,
+          revision: target.revision,
+        }
+      }
       return {
         status: 'ready' as const,
         version: CANVAS_SCHEMA_VERSION,
         revision: target.revision,
-        document,
+        document: parseCanvasDocument(document),
         transactions: [] as CanvasTransaction[],
         activity,
       }
@@ -524,16 +616,38 @@ const getCanvas = protectedProcedure
       input.designId,
       input.draftId,
       input.sinceRevision,
+      target.revision,
     )
     const complete =
       intervening.length <= 100 &&
       intervening[0]?.revision === input.sinceRevision + 1 &&
       intervening.at(-1)?.revision === target.revision
+    const snapshot = complete
+      ? null
+      : await canvasTargetSnapshot(
+          context.user.id,
+          input.designId,
+          input.draftId,
+        )
+    if (
+      !complete &&
+      (!snapshot ||
+        snapshot.version !== CANVAS_SCHEMA_VERSION ||
+        !snapshot.document)
+    ) {
+      return {
+        status: 'unsupported' as const,
+        version: snapshot?.version ?? target.version,
+        revision: snapshot?.revision ?? target.revision,
+      }
+    }
     return {
       status: 'ready' as const,
       version: CANVAS_SCHEMA_VERSION,
-      revision: target.revision,
-      document: complete ? null : document,
+      revision: snapshot?.revision ?? target.revision,
+      document: snapshot?.document
+        ? parseCanvasDocument(snapshot.document)
+        : null,
       transactions: complete
         ? intervening.map((entry) => parseCanvasTransaction(entry.transaction))
         : [],
@@ -620,6 +734,7 @@ const applyCanvasTransactions = protectedProcedure
           revision: target.revision,
           document,
           transactionIds: transactions.map((transaction) => transaction.id),
+          appliedTransactionIds: [] as string[],
           changedNodeIds: [] as string[],
         }
       }
@@ -629,6 +744,7 @@ const applyCanvasTransactions = protectedProcedure
           input.designId,
           input.draftId,
           input.expectedRevision,
+          target.revision,
         )
         const complete =
           intervening.length <= 100 &&
@@ -765,23 +881,35 @@ const applyCanvasTransactions = protectedProcedure
             transaction,
           })),
         )
-        await tx
-          .delete(canvasTransactionLog)
-          .where(
-            and(
-              eq(canvasTransactionLog.userId, context.user.id),
-              eq(canvasTransactionLog.designId, input.designId),
-              eq(canvasTransactionLog.targetKey, canvasTargetKey(input.draftId)),
-              lt(canvasTransactionLog.revision, Math.max(0, nextRevision - 500)),
-            ),
-          )
+        const pruneBefore = canvasTransactionPruneBefore(
+          target.revision,
+          nextRevision,
+        )
+        if (pruneBefore !== null) {
+          await tx
+            .delete(canvasTransactionLog)
+            .where(
+              and(
+                eq(canvasTransactionLog.userId, context.user.id),
+                eq(canvasTransactionLog.designId, input.designId),
+                eq(
+                  canvasTransactionLog.targetKey,
+                  canvasTargetKey(input.draftId),
+                ),
+                lt(canvasTransactionLog.revision, pruneBefore),
+              ),
+            )
+        }
       }
       return {
         applied: true as const,
         idempotent: freshTransactions.length === 0,
         revision: nextRevision,
-        document: nextDocument,
+        document: null,
         transactionIds: transactions.map((transaction) => transaction.id),
+        appliedTransactionIds: freshTransactions.map(
+          (transaction) => transaction.id,
+        ),
         changedNodeIds: [...changedNodeIds],
       }
     })

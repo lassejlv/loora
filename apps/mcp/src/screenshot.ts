@@ -16,6 +16,7 @@ import {
 } from '@loora/canvas/model'
 import { readCanvasNodeRef } from '@loora/agent/canvas-tools'
 import { s3 } from '@loora/rpc/storage'
+import { BoundedConcurrencyGate } from './concurrency'
 
 const BLANK_IMAGE =
   'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7'
@@ -37,6 +38,24 @@ interface LoadedAsset {
   data: string
   mediaType: string
 }
+
+function integerEnvironment(
+  name: string,
+  fallback: number,
+  minimum: number,
+  maximum: number,
+) {
+  const value = Number(process.env[name] ?? fallback)
+  return Number.isInteger(value) && value >= minimum && value <= maximum
+    ? value
+    : fallback
+}
+
+const screenshotGate = new BoundedConcurrencyGate(
+  integerEnvironment('MCP_SCREENSHOT_CONCURRENCY', 2, 1, 8),
+  integerEnvironment('MCP_SCREENSHOT_QUEUE_LIMIT', 8, 0, 100),
+  integerEnvironment('MCP_SCREENSHOT_QUEUE_TIMEOUT_MS', 20_000, 1_000, 120_000),
+)
 
 export interface CanvasScreenshotOptions {
   pageId?: NodeId
@@ -225,7 +244,7 @@ function screenshotTarget(
   }
 }
 
-export async function renderCanvasScreenshot(
+async function renderCanvasScreenshotInternal(
   userId: string,
   source: CanvasDocument,
   options: CanvasScreenshotOptions = {},
@@ -331,4 +350,14 @@ export async function renderCanvasScreenshot(
   } finally {
     await context.close()
   }
+}
+
+export function renderCanvasScreenshot(
+  userId: string,
+  source: CanvasDocument,
+  options: CanvasScreenshotOptions = {},
+) {
+  return screenshotGate.run(() =>
+    renderCanvasScreenshotInternal(userId, source, options),
+  )
 }

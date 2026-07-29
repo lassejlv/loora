@@ -16,5 +16,11 @@
       "bunfig.toml",
       "apps/mcp/Dockerfile"
     ]
+  },
+  "deploy": {
+    "healthcheckPath": "/ready",
+    "healthcheckTimeout": 10,
+    "restartPolicyType": "ON_FAILURE",
+    "restartPolicyMaxRetries": 5
   }
 }

@@ -9,6 +9,7 @@
   "scripts": {
     "dev": "bun run --cwd apps/web dev",
     "build": "bun run --cwd apps/web build",
+    "benchmark-api": "bun run --cwd apps/web benchmark-api",
     "docs:dev": "bun run --cwd apps/docs dev",
     "docs:build": "bun run --cwd apps/docs build",
     "preview": "bun run --cwd apps/web preview",

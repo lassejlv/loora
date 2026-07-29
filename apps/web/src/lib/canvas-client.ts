@@ -86,6 +86,20 @@ export function remoteRevealNodeIds(transactions: CanvasTransaction[]) {
   })
 }
 
+export function applyAcknowledgedTransactions(
+  base: CanvasDocument,
+  transactions: CanvasTransaction[],
+  transactionIds: string[],
+) {
+  const acknowledged = new Set(transactionIds)
+  let document = base
+  for (const transaction of transactions) {
+    if (!acknowledged.has(transaction.id)) continue
+    document = applyTransaction(document, transaction).document
+  }
+  return document
+}
+
 type CanvasRealtimeMessage =
   | {
       type: 'canvas.changed'
@@ -479,7 +493,13 @@ export class CanvasSyncController {
         this.#pending = this.#pending.filter(
           (transaction) => !acknowledged.has(transaction.id),
         )
-        this.#baseDocument = parseCanvasDocument(result.document)
+        this.#baseDocument = result.document
+          ? parseCanvasDocument(result.document)
+          : applyAcknowledgedTransactions(
+              this.#baseDocument,
+              batch,
+              result.appliedTransactionIds,
+            )
         this.#revision = result.revision
         if (this.#revision >= this.#announcedRevision) {
           this.#announcedRevision = this.#revision

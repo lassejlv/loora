@@ -9,6 +9,14 @@
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js'
 import { auth } from '@loora/auth'
+import { checkDatabaseConnection } from '@loora/db'
+import { serviceReadinessResponse } from '@loora/rpc/readiness'
+import {
+  elapsedMilliseconds,
+  logRequestTiming,
+  requestIdFromHeaders,
+  serverTimingHeader,
+} from '@loora/rpc/request-timing'
 import { createLooraServer } from './server'
 import { AccessDeniedError, requireAppAccess } from './access'
 
@@ -24,7 +32,8 @@ const CORS_HEADERS: Record<string, string> = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Methods': 'GET, POST, DELETE, OPTIONS',
   'Access-Control-Allow-Headers': 'Authorization, Content-Type, Mcp-Protocol-Version, Mcp-Session-Id',
-  'Access-Control-Expose-Headers': 'WWW-Authenticate, Mcp-Session-Id',
+  'Access-Control-Expose-Headers':
+    'WWW-Authenticate, Mcp-Session-Id, Server-Timing, X-Request-Id',
   'Access-Control-Max-Age': '86400',
 }
 
@@ -43,44 +52,103 @@ function sendUnauthorized(res: ServerResponse, message: string) {
   )
 }
 
-async function handleMcp(req: IncomingMessage, res: ServerResponse) {
+async function handleMcp(
+  req: IncomingMessage,
+  res: ServerResponse,
+  phases: Record<string, number>,
+) {
   const headers = new Headers()
   for (const [key, value] of Object.entries(req.headers)) {
     if (typeof value === 'string') headers.set(key, value)
     else if (Array.isArray(value)) for (const item of value) headers.append(key, item)
   }
+  const authStartedAt = performance.now()
   const session = await auth.api.getMcpSession({ headers })
+  phases.auth = elapsedMilliseconds(authStartedAt)
   if (!session) {
+    res.setHeader(
+      'Server-Timing',
+      serverTimingHeader([{ name: 'auth', durationMs: phases.auth }]),
+    )
     sendUnauthorized(res, 'Unauthorized: Authentication required')
     return
   }
 
   let userId: string
+  const accessStartedAt = performance.now()
   try {
     userId = (await requireAppAccess(session.userId)).id
+    phases.access = elapsedMilliseconds(accessStartedAt)
   } catch (error) {
+    phases.access = elapsedMilliseconds(accessStartedAt)
     if (error instanceof AccessDeniedError) {
+      res.setHeader(
+        'Server-Timing',
+        serverTimingHeader([
+          { name: 'auth', durationMs: phases.auth },
+          { name: 'access', durationMs: phases.access ?? 0 },
+        ]),
+      )
       sendJson(res, 403, { jsonrpc: '2.0', error: { code: -32000, message: error.message }, id: null })
       return
     }
     throw error
   }
 
+  const setupStartedAt = performance.now()
   const server = createLooraServer(userId)
   const transport = new StreamableHTTPServerTransport({
     sessionIdGenerator: undefined,
     enableJsonResponse: true,
   })
+  phases.setup = elapsedMilliseconds(setupStartedAt)
   res.on('close', () => {
     void transport.close()
     void server.close()
   })
   for (const [key, value] of Object.entries(CORS_HEADERS)) res.setHeader(key, value)
+  res.setHeader(
+    'Server-Timing',
+    serverTimingHeader([
+      { name: 'auth', durationMs: phases.auth },
+      { name: 'access', durationMs: phases.access },
+      { name: 'setup', durationMs: phases.setup },
+    ]),
+  )
   await server.connect(transport)
   await transport.handleRequest(req, res)
 }
 
 const httpServer = createServer((req, res) => {
+  const startedAt = performance.now()
+  const headers = new Headers()
+  for (const [key, value] of Object.entries(req.headers)) {
+    if (typeof value === 'string') headers.set(key, value)
+    else if (Array.isArray(value)) for (const item of value) headers.append(key, item)
+  }
+  const requestId = requestIdFromHeaders(headers)
+  const phases: Record<string, number> = {}
+  const requestPath = new URL(req.url ?? '/', PUBLIC_URL).pathname
+  res.setHeader('X-Request-Id', requestId)
+  res.once('finish', () => {
+    if (
+      res.statusCode < 400 &&
+      (requestPath === '/' ||
+        requestPath === '/health' ||
+        requestPath === '/ready')
+    ) {
+      return
+    }
+    logRequestTiming({
+      service: 'mcp',
+      requestId,
+      method: req.method ?? 'UNKNOWN',
+      path: requestPath,
+      status: res.statusCode,
+      durationMs: elapsedMilliseconds(startedAt),
+      phases,
+    })
+  })
   void (async () => {
     const url = new URL(req.url ?? '/', PUBLIC_URL)
 
@@ -116,12 +184,26 @@ const httpServer = createServer((req, res) => {
         })
         return
       }
-      await handleMcp(req, res)
+      await handleMcp(req, res, phases)
       return
     }
 
     if (req.method === 'GET' && (url.pathname === '/' || url.pathname === '/health')) {
       sendJson(res, 200, { name: 'loora-mcp', endpoint: `${PUBLIC_URL}/mcp` })
+      return
+    }
+
+    if (req.method === 'GET' && url.pathname === '/ready') {
+      const response = await serviceReadinessResponse(
+        'mcp',
+        checkDatabaseConnection,
+      )
+      const body = await response.text()
+      res.writeHead(
+        response.status,
+        Object.fromEntries(response.headers.entries()),
+      )
+      res.end(body)
       return
     }
 

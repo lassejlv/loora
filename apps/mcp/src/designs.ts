@@ -40,6 +40,7 @@ import {
   settleCanvasAgentActivity,
 } from '@loora/db/canvas-agent-activity'
 import { publishCanvasRealtimeEvent } from '@loora/db/canvas-realtime'
+import { canvasTransactionPruneBefore } from '@loora/db/canvas-transactions'
 
 export const MAX_NAME_LENGTH = 200
 
@@ -316,19 +317,22 @@ async function applyCanvasTransactionsInternal(
           })),
         )
         .onConflictDoNothing()
-      await tx
-        .delete(canvasTransactionLog)
-        .where(
-          and(
-            eq(canvasTransactionLog.userId, userId),
-            eq(canvasTransactionLog.designId, target.designId),
-            eq(canvasTransactionLog.targetKey, targetKey),
-            lt(
-              canvasTransactionLog.revision,
-              Math.max(0, revision - 500),
+      const pruneBefore = canvasTransactionPruneBefore(
+        found.revision,
+        revision,
+      )
+      if (pruneBefore !== null) {
+        await tx
+          .delete(canvasTransactionLog)
+          .where(
+            and(
+              eq(canvasTransactionLog.userId, userId),
+              eq(canvasTransactionLog.designId, target.designId),
+              eq(canvasTransactionLog.targetKey, targetKey),
+              lt(canvasTransactionLog.revision, pruneBefore),
             ),
-          ),
-        )
+          )
+      }
       return true
     })
     if (!committed) continue

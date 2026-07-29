@@ -1,6 +1,13 @@
 import { describe, expect, test } from 'bun:test'
-import { createFrameNode, createTextNode } from '@loora/canvas/model'
+import type { CanvasTransaction } from '@loora/canvas/engine'
 import {
+  createCanvasDocument,
+  createFrameNode,
+  createPageNode,
+  createTextNode,
+} from '@loora/canvas/model'
+import {
+  applyAcknowledgedTransactions,
   parseCanvasRealtimeMessage,
   remoteRevealNodeIds,
 } from './canvas-client'
@@ -47,6 +54,49 @@ describe('remoteRevealNodeIds', () => {
         },
       ]),
     ).toEqual(['section', 'caption', 'existing-card'])
+  })
+})
+
+describe('applyAcknowledgedTransactions', () => {
+  test('advances the confirmed base without applying transactions still pending', () => {
+    const base = createCanvasDocument('Fixture', 'fixture')
+    base.nodes.page = createPageNode('Home', { id: 'page' })
+    base.nodes.title = createTextNode('Title', {
+      id: 'title',
+      parentId: 'page',
+    })
+    const first: CanvasTransaction = {
+      id: 'tx-first',
+      label: 'First',
+      operations: [
+        {
+          type: 'node.patch',
+          id: 'title',
+          patch: { name: 'Confirmed title' },
+        },
+      ],
+    }
+    const second: CanvasTransaction = {
+      id: 'tx-second',
+      label: 'Second',
+      operations: [
+        {
+          type: 'node.patch',
+          id: 'title',
+          patch: { hidden: true },
+        },
+      ],
+    }
+
+    const confirmed = applyAcknowledgedTransactions(
+      base,
+      [first, second],
+      [first.id],
+    )
+
+    expect(confirmed.nodes.title.name).toBe('Confirmed title')
+    expect(confirmed.nodes.title.hidden).toBe(false)
+    expect(base.nodes.title.name).toBe('Title')
   })
 })
 

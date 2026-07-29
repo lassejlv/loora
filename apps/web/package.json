@@ -10,6 +10,7 @@
     "build": "bun --env-file=../../.env run vite build",
     "preview": "vite preview",
     "start": "bun --env-file=../../.env run .output/server/index.mjs",
+    "benchmark-api": "bun --env-file=../../.env run scripts/benchmark-api.ts",
     "test": "bun test --preload ./src/test/setup.ts",
     "generate-routes": "tsr generate"
   },

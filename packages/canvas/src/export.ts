@@ -116,7 +116,6 @@ function styleDeclarations(document: CanvasDocument, node: CanvasNode) {
   if (layout.maxHeight !== undefined) declarations.push(`max-height:${layout.maxHeight}px`)
   if (layout.aspectRatio !== undefined) declarations.push(`aspect-ratio:${layout.aspectRatio}`)
   if (node.rotation) declarations.push(`transform:rotate(${node.rotation}deg)`)
-  if (node.hidden) declarations.push('display:none')
   if (node.type === 'text' && style.fills[0]?.type === 'solid') {
     declarations.push(`color:${colorValue(document, style.fills[0].color)}`)
   } else if (style.fills.length > 0) {
@@ -176,6 +175,8 @@ function styleDeclarations(document: CanvasDocument, node: CanvasNode) {
       `text-transform:${typography.transform ?? 'none'}`,
     )
   }
+  // Must come last: flex/grid layout also emits a display declaration.
+  if (node.hidden) declarations.push('display:none')
   return declarations.join(';')
 }
 
@@ -646,7 +647,7 @@ function applyActions(actions,scope,depth){
     if(action.type==='set-theme'){applyTheme(scope,action.themeId);return}
     if(action.type==='open-url'){window.open(action.url,action.target||'_self',action.target==='_blank'?'noopener,noreferrer':undefined);return}
     if(action.type==='navigate'){var page=findNode(document,action.pageId);if(page)page.scrollIntoView({behavior:'smooth'});return}
-    if(action.type==='visibility'){var node=findNode(scope,action.nodeId);if(node){var hidden=node.hidden||node.style.display==='none';var show=action.value==='show'||(action.value==='toggle'&&hidden);node.hidden=!show}return}
+    if(action.type==='visibility'){var node=findNode(scope,action.nodeId);if(node){var hidden=node.hidden||node.style.display==='none';var show=action.value==='show'||(action.value==='toggle'&&hidden);node.hidden=!show;node.style.display=show?'':'none'}return}
     if(action.type==='open-overlay'){var overlay=findNode(document,action.pageId);if(overlay)overlay.dataset.looraOverlay='open';return}
     if(action.type==='close-overlay'){var open=document.querySelector('[data-loora-overlay="open"]');if(open)delete open.dataset.looraOverlay;return}
     if(action.type==='set-variant'){var instance=findNode(scope,action.instanceId);if(instance)setVariant(instance,action.variant)}
