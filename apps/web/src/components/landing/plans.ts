@@ -6,7 +6,12 @@ export const PLANS = [
     period: '/month',
     annual: null,
     summary: 'Enough to build something real before you pay for anything.',
-    features: ['50 design files', '1 GB asset storage', '200 MCP calls / week'],
+    features: [
+      '50 design files',
+      '1 GB asset storage',
+      '200 MCP calls / week',
+      '2 days of version history',
+    ],
     cta: 'Start free',
     featured: false,
   },
@@ -16,11 +21,13 @@ export const PLANS = [
     period: '/month',
     // Two months off the monthly rate: 10 × $20.
     annual: '$200 / year',
-    summary: 'For daily design work and agents that run all week.',
+    summary: 'Everything in Free, at production limits.',
     features: [
       'Unlimited design files',
       '100 GB asset storage',
       '1,000,000 MCP calls / week',
+      '90 days of version history',
+      'Branches: fork, compare, merge',
       'In-app agent access',
       'Image generation',
       'Team workspace, up to 5 users',
@@ -31,15 +38,12 @@ export const PLANS = [
 ] as const
 
 /**
- * What the product does on either plan. Every row is a shipped surface — no
- * roadmap entries, and nothing here is gated behind Pro; Pro raises the limits
- * in the cards above.
+ * The surfaces both plans get. Branches and history depth are Pro limits, so
+ * they live in the cards instead — everything listed here is genuinely shared.
  */
 export const PLAN_INCLUDES = [
   { capability: 'Canvas editor', detail: 'Infinite canvas, components, tokens, breakpoints' },
-  { capability: 'Branches', detail: 'Fork a design, compare, merge back into Main' },
   { capability: 'MCP server', detail: 'Drive the same document from Claude or Cursor' },
   { capability: 'Exports', detail: 'HTML/CSS, React/TSX, JSON, and PNG captures' },
-  { capability: 'History', detail: 'Versions, comparison, and rollback' },
   { capability: 'Integrations', detail: 'Figma import and GitHub read access' },
 ] as const

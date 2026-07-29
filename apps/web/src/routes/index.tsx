@@ -184,7 +184,7 @@ function LandingContent() {
       <h2 className="mt-14 text-[15px] font-semibold">Pricing</h2>
       <p className="mt-4 text-muted-foreground">
         Free is $0/month with 50 design files and 200 MCP calls a week. Pro is $20/month for
-        unlimited files, 100 GB of assets, and a million calls a week.
+        unlimited files, branches, 100 GB of assets, and a million calls a week.
       </p>
       <p className="mt-4">
         <Link to="/pricing" className="underline-offset-2 hover:underline" style={link}>

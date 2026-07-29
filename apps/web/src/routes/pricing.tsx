@@ -4,7 +4,7 @@ import { PLAN_INCLUDES, PLANS } from '#/components/landing/plans'
 import { LandingShell } from '#/components/landing/site-shell'
 
 const DESCRIPTION =
-  'Free is $0/month with 50 design files, 1 GB of assets, and 200 MCP calls a week. Pro is $20/month — or $200 a year, two months off — for unlimited files, 100 GB, 1M MCP calls a week, the in-app agent, image generation, and a 5-seat workspace.'
+  'Free is $0/month with 50 design files, 1 GB of assets, 200 MCP calls a week, and 2 days of version history. Pro is $20/month — or $200 a year, two months off — for unlimited files, 100 GB, 1M MCP calls a week, 90-day history, branches, the in-app agent, image generation, and a 5-seat workspace.'
 
 export const Route = createFileRoute('/pricing')({
   ssr: false,
@@ -88,7 +88,7 @@ function PricingContent() {
               ))}
             </ul>
 
-            <p className="mt-6 pt-1">
+            <p className="mt-auto pt-6">
               <Link
                 to="/app"
                 className={
@@ -107,8 +107,8 @@ function PricingContent() {
 
       <h2 className="mt-14 text-[15px] font-semibold">On both plans</h2>
       <p className="mt-4 text-muted-foreground">
-        No feature is held back for Pro. The editor, the branch model, and the MCP vocabulary are
-        the same on Free — Pro raises the ceilings above.
+        Free is the whole editor, not a demo of it. Branches and the longer history window are the
+        two things Pro adds outright; everything below ships on either plan.
       </p>
 
       <ul className="mt-6 grid gap-px border border-border bg-border sm:grid-cols-2">
@@ -128,8 +128,8 @@ function PricingContent() {
       </p>
       <p className="mt-4 text-muted-foreground">
         MCP calls are counted per week and reset weekly. Asset storage is the total size of the
-        images and files in your account. Nothing is billed per generation — an external agent you
-        connect over{' '}
+        images and files in your account. Version history is a rolling window: 2 days on Free, 90
+        days on Pro. Nothing is billed per generation — an external agent you connect over{' '}
         <a
           href="https://mcp.loora.design"
           target="_blank"
