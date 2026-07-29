@@ -875,6 +875,7 @@ export default function LooraDesign() {
               action.value === 'show' ||
               (action.value === 'toggle' && hidden)
             node.hidden = !show
+            node.style.display = show ? '' : 'none'
           }
           continue
         }
@@ -1380,6 +1381,7 @@ function portableRuntimeSource() {
               action.value === 'show' ||
               (action.value === 'toggle' && hidden)
             node.hidden = !show
+            node.style.display = show ? '' : 'none'
           }
           continue
         }

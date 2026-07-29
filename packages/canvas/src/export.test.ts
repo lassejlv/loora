@@ -438,6 +438,53 @@ describe('Canvas exports', () => {
     expect(firstLabel.hidden).toBe(false)
     expect(secondLabel.hidden).toBe(true)
   })
+
+  it('keeps hidden flex frames hidden in CSS and when shown at runtime', () => {
+    const document = fixture()
+    document.nodes.panel = createFrameNode('Panel', {
+      id: 'panel',
+      parentId: 'page',
+      order: 2_048,
+    })
+    document.nodes.panel.layout = {
+      ...document.nodes.panel.layout,
+      mode: 'flex',
+      direction: 'row',
+    }
+    document.nodes.panel.hidden = true
+    document.nodes.hero.interactions = [
+      {
+        trigger: 'click',
+        actions: [{ type: 'visibility', nodeId: 'panel', value: 'show' }],
+      },
+    ]
+
+    const compiled = compileCanvas(document)
+    const rule = compiled.css
+      .split('\n')
+      .find((line) => line.startsWith('.loora-panel{'))!
+    expect(rule).toContain('display:flex')
+    expect(rule.lastIndexOf('display:none')).toBeGreaterThan(
+      rule.indexOf('display:flex'),
+    )
+
+    const sandbox =
+      globalThis.document.implementation.createHTMLDocument('visibility')
+    sandbox.body.innerHTML = compiled.html
+    new Function('document', 'window', 'CSS', compiled.runtime)(
+      sandbox,
+      { open: () => null },
+      { escape: (value: string) => value },
+    )
+    const panel = sandbox.querySelector<HTMLElement>(
+      '[data-loora-node="panel"]',
+    )!
+    const click = sandbox.createEvent('Event')
+    click.initEvent('click', true, true)
+    sandbox.querySelector('[data-loora-node="hero"]')!.dispatchEvent(click)
+    expect(panel.hidden).toBe(false)
+    expect(panel.style.display).toBe('')
+  })
 })
 
 describe('inlineBrowserImages', () => {
