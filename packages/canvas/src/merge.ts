@@ -1,5 +1,5 @@
 import {
-  type CanvasDocumentV2,
+  type CanvasDocument,
   type CanvasNode,
   type DesignToken,
   type NodeId,
@@ -19,7 +19,7 @@ export interface CanvasMergeConflict {
 }
 
 export interface CanvasMergeResult {
-  document: CanvasDocumentV2
+  document: CanvasDocument
   conflicts: CanvasMergeConflict[]
   unresolved: string[]
   summary: {
@@ -116,7 +116,7 @@ function mergeCollection<T extends CanvasNode | DesignToken>(
   return result
 }
 
-export function diffDocuments(base: CanvasDocumentV2, next: CanvasDocumentV2) {
+export function diffDocuments(base: CanvasDocument, next: CanvasDocument) {
   const baseIds = new Set(Object.keys(base.nodes))
   const nextIds = new Set(Object.keys(next.nodes))
   let changed = 0
@@ -131,14 +131,14 @@ export function diffDocuments(base: CanvasDocumentV2, next: CanvasDocumentV2) {
 }
 
 export function mergeDocuments(
-  base: CanvasDocumentV2,
-  left: CanvasDocumentV2,
-  right: CanvasDocumentV2,
+  base: CanvasDocument,
+  left: CanvasDocument,
+  right: CanvasDocument,
   resolutions: CanvasMergeResolutions = {},
 ): CanvasMergeResult {
   const conflicts: CanvasMergeConflict[] = []
   const unresolved: string[] = []
-  const document: CanvasDocumentV2 = {
+  const document: CanvasDocument = {
     ...left,
     name: mergeValue(base.name, left.name, right.name, {
       scope: 'document',
@@ -155,7 +155,7 @@ export function mergeDocuments(
       conflicts,
       unresolved,
       resolutions,
-    }) as CanvasDocumentV2['breakpoints'],
+    }) as CanvasDocument['breakpoints'],
     nodes: mergeCollection(
       'node',
       base.nodes,
@@ -181,7 +181,7 @@ export function mergeDocuments(
       conflicts,
       unresolved,
       resolutions,
-    }) as CanvasDocumentV2['themes'],
+    }) as CanvasDocument['themes'],
     activeThemeId: mergeValue(
       base.activeThemeId,
       left.activeThemeId,
@@ -209,7 +209,7 @@ export function mergeDocuments(
   }
 }
 
-export function changedNodeIds(base: CanvasDocumentV2, next: CanvasDocumentV2): NodeId[] {
+export function changedNodeIds(base: CanvasDocument, next: CanvasDocument): NodeId[] {
   const ids = new Set([...Object.keys(base.nodes), ...Object.keys(next.nodes)])
   return [...ids].filter((id) => !same(base.nodes[id], next.nodes[id]))
 }

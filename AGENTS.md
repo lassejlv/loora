@@ -17,10 +17,10 @@ Postgres · Better Auth · Polar billing (plan access) · oRPC · Railway
 ```
 apps/web          TanStack Start app (UI, API route handlers, canvas editor shell)
 apps/mcp          Remote MCP server (Streamable HTTP, OAuth resource server)
-packages/canvas   Canvas V2 model, engine, merge, React surface, export, migration
+packages/canvas   Canvas model, engine, merge, React surface, import, export
 packages/db       Drizzle schema, Neon client, migrations (`@loora/db`)
 packages/rpc      oRPC `appRouter`, storage, history, publish, handoff (`@loora/rpc`)
-packages/agent    Shared canvas-v2 tools + layout repair for MCP (`@loora/agent`)
+packages/agent    Shared canvas tools + layout repair for MCP (`@loora/agent`)
 packages/auth     Better Auth, preview access, GitHub/Figma (`@loora/auth`)
 packages/billing  Polar plan access / entitlements (`@loora/billing`)
 ```
@@ -30,7 +30,7 @@ packages/billing  Polar plan access / entitlements (`@loora/billing`)
 | Path | Purpose |
 |------|---------|
 | `src/routes/` | File-based routes + API handlers. `routeTree.gen.ts` is generated — never hand-edit. |
-| `src/components/` | App UI. Canvas editor shell: `components/canvas-v2/`. Primitives: `components/ui/`. |
+| `src/components/` | App UI. Canvas editor shell: `components/canvas/`. Primitives: `components/ui/`. |
 | `src/lib/` | Client helpers (oRPC client, canvas runtime/clipboard, designs, theme, URL state). |
 | `src/hooks/`, `src/test/` | Hooks, JSDOM test preload. |
 | `public/` | Static assets. |
@@ -41,14 +41,15 @@ packages/billing  Polar plan access / entitlements (`@loora/billing`)
 |-------|-------|
 | `/` | Public landing |
 | `/app` | Design file browser (via `AccountGate`) |
-| `/app/design?id=<designId>` | Editor; optional `&draft=` selects a branch. Route supplies `designId` and remounts on change — the editor never picks a document itself. |
+| `/design/$id` | Editor on Main. Route supplies `designId` and remounts on change — the editor never picks a document itself. |
+| `/design/$id/b/$branchId` | Editor on an active branch. |
 | `/p/$linkId` | Published design |
 | `/api/rpc/$` | oRPC |
 | `/api/auth/$` | Better Auth |
 | `/api/asset/$id`, handoff/publish asset routes | Asset serving |
 | GitHub/Figma connect + callback routes | OAuth |
 
-Legacy `/?design=` / `/?d=` links redirect from `/` into the editor.
+Legacy `/?design=`, `/?d=`, `/app/design?id=`, and `?draft=` links redirect into the canonical editor route.
 
 ### `packages/canvas` (`@loora/canvas`)
 
@@ -56,20 +57,20 @@ Dependency-light canvas core. **Must never** import db, RPC, auth, web, drafts, 
 
 | Export | Role |
 |--------|------|
-| `@loora/canvas/model` | `CanvasDocumentV2`, node types, IDs, validation |
+| `@loora/canvas/model` | `CanvasDocument`, node types, IDs, validation |
 | `@loora/canvas/engine` | Typed transactions, indexes, undo/redo, preconditions, rebase, subscriptions |
 | `@loora/canvas/merge` | Neutral left/right semantic merge |
 | `@loora/canvas/react` | DOM/SVG renderer, surface, overlays, hooks |
-| `@loora/canvas/export` | One-way HTML, React/TSX, JSON, PNG compile |
-| `@loora/canvas/migration` | Browser-only V1 → V2 extraction/conversion |
+| `@loora/canvas/export` | One-way HTML, JSX, Tailwind, React/TSX, JSON, PNG compile |
+| `@loora/canvas/import` | HTML/CSS snapshot conversion into validated structured nodes |
 
-Web editor UI lives in `apps/web/src/components/canvas-v2/` (branch panel, sync target, history, export, publish, layers, properties). Keep branch/sync controllers outside the canvas package. There is no in-app agent panel.
+Web editor UI lives in `apps/web/src/components/canvas/` (branch panel, sync target, history, export, publish, layers, properties). Keep branch/sync controllers outside the canvas package. There is no in-app agent panel.
 
 ### `packages/agent` (`@loora/agent`)
 
 Shared canvas mutation vocabulary for MCP (and handoff consumers), not models or chat:
 
-- `canvas-v2-tools` — typed tool handlers over the same transaction path as the editor/RPC
+- `canvas-tools` — typed tool handlers over the same transaction path as the editor/RPC
 - `repair-layout` — layout repair utility used by `bun run canvas:repair-layout`
 
 ### `packages/rpc` (`appRouter` namespaces)
@@ -80,7 +81,7 @@ Most product mutations go through oRPC. External agents use MCP or handoff — t
 
 ### `apps/mcp`
 
-Remote MCP at `mcp.loora.design` (local default port `4100`). OAuth 2.1 resource server; Better Auth on the web app is the authorization server. Shares DB + canvas transaction path via `@loora/agent/canvas-v2-tools`. Stateless Streamable HTTP.
+Remote MCP at `mcp.loora.design` (local default port `4100`). OAuth 2.1 resource server; Better Auth on the web app is the authorization server. Shares DB + canvas transaction path via `@loora/agent/canvas-tools`. Stateless Streamable HTTP.
 
 ### `packages/db`
 
@@ -88,7 +89,7 @@ Remote MCP at `mcp.loora.design` (local default port `4100`). OAuth 2.1 resource
 - Migrations: `packages/db/drizzle/` (commit SQL **and** `meta/` snapshots)
 - Notable tables: `design`, `designDraft`, `designVersion`, `canvasTransaction`, `publishLink`, `asset`, auth/OAuth (incl. `oauth_*` MCP tables), `billingEntitlement`, GitHub/Figma bindings
 
-Legacy V1 helpers remain in `@loora/db/canvas` and `@loora/db/drafts` for migration/rollback compatibility.
+Legacy helpers remain in `@loora/db/canvas` and `@loora/db/drafts` for rollback and expiring-link compatibility.
 
 ### `packages/billing`
 
@@ -125,11 +126,11 @@ Deploy: Railway via root `Dockerfile` / `railway.json` (and `apps/mcp` for the M
 
 ---
 
-## Canvas V2 Invariants
+## Canvas Invariants
 
 These are easy to break and expensive to fix. Treat them as hard rules.
 
-1. **`CanvasDocumentV2` is the only writable source of truth.** Normalized by node ID. Roots are Pages and Components; children are frames, groups, text, shapes, vectors, images, instances. Layout, styles, breakpoints, tokens, themes, instance overrides, and interactions are structured values.
+1. **`CanvasDocument` is the only writable source of truth.** Normalized by node ID. Roots are Pages and Components; children are frames, groups, text, shapes, vectors, images, instances. Layout, styles, breakpoints, tokens, themes, instance overrides, and interactions are structured values.
 2. **No code-node escape hatch.** Never add arbitrary code nodes, freeform CSS/class strings as the authoring model, or two-way source sync with exported code.
 3. **All mutations are validated `CanvasTransaction`s.** Same ops and engine for React UI, oRPC, MCP tools, and handoff consumers. Transactions need stable idempotency IDs and touched-field preconditions.
 4. **Do not full-document replace on every move.** Pointer previews may use temporary DOM transforms; commit one transaction on pointer-up.
@@ -145,19 +146,19 @@ Keep MCP tools and handoff consumers aligned on the shared `@loora/agent` vocabu
 
 `createPage` · `insertNodes` · `patchNodes` · `moveNodes` · `deleteNodes` · `readNode` · `readTree` · `searchNodes` · `createComponent` · `createInstance` · `setTokens` · `viewNode` · `viewPage` · `viewCanvas`
 
-Implementation: `packages/agent/src/canvas-v2-tools.ts` (and MCP server wiring in `apps/mcp/src/`).
+Implementation: `packages/agent/src/canvas-tools.ts` (and MCP server wiring in `apps/mcp/src/`).
 
-### Persistence & V1 migration
+### Persistence & legacy compatibility
 
-- Designs, drafts, draft bases, and versions keep V1 payload columns for rollback alongside nullable V2 documents and `canvasVersion`.
+- Designs, drafts, draft bases, and versions keep legacy payload columns for rollback and expiring-link compatibility alongside nullable Canvas documents and `canvasVersion`.
 - `canvasTransaction` provides idempotency, stale-revision recovery, and audit. Server writes use compare-and-swap revisions; apply + log a batch atomically.
 - Browser: optimistic apply, queue unacked batches in IndexedDB, flush after ~250ms or before target change. Rebase independent fields; surface only same-field, move-vs-move, or edit-vs-delete conflicts.
-- First open may acquire a migration lease and migrate Main + relevant draft snapshots. V1 code runs only in the network-restricted legacy sandbox; DOM/computed styles serialize via `postMessage`, then convert to V2. Blocks below visual similarity threshold become raster fallbacks — upload fallback assets before the atomic migration commit. **Never mutate the V1 snapshot on failed migration.**
-- `apps/web/src/components/element-frame.tsx` is **legacy-only** (first-open conversion + temporary V1 public-link compatibility). Do not reuse its iframe/Babel/Tailwind/per-element React-root pipeline in the normal editor.
+- Legacy designs without a Canvas document are unsupported in the editor; there is no automatic first-open conversion flow.
+- `apps/web/src/components/element-frame.tsx` is **legacy-only** (temporary public-link compatibility). Do not reuse its iframe/Babel/Tailwind/per-element React-root pipeline in the normal editor.
 
 ### Figma
 
-Import maps frames, auto-layout, text, paints, vectors, components, and instances to V2. Rasterize unsupported visual blocks entirely rather than inventing half-editable approximations.
+Figma import maps frames, auto-layout, text, paints, vectors, components, and instances to Canvas. HTML/CSS import computes a sandboxed DOM snapshot and converts supported layout and visual properties to structured nodes. Rasterize unsupported visual blocks entirely rather than inventing half-editable approximations.
 
 ---
 
@@ -216,8 +217,8 @@ History uses Conventional Commits with scopes when useful:
 | Node types, validation, document shape | `packages/canvas/src/model.ts` |
 | Transactions, undo, conflict preconditions | `packages/canvas/src/engine.ts` |
 | Draft merge semantics | `packages/canvas/src/merge.ts` (+ RPC draft procedures) |
-| Editor chrome / tools / panels | `apps/web/src/components/canvas-v2/` |
-| Client sync / runtime | `apps/web/src/lib/canvas-v2-*.ts` |
+| Editor chrome / tools / panels | `apps/web/src/components/canvas/` |
+| Client sync / runtime | `apps/web/src/lib/canvas-*.ts` |
 | API procedures | `packages/rpc/src/router.ts` (+ focused modules beside it) |
 | Shared MCP canvas tools / layout repair | `packages/agent/src/` |
 | MCP tools / transport | `apps/mcp/src/` |

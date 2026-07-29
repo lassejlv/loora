@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { UnplugIcon } from 'lucide-react'
+import { UnplugIcon } from '#/components/icons'
 import { FigmaIcon } from '#/components/icons'
 import { Button } from '#/components/ui/button'
 import { IntegrationCard, IntegrationStatus } from '#/components/integration-card'
@@ -106,7 +106,7 @@ export function FigmaAccount() {
       description="Paste Figma Design links into the document importer. Imported documents are independent copies and do not sync back to Figma."
     >
       <div className="flex flex-col gap-2 border-t border-border pt-3 sm:flex-row sm:items-center sm:justify-between">
-        <p className="text-[11px] leading-relaxed text-muted-foreground">
+        <p className="text-xs leading-relaxed text-muted-foreground">
           Loora can only read files available to this Figma account.
         </p>
         <Button

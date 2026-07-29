@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { ImportIcon } from 'lucide-react'
+import { ImportIcon } from '#/components/icons'
 import { FigmaIcon } from '#/components/icons'
 import { Button } from '#/components/ui/button'
 import {

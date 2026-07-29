@@ -26,7 +26,7 @@ import {
   CANVAS_SCHEMA_VERSION,
   createCanvasDocument,
   parseCanvasDocument,
-  type CanvasDocumentV2,
+  type CanvasDocument,
 } from '@loora/canvas/model'
 import {
   diffDocuments,
@@ -45,25 +45,17 @@ function suffix() {
 export const newDesignId = () => `d${suffix()}`
 export const newDraftId = () => `dr${suffix()}`
 
-export class MigrationRequiredError extends Error {
-  readonly code = 'MIGRATION_REQUIRED'
+export class CanvasUnavailableError extends Error {
+  readonly code = 'CANVAS_UNAVAILABLE'
 
-  constructor(
-    readonly designId: string,
-    readonly openUrl: string,
-  ) {
-    super(`Canvas V1 must be migrated in Loora before MCP can edit it: ${openUrl}`)
+  constructor(readonly designId: string) {
+    super('This design uses an unsupported legacy Canvas format.')
   }
 }
 
 export interface CanvasTarget {
   designId: string
   draftId?: string | null
-}
-
-function migrationUrl(designId: string) {
-  const origin = (process.env.LOORA_APP_URL?.trim() || 'https://loora.design').replace(/\/+$/, '')
-  return `${origin}/app/design?id=${encodeURIComponent(designId)}`
 }
 
 export async function listDesigns(userId: string) {
@@ -80,9 +72,7 @@ export async function listDesigns(userId: string) {
     .orderBy(asc(design.createdAt))
   return rows.map((row) => ({
     ...row,
-    migrationRequired: row.canvasVersion !== CANVAS_SCHEMA_VERSION,
-    openUrl:
-      row.canvasVersion === CANVAS_SCHEMA_VERSION ? undefined : migrationUrl(row.id),
+    available: row.canvasVersion === CANVAS_SCHEMA_VERSION,
     updatedAt: row.updatedAt.toISOString(),
   }))
 }
@@ -96,7 +86,7 @@ export async function getCanvasTarget(
   draftId: string | null
   draftName: string | null
   status: 'active' | 'proposed' | 'applied' | 'closed'
-  document: CanvasDocumentV2
+  document: CanvasDocument
   revision: number
   updatedAt: Date
 }> {
@@ -131,10 +121,7 @@ export async function getCanvasTarget(
       )
     }
     if (found.canvasVersion !== CANVAS_SCHEMA_VERSION || !found.document) {
-      throw new MigrationRequiredError(
-        target.designId,
-        migrationUrl(target.designId),
-      )
+      throw new CanvasUnavailableError(target.designId)
     }
     return {
       id: found.id,
@@ -162,7 +149,7 @@ export async function getCanvasTarget(
     .limit(1)
   if (!found) throw new Error(`Design "${target.designId}" not found`)
   if (found.canvasVersion !== CANVAS_SCHEMA_VERSION || !found.document) {
-    throw new MigrationRequiredError(target.designId, migrationUrl(target.designId))
+    throw new CanvasUnavailableError(target.designId)
   }
   return {
     id: found.id,
@@ -332,7 +319,7 @@ export async function createDesign(userId: string, name: string) {
 
 export async function renameDesign(userId: string, id: string, name: string) {
   const current = await getCanvasTarget(userId, { designId: id })
-  const document: CanvasDocumentV2 = {
+  const document: CanvasDocument = {
     ...current.document,
     name,
     metadata: {
@@ -523,7 +510,7 @@ async function draftMergeSource(userId: string, designId: string, draftId: strin
     !draft.canvasDocument ||
     !draft.baseCanvasDocument
   ) {
-    throw new MigrationRequiredError(designId, migrationUrl(designId))
+    throw new CanvasUnavailableError(designId)
   }
   return {
     main,

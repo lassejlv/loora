@@ -16,6 +16,8 @@
   "dependencies": {
     "@base-ui/react": "^1.6.0",
     "@databuddy/sdk": "^2.6.0",
+    "@hugeicons/core-free-icons": "^4.2.3",
+    "@hugeicons/react": "^1.1.9",
     "@loora/auth": "workspace:*",
     "@loora/billing": "workspace:*",
     "@loora/canvas": "workspace:*",
@@ -35,7 +37,6 @@
     "clsx": "^2.1.1",
     "cmdk": "^1.1.1",
     "drizzle-orm": "catalog:",
-    "lucide-react": "^0.577.0",
     "motion": "^12.42.2",
     "nanoid": "^6.0.0",
     "nitro": "^3.0.260610-beta",

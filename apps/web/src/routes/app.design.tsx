@@ -1,24 +1,25 @@
 import { createFileRoute, redirect } from '@tanstack/react-router'
-import { AccountGate } from '#/components/account-gate'
-import { CanvasV2App } from '#/components/canvas-v2/app'
-import { designValidateSearch } from '#/lib/url-state'
+import { legacyDesignValidateSearch } from '#/lib/url-state'
 
 export const Route = createFileRoute('/app/design')({
-  component: DesignPage,
   ssr: false,
-  validateSearch: designValidateSearch,
+  validateSearch: legacyDesignValidateSearch,
   beforeLoad: ({ search }) => {
     if (!search.id) throw redirect({ to: '/app' })
+    const { id, draft, ...editorSearch } = search
+    if (draft) {
+      throw redirect({
+        to: '/design/$id/b/$branchId',
+        params: { id, branchId: draft },
+        search: editorSearch,
+        replace: true,
+      })
+    }
+    throw redirect({
+      to: '/design/$id',
+      params: { id },
+      search: editorSearch,
+      replace: true,
+    })
   },
 })
-
-function DesignPage() {
-  const { id } = Route.useSearch()
-
-  return (
-    <AccountGate>
-      {/* Remount on switch so the sync controller opens the new target cleanly. */}
-      <CanvasV2App key={id ?? ''} designId={id ?? ''} />
-    </AccountGate>
-  )
-}

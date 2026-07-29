@@ -1,6 +1,6 @@
-// Legacy V1 persisted canvas data. It remains readable only for first-open
-// migration, rollback, and expiring-link compatibility. Writable editor code
-// uses CanvasDocumentV2 from @loora/canvas.
+// Legacy persisted canvas data. It remains readable only for rollback and
+// expiring-link compatibility. Writable editor code uses CanvasDocument from
+// @loora/canvas.
 export interface CanvasElement {
   id: string
   name: string
@@ -37,7 +37,7 @@ export interface CanvasPage {
  * Older writes stored `shapes`/`pages` as a JSON *string* inside the jsonb
  * column instead of a jsonb array, so a row reads back as `"[{…}]"` rather
  * than `[{…}]`. Production is mostly in that state, and iterating a string
- * yields characters — which crashed first-open migration for those designs.
+ * yields characters, which used to crash consumers of those designs.
  * Read every legacy array through this.
  */
 export function legacyArray<T>(value: unknown): T[] {

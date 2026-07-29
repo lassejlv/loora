@@ -31,23 +31,23 @@ under `apps/web`; oRPC lives in `packages/rpc`, Drizzle/Postgres in
 `packages/agent`, and the MCP server in `apps/mcp`. There is no in-app chat
 agent — external agents use MCP or handoff.
 
-Canvas V2 is the dependency-light `@loora/canvas` package:
+Canvas is the dependency-light `@loora/canvas` package:
 
 - `@loora/canvas/model`: normalized document and node contracts, IDs, validation
 - `@loora/canvas/engine`: typed transactions, indexes, undo/redo, preconditions,
   rebase, and granular subscriptions
 - `@loora/canvas/merge`: neutral left/right semantic merge
 - `@loora/canvas/react`: real DOM/SVG renderer, surface, overlays, and hooks
-- `@loora/canvas/export`: deterministic HTML, React/TSX, and JSON output
-- `@loora/canvas/migration`: browser-only V1 extraction and conversion
+- `@loora/canvas/export`: deterministic HTML, JSX, Tailwind, React/TSX, and JSON output
+- `@loora/canvas/import`: validated HTML/CSS snapshot conversion
 
 The canvas package must never import the database, RPC, auth, web app, drafts,
 or branch concepts. Branches are product targets owned by the web/RPC/MCP
 layers. Pull requests are not a Loora feature.
 
-## Canvas V2 invariants
+## Canvas invariants
 
-`CanvasDocumentV2` is the only writable source of truth. It is normalized by
+`CanvasDocument` is the only writable source of truth. It is normalized by
 node ID and contains root Pages and Components plus frames, groups, text,
 shapes, vectors, images, and instances. Layout, styles, breakpoints, tokens,
 themes, instance overrides, and interactions are structured values. Never add
@@ -65,22 +65,24 @@ Keep document state in the engine; camera, selection, hover, active tool, and
 isolation are ephemeral. Subscribe nodes to their own revision and parent order
 instead of rerendering the full tree.
 
-The web editor is under `apps/web/src/components/canvas-v2`. Its branch UI and
+The web editor is under `apps/web/src/components/canvas`. Its branch UI and
 sync target controller deliberately live outside the canvas package. External
 agents accept structured node descriptors only and return permanent IDs for
 temporary refs. Destructive MCP actions still require confirmation where
 applicable. There is no in-app agent panel.
 
 `/` is the public landing page, `/app` is the file browser, and
-`/app/design?id=<designId>` opens one document (`&draft=` selects a branch).
-Legacy `/?design=`/`/?d=` links redirect out of `/` to the editor. Both app
-routes mount through `AccountGate`, and the editor never picks a document for
-itself — the route supplies `designId` and remounts when it changes.
+`/design/$id` opens Main. Active branches use `/design/$id/b/$branchId`.
+Legacy `/?design=`, `/?d=`, `/app/design?id=`, and `?draft=` links redirect to
+the canonical editor route. Both app routes mount through `AccountGate`, and
+the editor never picks a document for itself — the route supplies `designId`
+and optional `branchId`, then remounts when either changes.
 
-## Persistence and migration
+## Persistence and legacy compatibility
 
-Designs, drafts, draft bases, and versions retain their V1 payload columns for
-rollback, alongside nullable V2 documents and `canvasVersion`. The bounded
+Designs, drafts, draft bases, and versions retain their legacy payload columns
+for rollback and expiring public-link compatibility, alongside nullable Canvas
+documents and `canvasVersion`. The bounded
 `canvasTransaction` table provides idempotency, stale-revision recovery, and an
 audit trail. Server writes use compare-and-swap revisions and apply/log a batch
 atomically.
@@ -90,31 +92,25 @@ in IndexedDB, and flushes after 250 ms or before target changes. Rebase
 independent fields automatically; surface only actual same-field,
 move-vs-move, or edit-vs-delete conflicts.
 
-First open acquires a database migration lease and migrates Main plus relevant
-draft snapshots together. V1 code executes only inside the network-restricted
-legacy sandbox, serializes DOM/computed styles through `postMessage`, and is
-converted to V2. A block that misses the visual similarity threshold becomes a
-raster image fallback. Upload fallback assets before the atomic migration
-commit. Never mutate the V1 snapshot on failed migration.
-
 `apps/web/src/components/element-frame.tsx` is legacy-only. It remains solely
-for first-open conversion and temporary V1 public-link compatibility. Do not
-reuse its iframe, Babel, Tailwind, source editing, or per-element React-root
-pipeline in the normal editor. Delete it only after the rollback window and all
-expiring V1 links have drained.
+for temporary legacy public-link compatibility. Do not reuse its iframe, Babel,
+Tailwind, source editing, or per-element React-root pipeline in the normal
+editor. Legacy designs without a Canvas document are unsupported in the editor.
 
 ## Export, publish, and integrations
 
 HTML/CSS/JS, React/TSX, JSON, published pages, previews, and PNG captures all
-derive one-way from the V2 document. Exports never round-trip into the editor.
+derive one-way from the Canvas document. HTML/CSS import is a separate, lossy
+conversion into validated structured nodes; exported code never round-trips
+automatically.
 Published behavior comes from the declarative interaction runtime under a
 restrictive CSP; do not execute document-authored script.
 
 Figma import maps frames, auto-layout, text, paints, vectors, components, and
-instances directly to V2. Rasterize complete unsupported visual blocks instead
+instances directly to Canvas. Rasterize complete unsupported visual blocks instead
 of inventing a partially editable approximation.
 
-Keep the MCP / handoff tool vocabulary aligned via `@loora/agent/canvas-v2-tools`:
+Keep the MCP / handoff tool vocabulary aligned via `@loora/agent/canvas-tools`:
 `createPage`, `insertNodes`, `patchNodes`, `moveNodes`, `deleteNodes`,
 `readNode`, `readTree`, `searchNodes`, `createComponent`, `createInstance`,
 `setTokens`, `viewNode`, `viewPage`, and `viewCanvas`.

@@ -1,4 +1,4 @@
-import { createEmptyCanvas } from '#/lib/canvas-v2-fixtures'
+import { createEmptyCanvas } from '#/lib/canvas-fixtures'
 import { orpc } from '#/lib/orpc-client'
 
 export interface DesignSummary {
@@ -12,7 +12,7 @@ export function newDesignId() {
   return `d${crypto.randomUUID().replaceAll('-', '')}`
 }
 
-/** Creates an empty V2 document and its design row, then returns the list entry. */
+/** Creates an empty Canvas document and its design row, then returns the list entry. */
 export async function createDesign(name = 'Untitled'): Promise<DesignSummary> {
   const id = newDesignId()
   const document = createEmptyCanvas(id, name)

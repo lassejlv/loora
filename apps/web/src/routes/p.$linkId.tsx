@@ -2,7 +2,7 @@ import { useEffect, useState, type SyntheticEvent } from 'react'
 import { createFileRoute, Link } from '@tanstack/react-router'
 import { ElementFrame } from '#/components/element-frame'
 import type { CanvasInteraction } from '@loora/canvas/model'
-import { applyCanvasActions } from '#/lib/canvas-v2-runtime'
+import { applyCanvasActions } from '#/lib/canvas-runtime'
 
 // Public viewer for a published element. No auth: the link id is the
 // capability. The payload arrives with asset URLs already rewritten to the
@@ -21,7 +21,7 @@ type LoadState =
       payload:
         | { kind: 'element'; name: string; code: string }
         | {
-            kind: 'canvas-v2'
+            kind: 'canvas'
             name: string
             html: string
             css: string
@@ -49,7 +49,7 @@ function PublishedPage() {
     fetch(`/api/p/${encodeURIComponent(linkId)}`)
       .then(async (response) => {
         const body = (await response.json()) as {
-          kind?: 'element' | 'page' | 'canvas-v2'
+          kind?: 'element' | 'page' | 'canvas'
           name?: string
           code?: string
           html?: string
@@ -66,11 +66,11 @@ function PublishedPage() {
         }
         if (cancelled) return
         const payload =
-          body.kind === 'canvas-v2' &&
+          body.kind === 'canvas' &&
           typeof body.html === 'string' &&
           typeof body.css === 'string'
             ? {
-                kind: 'canvas-v2' as const,
+                kind: 'canvas' as const,
                 name: body.name ?? 'Page',
                 html: body.html,
                 css: body.css,
@@ -126,8 +126,8 @@ function PublishedPage() {
 
   const payload = state.payload
 
-  if (payload.kind === 'canvas-v2') {
-    return <PublishedCanvasV2 payload={payload} />
+  if (payload.kind === 'canvas') {
+    return <PublishedCanvas payload={payload} />
   }
 
   return (
@@ -192,12 +192,12 @@ function interactionsFor(
   }
 }
 
-function PublishedCanvasV2({
+function PublishedCanvas({
   payload,
 }: {
   payload: Extract<
     Extract<LoadState, { status: 'ready' }>['payload'],
-    { kind: 'canvas-v2' }
+    { kind: 'canvas' }
   >
 }) {
   const invoke = (

@@ -1,15 +1,15 @@
 import { useEffect, useRef, useState } from 'react'
-import type { CanvasDocumentV2 } from '@loora/canvas/model'
+import type { CanvasDocument } from '@loora/canvas/model'
 import { CanvasDocumentPreview } from '#/components/canvas-preview'
 import { orpc } from '#/lib/orpc-client'
 
 /** Documents are fetched once per revision and shared across remounts. */
-const documentCache = new Map<string, CanvasDocumentV2 | null>()
+const documentCache = new Map<string, CanvasDocument | null>()
 
 /**
  * A design's board, fetched only once the card scrolls into view so a long file
- * list does not pull every document down at once. Designs still on V1 render a
- * neutral tile — migration only runs when the file is opened.
+ * list does not pull every document down at once. Unsupported legacy designs
+ * render a neutral tile.
  */
 export function DesignThumbnail({
   designId,
@@ -22,7 +22,7 @@ export function DesignThumbnail({
 }) {
   const cacheKey = `${designId}:${revision}`
   const hostRef = useRef<HTMLDivElement | null>(null)
-  const [document, setDocument] = useState<CanvasDocumentV2 | null>(
+  const [document, setDocument] = useState<CanvasDocument | null>(
     () => documentCache.get(cacheKey) ?? null,
   )
 

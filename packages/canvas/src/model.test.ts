@@ -34,7 +34,7 @@ function documentFixture() {
   return document
 }
 
-describe('CanvasDocumentV2', () => {
+describe('CanvasDocument', () => {
   it('accepts a normalized editable page tree', () => {
     const document = documentFixture()
     expect(assertDocument(document)).toBe(document)

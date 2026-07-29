@@ -268,19 +268,19 @@ function AdminTab({ currentUserId }: { currentUserId: string }) {
               <p className="truncate text-sm font-medium">
                 {account.name}
                 {account.isAdmin ? (
-                  <span className="ml-2 text-[10px] font-semibold uppercase tracking-wide text-cx-accent">
+                  <span className="ml-2 text-[11px] font-semibold uppercase tracking-wide text-cx-accent">
                     Admin
                   </span>
                 ) : null}
                 {!account.isAdmin && account.previewAccessRequestedAt ? (
-                  <span className="ml-2 text-[10px] font-semibold uppercase tracking-wide text-cx-accent">
+                  <span className="ml-2 text-[11px] font-semibold uppercase tracking-wide text-cx-accent">
                     Requested access
                   </span>
                 ) : null}
               </p>
               <p className="truncate text-xs text-muted-foreground">{account.email}</p>
               <p
-                className={`mt-1 font-mono text-[11px] ${
+                className={`mt-1 font-mono text-xs ${
                   !account.isAdmin && account.publishEgressBytes >= account.publishEgressLimitBytes
                     ? 'text-destructive'
                     : 'text-muted-foreground'
@@ -445,7 +445,7 @@ function PublishedLinksSection() {
             </div>
           ) : null}
           {!egress.unlimited && egress.usedBytes >= egress.limitBytes ? (
-            <p className="text-[11px] text-destructive">
+            <p className="text-xs text-destructive">
               Limit reached — your published links are paused until usage drops out of the window.
             </p>
           ) : null}
@@ -470,7 +470,7 @@ function PublishedLinksSection() {
                 >
                   {link.pageName || link.elementName || link.designName}
                 </a>
-                <p className="truncate text-[11px] text-muted-foreground">
+                <p className="truncate text-xs text-muted-foreground">
                   {link.designName} · expires in{' '}
                   {Math.max(1, Math.round((link.expiresAt - Date.now()) / 3_600_000))}h
                 </p>

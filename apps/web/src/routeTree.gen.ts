@@ -14,6 +14,7 @@ import { Route as McpConsentRouteImport } from './routes/mcp-consent'
 import { Route as DotwellKnownOauthAuthorizationServerRouteImport } from './routes/[.]well-known.oauth-authorization-server'
 import { Route as AppIndexRouteImport } from './routes/app.index'
 import { Route as AppDesignRouteImport } from './routes/app.design'
+import { Route as DesignIdRouteImport } from './routes/design.$id'
 import { Route as PLinkIdRouteImport } from './routes/p.$linkId'
 import { Route as ApiAssetIdRouteImport } from './routes/api.asset.$id'
 import { Route as ApiAuthSplatRouteImport } from './routes/api.auth.$'
@@ -27,6 +28,7 @@ import { Route as ApiGithubWebhookRouteImport } from './routes/api.github.webhoo
 import { Route as ApiHandoffTokenRouteImport } from './routes/api.handoff.$token'
 import { Route as ApiPLinkIdRouteImport } from './routes/api.p.$linkId'
 import { Route as ApiRpcSplatRouteImport } from './routes/api.rpc.$'
+import { Route as DesignIdBBranchIdRouteImport } from './routes/design.$id_.b.$branchId'
 import { Route as ApiHandoffTokenAssetIdRouteImport } from './routes/api.handoff.$token.asset.$id'
 import { Route as ApiPLinkIdAssetIdRouteImport } from './routes/api.p.$linkId.asset.$id'
 
@@ -54,6 +56,11 @@ const AppIndexRoute = AppIndexRouteImport.update({
 const AppDesignRoute = AppDesignRouteImport.update({
   id: '/app/design',
   path: '/app/design',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const DesignIdRoute = DesignIdRouteImport.update({
+  id: '/design/$id',
+  path: '/design/$id',
   getParentRoute: () => rootRouteImport,
 } as any)
 const PLinkIdRoute = PLinkIdRouteImport.update({
@@ -121,6 +128,11 @@ const ApiRpcSplatRoute = ApiRpcSplatRouteImport.update({
   path: '/api/rpc/$',
   getParentRoute: () => rootRouteImport,
 } as any)
+const DesignIdBBranchIdRoute = DesignIdBBranchIdRouteImport.update({
+  id: '/design/$id_/b/$branchId',
+  path: '/design/$id/b/$branchId',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ApiHandoffTokenAssetIdRoute = ApiHandoffTokenAssetIdRouteImport.update({
   id: '/asset/$id',
   path: '/asset/$id',
@@ -137,6 +149,7 @@ export interface FileRoutesByFullPath {
   '/mcp-consent': typeof McpConsentRoute
   '/.well-known/oauth-authorization-server': typeof DotwellKnownOauthAuthorizationServerRoute
   '/app/design': typeof AppDesignRoute
+  '/design/$id': typeof DesignIdRoute
   '/p/$linkId': typeof PLinkIdRoute
   '/app/': typeof AppIndexRoute
   '/api/asset/$id': typeof ApiAssetIdRoute
@@ -151,6 +164,7 @@ export interface FileRoutesByFullPath {
   '/api/handoff/$token': typeof ApiHandoffTokenRouteWithChildren
   '/api/p/$linkId': typeof ApiPLinkIdRouteWithChildren
   '/api/rpc/$': typeof ApiRpcSplatRoute
+  '/design/$id/b/$branchId': typeof DesignIdBBranchIdRoute
   '/api/handoff/$token/asset/$id': typeof ApiHandoffTokenAssetIdRoute
   '/api/p/$linkId/asset/$id': typeof ApiPLinkIdAssetIdRoute
 }
@@ -159,6 +173,7 @@ export interface FileRoutesByTo {
   '/mcp-consent': typeof McpConsentRoute
   '/.well-known/oauth-authorization-server': typeof DotwellKnownOauthAuthorizationServerRoute
   '/app/design': typeof AppDesignRoute
+  '/design/$id': typeof DesignIdRoute
   '/p/$linkId': typeof PLinkIdRoute
   '/app': typeof AppIndexRoute
   '/api/asset/$id': typeof ApiAssetIdRoute
@@ -173,6 +188,7 @@ export interface FileRoutesByTo {
   '/api/handoff/$token': typeof ApiHandoffTokenRouteWithChildren
   '/api/p/$linkId': typeof ApiPLinkIdRouteWithChildren
   '/api/rpc/$': typeof ApiRpcSplatRoute
+  '/design/$id/b/$branchId': typeof DesignIdBBranchIdRoute
   '/api/handoff/$token/asset/$id': typeof ApiHandoffTokenAssetIdRoute
   '/api/p/$linkId/asset/$id': typeof ApiPLinkIdAssetIdRoute
 }
@@ -182,6 +198,7 @@ export interface FileRoutesById {
   '/mcp-consent': typeof McpConsentRoute
   '/.well-known/oauth-authorization-server': typeof DotwellKnownOauthAuthorizationServerRoute
   '/app/design': typeof AppDesignRoute
+  '/design/$id': typeof DesignIdRoute
   '/p/$linkId': typeof PLinkIdRoute
   '/app/': typeof AppIndexRoute
   '/api/asset/$id': typeof ApiAssetIdRoute
@@ -196,6 +213,7 @@ export interface FileRoutesById {
   '/api/handoff/$token': typeof ApiHandoffTokenRouteWithChildren
   '/api/p/$linkId': typeof ApiPLinkIdRouteWithChildren
   '/api/rpc/$': typeof ApiRpcSplatRoute
+  '/design/$id_/b/$branchId': typeof DesignIdBBranchIdRoute
   '/api/handoff/$token/asset/$id': typeof ApiHandoffTokenAssetIdRoute
   '/api/p/$linkId/asset/$id': typeof ApiPLinkIdAssetIdRoute
 }
@@ -206,6 +224,7 @@ export interface FileRouteTypes {
     | '/mcp-consent'
     | '/.well-known/oauth-authorization-server'
     | '/app/design'
+    | '/design/$id'
     | '/p/$linkId'
     | '/app/'
     | '/api/asset/$id'
@@ -220,6 +239,7 @@ export interface FileRouteTypes {
     | '/api/handoff/$token'
     | '/api/p/$linkId'
     | '/api/rpc/$'
+    | '/design/$id/b/$branchId'
     | '/api/handoff/$token/asset/$id'
     | '/api/p/$linkId/asset/$id'
   fileRoutesByTo: FileRoutesByTo
@@ -228,6 +248,7 @@ export interface FileRouteTypes {
     | '/mcp-consent'
     | '/.well-known/oauth-authorization-server'
     | '/app/design'
+    | '/design/$id'
     | '/p/$linkId'
     | '/app'
     | '/api/asset/$id'
@@ -242,6 +263,7 @@ export interface FileRouteTypes {
     | '/api/handoff/$token'
     | '/api/p/$linkId'
     | '/api/rpc/$'
+    | '/design/$id/b/$branchId'
     | '/api/handoff/$token/asset/$id'
     | '/api/p/$linkId/asset/$id'
   id:
@@ -250,6 +272,7 @@ export interface FileRouteTypes {
     | '/mcp-consent'
     | '/.well-known/oauth-authorization-server'
     | '/app/design'
+    | '/design/$id'
     | '/p/$linkId'
     | '/app/'
     | '/api/asset/$id'
@@ -264,6 +287,7 @@ export interface FileRouteTypes {
     | '/api/handoff/$token'
     | '/api/p/$linkId'
     | '/api/rpc/$'
+    | '/design/$id_/b/$branchId'
     | '/api/handoff/$token/asset/$id'
     | '/api/p/$linkId/asset/$id'
   fileRoutesById: FileRoutesById
@@ -273,6 +297,7 @@ export interface RootRouteChildren {
   McpConsentRoute: typeof McpConsentRoute
   DotwellKnownOauthAuthorizationServerRoute: typeof DotwellKnownOauthAuthorizationServerRoute
   AppDesignRoute: typeof AppDesignRoute
+  DesignIdRoute: typeof DesignIdRoute
   PLinkIdRoute: typeof PLinkIdRoute
   AppIndexRoute: typeof AppIndexRoute
   ApiAssetIdRoute: typeof ApiAssetIdRoute
@@ -287,6 +312,7 @@ export interface RootRouteChildren {
   ApiHandoffTokenRoute: typeof ApiHandoffTokenRouteWithChildren
   ApiPLinkIdRoute: typeof ApiPLinkIdRouteWithChildren
   ApiRpcSplatRoute: typeof ApiRpcSplatRoute
+  DesignIdBBranchIdRoute: typeof DesignIdBBranchIdRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -324,6 +350,13 @@ declare module '@tanstack/react-router' {
       path: '/app/design'
       fullPath: '/app/design'
       preLoaderRoute: typeof AppDesignRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/design/$id': {
+      id: '/design/$id'
+      path: '/design/$id'
+      fullPath: '/design/$id'
+      preLoaderRoute: typeof DesignIdRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/p/$linkId': {
@@ -417,6 +450,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiRpcSplatRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/design/$id_/b/$branchId': {
+      id: '/design/$id_/b/$branchId'
+      path: '/design/$id/b/$branchId'
+      fullPath: '/design/$id/b/$branchId'
+      preLoaderRoute: typeof DesignIdBBranchIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/handoff/$token/asset/$id': {
       id: '/api/handoff/$token/asset/$id'
       path: '/asset/$id'
@@ -464,6 +504,7 @@ const rootRouteChildren: RootRouteChildren = {
   DotwellKnownOauthAuthorizationServerRoute:
     DotwellKnownOauthAuthorizationServerRoute,
   AppDesignRoute: AppDesignRoute,
+  DesignIdRoute: DesignIdRoute,
   PLinkIdRoute: PLinkIdRoute,
   AppIndexRoute: AppIndexRoute,
   ApiAssetIdRoute: ApiAssetIdRoute,
@@ -478,6 +519,7 @@ const rootRouteChildren: RootRouteChildren = {
   ApiHandoffTokenRoute: ApiHandoffTokenRouteWithChildren,
   ApiPLinkIdRoute: ApiPLinkIdRouteWithChildren,
   ApiRpcSplatRoute: ApiRpcSplatRoute,
+  DesignIdBBranchIdRoute: DesignIdBBranchIdRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

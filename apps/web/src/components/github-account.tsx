@@ -5,7 +5,7 @@ import {
   PlusIcon,
   RefreshCwIcon,
 } from '#/components/icons'
-import { UnplugIcon } from 'lucide-react'
+import { UnplugIcon } from '#/components/icons'
 import { Button } from '#/components/ui/button'
 import { IntegrationCard, IntegrationStatus } from '#/components/integration-card'
 import { orpc } from '#/lib/orpc-client'
@@ -124,7 +124,7 @@ export function GitHubAccount() {
               >
                 <div className="min-w-0">
                   <p className="truncate text-xs font-medium">{installation.login}</p>
-                  <p className="text-[11px] text-muted-foreground">
+                  <p className="text-xs text-muted-foreground">
                     {installation.suspendedAt
                       ? 'Access suspended'
                       : installation.repositorySelection === 'all'
@@ -132,7 +132,7 @@ export function GitHubAccount() {
                         : 'Selected repositories'}
                   </p>
                 </div>
-                <span className="shrink-0 text-[10px] uppercase tracking-wide text-muted-foreground">
+                <span className="shrink-0 text-[11px] uppercase tracking-wide text-muted-foreground">
                   {installation.type}
                 </span>
               </div>
@@ -178,7 +178,7 @@ export function GitHubAccount() {
         </div>
 
         <div className="flex flex-col gap-2 border-t border-border pt-3 sm:flex-row sm:items-center sm:justify-between">
-          <p className="text-[11px] leading-relaxed text-muted-foreground">
+          <p className="text-xs leading-relaxed text-muted-foreground">
             Loora cannot write to repositories. Disconnecting here does not uninstall the GitHub App.
           </p>
           <Button

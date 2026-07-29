@@ -12,8 +12,7 @@ import {
   text,
   timestamp,
 } from 'drizzle-orm/pg-core'
-import type { UIMessage } from 'ai'
-import type { CanvasDocumentV2 } from '@loora/canvas/model'
+import type { CanvasDocument } from '@loora/canvas/model'
 import type { CanvasTransaction } from '@loora/canvas/engine'
 import type { CanvasElement, CanvasPage } from './canvas'
 import type { DraftStatus } from './drafts'
@@ -109,7 +108,7 @@ export const design = pgTable(
     shapes: jsonb('shapes').$type<CanvasElement[]>().default([]).notNull(),
     pages: jsonb('pages').$type<CanvasPage[]>().default([]).notNull(),
     canvasVersion: integer('canvas_version').default(1).notNull(),
-    canvasDocument: jsonb('canvas_document').$type<CanvasDocumentV2>(),
+    canvasDocument: jsonb('canvas_document').$type<CanvasDocument>(),
     canvasMigrationLeaseId: text('canvas_migration_lease_id'),
     canvasMigrationLeaseExpiresAt: timestamp('canvas_migration_lease_expires_at'),
     revision: integer('revision').default(0).notNull(),
@@ -140,8 +139,8 @@ export const designDraft = pgTable(
     pages: jsonb('pages').$type<CanvasPage[]>().default([]).notNull(),
     canvasVersion: integer('canvas_version').default(1).notNull(),
     baseCanvasVersion: integer('base_canvas_version').default(1).notNull(),
-    baseCanvasDocument: jsonb('base_canvas_document').$type<CanvasDocumentV2>(),
-    canvasDocument: jsonb('canvas_document').$type<CanvasDocumentV2>(),
+    baseCanvasDocument: jsonb('base_canvas_document').$type<CanvasDocument>(),
+    canvasDocument: jsonb('canvas_document').$type<CanvasDocument>(),
     baseRevision: integer('base_revision').notNull(),
     revision: integer('revision').default(0).notNull(),
     appliedVersionId: text('applied_version_id'),
@@ -176,7 +175,7 @@ export const designVersion = pgTable(
     shapes: jsonb('shapes').$type<CanvasElement[]>().notNull(),
     pages: jsonb('pages').$type<CanvasPage[]>().default([]).notNull(),
     canvasVersion: integer('canvas_version').default(1).notNull(),
-    canvasDocument: jsonb('canvas_document').$type<CanvasDocumentV2>(),
+    canvasDocument: jsonb('canvas_document').$type<CanvasDocument>(),
     added: integer('added').notNull(),
     removed: integer('removed').notNull(),
     changed: integer('changed').notNull(),
@@ -242,7 +241,7 @@ export const designChat = pgTable(
     draftId: text('draft_id'),
     userId: text('user_id').notNull(),
     title: text('title').default('New chat').notNull(),
-    messages: jsonb('messages').$type<UIMessage[]>().default([]).notNull(),
+    messages: jsonb('messages').$type<unknown[]>().default([]).notNull(),
     githubRepositoryId: text('github_repository_id'),
     githubRepositoryFullName: text('github_repository_full_name'),
     createdAt: timestamp('created_at').defaultNow().notNull(),

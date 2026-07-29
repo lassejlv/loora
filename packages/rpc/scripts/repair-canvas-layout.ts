@@ -19,7 +19,7 @@ import { repairStackedLayout } from '@loora/agent/repair-layout'
 import {
   CANVAS_SCHEMA_VERSION,
   parseCanvasDocument,
-  type CanvasDocumentV2,
+  type CanvasDocument,
 } from '@loora/canvas/model'
 
 function flag(name: string) {
@@ -32,7 +32,7 @@ const designFilter = flag('design')
 const userFilter = flag('user')
 
 interface Repaired {
-  document: CanvasDocumentV2
+  document: CanvasDocument
   flowed: number
   unboxed: number
 }
@@ -42,7 +42,7 @@ function repair(stored: unknown, now: number): Repaired | null {
   const source = parseCanvasDocument(stored)
   const result = repairStackedLayout(source)
   if (result.flowed.length === 0) return null
-  const document: CanvasDocumentV2 = {
+  const document: CanvasDocument = {
     ...result.document,
     metadata: { ...result.document.metadata, updatedAt: now },
   }

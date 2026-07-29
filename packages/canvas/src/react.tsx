@@ -21,7 +21,6 @@ import {
   type ReactNode,
   type Ref,
   type RefObject,
-  type WheelEvent,
 } from 'react'
 import {
   type CanvasApplyResult,
@@ -33,7 +32,7 @@ import {
 } from './engine'
 import {
   type CanvasColor,
-  type CanvasDocumentV2,
+  type CanvasDocument,
   type CanvasLength,
   type CanvasNode,
   type CanvasPaint,
@@ -429,12 +428,12 @@ export function useCanvasSelection() {
   return session.selection
 }
 
-function colorValue(_document: CanvasDocumentV2, color: CanvasColor) {
+function colorValue(_document: CanvasDocument, color: CanvasColor) {
   if (typeof color === 'string') return color
   return `var(--loora-token-${color.token.replace(/[^a-zA-Z0-9_-]/g, '-')})`
 }
 
-function paintValue(document: CanvasDocumentV2, paint: CanvasPaint) {
+function paintValue(document: CanvasDocument, paint: CanvasPaint) {
   if (paint.type === 'solid') return colorValue(document, paint.color)
   return `linear-gradient(${paint.angle}deg, ${paint.stops
     .map((stop) => `${colorValue(document, stop.color)} ${stop.offset * 100}%`)
@@ -467,7 +466,7 @@ function patchNode(node: CanvasNode, patch: NodePatch | undefined): CanvasNode {
 }
 
 function nodeCss(
-  document: CanvasDocumentV2,
+  document: CanvasDocument,
   node: CanvasNode,
   isPageRoot = false,
 ): CSSProperties {
@@ -814,8 +813,8 @@ function RawCanvasNodeRenderer({
   const onDoubleClick = (event: MouseEvent) => {
     event.stopPropagation()
     if (node.type === 'text' && !node.locked && !readOnly) {
-      setEditingText(true)
-      focusText()
+      session.select([ref])
+      session.editText(ref)
       return
     }
     if (
@@ -965,7 +964,7 @@ function chooseHit(
   event: PointerEvent | ReactPointerEvent,
   scene: HTMLElement,
   session: CanvasSession,
-  canvasDocument: CanvasDocumentV2,
+  canvasDocument: CanvasDocument,
   current: NodeRef | null,
 ) {
   const hits = document
@@ -1047,7 +1046,7 @@ function isTextEntryTarget(target: EventTarget | null) {
 }
 
 function rootSelection(
-  document: CanvasDocumentV2,
+  document: CanvasDocument,
   selection: NodeRef[],
 ) {
   const selected = new Set(selection.map(refKey))
@@ -1926,6 +1925,27 @@ export function CanvasSurface({
     })
   }
 
+  const onSurfaceDoubleClick = (event: MouseEvent<HTMLDivElement>) => {
+    const scene = sceneRef.current
+    if (!scene || readOnly || interactionMode === 'pan') return
+    // Pointer capture makes native click/double-click events target the
+    // surface in some browsers. Hit-test again so direct text editing still
+    // works after the selection/drag gesture has seen both pointer presses.
+    const target = document
+      .elementsFromPoint(event.clientX, event.clientY)
+      .find(
+        (element) =>
+          scene.contains(element) &&
+          element.getAttribute('data-loora-node-type') === 'text' &&
+          element.getAttribute('data-loora-locked') !== 'true',
+      )
+    const ref = target ? parseNodeRef(target) : null
+    if (!ref) return
+    event.preventDefault()
+    session.select([ref])
+    session.editText(ref)
+  }
+
   const onPointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
     const scene = sceneRef.current
     if (!scene) return
@@ -2538,11 +2558,13 @@ export function CanvasSurface({
     onDrop(event, placement)
   }
 
-  const onWheel = (event: WheelEvent<HTMLDivElement>) => {
+  const onWheel = (event: globalThis.WheelEvent) => {
+    const surface = surfaceRef.current
+    if (!surface) return
     event.preventDefault()
     const camera = cameraRef.current
     if (event.metaKey || event.ctrlKey) {
-      const rect = event.currentTarget.getBoundingClientRect()
+      const rect = surface.getBoundingClientRect()
       const pointerX = event.clientX - rect.left
       const pointerY = event.clientY - rect.top
       const nextZoom = Math.min(4, Math.max(0.08, camera.zoom * Math.exp(-event.deltaY * 0.002)))
@@ -2565,6 +2587,15 @@ export function CanvasSurface({
       onCameraChange?.({ ...cameraRef.current })
     })
   }
+  useEffect(() => {
+    const surface = surfaceRef.current
+    if (!surface) return
+    // React delegates wheel events through a passive root listener in modern
+    // browsers. A native non-passive listener is required to stop ctrl-wheel
+    // or trackpad pinch from zooming the whole browser page.
+    surface.addEventListener('wheel', onWheel, { passive: false })
+    return () => surface.removeEventListener('wheel', onWheel)
+  }, [onWheel])
 
   return (
     <div
@@ -2580,7 +2611,7 @@ export function CanvasSurface({
       onPointerMove={onPointerMove}
       onPointerUp={onPointerUp}
       onPointerCancel={onPointerUp}
-      onWheel={onWheel}
+      onDoubleClick={onSurfaceDoubleClick}
       style={{
         position: 'relative',
         overflow: 'hidden',

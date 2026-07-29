@@ -63,14 +63,10 @@ mock.module('#/components/ui/alert-dialog', () => ({
   AlertDialogPopup: ({ children }: { children: ReactNode }) => <div>{children}</div>,
   AlertDialogTitle: ({ children }: { children: ReactNode }) => <div>{children}</div>,
 }))
-// mock.module is process-global, so a partial stub here would strip the rest of
-// theme.ts for every other test file in the run — spread the real module.
-const themeModule = await import('#/lib/theme')
-mock.module('#/lib/theme', () => ({
-  ...themeModule,
-  getThemePreference: () => 'system',
-  setThemePreference: mock(),
-}))
+// theme.ts is deliberately NOT mocked. mock.module is process-global, so
+// stubbing it here would hand every other test file in the run the stub — which
+// is exactly how theme.test.ts started reading the wrong default. The real
+// module tolerates a missing `localStorage`, so it is safe to let it run.
 
 const { SettingsPanel } = await import('./settings-panel')
 

@@ -28,7 +28,7 @@ import {
   CANVAS_SCHEMA_VERSION,
   createCanvasDocument,
   parseCanvasDocument,
-  type CanvasDocumentV2,
+  type CanvasDocument,
 } from '@loora/canvas/model'
 import {
   diffDocuments,
@@ -39,7 +39,7 @@ import {
 import { EMPTY_SHORTCUT_CONFIG } from '@loora/db/shortcuts'
 import { parseShortcutConfig, shortcutConfigSchema } from './shortcuts'
 import { googleOAuthEnabled, type getSession } from '@loora/auth'
-import { legacyArray, type CanvasElement, type CanvasPage } from '@loora/db/canvas'
+import { type CanvasElement, type CanvasPage } from '@loora/db/canvas'
 import {
   mergeCanvas,
   type MergeChoice,
@@ -365,7 +365,7 @@ const createCanvasDesign = protectedProcedure
       .limit(1)
     if (!existing) throw new ORPCError('CONFLICT')
     if (existing.version !== CANVAS_SCHEMA_VERSION || !existing.document) {
-      throw new ORPCError('CONFLICT', { message: 'MIGRATION_REQUIRED' })
+      throw new ORPCError('CONFLICT', { message: 'UNSUPPORTED_CANVAS' })
     }
     return {
       created: false as const,
@@ -395,7 +395,7 @@ const renameCanvasDesign = protectedProcedure
       .limit(1)
     if (!target) throw new ORPCError('NOT_FOUND')
     if (target.version !== CANVAS_SCHEMA_VERSION || !target.document) {
-      throw new ORPCError('CONFLICT', { message: 'MIGRATION_REQUIRED' })
+      throw new ORPCError('CONFLICT', { message: 'UNSUPPORTED_CANVAS' })
     }
     if (target.revision !== input.expectedRevision) {
       throw new ORPCError('CONFLICT', {
@@ -403,7 +403,7 @@ const renameCanvasDesign = protectedProcedure
       })
     }
     const document = parseCanvasDocument(target.document)
-    const renamedDocument: CanvasDocumentV2 = {
+    const renamedDocument: CanvasDocument = {
       ...document,
       name: input.name,
       metadata: { ...document.metadata, updatedAt: Date.now() },
@@ -498,10 +498,9 @@ const getCanvas = protectedProcedure
     if (!target) throw new ORPCError('NOT_FOUND')
     if (target.version !== CANVAS_SCHEMA_VERSION || !target.document) {
       return {
-        status: 'migration-required' as const,
+        status: 'unsupported' as const,
         version: target.version,
         revision: target.revision,
-        openPath: `/app/design?id=${encodeURIComponent(input.designId)}&migrate=canvas-v2`,
       }
     }
     const document = parseCanvasDocument(target.document)
@@ -604,7 +603,7 @@ const applyCanvasTransactions = protectedProcedure
             .then((rows) => rows[0])
       if (!target) throw new ORPCError('NOT_FOUND')
       if (target.version !== CANVAS_SCHEMA_VERSION || !target.document) {
-        throw new ORPCError('CONFLICT', { message: 'MIGRATION_REQUIRED' })
+        throw new ORPCError('CONFLICT', { message: 'UNSUPPORTED_CANVAS' })
       }
       if ('status' in target && target.status !== 'active') {
         throw new ORPCError('CONFLICT', { message: 'This branch is read-only.' })
@@ -643,7 +642,7 @@ const applyCanvasTransactions = protectedProcedure
       }
 
       const engine = new CanvasEngine(document)
-      let nextDocument: CanvasDocumentV2 = document
+      let nextDocument: CanvasDocument = document
       const freshTransactions = transactions.filter(
         (transaction) => !duplicateIds.has(transaction.id),
       )
@@ -784,259 +783,6 @@ const applyCanvasTransactions = protectedProcedure
     })
   })
 
-const beginCanvasMigration = protectedProcedure
-  .input(
-    z.object({
-      designId: z.string().min(1).max(128),
-      leaseId: z.string().min(16).max(200),
-    }),
-  )
-  .handler(async ({ context, input }) => {
-    const now = new Date()
-    const expiresAt = new Date(now.getTime() + 2 * 60_000)
-    const [leased] = await db
-      .update(design)
-      .set({
-        canvasMigrationLeaseId: input.leaseId,
-        canvasMigrationLeaseExpiresAt: expiresAt,
-      })
-      .where(
-        and(
-          eq(design.id, input.designId),
-          eq(design.userId, context.user.id),
-          or(
-            isNull(design.canvasMigrationLeaseId),
-            lt(design.canvasMigrationLeaseExpiresAt, now),
-            eq(design.canvasMigrationLeaseId, input.leaseId),
-          ),
-        ),
-      )
-      .returning({
-        id: design.id,
-        name: design.name,
-        canvasVersion: design.canvasVersion,
-        canvasDocument: design.canvasDocument,
-        shapes: design.shapes,
-        pages: design.pages,
-        revision: design.revision,
-      })
-    if (!leased) {
-      const [current] = await db
-        .select({
-          leaseId: design.canvasMigrationLeaseId,
-          expiresAt: design.canvasMigrationLeaseExpiresAt,
-        })
-        .from(design)
-        .where(and(eq(design.id, input.designId), eq(design.userId, context.user.id)))
-        .limit(1)
-      if (!current) throw new ORPCError('NOT_FOUND')
-      return {
-        acquired: false as const,
-        retryAt: current.expiresAt?.getTime() ?? now.getTime() + 1_000,
-      }
-    }
-    if (
-      leased.canvasVersion === CANVAS_SCHEMA_VERSION &&
-      leased.canvasDocument
-    ) {
-      await db
-        .update(design)
-        .set({ canvasMigrationLeaseId: null, canvasMigrationLeaseExpiresAt: null })
-        .where(
-          and(
-            eq(design.id, input.designId),
-            eq(design.userId, context.user.id),
-            eq(design.canvasMigrationLeaseId, input.leaseId),
-          ),
-        )
-      return {
-        acquired: true as const,
-        alreadyMigrated: true as const,
-        revision: leased.revision,
-        document: parseCanvasDocument(leased.canvasDocument),
-      }
-    }
-    const drafts = await db
-      .select({
-        id: designDraft.id,
-        name: designDraft.name,
-        revision: designDraft.revision,
-        baseRevision: designDraft.baseRevision,
-        shapes: designDraft.shapes,
-        pages: designDraft.pages,
-        baseShapes: designDraft.baseShapes,
-        basePages: designDraft.basePages,
-      })
-      .from(designDraft)
-      .where(
-        and(
-          eq(designDraft.designId, input.designId),
-          eq(designDraft.userId, context.user.id),
-          or(eq(designDraft.status, 'active'), eq(designDraft.status, 'proposed')),
-        ),
-      )
-    return {
-      acquired: true as const,
-      alreadyMigrated: false as const,
-      leaseExpiresAt: expiresAt.getTime(),
-      main: {
-        id: leased.id,
-        name: leased.name,
-        revision: leased.revision,
-        shapes: legacyArray<CanvasElement>(leased.shapes),
-        pages: legacyArray<CanvasPage>(leased.pages),
-      },
-      drafts: drafts.map((draft) => ({
-        ...draft,
-        shapes: legacyArray<CanvasElement>(draft.shapes),
-        pages: legacyArray<CanvasPage>(draft.pages),
-        baseShapes: legacyArray<CanvasElement>(draft.baseShapes),
-        basePages: legacyArray<CanvasPage>(draft.basePages),
-      })),
-    }
-  })
-
-const renewCanvasMigration = protectedProcedure
-  .input(
-    z.object({
-      designId: z.string().min(1).max(128),
-      leaseId: z.string().min(16).max(200),
-    }),
-  )
-  .handler(async ({ context, input }) => {
-    const now = new Date()
-    const expiresAt = new Date(now.getTime() + 2 * 60_000)
-    const [renewed] = await db
-      .update(design)
-      .set({ canvasMigrationLeaseExpiresAt: expiresAt })
-      .where(
-        and(
-          eq(design.id, input.designId),
-          eq(design.userId, context.user.id),
-          eq(design.canvasMigrationLeaseId, input.leaseId),
-          gt(design.canvasMigrationLeaseExpiresAt, now),
-        ),
-      )
-      .returning({ id: design.id })
-    if (!renewed) {
-      throw new ORPCError('CONFLICT', {
-        message: 'The Canvas migration lease expired.',
-      })
-    }
-    return { renewed: true as const, expiresAt: expiresAt.getTime() }
-  })
-
-const cancelCanvasMigration = protectedProcedure
-  .input(
-    z.object({
-      designId: z.string().min(1).max(128),
-      leaseId: z.string().min(16).max(200),
-    }),
-  )
-  .handler(async ({ context, input }) => {
-    const [cancelled] = await db
-      .update(design)
-      .set({
-        canvasMigrationLeaseId: null,
-        canvasMigrationLeaseExpiresAt: null,
-      })
-      .where(
-        and(
-          eq(design.id, input.designId),
-          eq(design.userId, context.user.id),
-          eq(design.canvasMigrationLeaseId, input.leaseId),
-        ),
-      )
-      .returning({ id: design.id })
-    return { cancelled: cancelled !== undefined }
-  })
-
-const commitCanvasMigration = protectedProcedure
-  .input(
-    z.object({
-      designId: z.string().min(1).max(128),
-      leaseId: z.string().min(16).max(200),
-      sourceRevision: z.number().int().nonnegative(),
-      document: z.unknown(),
-      drafts: z.array(z.object({
-        id: draftIdSchema,
-        sourceRevision: z.number().int().nonnegative(),
-        document: z.unknown(),
-        baseDocument: z.unknown(),
-      })).max(100),
-    }),
-  )
-  .handler(async ({ context, input }) => {
-    const mainDocument = parseCanvasDocument(input.document)
-    const drafts = input.drafts.map((draft) => ({
-      ...draft,
-      document: parseCanvasDocument(draft.document),
-      baseDocument: parseCanvasDocument(draft.baseDocument),
-    }))
-    const now = new Date()
-    return db.transaction(async (tx) => {
-      for (const draft of drafts) {
-        const [updated] = await tx
-          .update(designDraft)
-          .set({
-            canvasVersion: CANVAS_SCHEMA_VERSION,
-            baseCanvasVersion: CANVAS_SCHEMA_VERSION,
-            canvasDocument: draft.document,
-            baseCanvasDocument: draft.baseDocument,
-            revision: draft.sourceRevision + 1,
-            updatedAt: now,
-          })
-          .where(
-            and(
-              eq(designDraft.id, draft.id),
-              eq(designDraft.designId, input.designId),
-              eq(designDraft.userId, context.user.id),
-              eq(designDraft.revision, draft.sourceRevision),
-              or(eq(designDraft.status, 'active'), eq(designDraft.status, 'proposed')),
-            ),
-          )
-          .returning({ id: designDraft.id })
-        if (!updated) {
-          throw new ORPCError('CONFLICT', {
-            message: `Draft ${draft.id} changed during migration.`,
-          })
-        }
-      }
-      const [updatedMain] = await tx
-        .update(design)
-        .set({
-          canvasVersion: CANVAS_SCHEMA_VERSION,
-          canvasDocument: mainDocument,
-          canvasMigrationLeaseId: null,
-          canvasMigrationLeaseExpiresAt: null,
-          revision: input.sourceRevision + 1,
-          updatedAt: now,
-        })
-        .where(
-          and(
-            eq(design.id, input.designId),
-            eq(design.userId, context.user.id),
-            eq(design.revision, input.sourceRevision),
-            eq(design.canvasMigrationLeaseId, input.leaseId),
-            gt(design.canvasMigrationLeaseExpiresAt, now),
-          ),
-        )
-        .returning({ id: design.id })
-      if (!updatedMain) {
-        throw new ORPCError('CONFLICT', {
-          message: 'Main changed or the migration lease expired.',
-        })
-      }
-      return {
-        committed: true as const,
-        revision: input.sourceRevision + 1,
-        draftRevisions: Object.fromEntries(
-          drafts.map((draft) => [draft.id, draft.sourceRevision + 1]),
-        ),
-      }
-    })
-  })
-
 async function getOwnedDraft(userId: string, designId: string, draftId: string) {
   const [draft] = await db
     .select()
@@ -1091,21 +837,21 @@ async function getDraftComparison(userId: string, designId: string, draftId: str
     getOwnedDraft(userId, designId, draftId),
   ])
   if (!main) throw new ORPCError('NOT_FOUND')
-  const usesV2 =
+  const usesCanvasDocument =
     main.canvasVersion === CANVAS_SCHEMA_VERSION &&
     draft.canvasVersion === CANVAS_SCHEMA_VERSION &&
     draft.baseCanvasVersion === CANVAS_SCHEMA_VERSION &&
     !!main.canvasDocument &&
     !!draft.canvasDocument &&
     !!draft.baseCanvasDocument
-  const v2Merge = usesV2
+  const documentMerge = usesCanvasDocument
     ? mergeDocuments(
         parseCanvasDocument(draft.baseCanvasDocument),
         parseCanvasDocument(main.canvasDocument),
         parseCanvasDocument(draft.canvasDocument),
       )
     : null
-  const legacyMerge = usesV2
+  const legacyMerge = usesCanvasDocument
     ? null
     : mergeCanvas(
         draft.baseShapes,
@@ -1129,21 +875,21 @@ async function getDraftComparison(userId: string, designId: string, draftId: str
       closedAt: draft.closedAt?.getTime() ?? null,
     },
     mainRevision: main.revision,
-    canvasVersion: usesV2 ? CANVAS_SCHEMA_VERSION : 1,
-    mainDocument: usesV2 ? parseCanvasDocument(main.canvasDocument) : null,
-    draftDocument: usesV2 ? parseCanvasDocument(draft.canvasDocument) : null,
-    baseDocument: usesV2 ? parseCanvasDocument(draft.baseCanvasDocument) : null,
+    canvasVersion: usesCanvasDocument ? CANVAS_SCHEMA_VERSION : 1,
+    mainDocument: usesCanvasDocument ? parseCanvasDocument(main.canvasDocument) : null,
+    draftDocument: usesCanvasDocument ? parseCanvasDocument(draft.canvasDocument) : null,
+    baseDocument: usesCanvasDocument ? parseCanvasDocument(draft.baseCanvasDocument) : null,
     mainShapes: main.shapes,
     draftShapes: draft.shapes,
     baseShapes: draft.baseShapes,
     mainPages: main.pages,
     draftPages: draft.pages,
     basePages: draft.basePages,
-    summary: v2Merge?.summary ?? legacyMerge!.summary,
-    conflicts: v2Merge
-      ? branchMergeConflicts(v2Merge.conflicts)
+    summary: documentMerge?.summary ?? legacyMerge!.summary,
+    conflicts: documentMerge
+      ? branchMergeConflicts(documentMerge.conflicts)
       : legacyMerge!.conflicts,
-    unresolved: v2Merge?.unresolved ?? legacyMerge!.unresolved,
+    unresolved: documentMerge?.unresolved ?? legacyMerge!.unresolved,
   }
 }
 
@@ -1446,7 +1192,7 @@ const applyDraft = protectedProcedure
       throw new ORPCError('CONFLICT', { message: 'This draft is already archived.' })
     }
 
-    const v2Merge =
+    const documentMerge =
       comparison.canvasVersion === CANVAS_SCHEMA_VERSION &&
       comparison.baseDocument &&
       comparison.mainDocument &&
@@ -1458,7 +1204,7 @@ const applyDraft = protectedProcedure
             canvasMergeResolutions(input.resolutions),
           )
         : null
-    const legacyMerge = v2Merge
+    const legacyMerge = documentMerge
       ? null
       : mergeCanvas(
           comparison.baseShapes,
@@ -1469,9 +1215,9 @@ const applyDraft = protectedProcedure
           comparison.mainPages,
           comparison.draftPages,
         )
-    const unresolved = v2Merge?.unresolved ?? legacyMerge!.unresolved
-    const conflicts = v2Merge
-      ? branchMergeConflicts(v2Merge.conflicts)
+    const unresolved = documentMerge?.unresolved ?? legacyMerge!.unresolved
+    const conflicts = documentMerge
+      ? branchMergeConflicts(documentMerge.conflicts)
       : legacyMerge!.conflicts
     if (unresolved.length > 0) {
       return {
@@ -1490,8 +1236,8 @@ const applyDraft = protectedProcedure
         .set({
           shapes: legacyMerge?.shapes ?? comparison.mainShapes,
           pages: legacyMerge?.pages ?? comparison.mainPages,
-          canvasVersion: v2Merge ? CANVAS_SCHEMA_VERSION : comparison.canvasVersion,
-          canvasDocument: v2Merge?.document ?? comparison.mainDocument,
+          canvasVersion: documentMerge ? CANVAS_SCHEMA_VERSION : comparison.canvasVersion,
+          canvasDocument: documentMerge?.document ?? comparison.mainDocument,
           revision: input.expectedMainRevision + 1,
           updatedAt: now,
         })
@@ -1517,7 +1263,7 @@ const applyDraft = protectedProcedure
           pages: comparison.mainPages,
           canvasVersion: comparison.canvasVersion,
           canvasDocument: comparison.mainDocument,
-          ...(v2Merge
+          ...(documentMerge
             ? diffDocuments(
                 createCanvasDocument(
                   comparison.mainDocument?.name,
@@ -1534,10 +1280,10 @@ const applyDraft = protectedProcedure
           message: `Applied draft: ${comparison.draft.name}`,
           shapes: legacyMerge?.shapes ?? comparison.mainShapes,
           pages: legacyMerge?.pages ?? comparison.mainPages,
-          canvasVersion: v2Merge ? CANVAS_SCHEMA_VERSION : comparison.canvasVersion,
-          canvasDocument: v2Merge?.document ?? comparison.mainDocument,
-          ...(v2Merge
-            ? diffDocuments(comparison.mainDocument!, v2Merge.document)
+          canvasVersion: documentMerge ? CANVAS_SCHEMA_VERSION : comparison.canvasVersion,
+          canvasDocument: documentMerge?.document ?? comparison.mainDocument,
+          ...(documentMerge
+            ? diffDocuments(comparison.mainDocument!, documentMerge.document)
             : documentDiff(
                 comparison.mainShapes,
                 legacyMerge!.shapes,
@@ -1575,8 +1321,8 @@ const applyDraft = protectedProcedure
       applied: true as const,
       revision: input.expectedMainRevision + 1,
       versionId: appliedId,
-      canvasVersion: v2Merge ? CANVAS_SCHEMA_VERSION : comparison.canvasVersion,
-      document: v2Merge?.document ?? null,
+      canvasVersion: documentMerge ? CANVAS_SCHEMA_VERSION : comparison.canvasVersion,
+      document: documentMerge?.document ?? null,
       shapes: legacyMerge?.shapes ?? comparison.mainShapes,
       pages: legacyMerge?.pages ?? comparison.mainPages,
       unresolved: [] as string[],
@@ -1818,106 +1564,6 @@ const listVersions = protectedProcedure
       .limit(input.limit + 1)
 
     return toHistoryPage(versions, input.limit)
-  })
-
-const getCanvasVersionForMigration = protectedProcedure
-  .input(
-    canvasTargetInput.extend({
-      id: z.string().min(1).max(128),
-    }),
-  )
-  .handler(async ({ context, input }) => {
-    const [version] = await db
-      .select({
-        message: designVersion.message,
-        canvasVersion: designVersion.canvasVersion,
-        document: designVersion.canvasDocument,
-        shapes: designVersion.shapes,
-        pages: designVersion.pages,
-      })
-      .from(designVersion)
-      .where(
-        and(
-          eq(designVersion.id, input.id),
-          eq(designVersion.designId, input.designId),
-          eq(designVersion.userId, context.user.id),
-          draftTargetWhere(input.draftId),
-        ),
-      )
-      .limit(1)
-    if (!version) throw new ORPCError('NOT_FOUND')
-    if (
-      version.canvasVersion === CANVAS_SCHEMA_VERSION &&
-      version.document
-    ) {
-      return {
-        status: 'ready' as const,
-        document: parseCanvasDocument(version.document),
-      }
-    }
-    return {
-      status: 'migration-required' as const,
-      name: version.message,
-      shapes: legacyArray<CanvasElement>(version.shapes),
-      pages: legacyArray<CanvasPage>(version.pages),
-    }
-  })
-
-const commitCanvasVersionMigration = protectedProcedure
-  .input(
-    canvasTargetInput.extend({
-      id: z.string().min(1).max(128),
-      document: z.unknown(),
-    }),
-  )
-  .handler(async ({ context, input }) => {
-    const document = parseCanvasDocument(input.document)
-    const [migrated] = await db
-      .update(designVersion)
-      .set({
-        canvasVersion: CANVAS_SCHEMA_VERSION,
-        canvasDocument: document,
-      })
-      .where(
-        and(
-          eq(designVersion.id, input.id),
-          eq(designVersion.designId, input.designId),
-          eq(designVersion.userId, context.user.id),
-          draftTargetWhere(input.draftId),
-          eq(designVersion.canvasVersion, 1),
-        ),
-      )
-      .returning({ id: designVersion.id })
-    if (!migrated) {
-      const [current] = await db
-        .select({
-          canvasVersion: designVersion.canvasVersion,
-          document: designVersion.canvasDocument,
-        })
-        .from(designVersion)
-        .where(
-          and(
-            eq(designVersion.id, input.id),
-            eq(designVersion.designId, input.designId),
-            eq(designVersion.userId, context.user.id),
-            draftTargetWhere(input.draftId),
-          ),
-        )
-        .limit(1)
-      if (
-        current?.canvasVersion !== CANVAS_SCHEMA_VERSION ||
-        !current.document
-      ) {
-        throw new ORPCError('CONFLICT', {
-          message: 'The historical version could not be migrated.',
-        })
-      }
-      return {
-        migrated: false as const,
-        document: parseCanvasDocument(current.document),
-      }
-    }
-    return { migrated: true as const, document }
   })
 
 const compareVersion = protectedProcedure
@@ -2880,10 +2526,6 @@ export const appRouter = {
     get: getCanvas,
     rename: renameCanvasDesign,
     applyTransactions: applyCanvasTransactions,
-    beginMigration: beginCanvasMigration,
-    renewMigration: renewCanvasMigration,
-    cancelMigration: cancelCanvasMigration,
-    commitMigration: commitCanvasMigration,
   },
   draft: {
     list: listDrafts,
@@ -2912,11 +2554,9 @@ export const appRouter = {
     compare: compareVersion,
     import: importVersions,
     commit: commitVersion,
-    commitV2: commitCanvasVersion,
-    compareV2: compareCanvasVersion,
-    getForMigration: getCanvasVersionForMigration,
-    commitMigration: commitCanvasVersionMigration,
-    restoreV2: restoreCanvasVersion,
+    commitCanvas: commitCanvasVersion,
+    compareCanvas: compareCanvasVersion,
+    restoreCanvas: restoreCanvasVersion,
   },
   asset: {
     list: listAssets,

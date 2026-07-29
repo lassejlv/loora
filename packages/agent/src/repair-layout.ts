@@ -1,4 +1,4 @@
-import type { CanvasDocumentV2, CanvasLayout, CanvasNode, NodeId } from '@loora/canvas/model'
+import type { CanvasDocument, CanvasLayout, CanvasNode, NodeId } from '@loora/canvas/model'
 
 /**
  * Repair for documents written before inserted descriptors inherited their
@@ -35,14 +35,14 @@ function isPlaceholderBox(layout: CanvasLayout) {
 }
 
 export interface LayoutRepair {
-  document: CanvasDocumentV2
+  document: CanvasDocument
   /** Nodes pulled back into their parent's flow. */
   flowed: NodeId[]
   /** Text nodes that also lost the 320×200 placeholder box. */
   unboxed: NodeId[]
 }
 
-export function repairStackedLayout(source: CanvasDocumentV2): LayoutRepair {
+export function repairStackedLayout(source: CanvasDocument): LayoutRepair {
   const stacked = new Set<NodeId>()
   const pile = new Map<NodeId, number>()
   for (const node of Object.values(source.nodes)) {

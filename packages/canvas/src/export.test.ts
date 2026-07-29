@@ -1,8 +1,10 @@
 import { afterEach, describe, expect, it } from 'bun:test'
 import {
   compileCanvas,
+  compileJsxComponent,
   compileReactComponent,
   compileStandaloneHtml,
+  compileTailwindComponent,
   inlineBrowserImages,
   serializeCanvasDocument,
 } from './export'
@@ -69,6 +71,21 @@ describe('Canvas exports', () => {
     })
   })
 
+  it('generates copyable JSX and Tailwind components for a selection', () => {
+    const document = fixture()
+    const jsx = compileJsxComponent(document, { nodeId: 'hero' })
+    const tailwind = compileTailwindComponent(document, { nodeId: 'hero' })
+
+    expect(jsx).toContain('export default function LooraDesign')
+    expect(jsx).toContain('style={{')
+    expect(jsx).toContain('{"<script>alert(1)</script>"}')
+    expect(jsx).not.toContain('dangerouslySetInnerHTML')
+    expect(tailwind).toContain('className=')
+    expect(tailwind).toContain('[position:relative]')
+    expect(tailwind).toContain('[box-sizing:border-box]')
+    expect(tailwind).not.toContain('<style')
+  })
+
   it('exports declarative actions and active theme token values', () => {
     const document = fixture()
     document.themes.dark = { id: 'dark', name: 'Dark' }
@@ -93,9 +110,12 @@ describe('Canvas exports', () => {
       },
     ]
     const html = compileStandaloneHtml(document)
+    const tailwind = compileTailwindComponent(document)
     expect(html).toContain('data-loora-interactions=')
     expect(html).toContain('--loora-token-accent:#111111')
     expect(html).toContain("action.type==='open-url'")
+    expect(tailwind).toContain('[--loora-token-accent:#111111]')
+    expect(tailwind).not.toContain('style={{')
   })
 
   it('renders component variant overrides and exports switching rules', () => {

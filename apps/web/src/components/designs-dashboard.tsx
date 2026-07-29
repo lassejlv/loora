@@ -6,7 +6,7 @@ import {
   ListIcon,
   PencilIcon,
   Trash2Icon,
-} from 'lucide-react'
+} from '#/components/icons'
 import {
   ChevronDownIcon,
   ClockIcon,
@@ -79,11 +79,11 @@ function FileActions({
           type="button"
           aria-label={`Actions for ${name}`}
           className={cn(
-            'flex size-6 items-center justify-center rounded-md text-muted-foreground hover:bg-secondary hover:text-foreground data-[state=open]:bg-secondary data-[state=open]:text-foreground',
+            'flex size-5 items-center justify-center rounded-sm text-muted-foreground hover:bg-secondary hover:text-foreground data-[state=open]:bg-secondary data-[state=open]:text-foreground',
             className,
           )}
         >
-          <EllipsisIcon className="size-3.5" />
+          <EllipsisIcon className="size-3" />
         </button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-40">
@@ -120,15 +120,15 @@ function AccountMenu({
           aria-label="Account"
           className={cn(
             'flex items-center gap-2 rounded-md text-start hover:bg-secondary',
-            compact ? 'p-1' : 'w-full px-2 py-1.5',
+            compact ? 'p-1' : 'w-full px-1.5 py-1',
           )}
         >
-          <span className="flex size-6 shrink-0 items-center justify-center rounded-full bg-cx-accent/12 text-xs font-semibold text-cx-accent">
+          <span className="flex size-5 shrink-0 items-center justify-center rounded-full bg-accent text-[10px] font-semibold">
             {name.slice(0, 1).toUpperCase()}
           </span>
           {compact ? null : (
             <>
-              <span className="min-w-0 flex-1 truncate text-sm font-medium">{name}</span>
+              <span className="min-w-0 flex-1 truncate text-xs font-medium">{name}</span>
               <ChevronDownIcon className="size-3.5 shrink-0 text-muted-foreground" />
             </>
           )}
@@ -159,30 +159,30 @@ function FileCard({
   onDelete: () => void
 }) {
   return (
-    <div className="group relative flex flex-col rounded-lg border border-glass bg-glass/80 p-2 transition-colors hover:bg-glass">
+    <div className="group relative flex flex-col gap-2 rounded-md bg-surface p-1.5 shadow-panel transition duration-200 ease-out hover:-translate-y-0.5 hover:bg-surface-2 hover:shadow-panel-lg motion-reduce:transition-none motion-reduce:hover:translate-y-0">
       <Link
-        to="/app/design"
-        search={{ id: design.id }}
+        to="/design/$id"
+        params={{ id: design.id }}
         aria-label={`Open ${design.name}`}
-        className="absolute inset-0 rounded-lg focus-visible:outline-2 focus-visible:outline-ring focus-visible:outline-offset-2"
+        className="absolute inset-0 rounded-md focus-visible:outline-2 focus-visible:outline-ring focus-visible:outline-offset-2"
       />
-      <div className="pointer-events-none flex items-start gap-2">
-        <div className="min-w-0 flex-1">
-          <p className="truncate text-xs font-medium">{design.name}</p>
-          <p className="mt-0.5 truncate text-[11px] text-muted-foreground">
-            Edited {relativeTime(design.updatedAt)}
-          </p>
-        </div>
+      <div className="pointer-events-none aspect-[4/3] overflow-hidden rounded-sm bg-cx-canvas shadow-panel">
+        <DesignThumbnail designId={design.id} revision={design.revision} />
+      </div>
+      <div className="pointer-events-none min-w-0 px-0.5 pb-0.5">
+        <p className="truncate text-xs font-medium leading-tight">
+          {design.name}
+        </p>
+        <p className="mt-1 truncate text-xs text-muted-foreground">
+          Edited {relativeTime(design.updatedAt)}
+        </p>
       </div>
       <FileActions
         name={design.name}
         onRename={onRename}
         onDelete={onDelete}
-        className="absolute end-2 top-2 bg-glass opacity-0 transition-opacity group-focus-within:opacity-100 group-hover:opacity-100 data-[state=open]:opacity-100"
+        className="absolute end-2 top-2 bg-surface opacity-0 shadow-panel transition-opacity group-focus-within:opacity-100 group-hover:opacity-100 data-[state=open]:opacity-100"
       />
-      <div className="mt-2 aspect-[4/3] overflow-hidden rounded-md border border-glass bg-cx-canvas">
-        <DesignThumbnail designId={design.id} revision={design.revision} />
-      </div>
     </div>
   )
 }
@@ -197,20 +197,20 @@ function FileRow({
   onDelete: () => void
 }) {
   return (
-    <div className="group relative flex items-center gap-2.5 border-b border-glass px-2.5 py-1.5 last:border-b-0 hover:bg-secondary/40">
+    <div className="group relative flex items-center gap-2.5 border-b border-line px-2.5 py-1.5 last:border-b-0 transition-colors hover:bg-surface-2">
       <Link
-        to="/app/design"
-        search={{ id: design.id }}
+        to="/design/$id"
+        params={{ id: design.id }}
         aria-label={`Open ${design.name}`}
         className="absolute inset-0 focus-visible:outline-2 focus-visible:outline-ring focus-visible:-outline-offset-2"
       />
-      <div className="pointer-events-none size-8 shrink-0 overflow-hidden rounded-sm border bg-cx-canvas">
+      <div className="pointer-events-none size-7 shrink-0 overflow-hidden rounded-sm bg-cx-canvas shadow-panel">
         <DesignThumbnail designId={design.id} revision={design.revision} />
       </div>
       <p className="pointer-events-none min-w-0 flex-1 truncate text-xs font-medium">
         {design.name}
       </p>
-      <p className="pointer-events-none hidden shrink-0 text-[11px] text-muted-foreground sm:block">
+      <p className="pointer-events-none hidden shrink-0 text-xs text-muted-foreground sm:block">
         Edited {relativeTime(design.updatedAt)}
       </p>
       <FileActions
@@ -225,7 +225,7 @@ function FileRow({
 
 /**
  * The file browser at `/app`. It owns creation, rename, and deletion; the
- * canvas itself lives at `/app/design?id=…` and is never mounted from here.
+ * canvas itself lives at `/design/:id` and is never mounted from here.
  */
 export function DesignsDashboard() {
   const navigate = useNavigate()
@@ -305,7 +305,7 @@ export function DesignsDashboard() {
     setError(null)
     try {
       const created = await createDesign()
-      await navigate({ to: '/app/design', search: { id: created.id } })
+      await navigate({ to: '/design/$id', params: { id: created.id } })
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'The file could not be created')
       setCreating(false)
@@ -336,8 +336,8 @@ export function DesignsDashboard() {
     } catch (cause) {
       const message = cause instanceof Error ? cause.message : 'The file could not be renamed'
       setError(
-        message.includes('MIGRATION_REQUIRED')
-          ? 'Open this file once so it upgrades to Canvas V2, then rename it.'
+        message.includes('UNSUPPORTED_CANVAS')
+          ? 'This file uses an unsupported legacy Canvas format.'
           : message,
       )
       setRenameTarget(null)
@@ -371,18 +371,21 @@ export function DesignsDashboard() {
 
   return (
     <div className="flex h-screen min-h-0 bg-cx-canvas text-foreground">
-      <aside className="hidden w-48 shrink-0 flex-col border-e border-glass bg-glass backdrop-glass md:flex">
-        <div className="border-b border-glass p-2">
-          <AccountMenu
-            name={accountName}
-            onSettings={() => setSettingsOpen(true)}
-            onSignOut={() => void signOut()}
+      <aside className="hidden w-48 shrink-0 flex-col border-e border-line bg-surface md:flex">
+        <div className="flex h-10 shrink-0 items-center gap-2 px-3">
+          <img
+            src="/logo192.png"
+            alt=""
+            width={16}
+            height={16}
+            className="size-4 shrink-0 rounded-sm"
           />
+          <span className="text-xs font-semibold tracking-tight">loora</span>
         </div>
-        <nav className="flex flex-col gap-0.5 p-2">
+        <nav className="flex flex-col gap-px px-1.5">
           <span
             aria-current="page"
-            className="flex items-center gap-1.5 rounded-md bg-secondary px-2 py-1 text-xs font-medium"
+            className="flex items-center gap-1.5 rounded-sm bg-accent px-2 py-1 text-xs font-medium"
           >
             <ClockIcon className="size-3.5 text-muted-foreground" />
             Recents
@@ -390,16 +393,23 @@ export function DesignsDashboard() {
           <button
             type="button"
             onClick={() => setSettingsOpen(true)}
-            className="flex items-center gap-1.5 rounded-md px-2 py-1 text-start text-xs text-muted-foreground hover:bg-secondary hover:text-foreground"
+            className="flex items-center gap-1.5 rounded-sm px-2 py-1 text-start text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
           >
             <SettingsIcon className="size-3.5" />
             Settings
           </button>
         </nav>
+        <div className="mt-auto border-t border-line p-2">
+          <AccountMenu
+            name={accountName}
+            onSettings={() => setSettingsOpen(true)}
+            onSignOut={() => void signOut()}
+          />
+        </div>
       </aside>
 
       <main className="flex min-w-0 flex-1 flex-col overflow-y-auto">
-        <header className="sticky top-0 z-10 flex flex-wrap items-center gap-2 border-b border-glass bg-glass px-4 py-2.5 backdrop-glass md:px-5">
+        <header className="sticky top-0 z-10 flex h-10 flex-wrap items-center gap-2 border-b border-line bg-surface px-3 md:px-4">
           <div className="md:hidden">
             <AccountMenu
               compact
@@ -408,11 +418,13 @@ export function DesignsDashboard() {
               onSignOut={() => void signOut()}
             />
           </div>
-          <h1 className="flex-1 text-sm font-semibold tracking-tight">Recents</h1>
-          <div className="flex items-center rounded-md border border-glass p-0.5">
+          <h1 className="flex-1 text-sm font-semibold tracking-tight">
+            Recents
+          </h1>
+          <div className="flex items-center gap-0.5 rounded-sm border border-line p-0.5">
             <Button
               variant={view === 'grid' ? 'secondary' : 'ghost'}
-              size="icon-sm"
+              size="icon-xs"
               aria-label="Grid view"
               aria-pressed={view === 'grid'}
               onClick={() => setView('grid')}
@@ -421,7 +433,7 @@ export function DesignsDashboard() {
             </Button>
             <Button
               variant={view === 'list' ? 'secondary' : 'ghost'}
-              size="icon-sm"
+              size="icon-xs"
               aria-label="List view"
               aria-pressed={view === 'list'}
               onClick={() => setView('list')}
@@ -429,14 +441,14 @@ export function DesignsDashboard() {
               <ListIcon />
             </Button>
           </div>
-          <div className="relative w-48">
-            <SearchIcon className="pointer-events-none absolute start-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
+          <div className="relative w-44">
+            <SearchIcon className="pointer-events-none absolute start-2 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
             <Input
               ref={searchRef}
               type="search"
               aria-label="Search files"
               placeholder="Search recents"
-              className="rounded-md border-glass bg-transparent ps-6"
+              className="rounded-sm bg-surface-2 ps-7"
               value={query}
               onChange={(event) => setQuery(event.target.value)}
             />
@@ -448,26 +460,26 @@ export function DesignsDashboard() {
         </header>
 
         {error ? (
-          <div className="mx-5 mb-3 mt-3 rounded-md border border-destructive/32 bg-destructive/8 px-2.5 py-1.5 text-xs text-destructive-foreground">
+          <div className="mx-4 mt-4 rounded-md border border-destructive/32 bg-destructive/8 px-3 py-2 text-xs text-destructive-foreground md:mx-5">
             {error}
           </div>
         ) : null}
 
-        <div className="min-h-0 flex-1 px-5 pt-4 pb-8">
+        <div className="min-h-0 flex-1 px-4 pt-4 pb-8 md:px-4">
           {designs === null ? (
             <p className="cx-shimmer text-xs">Loading your files…</p>
           ) : visible.length === 0 ? (
-            <div className="rounded-lg border border-dashed border-glass px-5 py-12 text-center">
-              <p className="text-xs font-medium">
+            <div className="rounded-xl border border-dashed border-line bg-surface px-4 py-12 text-center">
+              <p className="text-sm font-medium">
                 {designs.length === 0 ? 'No design files yet' : 'No files match that search'}
               </p>
-              <p className="mt-1 text-xs text-muted-foreground">
+              <p className="mx-auto mt-1.5 max-w-xs text-xs text-muted-foreground">
                 {designs.length === 0
                   ? 'Start a file and open it on the canvas.'
                   : 'Try a different name.'}
               </p>
               {designs.length === 0 ? (
-                <Button className="mt-3" onClick={() => void newFile()} disabled={creating}>
+                <Button className="mt-5" onClick={() => void newFile()} disabled={creating}>
                   {creating ? <Spinner /> : <FilePlus2Icon />}
                   New file
                 </Button>
@@ -493,7 +505,7 @@ export function DesignsDashboard() {
               ))}
             </div>
           ) : (
-            <div className="overflow-hidden rounded-lg border border-glass bg-glass">
+            <div className="overflow-hidden rounded-lg bg-surface shadow-panel">
               {visible.map((design) => (
                 <FileRow
                   key={design.id}

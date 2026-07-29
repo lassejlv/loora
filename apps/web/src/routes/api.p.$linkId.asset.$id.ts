@@ -20,7 +20,7 @@ export const Route = createFileRoute('/api/p/$linkId/asset/$id')({
         // Only assets the published element or composed Page actually references are servable —
         // the link is not a key to the owner's whole asset library.
         const referencedIds =
-          published?.kind === 'canvas-v2'
+          published?.kind === 'canvas'
             ? referencedCanvasAssetIds(published.document)
             : referencedAssetIds(
                 published?.kind === 'element'

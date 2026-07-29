@@ -456,6 +456,60 @@ describe('Canvas React surface', () => {
     expect(engine.canUndo).toBe(true)
   })
 
+  it('edits text when pointer capture retargets the double click to the surface', () => {
+    const engine = new CanvasEngine(fixture())
+    const view = render(
+      <CanvasProvider engine={engine}>
+        <SelectionProbe />
+        <CanvasSurface pageWidth={1_440} />
+      </CanvasProvider>,
+    )
+    const surface = view.container.querySelector<HTMLElement>(
+      '[data-loora-canvas-surface]',
+    )!
+    const text = view.container.querySelector<HTMLElement>(
+      '[data-loora-node="text"]',
+    )!
+
+    withHits([text], () => {
+      fireEvent.doubleClick(surface, { clientX: 40, clientY: 40 })
+    })
+
+    expect(text.getAttribute('contenteditable')).toBe('plaintext-only')
+    expect(view.getByTestId('selection').textContent).toBe(':text')
+  })
+
+  it('owns ctrl-wheel so browser zoom cannot take over', async () => {
+    const view = render(
+      <CanvasProvider engine={new CanvasEngine(fixture())}>
+        <CanvasSurface pageWidth={1_440} />
+      </CanvasProvider>,
+    )
+    const surface = view.container.querySelector<HTMLElement>(
+      '[data-loora-canvas-surface]',
+    )!
+    const scene = view.container.querySelector<HTMLElement>(
+      '[data-loora-canvas-scene]',
+    )!
+    stubRect(surface, { left: 0, top: 0, width: 1_000, height: 700 })
+    const before = scene.style.transform
+    const event = new MouseEvent('wheel', {
+      bubbles: true,
+      cancelable: true,
+      clientX: 500,
+      clientY: 350,
+      ctrlKey: true,
+    })
+    Object.defineProperties(event, {
+      deltaX: { value: 0 },
+      deltaY: { value: -120 },
+    })
+
+    expect(surface.dispatchEvent(event)).toBe(false)
+    expect(event.defaultPrevented).toBe(true)
+    await waitFor(() => expect(scene.style.transform).not.toBe(before))
+  })
+
   it('clears stale selection when undo removes the selected node', () => {
     const view = render(
       <CanvasProvider engine={new CanvasEngine(fixture())}>

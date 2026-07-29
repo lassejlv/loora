@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { UnplugIcon } from 'lucide-react'
+import { UnplugIcon } from '#/components/icons'
 import { CheckIcon, CopyIcon, RefreshCwIcon } from '#/components/icons'
 import { Button } from '#/components/ui/button'
 import { IntegrationCard, IntegrationStatus } from '#/components/integration-card'
@@ -83,7 +83,7 @@ export function McpSessions() {
           </Button>
         </div>
         <div className="flex items-center justify-between gap-3">
-          <p className="text-[11px] leading-relaxed text-muted-foreground">
+          <p className="text-xs leading-relaxed text-muted-foreground">
             Clients authorize through loora.design and talk to the remote MCP server.
           </p>
           <Button
@@ -115,7 +115,7 @@ export function McpSessions() {
               >
                 <div className="min-w-0">
                   <p className="truncate text-xs font-medium">{session.name}</p>
-                  <p className="mt-0.5 text-[11px] leading-relaxed text-muted-foreground">
+                  <p className="mt-0.5 text-xs leading-relaxed text-muted-foreground">
                     Connected {formatDate(session.connectedAt)}
                     {session.lastAuthorizedAt > session.connectedAt
                       ? ` · Last authorized ${formatDate(session.lastAuthorizedAt)}`

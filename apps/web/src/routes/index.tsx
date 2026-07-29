@@ -16,7 +16,7 @@ import {
   Share2Icon,
   SquareIcon,
   TypeIcon,
-} from 'lucide-react'
+} from '#/components/icons'
 import { MoonIcon, SunIcon } from '#/components/icons'
 import {
   getThemePreference,
@@ -37,12 +37,16 @@ export const Route = createFileRoute('/')({
           ? params.d
           : null
     if (!id) return
+    const draft = typeof params.draft === 'string' ? params.draft : null
+    if (draft) {
+      throw redirect({
+        to: '/design/$id/b/$branchId',
+        params: { id, branchId: draft },
+      })
+    }
     throw redirect({
-      to: '/app/design',
-      search: {
-        id,
-        draft: typeof params.draft === 'string' ? params.draft : undefined,
-      },
+      to: '/design/$id',
+      params: { id },
     })
   },
   head: () => ({

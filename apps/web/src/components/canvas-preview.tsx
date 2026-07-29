@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import { CanvasEngine } from '@loora/canvas/engine'
 import { CanvasNodeRenderer, CanvasProvider } from '@loora/canvas/react'
-import type { CanvasDocumentV2, PageNode } from '@loora/canvas/model'
+import type { CanvasDocument, PageNode } from '@loora/canvas/model'
 import { cn } from '#/lib/utils'
 
 const MAX_PAGES = 8
@@ -19,7 +19,7 @@ function pageHeight(page: PageNode) {
     : page.viewport.minHeight
 }
 
-function visiblePages(document: CanvasDocumentV2, pageId?: string) {
+function visiblePages(document: CanvasDocument, pageId?: string) {
   return Object.values(document.nodes)
     .filter(
       (node): node is PageNode =>
@@ -32,7 +32,7 @@ function visiblePages(document: CanvasDocumentV2, pageId?: string) {
 }
 
 /** Token values resolve through CSS variables, exactly as the editor surface does. */
-function tokenVariables(document: CanvasDocumentV2) {
+function tokenVariables(document: CanvasDocument) {
   const style: Record<string, string> = {}
   for (const token of Object.values(document.tokens)) {
     const value = token.modes?.[document.activeThemeId] ?? token.value
@@ -51,7 +51,7 @@ export function CanvasDocumentPreview({
   pageId,
   className,
 }: {
-  document: CanvasDocumentV2 | null
+  document: CanvasDocument | null
   /** Restricts the preview to one Page instead of the whole board. */
   pageId?: string
   className?: string

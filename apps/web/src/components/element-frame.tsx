@@ -29,7 +29,7 @@ const VENDOR_SCRIPTS = [
 // element. Chromium exposes hundreds of properties, which can turn a normal
 // legacy page into a multi-megabyte SVG data URL that the browser cannot
 // decode. Keep the visual properties that affect a static canvas capture.
-export const LEGACY_CAPTURE_STYLE_PROPERTIES = [
+export const CAPTURE_STYLE_PROPERTIES = [
   '-webkit-background-clip',
   '-webkit-box-reflect',
   '-webkit-line-clamp',
@@ -250,14 +250,12 @@ export const LEGACY_CAPTURE_STYLE_PROPERTIES = [
   'z-index',
 ] as const
 
-// Families available inside every frame (and offered by the style editor's
-// font row). Self-hosted: the migration sandbox blocks outbound network, and a
-// legacy render in fallback fonts would never match the V2 comparison render,
-// so every text block would rasterize. Regenerate with scripts/vendor-fonts.py.
+// Families available inside every legacy frame (and offered by the style
+// editor's font row). Regenerate with scripts/vendor-fonts.py.
 // Data-URL variant: element frames are sandboxed without allow-same-origin, so
 // their font fetches carry Origin: null and a plain same-origin woff2 would be
 // refused by CORS.
-export const FONTS_URL = '/vendor/fonts-sandbox.css'
+export const FRAME_FONTS_URL = '/vendor/fonts-sandbox.css'
 
 /**
  * Strip ES module import/export so Babel's classic preset can run.
@@ -647,7 +645,7 @@ export function buildElementDoc(): string {
 <html>
 <head>
 <meta charset="utf-8" />
-<link rel="stylesheet" href="${FONTS_URL}" />
+<link rel="stylesheet" href="${FRAME_FONTS_URL}" />
 ${VENDOR_SCRIPTS.map((src) => `<script src="${src}"><\/script>`).join('\n')}
 <style>html,body{margin:0;height:100%;background:transparent}#root{height:100%}body{font-family:Archivo,system-ui,sans-serif}</style>
 </head>
@@ -1149,56 +1147,6 @@ function __mountHtml(code) {
 window.addEventListener('message', function (e) {
   var msg = e.data
   if (!msg) return
-  if (msg.type === 'loora:migration-snapshot') {
-    var styleNames = [
-      'position', 'display', 'flexDirection', 'flexWrap', 'gap',
-      'alignItems', 'justifyContent', 'gridTemplateColumns',
-      'paddingTop', 'paddingRight', 'paddingBottom', 'paddingLeft',
-      'backgroundColor', 'backgroundImage', 'borderRadius', 'borderWidth',
-      'borderColor', 'borderStyle', 'boxShadow', 'opacity', 'overflow',
-      'fontFamily', 'fontSize', 'fontWeight', 'lineHeight', 'letterSpacing',
-      'textAlign', 'textDecoration', 'textTransform', 'color', 'objectFit'
-    ]
-    var serializeNode = function (node) {
-      var rect = node.getBoundingClientRect()
-      var computed = getComputedStyle(node)
-      var style = {}
-      styleNames.forEach(function (name) { style[name] = computed[name] || '' })
-      var attributes = {}
-      ;['src', 'href', 'alt', 'role', 'aria-label', 'type'].forEach(function (name) {
-        if (node.hasAttribute && node.hasAttribute(name)) attributes[name] = node.getAttribute(name) || ''
-      })
-      var unsupported = []
-      if (['CANVAS', 'VIDEO', 'IFRAME', 'OBJECT', 'EMBED'].includes(node.tagName)) {
-        unsupported.push(node.tagName.toLowerCase())
-      }
-      try {
-        var before = getComputedStyle(node, '::before').content
-        var after = getComputedStyle(node, '::after').content
-        if ((before && before !== 'none' && before !== 'normal') ||
-            (after && after !== 'none' && after !== 'normal')) {
-          unsupported.push('pseudo-element')
-        }
-      } catch (error) {}
-      var elementChildren = Array.from(node.children || [])
-      return {
-        tag: (node.tagName || 'div').toLowerCase(),
-        text: elementChildren.length === 0 ? (node.textContent || '') : undefined,
-        attributes: attributes,
-        style: style,
-        rect: { x: rect.x, y: rect.y, width: rect.width, height: rect.height },
-        children: elementChildren.map(serializeNode),
-        unsupported: unsupported,
-      }
-    }
-    var rootNode = __root.children.length === 1 ? __root.firstElementChild : __root
-    parent.postMessage({
-      type: 'loora:migration-snapshot-result',
-      token: msg.token,
-      root: rootNode ? serializeNode(rootNode) : null,
-    }, '*')
-    return
-  }
   // Canvas snapshots can't see into the sandboxed iframe, so the frame
   // captures itself on request and posts the PNG back to the parent.
   if (msg.type === 'loora:capture') {
@@ -1251,7 +1199,7 @@ window.addEventListener('message', function (e) {
     )
     var scaledCaptureWidth = Math.max(1, Math.round(captureWidth * captureScale))
     var scaledCaptureHeight = Math.max(1, Math.round(captureHeight * captureScale))
-    var captureStyleProperties = ${JSON.stringify(LEGACY_CAPTURE_STYLE_PROPERTIES)}
+    var captureStyleProperties = ${JSON.stringify(CAPTURE_STYLE_PROPERTIES)}
     var captureOptions = function (skipFonts) {
       var options = {
         pixelRatio: pixelRatio,
@@ -1351,30 +1299,6 @@ parent.postMessage({ type: 'loora:element-ready' }, '*')
 
 const ELEMENT_DOC = buildElementDoc()
 
-export function migrationElementDoc() {
-  const origin = typeof location === 'undefined' ? '' : location.origin
-  const policy = [
-    "default-src 'none'",
-    // Legacy elements are JSX compiled at runtime and instantiated through
-    // `new Function`, so the sandbox has to permit eval or every element fails
-    // to render and first-open migration aborts for the whole design. What
-    // contains this frame is the opaque origin from sandbox="allow-scripts"
-    // plus connect-src 'none' — not the eval ban, which only blocked us from
-    // running the user's own source.
-    `script-src 'unsafe-inline' 'unsafe-eval' ${origin}`,
-    `style-src 'unsafe-inline' ${origin}`,
-    `img-src data: blob: ${origin}`,
-    `font-src data: ${origin}`,
-    "connect-src 'none'",
-    "media-src 'none'",
-    "frame-src 'none'",
-  ].join('; ')
-  return ELEMENT_DOC.replace(
-    '<head>',
-    `<head><meta http-equiv="Content-Security-Policy" content="${policy}">`,
-  )
-}
-
 // Sandboxed iframes have an opaque origin: an <img src="/api/asset/…"> inside
 // one sends no session cookie and gets a 401. The parent document is
 // authenticated, so it fetches each asset once and inlines it as a data URL
@@ -1437,7 +1361,6 @@ export function ElementFrame({
   interactive,
   suspended = false,
   textEditable = false,
-  networkRestricted = false,
   onError,
   onTextEdit,
   onImagePick,
@@ -1458,9 +1381,6 @@ export function ElementFrame({
   // its source-code src via onImagePick instead (inlined data URLs are
   // mapped back to their /api/asset/… form).
   textEditable?: boolean
-  // One-time legacy migration runs with no outbound network and the minimum
-  // iframe capability. The normal editor never uses this path.
-  networkRestricted?: boolean
   // Called with a message when the latest payload failed, null when it rendered.
   onError?: (message: string | null) => void
   onTextEdit?: (edits: FrameTextEdit[]) => void
@@ -1635,8 +1555,8 @@ export function ElementFrame({
     <iframe
       ref={iframeRef}
       title="Element"
-      sandbox={networkRestricted ? 'allow-scripts' : 'allow-scripts allow-forms allow-modals'}
-      srcDoc={networkRestricted ? migrationElementDoc() : ELEMENT_DOC}
+      sandbox="allow-scripts allow-forms allow-modals"
+      srcDoc={ELEMENT_DOC}
       data-element-frame={runtimeId}
       data-source-element={elementId}
       className="h-full w-full border-0"
@@ -1654,118 +1574,6 @@ export interface ElementCapture {
   volatile: boolean
   // True when font embedding failed and the capture rendered without webfonts.
   fontsSkipped: boolean
-}
-
-export interface LegacyElementSnapshot {
-  root: import('@loora/canvas/migration').LegacyDomNode | null
-  png: string | null
-  error: string | null
-}
-
-let sandboxFontCss: Promise<string> | null = null
-
-function loadSandboxFontCss() {
-  if (!sandboxFontCss) {
-    sandboxFontCss = fetch(FONTS_URL, { cache: 'force-cache' })
-      .then((response) => (response.ok ? response.text() : ''))
-      .catch(() => '')
-  }
-  return sandboxFontCss
-}
-
-function normalizedFontFamily(value: string) {
-  return value.trim().replace(/^['"]|['"]$/g, '').toLowerCase()
-}
-
-export function selectLegacyFontEmbedCss(
-  css: string,
-  root: NonNullable<LegacyElementSnapshot['root']>,
-) {
-  const usedFamilies = new Set<string>()
-  const visit = (node: NonNullable<LegacyElementSnapshot['root']>) => {
-    for (const family of (node.style.fontFamily ?? '').split(',')) {
-      usedFamilies.add(normalizedFontFamily(family))
-    }
-    node.children.forEach(visit)
-  }
-  visit(root)
-  return (css.match(/@font-face\s*\{[\s\S]*?\}/gi) ?? [])
-    .filter((rule) => {
-      const family = rule.match(/font-family\s*:\s*([^;]+);/i)?.[1]
-      return family ? usedFamilies.has(normalizedFontFamily(family)) : false
-    })
-    .join('\n')
-}
-
-export async function snapshotLegacyElement(
-  elementId: string,
-  timeoutMs = 3_000,
-): Promise<LegacyElementSnapshot> {
-  // The PNG feeds visual comparison and raster fallback. Keep ordinary
-  // elements at full size, but cap long-page SVG decoding before the browser
-  // turns it into a bitmap; pixelRatio alone does not shrink that SVG.
-  const capturePixelRatio = 1
-  const captureMaxDimension = 2_048
-  const iframe = document.querySelector<HTMLIFrameElement>(
-    `iframe[data-element-frame="${CSS.escape(elementId)}"]`,
-  )
-  if (!iframe?.contentWindow) {
-    return {
-      root: null,
-      png: null,
-      error: 'The legacy element frame was unavailable',
-    }
-  }
-  const token = `${elementId}:migration:${crypto.randomUUID()}`
-  const root = await new Promise<LegacyElementSnapshot['root']>((resolve) => {
-    const timer = window.setTimeout(() => {
-      window.removeEventListener('message', onMessage)
-      resolve(null)
-    }, timeoutMs)
-    const onMessage = (event: MessageEvent) => {
-      const message = event.data as {
-        type?: string
-        token?: string
-        root?: LegacyElementSnapshot['root']
-      }
-      if (
-        event.source !== iframe.contentWindow ||
-        message.type !== 'loora:migration-snapshot-result' ||
-        message.token !== token
-      ) {
-        return
-      }
-      window.clearTimeout(timer)
-      window.removeEventListener('message', onMessage)
-      const replaceSources = (node: NonNullable<LegacyElementSnapshot['root']>) => {
-        if (node.attributes.src) {
-          node.attributes.src = sourceUrlForInlinedSrc(node.attributes.src)
-        }
-        node.children.forEach(replaceSources)
-      }
-      if (message.root) replaceSources(message.root)
-      resolve(message.root ?? null)
-    }
-    window.addEventListener('message', onMessage)
-    iframe.contentWindow!.postMessage({ type: 'loora:migration-snapshot', token }, '*')
-  })
-  const fontEmbedCSS = root
-    ? selectLegacyFontEmbedCss(await loadSandboxFontCss(), root)
-    : ''
-  const capture = await captureElement(elementId, timeoutMs, {
-    pixelRatio: capturePixelRatio,
-    maxDimension: captureMaxDimension,
-    // Supplying even an empty string prevents html-to-image from trying to
-    // fetch stylesheets inside the connect-src 'none' migration sandbox.
-    fontEmbedCSS,
-  })
-  return {
-    root,
-    png: capture?.png ?? null,
-    error:
-      capture?.error ??
-      (capture ? null : 'The legacy element capture timed out'),
-  }
 }
 
 // Ask a mounted element iframe for its runtime log buffer (console.error/warn

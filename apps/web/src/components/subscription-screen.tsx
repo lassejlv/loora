@@ -131,7 +131,7 @@ export function SubscriptionScreen({ userId, children, preview, redirect }: Subs
                       <p className="mt-1 text-xs text-muted-foreground">{plan.summary}</p>
                     </div>
                     {plan.note ? (
-                      <span className="shrink-0 whitespace-nowrap rounded-full bg-secondary px-2 py-1 text-[10px] font-medium">
+                      <span className="shrink-0 whitespace-nowrap rounded-full bg-secondary px-2 py-1 text-[11px] font-medium">
                         {plan.note}
                       </span>
                     ) : null}

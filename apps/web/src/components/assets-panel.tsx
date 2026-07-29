@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { ImagePlusIcon, Trash2Icon } from 'lucide-react'
+import { ImagePlusIcon, Trash2Icon } from '#/components/icons'
 import { LinkIcon, SearchIcon } from '#/components/icons'
 import { Button } from '#/components/ui/button'
 import {
@@ -348,16 +348,16 @@ export function AssetsPanel({
                 </button>
                 <div className="mt-1 flex items-center justify-between gap-1">
                   <span
-                    className="min-w-0 truncate text-[11px] text-muted-foreground"
+                    className="min-w-0 truncate text-xs text-muted-foreground"
                     title={asset.name}
                   >
                     {asset.name}
                   </span>
-                  <span className="shrink-0 text-[10px] text-muted-foreground/60">
+                  <span className="shrink-0 text-[11px] text-muted-foreground/60">
                     {formatSize(asset.size)}
                   </span>
                 </div>
-                <div className="flex items-center gap-1 text-[10px] text-muted-foreground/60">
+                <div className="flex items-center gap-1 text-[11px] text-muted-foreground/60">
                   {dimensions[asset.id] ? <span>{dimensions[asset.id]}</span> : null}
                   {asset.at ? <span>{relativeTime(asset.at)}</span> : null}
                   {used > 0 ? (
@@ -394,7 +394,7 @@ export function AssetsPanel({
       )}
 
       {assets.length > 0 ? (
-        <p className="shrink-0 text-[11px] text-muted-foreground">
+        <p className="shrink-0 text-xs text-muted-foreground">
           {assets.length} asset{assets.length === 1 ? '' : 's'} ·{' '}
           {formatSize(totalSize)}
         </p>

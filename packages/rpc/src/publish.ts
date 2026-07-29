@@ -8,7 +8,7 @@ import { compileCanvas } from '@loora/canvas/export'
 import {
   CANVAS_SCHEMA_VERSION,
   parseCanvasDocument,
-  type CanvasDocumentV2,
+  type CanvasDocument,
 } from '@loora/canvas/model'
 
 export const PUBLISH_TTL_MS = 12 * 60 * 60 * 1000
@@ -80,7 +80,7 @@ function publishedAssetUrl(url: string, linkId: string) {
     : url
 }
 
-export function referencedCanvasAssetIds(document: CanvasDocumentV2) {
+export function referencedCanvasAssetIds(document: CanvasDocument) {
   const ids = new Set<string>()
   for (const node of Object.values(document.nodes)) {
     if (node.type !== 'image' || !node.src.startsWith('/api/asset/')) continue
@@ -154,7 +154,7 @@ export async function getPublishedTarget(linkId: string) {
     }
     return {
       ...common,
-      kind: 'canvas-v2' as const,
+      kind: 'canvas' as const,
       document,
       target,
     }
@@ -194,7 +194,7 @@ export async function getPublishedTarget(linkId: string) {
 export async function buildPublishPayload(linkId: string) {
   const found = await getPublishedTarget(linkId)
   if (!found) return null
-  if (found.kind === 'canvas-v2') {
+  if (found.kind === 'canvas') {
     const compiled = compileCanvas(found.document, {
       ...(found.target.type === 'page'
         ? { pageId: found.target.id }
@@ -206,7 +206,7 @@ export async function buildPublishPayload(linkId: string) {
       userId: found.userId,
       isAdmin: found.isAdmin,
       payload: {
-        kind: 'canvas-v2' as const,
+        kind: 'canvas' as const,
         name: found.target.name || found.designName,
         html: compiled.html,
         css: compiled.css,

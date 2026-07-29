@@ -1,16 +1,12 @@
 import { describe, expect, it, mock } from 'bun:test'
-import { readFileSync } from 'node:fs'
 import {
   buildElementDoc,
-  FONTS_URL,
-  migrationElementDoc,
   classifyCode,
   compileForFrame,
   hasEntryCall,
   inlineAssetUrls,
-  LEGACY_CAPTURE_STYLE_PROPERTIES,
+  CAPTURE_STYLE_PROPERTIES,
   REACT_GLOBALS_PRELUDE,
-  selectLegacyFontEmbedCss,
   stripModuleSyntax,
   type BabelLike,
 } from './element-frame'
@@ -24,7 +20,7 @@ describe('stripModuleSyntax', () => {
 
   it('removes default and namespace imports', () => {
     const out = stripModuleSyntax(
-      `import React from 'react'\nimport * as icons from 'lucide-react'\nconst x = 1`,
+      `import React from 'react'\nimport * as icons from '@hugeicons/react'\nconst x = 1`,
     )
     expect(out).not.toContain('import')
     expect(out).toContain('const x = 1')
@@ -268,22 +264,22 @@ describe('buildElementDoc', () => {
     expect(doc).toContain('htmlToImage.toPng')
   })
 
-  it('bounds legacy capture styles and returns the final browser error', () => {
-    expect(LEGACY_CAPTURE_STYLE_PROPERTIES.length).toBeGreaterThan(100)
-    expect(LEGACY_CAPTURE_STYLE_PROPERTIES.length).toBeLessThan(250)
-    expect(new Set(LEGACY_CAPTURE_STYLE_PROPERTIES).size).toBe(
-      LEGACY_CAPTURE_STYLE_PROPERTIES.length,
+  it('bounds capture styles and returns the final browser error', () => {
+    expect(CAPTURE_STYLE_PROPERTIES.length).toBeGreaterThan(100)
+    expect(CAPTURE_STYLE_PROPERTIES.length).toBeLessThan(250)
+    expect(new Set(CAPTURE_STYLE_PROPERTIES).size).toBe(
+      CAPTURE_STYLE_PROPERTIES.length,
     )
-    expect(LEGACY_CAPTURE_STYLE_PROPERTIES).toContain('background-image')
-    expect(LEGACY_CAPTURE_STYLE_PROPERTIES).toContain('grid-template-columns')
-    expect(LEGACY_CAPTURE_STYLE_PROPERTIES).toContain('mix-blend-mode')
-    expect(LEGACY_CAPTURE_STYLE_PROPERTIES).toContain('transform')
+    expect(CAPTURE_STYLE_PROPERTIES).toContain('background-image')
+    expect(CAPTURE_STYLE_PROPERTIES).toContain('grid-template-columns')
+    expect(CAPTURE_STYLE_PROPERTIES).toContain('mix-blend-mode')
+    expect(CAPTURE_STYLE_PROPERTIES).toContain('transform')
     expect(doc).toContain('includeStyleProperties: captureStyleProperties')
     expect(doc).toContain('error: captureError || null')
     expect(doc).toContain('retry without fonts failed')
   })
 
-  it('scales full-page migration captures before the browser decodes the SVG', () => {
+  it('scales large captures before the browser decodes the SVG', () => {
     expect(doc).toContain('var maxDimension = typeof msg.maxDimension')
     expect(doc).toContain('var captureScale = Math.min')
     expect(doc).toContain("transform: 'scale(' + captureScale + ')'")
@@ -291,7 +287,7 @@ describe('buildElementDoc', () => {
     expect(doc).toContain('options.height = scaledCaptureHeight')
   })
 
-  it('passes preloaded migration fonts into the capture sandbox', () => {
+  it('passes preloaded fonts into the capture sandbox', () => {
     expect(doc).toContain('fontEmbedCSS: msg.fontEmbedCSS')
   })
 
@@ -359,24 +355,6 @@ describe('buildElementDoc', () => {
   })
 })
 
-describe('selectLegacyFontEmbedCss', () => {
-  it('keeps only font faces used by the legacy snapshot', () => {
-    const css = `
-      @font-face { font-family: 'Archivo'; src: url(data:font/woff2;base64,AAAA); }
-      @font-face { font-family: 'Space Grotesk'; src: url(data:font/woff2;base64,BBBB); }
-    `
-    const selected = selectLegacyFontEmbedCss(css, {
-      tag: 'main',
-      attributes: {},
-      style: { fontFamily: '"Space Grotesk", sans-serif' },
-      rect: { x: 0, y: 0, width: 1440, height: 3547 },
-      children: [],
-    })
-    expect(selected).toContain("font-family: 'Space Grotesk'")
-    expect(selected).not.toContain("font-family: 'Archivo'")
-  })
-})
-
 describe('inlineAssetUrls', () => {
   it('returns code without asset urls untouched and without fetching', async () => {
     const originalFetch = globalThis.fetch
@@ -403,53 +381,5 @@ describe('inlineAssetUrls', () => {
     } finally {
       globalThis.fetch = originalFetch
     }
-  })
-})
-
-describe('migration font parity', () => {
-  // Both stylesheets must declare the same faces. If they drift, the legacy
-  // render and the V2 comparison render use different typefaces, every text
-  // block falls under the 0.98 similarity threshold, and customer designs
-  // migrate to flat images instead of editable nodes.
-  const faces = (path: string) =>
-    [...readFileSync(path, 'utf8').matchAll(/font-family: '([^']+)'/g)]
-      .map((match) => match[1])
-      .sort()
-
-  it('serves fonts from our own origin so the sandbox can load them', () => {
-    expect(FONTS_URL.startsWith('/')).toBe(true)
-  })
-
-  it('declares identical families in both generated stylesheets', () => {
-    const app = faces('apps/web/public/vendor/fonts.css')
-    const sandbox = faces(`apps/web/public${FONTS_URL}`)
-    expect(sandbox).toEqual(app)
-    expect(app.length).toBeGreaterThan(0)
-  })
-
-  it('inlines the sandbox fonts, which cannot pass CORS from an opaque origin', () => {
-    const css = readFileSync(`apps/web/public${FONTS_URL}`, 'utf8')
-    expect(css).toContain('src: url(data:font/woff2;base64,')
-    expect(css).not.toContain('https://fonts.g')
-  })
-})
-
-describe('migration sandbox policy', () => {
-  const policy = () =>
-    migrationElementDoc().match(
-      /Content-Security-Policy" content="([^"]+)"/,
-    )?.[1] ?? ''
-
-  it('permits the eval that runtime JSX compilation needs', () => {
-    // Without this every legacy element fails to render and first-open
-    // migration aborts for the entire design.
-    expect(policy()).toContain("'unsafe-eval'")
-  })
-
-  it('still denies the frame any network of its own', () => {
-    const value = policy()
-    expect(value).toContain("default-src 'none'")
-    expect(value).toContain("connect-src 'none'")
-    expect(value).toContain("frame-src 'none'")
   })
 })

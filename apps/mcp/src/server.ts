@@ -33,10 +33,10 @@ import {
   viewCanvasInputSchema,
   viewNodeInputSchema,
   viewPageInputSchema,
-} from '@loora/agent/canvas-v2-tools'
+} from '@loora/agent/canvas-tools'
 import {
   MAX_NAME_LENGTH,
-  MigrationRequiredError,
+  CanvasUnavailableError,
   applyCanvasTransactions,
   applyDraft,
   closeDraft,
@@ -61,7 +61,7 @@ function json(data: unknown) {
 }
 
 function fail(error: unknown) {
-  if (error instanceof MigrationRequiredError) {
+  if (error instanceof CanvasUnavailableError) {
     return {
       content: [
         {
@@ -71,7 +71,6 @@ function fail(error: unknown) {
               error: error.message,
               code: error.code,
               designId: error.designId,
-              openUrl: error.openUrl,
             },
             null,
             2,
@@ -132,7 +131,7 @@ export function createLooraServer(userId: string) {
   server.registerTool(
     'readTree',
     {
-      description: 'Read a compact semantic Canvas V2 tree. No generated source is returned.',
+      description: 'Read a compact semantic Canvas tree. No generated source is returned.',
       inputSchema: {
         ...targetShape,
         root: readTreeInputSchema.shape.root,
@@ -568,7 +567,7 @@ export function createLooraServer(userId: string) {
   server.registerTool(
     'createDesign',
     {
-      description: 'Create a new empty Canvas V2 design.',
+      description: 'Create a new empty Canvas design.',
       inputSchema: {
         name: z.string().trim().min(1).max(MAX_NAME_LENGTH),
       },

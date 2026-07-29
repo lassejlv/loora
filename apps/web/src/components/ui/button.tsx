@@ -8,7 +8,7 @@ import { cn } from "#/lib/utils.ts";
 import { Spinner } from "#/components/ui/spinner.tsx";
 
 export const buttonVariants = cva(
-  "relative inline-flex shrink-0 cursor-pointer items-center justify-center gap-1.5 whitespace-nowrap rounded-md border font-medium text-sm outline-none transition-colors pointer-coarse:after:absolute pointer-coarse:after:size-full pointer-coarse:after:min-h-11 pointer-coarse:after:min-w-11 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background disabled:pointer-events-none disabled:opacity-56 data-loading:select-none data-loading:text-transparent sm:text-xs [&_svg:not([class*='opacity-'])]:opacity-72 [&_svg:not([class*='size-'])]:size-4 sm:[&_svg:not([class*='size-'])]:size-3.5 [&_svg]:pointer-events-none [&_svg]:shrink-0",
+  "relative inline-flex shrink-0 cursor-pointer items-center justify-center gap-1.5 whitespace-nowrap rounded-md border font-medium text-sm outline-none transition-colors pointer-coarse:after:absolute pointer-coarse:after:size-full pointer-coarse:after:min-h-11 pointer-coarse:after:min-w-11 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background disabled:pointer-events-none disabled:opacity-56 data-loading:select-none data-loading:text-transparent sm:text-[11px] [&_svg:not([class*='opacity-'])]:opacity-72 [&_svg:not([class*='size-'])]:size-4 sm:[&_svg:not([class*='size-'])]:size-3 [&_svg]:pointer-events-none [&_svg]:shrink-0",
   {
     defaultVariants: {
       size: "default",
@@ -16,18 +16,18 @@ export const buttonVariants = cva(
     },
     variants: {
       size: {
-        default: "h-8 px-[calc(--spacing(2.5)-1px)] sm:h-7",
-        icon: "size-8 sm:size-7",
-        "icon-lg": "size-9 sm:size-8",
-        "icon-sm": "size-7 sm:size-6",
+        default: "h-8 px-[calc(--spacing(2.5)-1px)] sm:h-6",
+        icon: "size-8 sm:size-6",
+        "icon-lg": "size-9 sm:size-7",
+        "icon-sm": "size-7 sm:size-5.5",
         "icon-xl":
-          "size-10 sm:size-9 [&_svg:not([class*='size-'])]:size-4.5 sm:[&_svg:not([class*='size-'])]:size-4",
+          "size-10 sm:size-8 [&_svg:not([class*='size-'])]:size-4.5 sm:[&_svg:not([class*='size-'])]:size-3.5",
         "icon-xs":
-          "size-6 rounded-sm sm:size-5.5 not-in-data-[slot=input-group]:[&_svg:not([class*='size-'])]:size-3.5 sm:not-in-data-[slot=input-group]:[&_svg:not([class*='size-'])]:size-3",
-        lg: "h-9 px-[calc(--spacing(3)-1px)] sm:h-8",
-        sm: "h-7 gap-1 px-[calc(--spacing(2)-1px)] sm:h-6",
-        xl: "h-10 px-[calc(--spacing(3.5)-1px)] text-base sm:h-9 sm:text-sm [&_svg:not([class*='size-'])]:size-4.5 sm:[&_svg:not([class*='size-'])]:size-4",
-        xs: "h-6 gap-1 rounded-sm px-[calc(--spacing(1.5)-1px)] text-xs sm:h-5.5 sm:text-[11px] [&_svg:not([class*='size-'])]:size-3.5 sm:[&_svg:not([class*='size-'])]:size-3",
+          "size-6 rounded-sm sm:size-5 not-in-data-[slot=input-group]:[&_svg:not([class*='size-'])]:size-3.5 sm:not-in-data-[slot=input-group]:[&_svg:not([class*='size-'])]:size-3",
+        lg: "h-9 px-[calc(--spacing(3)-1px)] sm:h-7",
+        sm: "h-7 gap-1 px-[calc(--spacing(2)-1px)] sm:h-5.5",
+        xl: "h-10 px-[calc(--spacing(3.5)-1px)] text-base sm:h-8 sm:text-xs [&_svg:not([class*='size-'])]:size-4.5 sm:[&_svg:not([class*='size-'])]:size-3.5",
+        xs: "h-6 gap-1 rounded-sm px-[calc(--spacing(1.5)-1px)] text-xs sm:h-5 sm:text-[11px] [&_svg:not([class*='size-'])]:size-3.5 sm:[&_svg:not([class*='size-'])]:size-3",
       },
       variant: {
         default:

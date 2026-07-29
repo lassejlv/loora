@@ -108,7 +108,7 @@ function WelcomeHero() {
 
       {/* Comment pin */}
       <motion.div
-        className="absolute right-[14%] top-[3.25rem] flex size-6 items-center justify-center rounded-full border border-border bg-background text-[10px] font-medium text-muted-foreground shadow-sm"
+        className="absolute right-[14%] top-[3.25rem] flex size-6 items-center justify-center rounded-full border border-border bg-background text-[11px] font-medium text-muted-foreground shadow-sm"
         initial={reduceMotion ? false : { opacity: 0, scale: 0.85 }}
         animate={{ opacity: 1, scale: 1 }}
         transition={{ duration: 0.3, delay: reduceMotion ? 0 : 0.16, ease: [0.22, 1, 0.36, 1] }}
@@ -161,7 +161,7 @@ export function WelcomeDialog({
               animate={enter.animate}
               transition={{ ...transition, delay: reduceMotion ? 0 : 0.03 * index }}
             >
-              <span className="w-5 shrink-0 pt-0.5 font-mono text-[11px] tabular-nums text-muted-foreground">
+              <span className="w-5 shrink-0 pt-0.5 font-mono text-xs tabular-nums text-muted-foreground">
                 {String(index + 1).padStart(2, '0')}
               </span>
               <div className="min-w-0">

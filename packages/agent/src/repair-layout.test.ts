@@ -6,14 +6,14 @@ import {
   createTextNode,
   defaultLayout,
   defaultStyle,
-  type CanvasDocumentV2,
+  type CanvasDocument,
   type CanvasLayout,
   type CanvasNode,
   type ShapeNode,
 } from '@loora/canvas/model'
 import { repairStackedLayout } from './repair-layout'
 
-function documentWith(nodes: CanvasNode[]): CanvasDocumentV2 {
+function documentWith(nodes: CanvasNode[]): CanvasDocument {
   const document = createCanvasDocument('Repair fixture', 'repair-fixture')
   for (const node of nodes) document.nodes[node.id] = node
   return document

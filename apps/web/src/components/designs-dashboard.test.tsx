@@ -40,18 +40,27 @@ mock.module('@tanstack/react-router', () => ({
   useNavigate: () => navigate,
   Link: ({
     to,
+    params,
     search,
     children,
     ...props
   }: {
     to: string
+    params?: Record<string, string>
     search?: Record<string, unknown>
     children?: ReactNode
-  }) => (
-    <a href={`${to}?${new URLSearchParams(search as Record<string, string>)}`} {...props}>
-      {children}
-    </a>
-  ),
+  }) => {
+    const path = Object.entries(params ?? {}).reduce(
+      (current, [key, value]) => current.replace(`$${key}`, encodeURIComponent(value)),
+      to,
+    )
+    const query = new URLSearchParams(search as Record<string, string>).toString()
+    return (
+      <a href={query ? `${path}?${query}` : path} {...props}>
+        {children}
+      </a>
+    )
+  },
 }))
 
 const { DesignsDashboard } = await import('./designs-dashboard')
@@ -82,7 +91,7 @@ describe('DesignsDashboard', () => {
       'Open Ideal pine',
       'Open Portfolio Design',
     ])
-    expect(links[0]?.getAttribute('href')).toBe('/app/design?id=design-new')
+    expect(links[0]?.getAttribute('href')).toBe('/design/design-new')
     expect(screen.getByText('Edited 2 hours ago')).toBeTruthy()
   })
 
@@ -109,8 +118,8 @@ describe('DesignsDashboard', () => {
     expect(created.name).toBe('Untitled')
     await waitFor(() =>
       expect(navigate).toHaveBeenCalledWith({
-        to: '/app/design',
-        search: { id: created.designId },
+        to: '/design/$id',
+        params: { id: created.designId },
       }),
     )
   })

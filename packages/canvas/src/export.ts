@@ -1,7 +1,7 @@
 import {
   type CanvasAction,
   type CanvasColor,
-  type CanvasDocumentV2,
+  type CanvasDocument,
   type CanvasLength,
   type CanvasNode,
   type CanvasPaint,
@@ -71,12 +71,12 @@ function escapeCssString(value: string) {
     .join('')
 }
 
-function colorValue(_document: CanvasDocumentV2, color: CanvasColor) {
+function colorValue(_document: CanvasDocument, color: CanvasColor) {
   if (typeof color === 'string') return color
   return `var(--loora-token-${color.token.replace(/[^a-zA-Z0-9_-]/g, '-')})`
 }
 
-function paintValue(document: CanvasDocumentV2, paint: CanvasPaint) {
+function paintValue(document: CanvasDocument, paint: CanvasPaint) {
   if (paint.type === 'solid') return colorValue(document, paint.color)
   return `linear-gradient(${paint.angle}deg, ${paint.stops
     .map((stop) => `${colorValue(document, stop.color)} ${stop.offset * 100}%`)
@@ -96,7 +96,7 @@ function lengthValue(length: CanvasLength, axis: 'width' | 'height') {
   }
 }
 
-function styleDeclarations(document: CanvasDocumentV2, node: CanvasNode) {
+function styleDeclarations(document: CanvasDocument, node: CanvasNode) {
   const { layout, style } = node
   const declarations: string[] = [
     'box-sizing:border-box',
@@ -209,7 +209,7 @@ function asInstanceComponentRoot(node: CanvasNode): CanvasNode {
 }
 
 function instanceVariant(
-  document: CanvasDocumentV2,
+  document: CanvasDocument,
   instance: InstanceNode,
 ) {
   const component = document.nodes[instance.componentId]
@@ -218,7 +218,7 @@ function instanceVariant(
 }
 
 function applyInstancePatches(
-  document: CanvasDocumentV2,
+  document: CanvasDocument,
   node: CanvasNode,
   instance: InstanceNode | undefined,
   variant = instance ? instanceVariant(document, instance) : undefined,
@@ -245,7 +245,7 @@ function renderInteractions(
   return escapeAttribute(JSON.stringify(interactions))
 }
 
-function textMarkup(document: CanvasDocumentV2, node: Extract<CanvasNode, { type: 'text' }>) {
+function textMarkup(document: CanvasDocument, node: Extract<CanvasNode, { type: 'text' }>) {
   if (node.runs.length === 0) return escapeHtml(node.text)
   const boundaries = new Set([0, node.text.length])
   for (const run of node.runs) {
@@ -271,7 +271,7 @@ function textMarkup(document: CanvasDocumentV2, node: Extract<CanvasNode, { type
 }
 
 function instanceVariantContent(
-  document: CanvasDocumentV2,
+  document: CanvasDocument,
   componentId: NodeId,
   instance: InstanceNode,
   options: CanvasExportOptions,
@@ -329,7 +329,7 @@ function instanceVariantContent(
 }
 
 function renderNode(
-  document: CanvasDocumentV2,
+  document: CanvasDocument,
   rawNode: CanvasNode,
   options: CanvasExportOptions,
   instance?: InstanceNode,
@@ -402,7 +402,7 @@ function renderNode(
 }
 
 function cssForNode(
-  document: CanvasDocumentV2,
+  document: CanvasDocument,
   node: CanvasNode,
   instance?: InstanceNode,
   variant?: string,
@@ -439,7 +439,7 @@ function cssForNode(
   return [base, pageBase, ...responsive].join('')
 }
 
-function collectCss(document: CanvasDocumentV2) {
+function collectCss(document: CanvasDocument) {
   const output: string[] = []
   for (const node of Object.values(document.nodes)) {
     output.push(cssForNode(document, node))
@@ -482,7 +482,7 @@ function collectCss(document: CanvasDocumentV2) {
 }
 
 export function compileCanvas(
-  document: CanvasDocumentV2,
+  document: CanvasDocument,
   options: CanvasExportOptions = {},
 ): CompiledCanvas {
   assertDocument(document)
@@ -579,7 +579,7 @@ document.addEventListener('submit',function(event){
 }
 
 export function compileStandaloneHtml(
-  document: CanvasDocumentV2,
+  document: CanvasDocument,
   options: CanvasExportOptions = {},
 ) {
   const compiled = compileCanvas(document, options)
@@ -599,7 +599,7 @@ export function compileStandaloneHtml(
 }
 
 export function compileReactComponent(
-  document: CanvasDocumentV2,
+  document: CanvasDocument,
   options: CanvasExportOptions = {},
 ) {
   const compiled = compileCanvas(document, options)
@@ -726,7 +726,314 @@ export default function LooraDesign() {
 `
 }
 
-export function serializeCanvasDocument(document: CanvasDocumentV2) {
+type PortableCodeFormat = 'jsx' | 'tailwind'
+
+function portableRoots(
+  document: CanvasDocument,
+  options: CanvasExportOptions,
+) {
+  assertDocument(document)
+  const requestedNode = options.nodeId
+    ? document.nodes[options.nodeId]
+    : null
+  if (
+    options.nodeId &&
+    (!requestedNode || requestedNode.type === 'component')
+  ) {
+    throw new Error(`Canvas export target "${options.nodeId}" does not exist`)
+  }
+  const roots = requestedNode
+    ? [requestedNode]
+    : Object.values(document.nodes)
+        .filter(
+          (node) =>
+            node.type === 'page' &&
+            (!options.pageId || node.id === options.pageId),
+        )
+        .sort(
+          (left, right) =>
+            left.order - right.order || left.id.localeCompare(right.id),
+        )
+  if (options.pageId && roots.length === 0) {
+    throw new Error(`Canvas export Page "${options.pageId}" does not exist`)
+  }
+  return roots
+}
+
+function cssPropertyName(value: string) {
+  return value.replace(/-([a-z])/g, (_, character: string) =>
+    character.toUpperCase(),
+  )
+}
+
+function portableDeclarations(
+  document: CanvasDocument,
+  node: CanvasNode,
+  width: number,
+  exportedRoot: boolean,
+  instance?: InstanceNode,
+) {
+  const responsive = resolveNodeAtWidth(document, node, width)
+  const patched = applyInstancePatches(document, responsive, instance)
+  const styled =
+    instance && patched.type === 'component'
+      ? asInstanceComponentRoot(patched)
+      : patched
+  const declarations = new Map<string, string>()
+  for (const item of styleDeclarations(document, styled).split(';')) {
+    const separator = item.indexOf(':')
+    if (separator <= 0) continue
+    declarations.set(
+      item.slice(0, separator),
+      item.slice(separator + 1),
+    )
+  }
+  if (styled.type === 'image') declarations.set('object-fit', styled.fit)
+  if (styled.hidden) declarations.set('display', 'none')
+  if (exportedRoot) {
+    declarations.set('position', 'relative')
+    declarations.set('left', '0')
+    declarations.set('top', '0')
+    if (styled.type === 'page') {
+      declarations.set('width', '100%')
+      declarations.set('height', 'auto')
+      declarations.set('min-height', `${styled.viewport.minHeight}px`)
+    }
+  }
+  return declarations
+}
+
+function jsxStyle(declarations: Map<string, string>) {
+  const entries = [...declarations].map(
+    ([property, value]) =>
+      `${JSON.stringify(cssPropertyName(property))}: ${JSON.stringify(value)}`,
+  )
+  return `{{ ${entries.join(', ')} }}`
+}
+
+function tailwindValue(value: string) {
+  return value
+    .replaceAll('"', "'")
+    .replace(/\s+/g, '_')
+    .replaceAll('[', '\\[')
+    .replaceAll(']', '\\]')
+}
+
+function tailwindClasses(declarations: Map<string, string>) {
+  return [...declarations]
+    .map(
+      ([property, value]) =>
+        `[${property}:${tailwindValue(value)}]`,
+    )
+    .join(' ')
+}
+
+function portableAttributes(
+  document: CanvasDocument,
+  node: CanvasNode,
+  format: PortableCodeFormat,
+  options: CanvasExportOptions,
+  exportedRoot: boolean,
+  instance?: InstanceNode,
+) {
+  const width = options.width ?? 1440
+  const responsive = resolveNodeAtWidth(document, node, width)
+  const patched = applyInstancePatches(document, responsive, instance)
+  const declarations = portableDeclarations(
+    document,
+    node,
+    width,
+    exportedRoot,
+    instance,
+  )
+  const attributes = [
+    `data-loora-node=${JSON.stringify(patched.id)}`,
+    format === 'tailwind'
+      ? `className=${JSON.stringify(tailwindClasses(declarations))}`
+      : `style=${jsxStyle(declarations)}`,
+  ]
+  const openUrl = patched.interactions
+    .flatMap((interaction) =>
+      interaction.trigger === 'click' ? interaction.actions : [],
+    )
+    .find((action) => action.type === 'open-url')
+  if (patched.type === 'frame' && patched.semanticTag === 'a' && openUrl?.type === 'open-url') {
+    attributes.push(`href=${JSON.stringify(openUrl.url)}`)
+    if (openUrl.target) attributes.push(`target=${JSON.stringify(openUrl.target)}`)
+    if (openUrl.target === '_blank') attributes.push('rel="noreferrer"')
+  }
+  return attributes.join(' ')
+}
+
+function indent(value: string, spaces: number) {
+  const padding = ' '.repeat(spaces)
+  return value
+    .split('\n')
+    .map((line) => `${padding}${line}`)
+    .join('\n')
+}
+
+function portableText(node: Extract<CanvasNode, { type: 'text' }>) {
+  return `{${JSON.stringify(node.text)}}`
+}
+
+function renderPortableNode(
+  document: CanvasDocument,
+  rawNode: CanvasNode,
+  options: CanvasExportOptions,
+  format: PortableCodeFormat,
+  instance?: InstanceNode,
+  exportedRoot = false,
+): string {
+  const width = options.width ?? 1440
+  const responsive = resolveNodeAtWidth(document, rawNode, width)
+  const node = applyInstancePatches(document, responsive, instance)
+  const attributes = portableAttributes(
+    document,
+    rawNode,
+    format,
+    options,
+    exportedRoot,
+    instance,
+  )
+  if (node.type === 'text') {
+    return `<div ${attributes}>${portableText(node)}</div>`
+  }
+  if (node.type === 'image') {
+    const src = options.assetUrl?.(node.src) ?? node.src
+    return `<img ${attributes} src=${JSON.stringify(src)} alt=${JSON.stringify(node.alt)} />`
+  }
+  if (node.type === 'shape') return `<div ${attributes} />`
+  if (node.type === 'vector') {
+    const paths = node.paths.map((path) => {
+      const pathAttributes = [
+        `d=${JSON.stringify(path.d)}`,
+        path.fill
+          ? `fill=${JSON.stringify(colorValue(document, path.fill))}`
+          : 'fill="none"',
+        path.stroke
+          ? `stroke=${JSON.stringify(colorValue(document, path.stroke))}`
+          : '',
+        path.strokeWidth !== undefined
+          ? `strokeWidth={${path.strokeWidth}}`
+          : '',
+      ].filter(Boolean)
+      return `<path ${pathAttributes.join(' ')} />`
+    })
+    return `<svg ${attributes} viewBox=${JSON.stringify(node.viewBox)} aria-hidden="true">
+${indent(paths.join('\n'), 2)}
+</svg>`
+  }
+  if (node.type === 'instance') {
+    const component = document.nodes[node.componentId]
+    if (!component || component.type !== 'component') return ''
+    const children = orderedChildren(document, component.id)
+      .map((child) =>
+        renderPortableNode(document, child, options, format, node),
+      )
+      .filter(Boolean)
+    return `<div ${attributes}>
+${indent(children.join('\n'), 2)}
+</div>`
+  }
+  if (node.type === 'component') {
+    if (!instance) return ''
+    return orderedChildren(document, node.id)
+      .map((child) =>
+        renderPortableNode(document, child, options, format, instance),
+      )
+      .filter(Boolean)
+      .join('\n')
+  }
+  const tag =
+    node.type === 'frame'
+      ? node.semanticTag
+      : node.type === 'page'
+        ? 'main'
+        : 'div'
+  const children = orderedChildren(document, node.id)
+    .map((child) =>
+      renderPortableNode(document, child, options, format, instance),
+    )
+    .filter(Boolean)
+  if (children.length === 0) return `<${tag} ${attributes} />`
+  return `<${tag} ${attributes}>
+${indent(children.join('\n'), 2)}
+</${tag}>`
+}
+
+function tokenDeclarations(document: CanvasDocument) {
+  return new Map(
+    Object.values(document.tokens).map((token) => [
+      `--loora-token-${token.id.replace(/[^a-zA-Z0-9_-]/g, '-')}`,
+      String(token.modes?.[document.activeThemeId] ?? token.value),
+    ]),
+  )
+}
+
+function compilePortableComponent(
+  document: CanvasDocument,
+  options: CanvasExportOptions,
+  format: PortableCodeFormat,
+) {
+  const roots = portableRoots(document, options)
+    .map((root) =>
+      renderPortableNode(
+        document,
+        root,
+        options,
+        format,
+        undefined,
+        true,
+      ),
+    )
+    .filter(Boolean)
+  const content =
+    roots.length === 1
+      ? roots[0]!
+      : `<>
+${indent(roots.join('\n'), 2)}
+</>`
+  const variables = tokenDeclarations(document)
+  const variableAttributes =
+    variables.size === 0
+      ? ''
+      : format === 'tailwind'
+        ? ` className=${JSON.stringify(tailwindClasses(variables))}`
+        : ` style=${jsxStyle(variables)}`
+  const wrapped = variableAttributes
+    ? `<div${variableAttributes}>
+${indent(content, 2)}
+</div>`
+    : content
+  return `export default function LooraDesign() {
+  return (
+${indent(wrapped, 4)}
+  )
+}
+`
+}
+
+/** Pure JSX with structured Canvas styles expressed as React inline styles. */
+export function compileJsxComponent(
+  document: CanvasDocument,
+  options: CanvasExportOptions = {},
+) {
+  return compilePortableComponent(document, options, 'jsx')
+}
+
+/**
+ * JSX whose visual rules are literal Tailwind arbitrary-property utilities.
+ * It needs no generated stylesheet and remains selection/page scoped.
+ */
+export function compileTailwindComponent(
+  document: CanvasDocument,
+  options: CanvasExportOptions = {},
+) {
+  return compilePortableComponent(document, options, 'tailwind')
+}
+
+export function serializeCanvasDocument(document: CanvasDocument) {
   assertDocument(document)
   return JSON.stringify(
     { schema: 'loora.canvas', version: 2, document },

@@ -8,11 +8,11 @@ import { canUseApp } from '@loora/auth/preview-access'
 import {
   CANVAS_SCHEMA_VERSION,
   parseCanvasDocument,
-  type CanvasDocumentV2,
+  type CanvasDocument,
 } from '@loora/canvas/model'
 
 export function referencedAssetIds(
-  sourceDocument: CanvasElement[] | CanvasDocumentV2,
+  sourceDocument: CanvasElement[] | CanvasDocument,
 ) {
   const ids = new Set<string>()
   const source = JSON.stringify(sourceDocument)
@@ -135,7 +135,7 @@ export async function buildHandoffPayload(token: string, origin: string) {
       },
       guidance: {
         sourceOfTruth:
-          'CanvasDocumentV2 is normalized structured UI data. Do not look for or execute source strings.',
+          'CanvasDocument is normalized structured UI data. Do not look for or execute source strings.',
         hierarchy:
           'Use parentId and numeric order to reconstruct Pages, components, frames, and content nodes.',
         layout:

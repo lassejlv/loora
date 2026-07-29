@@ -283,7 +283,7 @@ export interface CanvasTheme {
   name: string
 }
 
-export interface CanvasDocumentV2 {
+export interface CanvasDocument {
   schemaVersion: typeof CANVAS_SCHEMA_VERSION
   id: string
   name: string
@@ -392,7 +392,7 @@ export function defaultStyle(patch: Partial<CanvasStyle> = {}): CanvasStyle {
 export function createCanvasDocument(
   name = 'Untitled',
   id = canvasId('doc'),
-): CanvasDocumentV2 {
+): CanvasDocument {
   const now = Date.now()
   return {
     schemaVersion: CANVAS_SCHEMA_VERSION,
@@ -513,13 +513,13 @@ export function createTextNode(
   } satisfies TextNode, patch)
 }
 
-export function orderedChildren(document: CanvasDocumentV2, parentId: NodeId | null) {
+export function orderedChildren(document: CanvasDocument, parentId: NodeId | null) {
   return Object.values(document.nodes)
     .filter((node) => node.parentId === parentId)
     .sort((left, right) => left.order - right.order || left.id.localeCompare(right.id))
 }
 
-export function findBreakpoint(document: CanvasDocumentV2, width: number) {
+export function findBreakpoint(document: CanvasDocument, width: number) {
   return [...document.breakpoints]
     .sort((left, right) => left.minWidth - right.minWidth)
     .filter((breakpoint) => breakpoint.minWidth <= width)
@@ -564,7 +564,7 @@ export function applyNodePatch(
 }
 
 export function resolveNodeAtWidth(
-  document: CanvasDocumentV2,
+  document: CanvasDocument,
   node: CanvasNode,
   width: number,
 ): CanvasNode {
@@ -581,7 +581,7 @@ export function resolveNodeAtWidth(
 }
 
 function applyInstanceToNode(
-  document: CanvasDocumentV2,
+  document: CanvasDocument,
   source: CanvasNode,
   instance: InstanceNode,
 ) {
@@ -602,7 +602,7 @@ function applyInstanceToNode(
 }
 
 export function resolveNodeRef(
-  document: CanvasDocumentV2,
+  document: CanvasDocument,
   ref: NodeRef,
   width = 1_440,
 ): CanvasNode | null {
@@ -704,7 +704,7 @@ function safeCssText(value: unknown, max = 200): value is string {
 
 function validColor(
   value: unknown,
-  document: CanvasDocumentV2,
+  document: CanvasDocument,
 ): value is CanvasColor {
   if (isRecord(value)) {
     return (
@@ -723,7 +723,7 @@ function validColor(
   )
 }
 
-function validPaint(value: unknown, document: CanvasDocumentV2) {
+function validPaint(value: unknown, document: CanvasDocument) {
   if (!isRecord(value) || typeof value.type !== 'string') return false
   if (value.type === 'solid') {
     return (
@@ -932,7 +932,7 @@ function validTypography(value: unknown, partial = false) {
 
 function validStylePatch(
   value: unknown,
-  document: CanvasDocumentV2,
+  document: CanvasDocument,
   partial = true,
 ) {
   if (!isRecord(value)) return false
@@ -1009,7 +1009,7 @@ function validStylePatch(
 
 function validInteractions(
   value: unknown,
-  document: CanvasDocumentV2,
+  document: CanvasDocument,
 ) {
   if (!Array.isArray(value) || value.length > 100) return false
   return value.every((interaction) => {
@@ -1067,7 +1067,7 @@ function validInteractions(
 
 function validTextRun(
   value: unknown,
-  document: CanvasDocumentV2,
+  document: CanvasDocument,
 ): value is TextRun {
   return (
     isRecord(value) &&
@@ -1099,7 +1099,7 @@ const patchKeys = new Set([
   'variant',
 ])
 
-function validNodePatch(value: unknown, document: CanvasDocumentV2) {
+function validNodePatch(value: unknown, document: CanvasDocument) {
   if (!isRecord(value) || Object.keys(value).some((key) => !patchKeys.has(key))) {
     return false
   }
@@ -1190,7 +1190,7 @@ const fastMutationKeys = new Set([
 ])
 
 export function validateCommonNodeMutationPatch(
-  document: CanvasDocumentV2,
+  document: CanvasDocument,
   value: unknown,
 ) {
   if (
@@ -1343,7 +1343,7 @@ export function validateDocument(value: unknown): DocumentValidationResult {
     pushIssue(issues, 'metadata', 'Document metadata is invalid')
   }
 
-  const document = value as unknown as CanvasDocumentV2
+  const document = value as unknown as CanvasDocument
   const entries = Object.entries(document.nodes)
   if (entries.length > MAX_CANVAS_NODES) {
     pushIssue(issues, 'nodes', `Canvas has more than ${MAX_CANVAS_NODES} nodes`)
@@ -1864,19 +1864,19 @@ export function validateDocument(value: unknown): DocumentValidationResult {
   return { ok: issues.length === 0, issues }
 }
 
-export function assertDocument(document: unknown): CanvasDocumentV2 {
+export function assertDocument(document: unknown): CanvasDocument {
   const result = validateDocument(document)
   if (!result.ok) {
     throw new Error(result.issues.map((issue) => `${issue.path}: ${issue.message}`).join('\n'))
   }
-  return document as CanvasDocumentV2
+  return document as CanvasDocument
 }
 
-export function parseCanvasDocument(value: unknown): CanvasDocumentV2 {
+export function parseCanvasDocument(value: unknown): CanvasDocument {
   return assertDocument(value)
 }
 
-export const canvasDocumentSchema: CanvasRuntimeSchema<CanvasDocumentV2> = {
+export const canvasDocumentSchema: CanvasRuntimeSchema<CanvasDocument> = {
   parse: parseCanvasDocument,
   safeParse(value) {
     try {
@@ -1891,7 +1891,7 @@ export const canvasDocumentSchema: CanvasRuntimeSchema<CanvasDocumentV2> = {
 }
 
 export function validateNodeRef(
-  document: CanvasDocumentV2,
+  document: CanvasDocument,
   value: unknown,
 ): DocumentValidationResult {
   const issues: DocumentValidationIssue[] = []
@@ -1956,7 +1956,7 @@ export function validateNodeRef(
 }
 
 export function parseNodeRef(
-  document: CanvasDocumentV2,
+  document: CanvasDocument,
   value: unknown,
 ): NodeRef {
   const result = validateNodeRef(document, value)
@@ -1971,7 +1971,7 @@ export function parseNodeRef(
 }
 
 export function nodeRefSchema(
-  document: CanvasDocumentV2,
+  document: CanvasDocument,
 ): CanvasRuntimeSchema<NodeRef> {
   return {
     parse: (value) => parseNodeRef(document, value),
@@ -1992,7 +1992,7 @@ export function nodeRefSchema(
 }
 
 export function validateCommentPin(
-  document: CanvasDocumentV2,
+  document: CanvasDocument,
   value: unknown,
 ): DocumentValidationResult {
   const issues: DocumentValidationIssue[] = []
@@ -2017,7 +2017,7 @@ export function validateCommentPin(
 }
 
 export function canvasCommentPinSchema(
-  document: CanvasDocumentV2,
+  document: CanvasDocument,
 ): CanvasRuntimeSchema<CanvasCommentPin> {
   const parse = (value: unknown) => {
     const result = validateCommentPin(document, value)

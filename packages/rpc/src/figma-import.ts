@@ -14,7 +14,7 @@ import {
   defaultStyle,
   orderedChildren,
   type CanvasColor,
-  type CanvasDocumentV2,
+  type CanvasDocument,
   type CanvasLayout,
   type CanvasNode,
   type CanvasPaint,
@@ -192,7 +192,7 @@ export interface FigmaImportSummary {
 }
 
 export interface FigmaConversion {
-  document: CanvasDocumentV2
+  document: CanvasDocument
   fallbacks: RasterFallback[]
   fonts: string[]
   pages: number
@@ -501,7 +501,7 @@ function safeIdPart(value: string) {
   return value.replace(/[^a-zA-Z0-9_-]+/g, '_').slice(0, 80)
 }
 
-function createIdAllocator(existing: CanvasDocumentV2) {
+function createIdAllocator(existing: CanvasDocument) {
   const used = new Set(Object.keys(existing.nodes))
   return (prefix: string, figmaId: string) => {
     const base = `${prefix}_${safeIdPart(figmaId)}`
@@ -526,7 +526,7 @@ function collectComponents(node: FigmaNode, output: FigmaNode[]) {
 }
 
 interface ConvertContext {
-  document: CanvasDocumentV2
+  document: CanvasDocument
   allocate: (prefix: string, figmaId: string) => string
   componentIds: Map<string, NodeId>
   componentVariantNames: Map<string, string>
@@ -878,7 +878,7 @@ function componentVariantOverrides(
   return overrides
 }
 
-function pageRight(document: CanvasDocumentV2) {
+function pageRight(document: CanvasDocument) {
   return Object.values(document.nodes)
     .filter((node): node is PageNode => node.type === 'page')
     .reduce((right, page) => {
@@ -1299,7 +1299,7 @@ async function renderFallbacks(
 async function readTarget(
   userId: string,
   target: FigmaImportTarget,
-): Promise<CanvasDocumentV2> {
+): Promise<CanvasDocument> {
   const row = target.draftId
     ? await db
         .select({
@@ -1340,7 +1340,7 @@ async function readTarget(
     !row.document
   ) {
     throw new FigmaIntegrationError(
-      'The target changed or still needs Canvas V2 migration. Reload it and try again.',
+      'The target changed or uses an unsupported legacy format. Reload it and try again.',
       'INVALID_FILE',
     )
   }

@@ -23,7 +23,7 @@ export function IntegrationCard({
           {status}
         </div>
         {description ? (
-          <div className="text-[11px] leading-relaxed text-muted-foreground">{description}</div>
+          <div className="text-xs leading-relaxed text-muted-foreground">{description}</div>
         ) : null}
       </header>
       {children ? <div className="flex flex-col gap-2.5">{children}</div> : null}

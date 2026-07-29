@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "exports": {
-    "./canvas-v2-tools": "./src/canvas-v2-tools.ts",
+    "./canvas-tools": "./src/canvas-tools.ts",
     "./repair-layout": "./src/repair-layout.ts"
   },
   "dependencies": {

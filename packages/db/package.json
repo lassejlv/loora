@@ -15,7 +15,6 @@
   "dependencies": {
     "@loora/canvas": "workspace:*",
     "@neondatabase/serverless": "^1.1.0",
-    "ai": "catalog:",
     "drizzle-orm": "catalog:"
   },
   "devDependencies": {

@@ -3,7 +3,7 @@
 import { mergeProps } from "@base-ui/react/merge-props";
 import { useRender } from "@base-ui/react/use-render";
 import { ChevronLeftIcon, ChevronRightIcon } from "#/components/icons";
-import { MoreHorizontalIcon } from "lucide-react";
+import { MoreHorizontalIcon } from "#/components/icons";
 import type * as React from "react";
 import { cn } from "#/lib/utils.ts";
 import { type Button, buttonVariants } from "#/components/ui/button.tsx";
@@ -120,7 +120,7 @@ export function PaginationEllipsis({
       data-slot="pagination-ellipsis"
       {...props}
     >
-      <MoreHorizontalIcon className="size-5 sm:size-4" />
+      <MoreHorizontalIcon className="size-5 sm:size-3.5" />
       <span className="sr-only">More pages</span>
     </span>
   );

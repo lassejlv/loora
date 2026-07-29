@@ -1,6 +1,6 @@
 import {
   assertDocument,
-  type CanvasDocumentV2,
+  type CanvasDocument,
   type CanvasNode,
   type CanvasStyle,
   type CanvasLayout,
@@ -284,7 +284,7 @@ export const canvasTransactionSchema: CanvasRuntimeSchema<CanvasTransaction> = {
 }
 
 export interface CanvasApplyResult {
-  document: CanvasDocumentV2
+  document: CanvasDocument
   inverse: CanvasTransaction
   changedNodeIds: Set<NodeId>
   changedTokenIds: Set<string>
@@ -302,8 +302,8 @@ export interface CanvasTransactionConflict {
 }
 
 export type CanvasRebaseResult =
-  | { ok: true; document: CanvasDocumentV2; transactions: CanvasTransaction[] }
-  | { ok: false; document: CanvasDocumentV2; conflicts: CanvasTransactionConflict[] }
+  | { ok: true; document: CanvasDocument; transactions: CanvasTransaction[] }
+  | { ok: false; document: CanvasDocument; conflicts: CanvasTransactionConflict[] }
 
 function clone<T>(value: T): T {
   return structuredClone(value)
@@ -340,7 +340,7 @@ function valueAtPath(value: unknown, path: string) {
 }
 
 export function preconditionsForNodePatch(
-  document: CanvasDocumentV2,
+  document: CanvasDocument,
   id: NodeId,
   patch: NodeMutationPatch,
 ): CanvasFieldPrecondition[] {
@@ -373,7 +373,7 @@ export function preconditionsForNodePatch(
 }
 
 export function preconditionsForNodeMove(
-  document: CanvasDocumentV2,
+  document: CanvasDocument,
   id: NodeId,
 ): CanvasFieldPrecondition[] {
   const node = document.nodes[id]
@@ -395,7 +395,7 @@ export function preconditionsForNodeMove(
 }
 
 export function withTransactionPreconditions(
-  document: CanvasDocumentV2,
+  document: CanvasDocument,
   transaction: CanvasTransaction,
 ): CanvasTransaction {
   if (transaction.preconditions !== undefined) return transaction
@@ -473,7 +473,7 @@ export function withTransactionPreconditions(
 }
 
 function verifyPreconditions(
-  document: CanvasDocumentV2,
+  document: CanvasDocument,
   transaction: CanvasTransaction,
 ): CanvasTransactionConflict[] {
   const conflicts: CanvasTransactionConflict[] = []
@@ -561,7 +561,7 @@ function patchNode(
   return next
 }
 
-function descendants(document: CanvasDocumentV2, id: NodeId) {
+function descendants(document: CanvasDocument, id: NodeId) {
   const result: CanvasNode[] = []
   const queue = [id]
   while (queue.length > 0) {
@@ -579,7 +579,7 @@ function inverseId(transactionId: string) {
 }
 
 export function applyTransaction(
-  source: CanvasDocumentV2,
+  source: CanvasDocument,
   transaction: CanvasTransaction,
   options: {
     checkPreconditions?: boolean
@@ -593,7 +593,7 @@ export function applyTransaction(
     }
   }
 
-  const document: CanvasDocumentV2 = {
+  const document: CanvasDocument = {
     ...source,
     nodes: { ...source.nodes },
     tokens: { ...source.tokens },
@@ -761,7 +761,7 @@ export function applyTransaction(
 }
 
 function canValidateIncrementally(
-  document: CanvasDocumentV2,
+  document: CanvasDocument,
   transaction: CanvasTransaction,
 ) {
   return transaction.operations.every(
@@ -785,7 +785,7 @@ export class CanvasConflictError extends Error {
 }
 
 export function rebaseTransactions(
-  remote: CanvasDocumentV2,
+  remote: CanvasDocument,
   transactions: CanvasTransaction[],
 ): CanvasRebaseResult {
   let document = remote
@@ -815,7 +815,7 @@ export function orderBetween(
 }
 
 export function rebalanceSiblingOperations(
-  document: CanvasDocumentV2,
+  document: CanvasDocument,
   parentId: NodeId | null,
 ): CanvasOperation[] {
   return orderedChildren(document, parentId).map((node, index) => ({
@@ -842,7 +842,7 @@ export interface CanvasBounds {
 }
 
 export class CanvasEngine {
-  #document: CanvasDocumentV2
+  #document: CanvasDocument
   #undo: HistoryEntry[] = []
   #redo: HistoryEntry[] = []
   #listeners = new Set<Listener>()
@@ -854,7 +854,7 @@ export class CanvasEngine {
   #appliedTransactionOrder: string[] = []
   #revision = 0
 
-  constructor(document: CanvasDocumentV2) {
+  constructor(document: CanvasDocument) {
     this.#document = assertDocument(clone(document))
     this.#rebuildIndexes()
   }
@@ -975,7 +975,7 @@ export class CanvasEngine {
     return result
   }
 
-  replaceDocument(document: CanvasDocumentV2) {
+  replaceDocument(document: CanvasDocument) {
     this.#document = assertDocument(clone(document))
     this.#undo = []
     this.#redo = []
@@ -1038,8 +1038,8 @@ export class CanvasEngine {
   }
 
   #updateIndexes(
-    previous: CanvasDocumentV2,
-    next: CanvasDocumentV2,
+    previous: CanvasDocument,
+    next: CanvasDocument,
     changedNodeIds: Set<NodeId>,
   ) {
     const affectedParents = new Set<NodeId | null>()

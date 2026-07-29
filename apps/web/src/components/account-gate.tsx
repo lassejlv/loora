@@ -1,6 +1,6 @@
 import { useState, type ReactNode } from 'react'
 import { authClient } from '@loora/auth/client'
-import { CanvasV2App } from '#/components/canvas-v2/app'
+import { CanvasApp } from '#/components/canvas/app'
 import { AuthScreen } from '#/components/auth-screen'
 import { PreviewAccessScreen } from '#/components/preview-access-screen'
 import { SubscriptionScreen } from '#/components/subscription-screen'
@@ -12,7 +12,7 @@ import {
 
 /**
  * Session, preview access, and billing gates for every signed-in surface.
- * Both `/app` and `/app/design` mount their content through this so the gates
+ * Both `/app` and `/design/$id` mount their content through this so the gates
  * behave identically wherever a link drops the visitor.
  */
 export function AccountGate({ children }: { children: ReactNode }) {
@@ -35,7 +35,7 @@ export function AccountGate({ children }: { children: ReactNode }) {
           className="pointer-events-none select-none"
           inert
         >
-          <CanvasV2App preview />
+          <CanvasApp preview />
         </div>
         {welcomeOpen ? (
           <WelcomeDialog
@@ -57,11 +57,11 @@ export function AccountGate({ children }: { children: ReactNode }) {
   return (
     <PreviewAccessScreen
       userId={session.user.id}
-      preview={<CanvasV2App preview />}
+      preview={<CanvasApp preview />}
     >
       <SubscriptionScreen
         userId={session.user.id}
-        preview={<CanvasV2App preview />}
+        preview={<CanvasApp preview />}
       >
         {children}
       </SubscriptionScreen>

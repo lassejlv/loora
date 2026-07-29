@@ -189,7 +189,7 @@ export function ShortcutsSettings({
         )
       })}
 
-      <p className="text-[11px] text-muted-foreground">
+      <p className="text-xs text-muted-foreground">
         Defaults include {Object.keys(DEFAULT_SHORTCUTS).length} actions
         {chordsOf(DEFAULT_SHORTCUTS['tool.select']).length
           ? ` (e.g. Select is ${formatChord(DEFAULT_SHORTCUTS['tool.select'])})`
