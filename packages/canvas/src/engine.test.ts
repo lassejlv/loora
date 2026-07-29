@@ -87,6 +87,37 @@ describe('Canvas transactions', () => {
     ).toBeUndefined()
   })
 
+  it('updates named themes and their token modes atomically', () => {
+    const engine = engineFixture()
+    const before = structuredClone(engine.document)
+    const result = engine.apply({
+      id: 'add-focus-theme',
+      label: 'Add focus theme',
+      operations: [
+        {
+          type: 'theme.upsert',
+          theme: { id: 'focus', name: 'Focus' },
+        },
+        {
+          type: 'token.upsert',
+          token: {
+            id: 'accent',
+            name: 'Accent',
+            type: 'color',
+            value: '#3b82f6',
+            modes: { focus: '#f59e0b' },
+          },
+        },
+      ],
+    })
+
+    expect(result.changedThemeIds.has('focus')).toBe(true)
+    expect(engine.document.themes.focus?.name).toBe('Focus')
+    expect(engine.document.tokens.accent?.modes?.focus).toBe('#f59e0b')
+    engine.undo()
+    expect(engine.document).toEqual(before)
+  })
+
   it('leaves the source untouched when final validation fails', () => {
     const engine = engineFixture()
     const before = structuredClone(engine.document)

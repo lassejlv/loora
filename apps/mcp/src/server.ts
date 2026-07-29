@@ -361,7 +361,7 @@ export function createLooraServer(userId: string) {
     'createPage',
     {
       description:
-        'Create an editable responsive Page with typed local state and nested structured nodes in one engine transaction. Event interactions can set, toggle, or increment state and react through conditional state-change rules. Model normal Tailwind layouts with flex/grid, gap, padding, fill, and hug; use absolute positioning only intentionally.',
+        'Create an editable responsive Page with typed local state and nested structured nodes in one engine transaction. Event interactions can set, toggle, or increment state, switch any named visual theme, and react through conditional state-change rules. Model normal Tailwind layouts with flex/grid, gap, padding, fill, and hug; use absolute positioning only intentionally.',
       inputSchema: { ...targetShape, ...createPageInputSchema.shape },
     },
     tool(
@@ -424,7 +424,7 @@ export function createLooraServer(userId: string) {
     'patchNodes',
     {
       description:
-        'Patch structured layout, visual, text, responsive, variant, typed Page/component state, and declarative event interaction fields atomically through the Canvas engine. Runtime state stays ephemeral and never replaces the Canvas document.',
+        'Patch structured layout, visual, text, responsive, variant, typed Page/component state, and declarative event interaction fields atomically through the Canvas engine. Events may switch any named visual theme; runtime state and the selected runtime theme stay ephemeral.',
       inputSchema: { ...targetShape, ...patchNodesInputSchema.shape },
     },
     tool(
@@ -543,7 +543,7 @@ export function createLooraServer(userId: string) {
     'createComponent',
     {
       description:
-        'Create an off-canvas reusable component definition with optional instance-local typed state and declarative event interactions.',
+        'Create an off-canvas reusable component definition with optional instance-local typed state and declarative event interactions, including scoped named-theme switching.',
       inputSchema: { ...targetShape, ...createComponentInputSchema.shape },
     },
     tool(
@@ -620,7 +620,8 @@ export function createLooraServer(userId: string) {
   server.registerTool(
     'setTokens',
     {
-      description: 'Create or update structured design tokens.',
+      description:
+        'Create or update named visual themes and structured design tokens. Put per-theme token values in modes keyed by theme id, then use set-theme event actions to switch them at runtime.',
       inputSchema: { ...targetShape, ...setTokensInputSchema.shape },
     },
     tool(
@@ -632,10 +633,11 @@ export function createLooraServer(userId: string) {
           {
             id: canvasId('tx'),
             label: 'MCP updated tokens',
-            operations: tokenOperations(args.tokens),
+            operations: tokenOperations(args.tokens, args.themes),
           },
         ])
         return {
+          themeIds: args.themes.map((theme) => theme.id),
           tokenIds: args.tokens.map((token) => token.id),
           revision: result.revision,
         }

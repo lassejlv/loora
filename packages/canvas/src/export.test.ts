@@ -118,6 +118,86 @@ describe('Canvas exports', () => {
     expect(tailwind).not.toContain('style={{')
   })
 
+  it('switches generic named themes from local state in every code export', () => {
+    const document = fixture()
+    const page = document.nodes.page
+    if (page.type !== 'page') throw new Error('Fixture Page is missing')
+    document.themes.focus = { id: 'focus', name: 'Focus' }
+    document.tokens.accent = {
+      id: 'accent',
+      name: 'Accent',
+      type: 'color',
+      value: '#3b82f6',
+      modes: { focus: '#f59e0b' },
+    }
+    page.states = {
+      visualMode: {
+        id: 'visualMode',
+        name: 'Visual mode',
+        type: 'string',
+        initial: 'default',
+      },
+    }
+    document.nodes.hero.interactions = [
+      {
+        trigger: 'click',
+        actions: [
+          {
+            type: 'set-state',
+            stateId: 'visualMode',
+            value: 'focus',
+          },
+        ],
+      },
+    ]
+    page.interactions = [
+      {
+        trigger: 'state-change',
+        stateId: 'visualMode',
+        when: [
+          {
+            stateId: 'visualMode',
+            operator: 'equals',
+            value: 'focus',
+          },
+        ],
+        actions: [{ type: 'set-theme', themeId: 'focus' }],
+      },
+    ]
+
+    const compiled = compileCanvas(document)
+    const react = compileReactComponent(document)
+    const jsx = compileJsxComponent(document)
+    const tailwind = compileTailwindComponent(document)
+
+    expect(compiled.html).toContain('data-loora-theme-values=')
+    expect(compiled.runtime).toContain("action.type==='set-theme'")
+    expect(react).toContain("action.type === 'set-theme'")
+    expect(jsx).toContain('data-loora-theme-values=')
+    expect(tailwind).toContain('data-loora-theme-values=')
+
+    const sandbox =
+      globalThis.document.implementation.createHTMLDocument('theme-runtime')
+    sandbox.body.innerHTML = compiled.html
+    new Function('document', 'window', 'CSS', compiled.runtime)(
+      sandbox,
+      { open: () => null },
+      { escape: (value: string) => value },
+    )
+    const click = sandbox.createEvent('Event')
+    click.initEvent('click', true, true)
+    sandbox
+      .querySelector('[data-loora-node="hero"]')!
+      .dispatchEvent(click)
+    const renderedPage = sandbox.querySelector<HTMLElement>(
+      '[data-loora-node="page"]',
+    )!
+    expect(renderedPage.dataset.looraTheme).toBe('focus')
+    expect(
+      renderedPage.style.getPropertyValue('--loora-token-accent'),
+    ).toBe('#f59e0b')
+  })
+
   it('exports typed state, event conditions, and a bounded local runtime', () => {
     const document = fixture()
     const page = document.nodes.page

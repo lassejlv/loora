@@ -13,6 +13,24 @@ function findCanvasNode(root: ParentNode, id: string) {
   return null
 }
 
+export function setCanvasTheme(root: HTMLElement, themeId: string) {
+  root.dataset.looraTheme = themeId
+  const source =
+    root.closest<HTMLElement>('[data-loora-theme-values]') ??
+    root.querySelector<HTMLElement>('[data-loora-theme-values]')
+  if (!source) return
+  let themes: Record<string, Record<string, string | number>>
+  try {
+    themes = JSON.parse(source.dataset.looraThemeValues ?? '{}') as typeof themes
+  } catch {
+    return
+  }
+  for (const [property, value] of Object.entries(themes[themeId] ?? {})) {
+    if (!/^--loora-token-[a-zA-Z0-9_-]+$/.test(property)) continue
+    root.style.setProperty(property, String(value))
+  }
+}
+
 export function setCanvasVariant(instance: HTMLElement, variant: string) {
   instance.dataset.looraVariant = variant
   let variants: Record<
@@ -105,6 +123,10 @@ export function applyCanvasActions(
       if (Object.is(current, next)) continue
       context.state[action.stateId] = next
       context.onStateChange?.(action.stateId)
+      continue
+    }
+    if (action.type === 'set-theme') {
+      setCanvasTheme(root, action.themeId)
       continue
     }
     if (action.type === 'open-url') {

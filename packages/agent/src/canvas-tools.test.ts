@@ -19,7 +19,9 @@ import {
   patchOperationsForChanges,
   readCanvasNodeRef,
   semanticTree,
+  setTokensInputSchema,
   sourceContainerForRef,
+  tokenOperations,
 } from './canvas-tools'
 
 function componentFixture() {
@@ -59,6 +61,7 @@ function componentFixture() {
 describe('Canvas agent NodeRefs', () => {
   test('creates readable Page state and event rules without source code', () => {
     const source = createCanvasDocument('Agent state fixture', 'agent-state')
+    source.themes.focus = { id: 'focus', name: 'Focus' }
     const input = createPageInputSchema.parse({
       name: 'Interactive',
       states: {
@@ -80,6 +83,7 @@ describe('Canvas agent NodeRefs', () => {
               trigger: 'click',
               actions: [
                 { type: 'toggle-state', stateId: 'menuOpen' },
+                { type: 'set-theme', themeId: 'focus' },
               ],
             },
           ],
@@ -97,9 +101,36 @@ describe('Canvas agent NodeRefs', () => {
     expect(tree.children[0]?.interactions).toEqual([
       {
         trigger: 'click',
-        actions: [{ type: 'toggle-state', stateId: 'menuOpen' }],
+        actions: [
+          { type: 'toggle-state', stateId: 'menuOpen' },
+          { type: 'set-theme', themeId: 'focus' },
+        ],
       },
     ])
+  })
+
+  test('creates named themes before tokens that use their modes', () => {
+    const source = createCanvasDocument('Agent theme fixture', 'agent-theme')
+    const input = setTokensInputSchema.parse({
+      themes: [{ id: 'brand-a', name: 'Brand A' }],
+      tokens: [
+        {
+          id: 'accent',
+          name: 'Accent',
+          type: 'color',
+          value: '#3b82f6',
+          modes: { 'brand-a': '#ec4899' },
+        },
+      ],
+    })
+    const document = applyTransaction(source, {
+      id: 'set-brand-theme',
+      label: 'Set brand theme',
+      operations: tokenOperations(input.tokens, input.themes),
+    }).document
+
+    expect(document.themes['brand-a']?.name).toBe('Brand A')
+    expect(document.tokens.accent?.modes?.['brand-a']).toBe('#ec4899')
   })
 
   test('reads source and effective instance state', () => {

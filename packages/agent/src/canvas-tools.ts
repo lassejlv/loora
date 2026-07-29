@@ -18,6 +18,7 @@ import {
   type CanvasNode,
   type CanvasNodeType,
   type CanvasStyle,
+  type CanvasTheme,
   type DesignToken,
   type NodeId,
   type NodeMutationPatch,
@@ -246,6 +247,10 @@ const actionSchema = z.discriminatedUnion('type', [
     type: z.literal('increment-state'),
     stateId: stateIdSchema,
     amount: z.number().finite(),
+  }),
+  z.object({
+    type: z.literal('set-theme'),
+    themeId: z.string().regex(/^[a-zA-Z0-9_-]{1,128}$/),
   }),
 ])
 
@@ -589,6 +594,15 @@ const tokenSchema = z.discriminatedUnion('type', [
 ])
 
 export const setTokensInputSchema = z.object({
+  themes: z
+    .array(
+      z.object({
+        id: z.string().regex(/^[a-zA-Z0-9_-]{1,128}$/),
+        name: z.string().trim().min(1).max(200),
+      }),
+    )
+    .max(100)
+    .default([]),
   tokens: z.array(tokenSchema).min(1).max(1_000),
 })
 
@@ -1151,8 +1165,14 @@ export function searchCanvasNodes(
     }))
 }
 
-export function tokenOperations(tokens: DesignToken[]): CanvasOperation[] {
-  return tokens.map((token) => ({ type: 'token.upsert', token }))
+export function tokenOperations(
+  tokens: DesignToken[],
+  themes: CanvasTheme[] = [],
+): CanvasOperation[] {
+  return [
+    ...themes.map((theme) => ({ type: 'theme.upsert' as const, theme })),
+    ...tokens.map((token) => ({ type: 'token.upsert' as const, token })),
+  ]
 }
 
 export function createCanvasAgentTools({
@@ -1185,7 +1205,7 @@ export function createCanvasAgentTools({
   return {
     createPage: {
       description:
-        'Create an editable responsive Page root with optional typed local states and nested structured nodes. Use interactions to handle events and state-change rules; use flex/grid for normal UI flow and absolute positioning only when intentional.',
+        'Create an editable responsive Page root with optional typed local states and nested structured nodes. Use interactions to handle events, state-change rules, and named visual theme switches; use flex/grid for normal UI flow and absolute positioning only when intentional.',
       inputSchema: createPageInputSchema,
     },
     insertNodes: {
@@ -1195,7 +1215,7 @@ export function createCanvasAgentTools({
     },
     patchNodes: {
       description:
-        'Patch structured layout, style, text, visibility, responsive properties, variants, typed Page/component states, or declarative event interactions. State values are ephemeral at runtime; definitions and rules stay transactional. NodeRefs can address descendants inside component instances.',
+        'Patch structured layout, style, text, visibility, responsive properties, variants, typed Page/component states, or declarative event interactions. Events can switch any named visual theme. State values and selected runtime themes are ephemeral; definitions and rules stay transactional. NodeRefs can address descendants inside component instances.',
       inputSchema: patchNodesInputSchema,
     },
     moveNodes: {
@@ -1221,7 +1241,8 @@ export function createCanvasAgentTools({
       inputSchema: searchNodesInputSchema,
     },
     createComponent: {
-      description: 'Create an off-canvas reusable component definition with variants.',
+      description:
+        'Create an off-canvas reusable component definition with variants, instance-local state, and scoped named-theme interactions.',
       inputSchema: createComponentInputSchema,
     },
     createInstance: {
@@ -1229,7 +1250,8 @@ export function createCanvasAgentTools({
       inputSchema: createInstanceInputSchema,
     },
     setTokens: {
-      description: 'Create or update document design tokens.',
+      description:
+        'Create or update named visual themes and document design tokens. Token modes are keyed by theme id; event actions can switch themes at runtime.',
       inputSchema: setTokensInputSchema,
     },
     viewNode: {

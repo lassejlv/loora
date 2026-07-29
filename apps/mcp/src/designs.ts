@@ -39,6 +39,7 @@ import {
   clearCanvasAgentActivity,
   settleCanvasAgentActivity,
 } from '@loora/db/canvas-agent-activity'
+import { publishCanvasRealtimeEvent } from '@loora/db/canvas-realtime'
 
 export const MAX_NAME_LENGTH = 200
 
@@ -245,6 +246,7 @@ async function applyCanvasTransactionsInternal(
         revision: found.revision,
         transactionIds: ids,
         changedNodeIds: [] as string[],
+        idempotent: true,
       }
     }
 
@@ -335,6 +337,7 @@ async function applyCanvasTransactionsInternal(
       revision,
       transactionIds: ids,
       changedNodeIds: [...changed],
+      idempotent: false,
     }
   }
   throw new Error('The canvas changed repeatedly; read it again before retrying.')
@@ -359,6 +362,13 @@ export async function applyCanvasTransactions(
 
   try {
     const result = await applyCanvasTransactionsInternal(userId, target, parsed)
+    if (!result.idempotent) {
+      void publishCanvasRealtimeEvent(userId, target, {
+        type: 'canvas.changed',
+        revision: result.revision,
+        nodeIds: result.changedNodeIds,
+      })
+    }
     if (activityId) {
       try {
         await settleCanvasAgentActivity(

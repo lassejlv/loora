@@ -12,6 +12,7 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as McpConsentRouteImport } from './routes/mcp-consent'
 import { Route as DotwellKnownOauthAuthorizationServerRouteImport } from './routes/[.]well-known.oauth-authorization-server'
+import { Route as ApiCanvasEventsRouteImport } from './routes/api.canvas-events'
 import { Route as AppIndexRouteImport } from './routes/app.index'
 import { Route as AppDesignRouteImport } from './routes/app.design'
 import { Route as DesignIdRouteImport } from './routes/design.$id'
@@ -45,6 +46,11 @@ const DotwellKnownOauthAuthorizationServerRoute =
     path: '/.well-known/oauth-authorization-server',
     getParentRoute: () => rootRouteImport,
   } as any)
+const ApiCanvasEventsRoute = ApiCanvasEventsRouteImport.update({
+  id: '/api/canvas-events',
+  path: '/api/canvas-events',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const AppIndexRoute = AppIndexRouteImport.update({
   id: '/app/',
   path: '/app/',
@@ -130,6 +136,7 @@ export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/mcp-consent': typeof McpConsentRoute
   '/.well-known/oauth-authorization-server': typeof DotwellKnownOauthAuthorizationServerRoute
+  '/api/canvas-events': typeof ApiCanvasEventsRoute
   '/app/design': typeof AppDesignRoute
   '/design/$id': typeof DesignIdRoute
   '/app/': typeof AppIndexRoute
@@ -151,6 +158,7 @@ export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/mcp-consent': typeof McpConsentRoute
   '/.well-known/oauth-authorization-server': typeof DotwellKnownOauthAuthorizationServerRoute
+  '/api/canvas-events': typeof ApiCanvasEventsRoute
   '/app/design': typeof AppDesignRoute
   '/design/$id': typeof DesignIdRoute
   '/app': typeof AppIndexRoute
@@ -173,6 +181,7 @@ export interface FileRoutesById {
   '/': typeof IndexRoute
   '/mcp-consent': typeof McpConsentRoute
   '/.well-known/oauth-authorization-server': typeof DotwellKnownOauthAuthorizationServerRoute
+  '/api/canvas-events': typeof ApiCanvasEventsRoute
   '/app/design': typeof AppDesignRoute
   '/design/$id': typeof DesignIdRoute
   '/app/': typeof AppIndexRoute
@@ -196,6 +205,7 @@ export interface FileRouteTypes {
     | '/'
     | '/mcp-consent'
     | '/.well-known/oauth-authorization-server'
+    | '/api/canvas-events'
     | '/app/design'
     | '/design/$id'
     | '/app/'
@@ -217,6 +227,7 @@ export interface FileRouteTypes {
     | '/'
     | '/mcp-consent'
     | '/.well-known/oauth-authorization-server'
+    | '/api/canvas-events'
     | '/app/design'
     | '/design/$id'
     | '/app'
@@ -238,6 +249,7 @@ export interface FileRouteTypes {
     | '/'
     | '/mcp-consent'
     | '/.well-known/oauth-authorization-server'
+    | '/api/canvas-events'
     | '/app/design'
     | '/design/$id'
     | '/app/'
@@ -260,6 +272,7 @@ export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   McpConsentRoute: typeof McpConsentRoute
   DotwellKnownOauthAuthorizationServerRoute: typeof DotwellKnownOauthAuthorizationServerRoute
+  ApiCanvasEventsRoute: typeof ApiCanvasEventsRoute
   AppDesignRoute: typeof AppDesignRoute
   DesignIdRoute: typeof DesignIdRoute
   AppIndexRoute: typeof AppIndexRoute
@@ -298,6 +311,13 @@ declare module '@tanstack/react-router' {
       path: '/.well-known/oauth-authorization-server'
       fullPath: '/.well-known/oauth-authorization-server'
       preLoaderRoute: typeof DotwellKnownOauthAuthorizationServerRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/canvas-events': {
+      id: '/api/canvas-events'
+      path: '/api/canvas-events'
+      fullPath: '/api/canvas-events'
+      preLoaderRoute: typeof ApiCanvasEventsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/app/': {
@@ -432,6 +452,7 @@ const rootRouteChildren: RootRouteChildren = {
   McpConsentRoute: McpConsentRoute,
   DotwellKnownOauthAuthorizationServerRoute:
     DotwellKnownOauthAuthorizationServerRoute,
+  ApiCanvasEventsRoute: ApiCanvasEventsRoute,
   AppDesignRoute: AppDesignRoute,
   DesignIdRoute: DesignIdRoute,
   AppIndexRoute: AppIndexRoute,

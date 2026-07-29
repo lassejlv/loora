@@ -73,6 +73,28 @@ describe('Canvas declarative runtime', () => {
     expect(overlay.dataset.looraOverlay).toBeUndefined()
   })
 
+  it('switches any named theme and applies its token mode values', () => {
+    const root = document.createElement('main')
+    root.dataset.looraTheme = 'default'
+    root.dataset.looraThemeValues = JSON.stringify({
+      default: {
+        '--loora-token-accent': '#3b82f6',
+      },
+      focus: {
+        '--loora-token-accent': '#f59e0b',
+      },
+    })
+
+    applyCanvasActions(root, [
+      { type: 'set-theme', themeId: 'focus' },
+    ])
+
+    expect(root.dataset.looraTheme).toBe('focus')
+    expect(root.style.getPropertyValue('--loora-token-accent')).toBe(
+      '#f59e0b',
+    )
+  })
+
   it('keeps typed state ephemeral and selects conditional state-change actions', () => {
     const state = initialCanvasState({
       menuOpen: {

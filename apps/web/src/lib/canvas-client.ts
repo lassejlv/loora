@@ -22,6 +22,7 @@ export interface CanvasAgentActivity {
   nodeIds: string[]
   phase: 'working' | 'settled'
   updatedAt: number
+  expiresAt?: number
 }
 
 export interface CanvasRemoteChange {
@@ -44,7 +45,9 @@ interface PendingRecord {
 
 const DATABASE_NAME = 'loora-canvas'
 const STORE_NAME = 'pending-transactions'
-const REMOTE_REFRESH_INTERVAL_MS = 800
+const REALTIME_CONNECTED_REFRESH_MS = 5 * 60_000
+const REALTIME_DISCONNECTED_REFRESH_MS = 15_000
+const REALTIME_RETRY_MAX_MS = 30_000
 
 function targetKey(target: CanvasSyncTarget) {
   return `${target.designId}:${target.draftId ?? 'main'}`
@@ -81,6 +84,66 @@ export function remoteRevealNodeIds(transactions: CanvasTransaction[]) {
     }
     return true
   })
+}
+
+type CanvasRealtimeMessage =
+  | {
+      type: 'canvas.changed'
+      revision: number
+      nodeIds: string[]
+      sentAt: number
+    }
+  | {
+      type: 'agent.activity'
+      activity: CanvasAgentActivity | null
+      sentAt: number
+    }
+
+export function parseCanvasRealtimeMessage(
+  value: string,
+): CanvasRealtimeMessage | null {
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(value)
+  } catch {
+    return null
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    return null
+  }
+  const event = parsed as Record<string, unknown>
+  if (!Number.isFinite(event.sentAt)) return null
+  if (
+    event.type === 'canvas.changed' &&
+    Number.isInteger(event.revision) &&
+    Number(event.revision) >= 0 &&
+    Array.isArray(event.nodeIds) &&
+    event.nodeIds.every((id) => typeof id === 'string')
+  ) {
+    return parsed as CanvasRealtimeMessage
+  }
+  if (event.type !== 'agent.activity') return null
+  if (event.activity === null) return parsed as CanvasRealtimeMessage
+  if (
+    !event.activity ||
+    typeof event.activity !== 'object' ||
+    Array.isArray(event.activity)
+  ) {
+    return null
+  }
+  const activity = event.activity as Record<string, unknown>
+  if (
+    typeof activity.id !== 'string' ||
+    typeof activity.label !== 'string' ||
+    !Array.isArray(activity.nodeIds) ||
+    !activity.nodeIds.every((id) => typeof id === 'string') ||
+    (activity.phase !== 'working' && activity.phase !== 'settled') ||
+    !Number.isFinite(activity.updatedAt) ||
+    !Number.isFinite(activity.expiresAt)
+  ) {
+    return null
+  }
+  return parsed as CanvasRealtimeMessage
 }
 
 function changedSnapshotNodeIds(
@@ -165,6 +228,12 @@ export class CanvasSyncController {
   #listeners = new Set<Listener>()
   #timer: ReturnType<typeof setTimeout> | null = null
   #refreshTimer: ReturnType<typeof setTimeout> | null = null
+  #activityTimer: ReturnType<typeof setTimeout> | null = null
+  #realtimeRetryTimer: ReturnType<typeof setTimeout> | null = null
+  #eventSource: EventSource | null = null
+  #realtimeConnected = false
+  #realtimeRetryDelay = 1_000
+  #announcedRevision = 0
   #flushing: Promise<void> | null = null
   #refreshing: Promise<void> | null = null
   #closed = false
@@ -211,6 +280,7 @@ export class CanvasSyncController {
     if (pending.length > 0 && controller.#status !== 'conflict') {
       controller.#schedule(0)
     }
+    controller.#connectRealtime()
     controller.#scheduleRefresh(0)
     return controller
   }
@@ -263,6 +333,9 @@ export class CanvasSyncController {
       await this.#flushing
     } finally {
       this.#flushing = null
+      if (this.#announcedRevision > this.#revision) {
+        this.#scheduleRefresh(0)
+      }
     }
   }
 
@@ -282,6 +355,9 @@ export class CanvasSyncController {
     if (this.#closed) return
     if (this.#timer) clearTimeout(this.#timer)
     if (this.#refreshTimer) clearTimeout(this.#refreshTimer)
+    if (this.#activityTimer) clearTimeout(this.#activityTimer)
+    if (this.#realtimeRetryTimer) clearTimeout(this.#realtimeRetryTimer)
+    this.#disconnectRealtime()
     await this.flush()
     this.#closed = true
     if (this.#refreshTimer) clearTimeout(this.#refreshTimer)
@@ -319,6 +395,9 @@ export class CanvasSyncController {
       if (result.status !== 'ready') return
       this.#setAgentActivity(result.activity)
       if (result.revision <= this.#revision) {
+        if (this.#revision >= this.#announcedRevision) {
+          this.#announcedRevision = this.#revision
+        }
         if (this.#status === 'offline') {
           this.#status = 'ready'
           this.#emit()
@@ -345,6 +424,9 @@ export class CanvasSyncController {
 
       this.#baseDocument = remote
       this.#revision = result.revision
+      if (this.#revision >= this.#announcedRevision) {
+        this.#announcedRevision = this.#revision
+      }
       const rebased = rebaseTransactions(remote, this.#pending)
       const revealNodeIds = result.document
         ? [...changedNodeIds]
@@ -399,6 +481,9 @@ export class CanvasSyncController {
         )
         this.#baseDocument = parseCanvasDocument(result.document)
         this.#revision = result.revision
+        if (this.#revision >= this.#announcedRevision) {
+          this.#announcedRevision = this.#revision
+        }
         this.#status = 'ready'
         this.#conflicts = []
         await writePending(targetKey(this.target), this.#pending)
@@ -425,6 +510,9 @@ export class CanvasSyncController {
       }
       this.#baseDocument = remote
       this.#revision = result.revision
+      if (this.#revision >= this.#announcedRevision) {
+        this.#announcedRevision = this.#revision
+      }
       if (revealNodeIds.length > 0) {
         this.#remoteChangeSequence += 1
         this.#remoteChange = {
@@ -459,6 +547,85 @@ export class CanvasSyncController {
     }, delay)
   }
 
+  #connectRealtime() {
+    if (
+      this.#closed ||
+      !navigator.onLine ||
+      this.#eventSource ||
+      typeof EventSource === 'undefined'
+    ) {
+      return
+    }
+    const url = new URL('/api/canvas-events', window.location.origin)
+    url.searchParams.set('designId', this.target.designId)
+    if (this.target.draftId) {
+      url.searchParams.set('draftId', this.target.draftId)
+    }
+    const source = new EventSource(url)
+    this.#eventSource = source
+    source.addEventListener('open', this.#realtimeOpen)
+    source.addEventListener('ready', this.#realtimeReady)
+    source.addEventListener('canvas', this.#realtimeCanvas)
+    source.addEventListener('error', this.#realtimeError)
+  }
+
+  #disconnectRealtime() {
+    const source = this.#eventSource
+    this.#eventSource = null
+    this.#realtimeConnected = false
+    if (!source) return
+    source.removeEventListener('open', this.#realtimeOpen)
+    source.removeEventListener('ready', this.#realtimeReady)
+    source.removeEventListener('canvas', this.#realtimeCanvas)
+    source.removeEventListener('error', this.#realtimeError)
+    source.close()
+  }
+
+  #realtimeOpen = () => {
+    this.#realtimeConnected = true
+    this.#realtimeRetryDelay = 1_000
+    if (this.#realtimeRetryTimer) {
+      clearTimeout(this.#realtimeRetryTimer)
+      this.#realtimeRetryTimer = null
+    }
+    this.#scheduleRefresh(REALTIME_CONNECTED_REFRESH_MS)
+  }
+
+  #realtimeReady = () => {
+    this.#scheduleRefresh(0)
+  }
+
+  #realtimeCanvas = (message: Event) => {
+    if (!(message instanceof MessageEvent)) return
+    const event = parseCanvasRealtimeMessage(String(message.data))
+    if (!event) return
+    if (event.type === 'agent.activity') {
+      this.#setAgentActivity(event.activity)
+      return
+    }
+    this.#announcedRevision = Math.max(
+      this.#announcedRevision,
+      event.revision,
+    )
+    if (event.revision > this.#revision) this.#scheduleRefresh(0)
+  }
+
+  #realtimeError = () => {
+    this.#disconnectRealtime()
+    if (this.#closed || !navigator.onLine) return
+    this.#scheduleRefresh(0)
+    const delay = this.#realtimeRetryDelay
+    this.#realtimeRetryDelay = Math.min(
+      REALTIME_RETRY_MAX_MS,
+      this.#realtimeRetryDelay * 2,
+    )
+    if (this.#realtimeRetryTimer) clearTimeout(this.#realtimeRetryTimer)
+    this.#realtimeRetryTimer = setTimeout(() => {
+      this.#realtimeRetryTimer = null
+      this.#connectRealtime()
+    }, delay)
+  }
+
   #scheduleRefresh(delay: number) {
     if (this.#closed) return
     if (this.#refreshTimer) clearTimeout(this.#refreshTimer)
@@ -467,8 +634,10 @@ export class CanvasSyncController {
       void this.refresh().finally(() => {
         this.#scheduleRefresh(
           document.visibilityState === 'hidden'
-            ? 5_000
-            : REMOTE_REFRESH_INTERVAL_MS,
+            ? REALTIME_CONNECTED_REFRESH_MS
+            : this.#realtimeConnected
+              ? REALTIME_CONNECTED_REFRESH_MS
+              : REALTIME_DISCONNECTED_REFRESH_MS,
         )
       })
     }, delay)
@@ -480,14 +649,29 @@ export class CanvasSyncController {
       current?.id === activity?.id &&
       current?.phase === activity?.phase &&
       current?.updatedAt === activity?.updatedAt &&
+      current?.expiresAt === activity?.expiresAt &&
       current?.label === activity?.label &&
       current?.nodeIds.join('\u0000') === activity?.nodeIds.join('\u0000')
     ) {
       return
     }
+    if (this.#activityTimer) {
+      clearTimeout(this.#activityTimer)
+      this.#activityTimer = null
+    }
     this.#agentActivity = activity
       ? { ...activity, nodeIds: [...activity.nodeIds] }
       : null
+    if (activity) {
+      const fallbackTtl =
+        activity.phase === 'settled' ? 2_600 : 30_000
+      const expiresAt =
+        activity.expiresAt ?? activity.updatedAt + fallbackTtl
+      this.#activityTimer = setTimeout(() => {
+        this.#activityTimer = null
+        this.#setAgentActivity(null)
+      }, Math.max(0, expiresAt - Date.now()))
+    }
     this.#emit()
   }
 
@@ -495,10 +679,16 @@ export class CanvasSyncController {
     if (this.#status === 'offline') this.#status = 'ready'
     this.#emit()
     this.#schedule(0)
+    this.#connectRealtime()
     this.#scheduleRefresh(0)
   }
 
   #offline = () => {
+    if (this.#realtimeRetryTimer) {
+      clearTimeout(this.#realtimeRetryTimer)
+      this.#realtimeRetryTimer = null
+    }
+    this.#disconnectRealtime()
     this.#status = 'offline'
     this.#emit()
   }
@@ -509,7 +699,10 @@ export class CanvasSyncController {
   }
 
   #visibilityChange = () => {
-    if (document.visibilityState === 'visible') this.#scheduleRefresh(0)
+    if (document.visibilityState === 'visible') {
+      this.#connectRealtime()
+      this.#scheduleRefresh(0)
+    }
   }
 
   #emit() {

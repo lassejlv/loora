@@ -258,6 +258,30 @@ describe('CanvasDocument', () => {
     ).toBe(true)
   })
 
+  it('validates generic theme actions against named document themes', () => {
+    const document = documentFixture()
+    document.themes.focus = { id: 'focus', name: 'Focus' }
+    document.nodes.hero.interactions = [
+      {
+        trigger: 'click',
+        actions: [{ type: 'set-theme', themeId: 'focus' }],
+      },
+    ]
+    expect(validateDocument(document).ok).toBe(true)
+
+    document.nodes.hero.interactions = [
+      {
+        trigger: 'click',
+        actions: [{ type: 'set-theme', themeId: 'missing' }],
+      },
+    ]
+    expect(
+      validateDocument(document).issues.some(
+        (issue) => issue.path === 'nodes.hero.interactions',
+      ),
+    ).toBe(true)
+  })
+
   it('rejects values that cannot survive a JSON round trip', () => {
     const document = documentFixture()
     ;(document.nodes.hero.metadata as Record<string, unknown>) = {

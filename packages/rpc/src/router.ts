@@ -36,6 +36,7 @@ import {
 } from '@loora/canvas/merge'
 import { EMPTY_SHORTCUT_CONFIG } from '@loora/db/shortcuts'
 import { getCanvasAgentActivity } from '@loora/db/canvas-agent-activity'
+import { publishCanvasRealtimeEvent } from '@loora/db/canvas-realtime'
 import { parseShortcutConfig, shortcutConfigSchema } from './shortcuts'
 import { googleOAuthEnabled, type getSession } from '@loora/auth'
 import { type CanvasElement, type CanvasPage } from '@loora/db/canvas'
@@ -575,7 +576,7 @@ const applyCanvasTransactions = protectedProcedure
         .then((rows) => rows.map((row) => row.id)),
     )
 
-    return db.transaction(async (tx) => {
+    const result = await db.transaction(async (tx) => {
       const target = input.draftId
         ? await tx
             .select({
@@ -784,6 +785,14 @@ const applyCanvasTransactions = protectedProcedure
         changedNodeIds: [...changedNodeIds],
       }
     })
+    if (result.applied && !result.idempotent) {
+      void publishCanvasRealtimeEvent(context.user.id, input, {
+        type: 'canvas.changed',
+        revision: result.revision,
+        nodeIds: result.changedNodeIds,
+      })
+    }
+    return result
   })
 
 async function getOwnedDraft(userId: string, designId: string, draftId: string) {

@@ -240,6 +240,20 @@ function renderActions(actions: CanvasAction[]) {
   return escapeAttribute(JSON.stringify(actions))
 }
 
+function runtimeThemeValues(document: CanvasDocument) {
+  return Object.fromEntries(
+    Object.values(document.themes).map((theme) => [
+      theme.id,
+      Object.fromEntries(
+        Object.values(document.tokens).map((token) => [
+          `--loora-token-${token.id.replace(/[^a-zA-Z0-9_-]/g, '-')}`,
+          token.modes?.[theme.id] ?? token.value,
+        ]),
+      ),
+    ]),
+  )
+}
+
 function renderInteractions(
   interactions: CanvasNode['interactions'],
 ) {
@@ -358,7 +372,9 @@ function renderNode(
   )
   const states = renderedStateDefinitions(document, rawNode, exportedRoot)
   const common = `class="${classes}" data-loora-node="${escapeAttribute(node.id)}"${
-    exportedRoot ? ' data-loora-export-root="true"' : ''
+    exportedRoot
+      ? ` data-loora-export-root="true" data-loora-theme="${escapeAttribute(document.activeThemeId)}" data-loora-theme-values="${escapeAttribute(JSON.stringify(runtimeThemeValues(document)))}"`
+      : ''
   }${
     clickActions.length > 0 ? ` data-loora-actions="${renderActions(clickActions)}"` : ''
   }${
@@ -556,6 +572,17 @@ export function compileCanvas(
   const runtime = `(function(){
 var stateByScope=new WeakMap();
 function read(target,name,fallback){try{return JSON.parse(target.getAttribute(name)||fallback)}catch(error){return JSON.parse(fallback)}}
+function applyTheme(scope,themeId){
+  scope.setAttribute('data-loora-theme',themeId);
+  var source=(scope.matches&&scope.matches('[data-loora-theme-values]')?scope:null)||
+    (scope.closest&&scope.closest('[data-loora-theme-values]'))||
+    scope.querySelector('[data-loora-theme-values]')||
+    document.querySelector('[data-loora-theme-values]');
+  var values=source?read(source,'data-loora-theme-values','{}')[themeId]||{}:{};
+  Object.keys(values).forEach(function(property){
+    if(/^--loora-token-[a-zA-Z0-9_-]+$/.test(property))scope.style.setProperty(property,String(values[property]))
+  })
+}
 function scopeFor(target){return target.closest('[data-loora-states]')||document.body}
 function stateFor(scope){
   var current=stateByScope.get(scope);if(current)return current;
@@ -616,6 +643,7 @@ function applyActions(actions,scope,depth){
       if(!Object.is(current,next)){state[action.stateId]=next;scope.setAttribute('data-loora-state-values',JSON.stringify(state));runState(scope,action.stateId,depth+1)}
       return
     }
+    if(action.type==='set-theme'){applyTheme(scope,action.themeId);return}
     if(action.type==='open-url'){window.open(action.url,action.target||'_self',action.target==='_blank'?'noopener,noreferrer':undefined);return}
     if(action.type==='navigate'){var page=findNode(document,action.pageId);if(page)page.scrollIntoView({behavior:'smooth'});return}
     if(action.type==='visibility'){var node=findNode(scope,action.nodeId);if(node){var hidden=node.hidden||node.style.display==='none';var show=action.value==='show'||(action.value==='toggle'&&hidden);node.hidden=!show}return}
@@ -733,6 +761,21 @@ export default function LooraDesign() {
     const stateByScope = new WeakMap()
     const scopeFor = (target) =>
       target.closest('[data-loora-states]') || root
+    const applyTheme = (scope, themeId) => {
+      scope.dataset.looraTheme = themeId
+      const source =
+        scope.closest?.('[data-loora-theme-values]') ||
+        scope.querySelector('[data-loora-theme-values]') ||
+        root.querySelector('[data-loora-theme-values]')
+      const values = source
+        ? readJson(source, 'data-loora-theme-values', '{}')[themeId] || {}
+        : {}
+      for (const [property, value] of Object.entries(values)) {
+        if (/^--loora-token-[a-zA-Z0-9_-]+$/.test(property)) {
+          scope.style.setProperty(property, String(value))
+        }
+      }
+    }
     const stateFor = (scope) => {
       const existing = stateByScope.get(scope)
       if (existing) return existing
@@ -803,6 +846,10 @@ export default function LooraDesign() {
             renderState((version) => version + 1)
             runState(scope, action.stateId, depth + 1)
           }
+          continue
+        }
+        if (action.type === 'set-theme') {
+          applyTheme(scope, action.themeId)
           continue
         }
         if (action.type === 'open-url') {
@@ -1026,6 +1073,12 @@ function portableAttributes(
       ? `className=${JSON.stringify(tailwindClasses(declarations))}`
       : `style=${jsxStyle(declarations)}`,
   ]
+  if (exportedRoot) {
+    attributes.push(
+      `data-loora-theme=${JSON.stringify(document.activeThemeId)}`,
+      `data-loora-theme-values={${JSON.stringify(JSON.stringify(runtimeThemeValues(document)))}}`,
+    )
+  }
   if (patched.interactions.length > 0) {
     attributes.push(
       `data-loora-interactions={${JSON.stringify(JSON.stringify(patched.interactions))}}`,
@@ -1188,6 +1241,21 @@ function portableRuntimeSource() {
     }
     const scopeFor = (target) =>
       target.closest('[data-loora-states]') || root
+    const applyTheme = (scope, themeId) => {
+      scope.dataset.looraTheme = themeId
+      const source =
+        scope.closest?.('[data-loora-theme-values]') ||
+        scope.querySelector('[data-loora-theme-values]') ||
+        root.querySelector('[data-loora-theme-values]')
+      const values = source
+        ? read(source, 'data-loora-theme-values', '{}')[themeId] || {}
+        : {}
+      for (const [property, value] of Object.entries(values)) {
+        if (/^--loora-token-[a-zA-Z0-9_-]+$/.test(property)) {
+          scope.style.setProperty(property, String(value))
+        }
+      }
+    }
     const stateFor = (scope) => {
       const existing = stores.get(scope)
       if (existing) return existing
@@ -1285,6 +1353,10 @@ function portableRuntimeSource() {
             renderState((version) => version + 1)
             runState(scope, action.stateId, depth + 1)
           }
+          continue
+        }
+        if (action.type === 'set-theme') {
+          applyTheme(scope, action.themeId)
           continue
         }
         if (action.type === 'open-url') {

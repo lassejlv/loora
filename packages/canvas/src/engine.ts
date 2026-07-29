@@ -5,6 +5,7 @@ import {
   type CanvasStyle,
   type CanvasLayout,
   type CanvasRuntimeSchema,
+  type CanvasTheme,
   type DesignToken,
   type NodeId,
   type NodeMutationPatch,
@@ -16,7 +17,7 @@ import {
 } from './model'
 
 export interface CanvasFieldPrecondition {
-  scope: 'node' | 'token'
+  scope: 'node' | 'token' | 'theme'
   id: string
   path: string
   hash: string
@@ -42,6 +43,8 @@ export type CanvasOperation =
     }
   | { type: 'token.upsert'; token: DesignToken }
   | { type: 'token.delete'; id: string }
+  | { type: 'theme.upsert'; theme: CanvasTheme }
+  | { type: 'theme.delete'; id: string }
 
 export interface CanvasTransaction {
   id: string
@@ -61,6 +64,8 @@ const operationTypes = new Set<CanvasOperation['type']>([
   'instance.patchOverride',
   'token.upsert',
   'token.delete',
+  'theme.upsert',
+  'theme.delete',
 ])
 
 const operationKeys: Record<CanvasOperation['type'], Set<string>> = {
@@ -77,6 +82,8 @@ const operationKeys: Record<CanvasOperation['type'], Set<string>> = {
   ]),
   'token.upsert': new Set(['type', 'token']),
   'token.delete': new Set(['type', 'id']),
+  'theme.upsert': new Set(['type', 'theme']),
+  'theme.delete': new Set(['type', 'id']),
 }
 
 function record(value: unknown): value is Record<string, unknown> {
@@ -239,6 +246,12 @@ export function parseCanvasTransaction(value: unknown): CanvasTransaction {
     if (operation.type === 'token.delete' && typeof operation.id !== 'string') {
       throw new Error(`Canvas token operation ${index} has no token id`)
     }
+    if (operation.type === 'theme.upsert' && !record(operation.theme)) {
+      throw new Error(`Canvas theme operation ${index} has no theme`)
+    }
+    if (operation.type === 'theme.delete' && typeof operation.id !== 'string') {
+      throw new Error(`Canvas theme operation ${index} has no theme id`)
+    }
   }
   if (value.preconditions !== undefined) {
     if (
@@ -250,7 +263,7 @@ export function parseCanvasTransaction(value: unknown): CanvasTransaction {
           Object.keys(precondition).some(
             (key) => !['scope', 'id', 'path', 'hash'].includes(key),
           ) ||
-          !['node', 'token'].includes(String(precondition.scope)) ||
+          !['node', 'token', 'theme'].includes(String(precondition.scope)) ||
           typeof precondition.id !== 'string' ||
           precondition.id.length === 0 ||
           precondition.id.length > 200 ||
@@ -289,6 +302,7 @@ export interface CanvasApplyResult {
   inverse: CanvasTransaction
   changedNodeIds: Set<NodeId>
   changedTokenIds: Set<string>
+  changedThemeIds: Set<string>
   idempotent: boolean
 }
 
@@ -450,15 +464,22 @@ export function withTransactionPreconditions(
       })
       continue
     }
+    const isTheme =
+      operation.type === 'theme.upsert' ||
+      operation.type === 'theme.delete'
     const id =
       operation.type === 'token.upsert'
         ? operation.token.id
-        : operation.id
+        : operation.type === 'theme.upsert'
+          ? operation.theme.id
+          : operation.id
     preconditions.push({
-      scope: 'token',
+      scope: isTheme ? 'theme' : 'token',
       id,
       path: '',
-      hash: valueHash(document.tokens[id]),
+      hash: valueHash(
+        isTheme ? document.themes[id] : document.tokens[id],
+      ),
     })
   }
   const unique = new Map(
@@ -482,7 +503,9 @@ function verifyPreconditions(
     const target =
       precondition.scope === 'node'
         ? document.nodes[precondition.id]
-        : document.tokens[precondition.id]
+        : precondition.scope === 'token'
+          ? document.tokens[precondition.id]
+          : document.themes[precondition.id]
     const actualHash = valueHash(valueAtPath(target, precondition.path))
     if (actualHash !== precondition.hash) {
       conflicts.push({ transactionId: transaction.id, precondition, actualHash })
@@ -598,12 +621,14 @@ export function applyTransaction(
     ...source,
     nodes: { ...source.nodes },
     tokens: { ...source.tokens },
+    themes: { ...source.themes },
     breakpoints: source.breakpoints,
     metadata: { ...source.metadata },
   }
   const inverseOperations: CanvasOperation[] = []
   const changedNodeIds = new Set<NodeId>()
   const changedTokenIds = new Set<string>()
+  const changedThemeIds = new Set<string>()
 
   for (const operation of transaction.operations) {
     switch (operation.type) {
@@ -741,6 +766,28 @@ export function applyTransaction(
         changedTokenIds.add(operation.id)
         break
       }
+      case 'theme.upsert': {
+        const previous = document.themes[operation.theme.id]
+        document.themes[operation.theme.id] = clone(operation.theme)
+        inverseOperations.unshift(
+          previous
+            ? { type: 'theme.upsert', theme: clone(previous) }
+            : { type: 'theme.delete', id: operation.theme.id },
+        )
+        changedThemeIds.add(operation.theme.id)
+        break
+      }
+      case 'theme.delete': {
+        const previous = document.themes[operation.id]
+        if (!previous) throw new Error(`Theme ${operation.id} does not exist`)
+        delete document.themes[operation.id]
+        inverseOperations.unshift({
+          type: 'theme.upsert',
+          theme: clone(previous),
+        })
+        changedThemeIds.add(operation.id)
+        break
+      }
     }
   }
 
@@ -757,6 +804,7 @@ export function applyTransaction(
     },
     changedNodeIds,
     changedTokenIds,
+    changedThemeIds,
     idempotent: false,
   }
 }
@@ -936,6 +984,7 @@ export class CanvasEngine {
         },
         changedNodeIds: new Set<NodeId>(),
         changedTokenIds: new Set<string>(),
+        changedThemeIds: new Set<string>(),
         idempotent: true,
       }
     }

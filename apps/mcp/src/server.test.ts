@@ -158,6 +158,14 @@ describe('MCP agent workflow', () => {
       expect(JSON.stringify(createPage?.inputSchema)).toContain(
         'toggle-state',
       )
+      expect(JSON.stringify(createPage?.inputSchema)).toContain(
+        'set-theme',
+      )
+      const setTokens = tools.tools.find(
+        (tool) => tool.name === 'setTokens',
+      )
+      expect(JSON.stringify(setTokens?.inputSchema)).toContain('themes')
+      expect(setTokens?.description).toContain('named visual themes')
       expect(
         tools.tools.find((tool) => tool.name === 'getScreenshot')
           ?.annotations?.readOnlyHint,

@@ -1,6 +1,9 @@
 import { describe, expect, test } from 'bun:test'
 import { createFrameNode, createTextNode } from '@loora/canvas/model'
-import { remoteRevealNodeIds } from './canvas-client'
+import {
+  parseCanvasRealtimeMessage,
+  remoteRevealNodeIds,
+} from './canvas-client'
 
 describe('remoteRevealNodeIds', () => {
   test('reveals inserted groups once and keeps separately edited details', () => {
@@ -44,5 +47,53 @@ describe('remoteRevealNodeIds', () => {
         },
       ]),
     ).toEqual(['section', 'caption', 'existing-card'])
+  })
+})
+
+describe('Canvas realtime messages', () => {
+  test('accepts revision invalidations and expiring agent activity', () => {
+    expect(
+      parseCanvasRealtimeMessage(
+        JSON.stringify({
+          type: 'canvas.changed',
+          revision: 7,
+          nodeIds: ['hero'],
+          sentAt: 100,
+        }),
+      ),
+    ).toMatchObject({ type: 'canvas.changed', revision: 7 })
+    expect(
+      parseCanvasRealtimeMessage(
+        JSON.stringify({
+          type: 'agent.activity',
+          activity: {
+            id: 'activity-1',
+            label: 'Agent is working',
+            nodeIds: ['hero'],
+            phase: 'working',
+            updatedAt: 100,
+            expiresAt: 1_000,
+          },
+          sentAt: 100,
+        }),
+      ),
+    ).toMatchObject({
+      type: 'agent.activity',
+      activity: { id: 'activity-1' },
+    })
+  })
+
+  test('drops malformed events', () => {
+    expect(parseCanvasRealtimeMessage('{nope')).toBeNull()
+    expect(
+      parseCanvasRealtimeMessage(
+        JSON.stringify({
+          type: 'canvas.changed',
+          revision: -1,
+          nodeIds: [],
+          sentAt: 100,
+        }),
+      ),
+    ).toBeNull()
   })
 })

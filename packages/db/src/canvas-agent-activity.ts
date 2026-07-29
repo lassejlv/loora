@@ -1,6 +1,7 @@
 import { and, desc, eq, gt, lt } from 'drizzle-orm'
 import { db } from './index'
 import { canvasAgentActivity } from './schema'
+import { publishCanvasRealtimeEvent } from './canvas-realtime'
 
 export interface CanvasAgentActivityTarget {
   designId: string
@@ -13,6 +14,7 @@ export interface ActiveCanvasAgentActivity {
   nodeIds: string[]
   phase: 'working' | 'settled'
   updatedAt: number
+  expiresAt: number
 }
 
 const WORKING_TTL_MS = 30_000
@@ -21,6 +23,13 @@ const MAX_ACTIVITY_NODE_IDS = 64
 
 function targetKey(draftId: string | null | undefined) {
   return draftId ? `draft:${draftId}` : 'main'
+}
+
+function targetFromKey(designId: string, key: string) {
+  return {
+    designId,
+    draftId: key.startsWith('draft:') ? key.slice('draft:'.length) : null,
+  }
 }
 
 function normalizedNodeIds(nodeIds: string[]) {
@@ -49,17 +58,31 @@ export async function beginCanvasAgentActivity(
     )
 
   const id = `activity_${globalThis.crypto.randomUUID()}`
+  const label = input.label.slice(0, 160)
+  const nodeIds = normalizedNodeIds(input.nodeIds)
+  const expiresAt = new Date(now.getTime() + WORKING_TTL_MS)
   await db.insert(canvasAgentActivity).values({
     id,
     designId: target.designId,
     userId,
     targetKey: key,
-    label: input.label.slice(0, 160),
-    nodeIds: normalizedNodeIds(input.nodeIds),
+    label,
+    nodeIds,
     phase: 'working',
     startedAt: now,
     updatedAt: now,
-    expiresAt: new Date(now.getTime() + WORKING_TTL_MS),
+    expiresAt,
+  })
+  void publishCanvasRealtimeEvent(userId, target, {
+    type: 'agent.activity',
+    activity: {
+      id,
+      label,
+      nodeIds,
+      phase: 'working',
+      updatedAt: now.getTime(),
+      expiresAt: expiresAt.getTime(),
+    },
   })
   return id
 }
@@ -70,13 +93,15 @@ export async function settleCanvasAgentActivity(
   nodeIds: string[],
 ) {
   const now = new Date()
-  await db
+  const normalized = normalizedNodeIds(nodeIds)
+  const expiresAt = new Date(now.getTime() + SETTLED_TTL_MS)
+  const [updated] = await db
     .update(canvasAgentActivity)
     .set({
-      nodeIds: normalizedNodeIds(nodeIds),
+      nodeIds: normalized,
       phase: 'settled',
       updatedAt: now,
-      expiresAt: new Date(now.getTime() + SETTLED_TTL_MS),
+      expiresAt,
     })
     .where(
       and(
@@ -84,13 +109,35 @@ export async function settleCanvasAgentActivity(
         eq(canvasAgentActivity.userId, userId),
       ),
     )
+    .returning({
+      designId: canvasAgentActivity.designId,
+      targetKey: canvasAgentActivity.targetKey,
+      label: canvasAgentActivity.label,
+    })
+  if (updated) {
+    void publishCanvasRealtimeEvent(
+      userId,
+      targetFromKey(updated.designId, updated.targetKey),
+      {
+        type: 'agent.activity',
+        activity: {
+          id: activityId,
+          label: updated.label,
+          nodeIds: normalized,
+          phase: 'settled',
+          updatedAt: now.getTime(),
+          expiresAt: expiresAt.getTime(),
+        },
+      },
+    )
+  }
 }
 
 export async function clearCanvasAgentActivity(
   userId: string,
   activityId: string,
 ) {
-  await db
+  const [deleted] = await db
     .delete(canvasAgentActivity)
     .where(
       and(
@@ -98,6 +145,20 @@ export async function clearCanvasAgentActivity(
         eq(canvasAgentActivity.userId, userId),
       ),
     )
+    .returning({
+      designId: canvasAgentActivity.designId,
+      targetKey: canvasAgentActivity.targetKey,
+    })
+  if (deleted) {
+    void publishCanvasRealtimeEvent(
+      userId,
+      targetFromKey(deleted.designId, deleted.targetKey),
+      {
+        type: 'agent.activity',
+        activity: null,
+      },
+    )
+  }
 }
 
 export async function getCanvasAgentActivity(
@@ -111,6 +172,7 @@ export async function getCanvasAgentActivity(
       nodeIds: canvasAgentActivity.nodeIds,
       phase: canvasAgentActivity.phase,
       updatedAt: canvasAgentActivity.updatedAt,
+      expiresAt: canvasAgentActivity.expiresAt,
     })
     .from(canvasAgentActivity)
     .where(
@@ -129,6 +191,7 @@ export async function getCanvasAgentActivity(
         ...activity,
         nodeIds: normalizedNodeIds(activity.nodeIds),
         updatedAt: activity.updatedAt.getTime(),
+        expiresAt: activity.expiresAt.getTime(),
       }
     : null
 }

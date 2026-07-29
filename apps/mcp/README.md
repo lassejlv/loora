@@ -66,7 +66,8 @@ Local stdio (no OAuth):
 
 Separate Railway service off the same repo, config `apps/mcp/railway.json`
 (builds `apps/mcp/Dockerfile`). Point mcp.loora.design at it. Migrations stay
-with the web service.
+with the web service. Set the same `REDIS_URL` on both the web and MCP
+services so Canvas changes and agent activity reach open editors immediately.
 
 ## Agent workflow
 

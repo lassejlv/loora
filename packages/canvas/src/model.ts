@@ -138,6 +138,7 @@ export type CanvasAction =
   | { type: 'set-state'; stateId: StateId; value: CanvasStateValue }
   | { type: 'toggle-state'; stateId: StateId }
   | { type: 'increment-state'; stateId: StateId; amount: number }
+  | { type: 'set-theme'; themeId: ThemeId }
 
 export type CanvasEventTrigger =
   | 'click'
@@ -1203,6 +1204,12 @@ function validInteractions(
         )
       }
       if (action.type === 'close-overlay') return true
+      if (action.type === 'set-theme') {
+        return (
+          safeDictionaryId(action.themeId) &&
+          !!document.themes[action.themeId]
+        )
+      }
       return (
         action.type === 'set-variant' &&
         typeof action.instanceId === 'string' &&
