@@ -3,7 +3,7 @@
 Loora is an infinite-canvas design tool. Users arrange structured UI nodes on a
 canvas; remote MCP clients (and agent handoff consumers) mutate the same
 document through typed transactions. Designs have version history, isolated
-drafts/branches, publishable Main links, and integrations (GitHub, Figma).
+drafts/branches, one-way exports, and integrations (GitHub, Figma).
 There is no in-app chat agent — bring your own agent via MCP or handoff.
 
 **Stack:** Bun workspaces monorepo · TanStack Start / React 19 · Drizzle + Neon
@@ -19,7 +19,7 @@ apps/web          TanStack Start app (UI, API route handlers, canvas editor shel
 apps/mcp          Remote MCP server (Streamable HTTP, OAuth resource server)
 packages/canvas   Canvas model, engine, merge, React surface, import, export
 packages/db       Drizzle schema, Neon client, migrations (`@loora/db`)
-packages/rpc      oRPC `appRouter`, storage, history, publish, handoff (`@loora/rpc`)
+packages/rpc      oRPC `appRouter`, storage, history, handoff (`@loora/rpc`)
 packages/agent    Shared canvas tools + layout repair for MCP (`@loora/agent`)
 packages/auth     Better Auth, preview access, GitHub/Figma (`@loora/auth`)
 packages/billing  Polar plan access / entitlements (`@loora/billing`)
@@ -43,10 +43,9 @@ packages/billing  Polar plan access / entitlements (`@loora/billing`)
 | `/app` | Design file browser (via `AccountGate`) |
 | `/design/$id` | Editor on Main. Route supplies `designId` and remounts on change — the editor never picks a document itself. |
 | `/design/$id/b/$branchId` | Editor on an active branch. |
-| `/p/$linkId` | Published design |
 | `/api/rpc/$` | oRPC |
 | `/api/auth/$` | Better Auth |
-| `/api/asset/$id`, handoff/publish asset routes | Asset serving |
+| `/api/asset/$id`, handoff asset routes | Asset serving |
 | GitHub/Figma connect + callback routes | OAuth |
 
 Legacy `/?design=`, `/?d=`, `/app/design?id=`, and `?draft=` links redirect into the canonical editor route.
@@ -64,7 +63,7 @@ Dependency-light canvas core. **Must never** import db, RPC, auth, web, drafts, 
 | `@loora/canvas/export` | One-way HTML, JSX, Tailwind, React/TSX, JSON, PNG compile |
 | `@loora/canvas/import` | HTML/CSS snapshot conversion into validated structured nodes |
 
-Web editor UI lives in `apps/web/src/components/canvas/` (branch panel, sync target, history, export, publish, layers, properties). Keep branch/sync controllers outside the canvas package. There is no in-app agent panel.
+Web editor UI lives in `apps/web/src/components/canvas/` (branch panel, sync target, history, export, layers, properties). Keep branch/sync controllers outside the canvas package. There is no in-app agent panel.
 
 ### `packages/agent` (`@loora/agent`)
 
@@ -75,7 +74,7 @@ Shared canvas mutation vocabulary for MCP (and handoff consumers), not models or
 
 ### `packages/rpc` (`appRouter` namespaces)
 
-`auth` · `preferences` · `billing` · `design` · `canvas` · `draft` · `handoff` · `publish` · `history` · `asset` · `github` · `figma` · `mcp` · `admin`
+`auth` · `preferences` · `billing` · `design` · `canvas` · `draft` · `handoff` · `history` · `asset` · `github` · `figma` · `mcp` · `admin`
 
 Most product mutations go through oRPC. External agents use MCP or handoff — there is no `/api/chat` streaming path.
 
@@ -87,7 +86,7 @@ Remote MCP at `mcp.loora.design` (local default port `4100`). OAuth 2.1 resource
 
 - Schema: `packages/db/src/schema.ts`
 - Migrations: `packages/db/drizzle/` (commit SQL **and** `meta/` snapshots)
-- Notable tables: `design`, `designDraft`, `designVersion`, `canvasTransaction`, `publishLink`, `asset`, auth/OAuth (incl. `oauth_*` MCP tables), `billingEntitlement`, GitHub/Figma bindings
+- Notable tables: `design`, `designDraft`, `designVersion`, `canvasTransaction`, `asset`, auth/OAuth (incl. `oauth_*` MCP tables), `billingEntitlement`, GitHub/Figma bindings. Legacy publish tables remain for compatibility but have no product runtime.
 
 Legacy helpers remain in `@loora/db/canvas` and `@loora/db/drafts` for rollback and expiring-link compatibility.
 
@@ -136,9 +135,8 @@ These are easy to break and expensive to fix. Treat them as hard rules.
 4. **Do not full-document replace on every move.** Pointer previews may use temporary DOM transforms; commit one transaction on pointer-up.
 5. **Render is real DOM/SVG** with `data-loora-node` and instance-path metadata. One camera transform + viewport-space SVG overlay. Document state lives in the engine; camera, selection, hover, tool, and isolation are ephemeral. Subscribe nodes to their own revision/parent order — avoid full-tree rerenders.
 6. **External agent input is structured node descriptors**, not source code. Temporary client refs must resolve to permanent IDs. Destructive MCP actions still require confirmation in product UX where applicable.
-7. **Exports are one-way** (HTML/CSS/JS, React/TSX, JSON, PNG, publish, preview). They never round-trip into the editor. Published behavior uses the declarative interaction runtime under a restrictive CSP — no document-authored script execution.
-8. **Main is the only publishable target.** Draft/branch documents are never published directly.
-9. **Pull requests are not a Loora feature.** Drafts are the branch/merge model (`active` → `proposed` → `applied` | `closed`).
+7. **Exports are one-way** (HTML/CSS/JS, React/TSX, JSON, PNG, preview). They never round-trip into the editor.
+8. **Pull requests are not a Loora feature.** Drafts are the branch/merge model (`active` → `proposed` → `applied` | `closed`).
 
 ### Shared MCP / handoff tool vocabulary
 
@@ -205,7 +203,7 @@ History uses Conventional Commits with scopes when useful:
 - Server-only: `DATABASE_URL`, `BETTER_AUTH_*`, Polar tokens, OAuth client secrets, encryption keys, storage credentials.
 - User-scoped data only through protected oRPC/MCP paths.
 - Validate image/interaction URLs, SVG paths, CSS-like values, metadata, geometry, overrides, and document size at the **canvas model** boundary.
-- Capability/publish URLs must not leak into analytics. Public pages: no-referrer; link-scoped asset routes.
+- Capability URLs must not leak into analytics. Handoff payloads use token-scoped asset routes.
 - Review generated SQL before migrating shared environments.
 
 ---

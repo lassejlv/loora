@@ -4,18 +4,12 @@ import { createContext, useContext, type ReactNode } from 'react'
 import { withNuqsTestingAdapter } from 'nuqs/adapters/testing'
 
 const billingStatus = mock()
-const listPublished = mock()
-const publishedEgress = mock()
 
 const TabsContext = createContext('')
 
 mock.module('#/lib/orpc-client', () => ({
   orpc: {
     billing: { status: billingStatus },
-    publish: {
-      listAll: listPublished,
-      egress: publishedEgress,
-    },
   },
 }))
 mock.module('@loora/auth/client', () => ({
@@ -91,13 +85,6 @@ function renderSettings(searchParams = '?settings=billing') {
 describe('SettingsPanel billing visibility', () => {
   beforeEach(() => {
     billingStatus.mockReset().mockResolvedValue(disabledBilling)
-    listPublished.mockReset().mockResolvedValue([])
-    publishedEgress.mockReset().mockResolvedValue({
-      usedBytes: 0,
-      limitBytes: 1,
-      windowDays: 30,
-      unlimited: true,
-    })
   })
 
   afterEach(() => cleanup())

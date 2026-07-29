@@ -48,13 +48,21 @@ export function CanvasHistory({
   controller,
   readOnly,
   iconOnly = false,
+  open: controlledOpen,
+  onOpenChange,
+  showTrigger = true,
 }: {
   controller: CanvasEditorController
   readOnly: boolean
   iconOnly?: boolean
+  open?: boolean
+  onOpenChange?: (open: boolean) => void
+  showTrigger?: boolean
 }) {
   const document = useCanvasDocument()
-  const [open, setOpen] = useState(false)
+  const [internalOpen, setInternalOpen] = useState(false)
+  const open = controlledOpen ?? internalOpen
+  const setOpen = onOpenChange ?? setInternalOpen
   const [versions, setVersions] = useState<Version[]>([])
   const [cursor, setCursor] = useState<VersionPage['nextCursor']>(null)
   const [loading, setLoading] = useState(false)
@@ -210,16 +218,18 @@ export function CanvasHistory({
   if (!controller.target) return null
   return (
     <>
-      <Button
-        size={iconOnly ? 'icon-sm' : 'xs'}
-        variant="ghost"
-        aria-label={iconOnly ? 'History' : undefined}
-        title="Version history"
-        onClick={() => setOpen(true)}
-      >
-        <HistoryIcon />
-        {iconOnly ? null : 'History'}
-      </Button>
+      {showTrigger ? (
+        <Button
+          size={iconOnly ? 'icon-sm' : 'xs'}
+          variant="ghost"
+          aria-label={iconOnly ? 'History' : undefined}
+          title="Version history"
+          onClick={() => setOpen(true)}
+        >
+          <HistoryIcon />
+          {iconOnly ? null : 'History'}
+        </Button>
+      ) : null}
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogPopup className="max-w-3xl p-0">
           <DialogHeader className="border-b px-4 py-3">

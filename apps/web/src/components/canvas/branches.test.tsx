@@ -143,7 +143,7 @@ async function openManage(branches: CanvasBranchSummary[], activeDraftId: string
   const view = setup(branches, activeDraftId)
   await openMenu(view)
   press(view.getByText('Manage branches'))
-  await view.findByText('The published, shared document.')
+  await view.findByText('The shared source of truth.')
   return view
 }
 

@@ -20,6 +20,7 @@ import {
   CanvasEngine,
   parseCanvasTransaction,
   withTransactionPreconditions,
+  type CanvasOperation,
   type CanvasTransaction,
 } from '@loora/canvas/engine'
 import {
@@ -33,6 +34,11 @@ import {
   mergeDocuments,
   type CanvasMergeConflict,
 } from '@loora/canvas/merge'
+import {
+  beginCanvasAgentActivity,
+  clearCanvasAgentActivity,
+  settleCanvasAgentActivity,
+} from '@loora/db/canvas-agent-activity'
 
 export const MAX_NAME_LENGTH = 200
 
@@ -163,7 +169,42 @@ export async function getCanvasTarget(
   }
 }
 
-export async function applyCanvasTransactions(
+export function canvasAgentActivityNodeIds(
+  transactions: CanvasTransaction[],
+) {
+  const ids: string[] = []
+  const add = (id: string | null | undefined) => {
+    if (id && !ids.includes(id)) ids.push(id)
+  }
+  const visit = (operation: CanvasOperation) => {
+    if (operation.type === 'node.insert') {
+      add(operation.node.id)
+      add(operation.node.parentId)
+    } else if (operation.type === 'node.patch') {
+      add(operation.id)
+    } else if (operation.type === 'node.move') {
+      add(operation.id)
+      add(operation.parentId)
+    } else if (operation.type === 'node.delete') {
+      add(operation.id)
+    } else if (operation.type === 'instance.patchOverride') {
+      add(operation.id)
+      add(operation.targetId)
+    }
+  }
+  for (const transaction of transactions) {
+    for (const operation of transaction.operations) visit(operation)
+  }
+  return ids
+}
+
+function canvasAgentActivityLabel(transactions: CanvasTransaction[]) {
+  if (transactions.length !== 1) return 'Agent is updating the canvas'
+  const action = transactions[0]!.label.replace(/^MCP\s+/i, '').trim()
+  return action ? `Agent is working: ${action}` : 'Agent is updating the canvas'
+}
+
+async function applyCanvasTransactionsInternal(
   userId: string,
   target: CanvasTarget,
   transactions: CanvasTransaction[],
@@ -297,6 +338,49 @@ export async function applyCanvasTransactions(
     }
   }
   throw new Error('The canvas changed repeatedly; read it again before retrying.')
+}
+
+export async function applyCanvasTransactions(
+  userId: string,
+  target: CanvasTarget,
+  transactions: CanvasTransaction[],
+) {
+  const parsed = transactions.map(parseCanvasTransaction)
+  const focusNodeIds = canvasAgentActivityNodeIds(parsed)
+  let activityId: string | null = null
+  try {
+    activityId = await beginCanvasAgentActivity(userId, target, {
+      label: canvasAgentActivityLabel(parsed),
+      nodeIds: focusNodeIds,
+    })
+  } catch (error) {
+    console.error('[canvas-activity] Could not start agent activity:', error)
+  }
+
+  try {
+    const result = await applyCanvasTransactionsInternal(userId, target, parsed)
+    if (activityId) {
+      try {
+        await settleCanvasAgentActivity(
+          userId,
+          activityId,
+          [...focusNodeIds, ...result.changedNodeIds],
+        )
+      } catch (error) {
+        console.error('[canvas-activity] Could not settle agent activity:', error)
+      }
+    }
+    return result
+  } catch (error) {
+    if (activityId) {
+      try {
+        await clearCanvasAgentActivity(userId, activityId)
+      } catch (activityError) {
+        console.error('[canvas-activity] Could not clear agent activity:', activityError)
+      }
+    }
+    throw error
+  }
 }
 
 export async function createDesign(userId: string, name: string) {

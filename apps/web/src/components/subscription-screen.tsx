@@ -29,14 +29,14 @@ const plans = [
     id: 'pro' as const,
     name: 'Pro',
     price: '$20',
-    summary: 'Full canvas, branches, MCP, and publishing',
+    summary: 'Full canvas, branches, MCP, and exports',
     note: '3-day free trial',
   },
   {
     id: 'studio' as const,
     name: 'Studio',
     price: '$49',
-    summary: 'Pro plus higher publish bandwidth and priority support',
+    summary: 'Pro plus priority support',
     note: 'For teams',
   },
 ]

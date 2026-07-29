@@ -5,8 +5,12 @@
     "dockerfilePath": "apps/mcp/Dockerfile",
     "watchPatterns": [
       "apps/mcp/**",
+      "packages/agent/**",
+      "packages/canvas/**",
       "packages/db/**",
       "packages/auth/**",
+      "packages/billing/**",
+      "packages/rpc/**",
       "package.json",
       "bun.lock",
       "bunfig.toml",

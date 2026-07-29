@@ -16,6 +16,20 @@ export interface CanvasSyncTarget {
   draftId: string | null
 }
 
+export interface CanvasAgentActivity {
+  id: string
+  label: string
+  nodeIds: string[]
+  phase: 'working' | 'settled'
+  updatedAt: number
+}
+
+export interface CanvasRemoteChange {
+  sequence: number
+  revision: number
+  nodeIds: string[]
+}
+
 export type CanvasSyncStatus =
   | 'ready'
   | 'offline'
@@ -30,9 +44,57 @@ interface PendingRecord {
 
 const DATABASE_NAME = 'loora-canvas'
 const STORE_NAME = 'pending-transactions'
+const REMOTE_REFRESH_INTERVAL_MS = 800
 
 function targetKey(target: CanvasSyncTarget) {
   return `${target.designId}:${target.draftId ?? 'main'}`
+}
+
+export function remoteRevealNodeIds(transactions: CanvasTransaction[]) {
+  const candidates: string[] = []
+  const insertedParents = new Map<string, string | null>()
+  const add = (id: string) => {
+    if (!candidates.includes(id)) candidates.push(id)
+  }
+
+  for (const transaction of transactions) {
+    for (const operation of transaction.operations) {
+      if (operation.type === 'node.insert') {
+        insertedParents.set(operation.node.id, operation.node.parentId)
+        add(operation.node.id)
+      } else if (
+        operation.type === 'node.patch' ||
+        operation.type === 'node.move'
+      ) {
+        add(operation.id)
+      } else if (operation.type === 'instance.patchOverride') {
+        add(operation.id)
+      }
+    }
+  }
+
+  return candidates.filter((id) => {
+    let parentId = insertedParents.get(id)
+    while (parentId) {
+      if (insertedParents.has(parentId)) return false
+      parentId = insertedParents.get(parentId)
+    }
+    return true
+  })
+}
+
+function changedSnapshotNodeIds(
+  previous: CanvasDocument,
+  next: CanvasDocument,
+) {
+  const ids = new Set([
+    ...Object.keys(previous.nodes),
+    ...Object.keys(next.nodes),
+  ])
+  return [...ids].filter(
+    (id) =>
+      JSON.stringify(previous.nodes[id]) !== JSON.stringify(next.nodes[id]),
+  )
 }
 
 function requestResult<T>(request: IDBRequest<T>) {
@@ -97,9 +159,14 @@ export class CanvasSyncController {
   #pending: CanvasTransaction[]
   #status: CanvasSyncStatus = 'ready'
   #conflicts: CanvasTransactionConflict[] = []
+  #agentActivity: CanvasAgentActivity | null = null
+  #remoteChange: CanvasRemoteChange | null = null
+  #remoteChangeSequence = 0
   #listeners = new Set<Listener>()
   #timer: ReturnType<typeof setTimeout> | null = null
+  #refreshTimer: ReturnType<typeof setTimeout> | null = null
   #flushing: Promise<void> | null = null
+  #refreshing: Promise<void> | null = null
   #closed = false
 
   private constructor(
@@ -123,6 +190,10 @@ export class CanvasSyncController {
     window.addEventListener('online', this.#online)
     window.addEventListener('offline', this.#offline)
     window.addEventListener('pagehide', this.#pageHide)
+    window.document.addEventListener(
+      'visibilitychange',
+      this.#visibilityChange,
+    )
   }
 
   static async open(
@@ -140,6 +211,7 @@ export class CanvasSyncController {
     if (pending.length > 0 && controller.#status !== 'conflict') {
       controller.#schedule(0)
     }
+    controller.#scheduleRefresh(0)
     return controller
   }
 
@@ -157,6 +229,14 @@ export class CanvasSyncController {
 
   get conflicts() {
     return this.#conflicts
+  }
+
+  get agentActivity() {
+    return this.#agentActivity
+  }
+
+  get remoteChange() {
+    return this.#remoteChange
   }
 
   subscribe = (listener: Listener) => {
@@ -186,15 +266,30 @@ export class CanvasSyncController {
     }
   }
 
+  async refresh() {
+    if (this.#closed || !navigator.onLine) return
+    if (this.#flushing) return
+    if (this.#refreshing) return this.#refreshing
+    this.#refreshing = this.#refresh()
+    try {
+      await this.#refreshing
+    } finally {
+      this.#refreshing = null
+    }
+  }
+
   async close() {
     if (this.#closed) return
     if (this.#timer) clearTimeout(this.#timer)
+    if (this.#refreshTimer) clearTimeout(this.#refreshTimer)
     await this.flush()
     this.#closed = true
+    if (this.#refreshTimer) clearTimeout(this.#refreshTimer)
     this.#status = 'closed'
     window.removeEventListener('online', this.#online)
     window.removeEventListener('offline', this.#offline)
     window.removeEventListener('pagehide', this.#pageHide)
+    document.removeEventListener('visibilitychange', this.#visibilityChange)
     this.#emit()
   }
 
@@ -213,7 +308,74 @@ export class CanvasSyncController {
     this.#emit()
   }
 
+  async #refresh() {
+    if (document.visibilityState === 'hidden') return
+    try {
+      const result = await orpc.canvas.get({
+        designId: this.target.designId,
+        draftId: this.target.draftId,
+        sinceRevision: this.#revision,
+      })
+      if (result.status !== 'ready') return
+      this.#setAgentActivity(result.activity)
+      if (result.revision <= this.#revision) {
+        if (this.#status === 'offline') {
+          this.#status = 'ready'
+          this.#emit()
+        }
+        return
+      }
+
+      const previous = this.#baseDocument
+      let remote = result.document
+        ? parseCanvasDocument(result.document)
+        : previous
+      const changedNodeIds = new Set<string>()
+      if (result.document) {
+        for (const id of changedSnapshotNodeIds(previous, remote)) {
+          changedNodeIds.add(id)
+        }
+      } else {
+        for (const transaction of result.transactions) {
+          const applied = applyTransaction(remote, transaction)
+          remote = applied.document
+          for (const id of applied.changedNodeIds) changedNodeIds.add(id)
+        }
+      }
+
+      this.#baseDocument = remote
+      this.#revision = result.revision
+      const rebased = rebaseTransactions(remote, this.#pending)
+      const revealNodeIds = result.document
+        ? [...changedNodeIds]
+        : remoteRevealNodeIds(result.transactions)
+      if (revealNodeIds.length > 0) {
+        this.#remoteChangeSequence += 1
+        this.#remoteChange = {
+          sequence: this.#remoteChangeSequence,
+          revision: result.revision,
+          nodeIds: revealNodeIds,
+        }
+      }
+      this.engine.replaceDocument(rebased.document)
+      if (!rebased.ok) {
+        this.#status = 'conflict'
+        this.#conflicts = rebased.conflicts
+      } else {
+        this.#status = 'ready'
+        this.#conflicts = []
+      }
+      this.#emit()
+    } catch {
+      if (!this.#closed && this.#status !== 'conflict') {
+        this.#status = 'offline'
+        this.#emit()
+      }
+    }
+  }
+
   async #flush() {
+    if (this.#refreshing) await this.#refreshing
     if (!navigator.onLine) {
       this.#status = 'offline'
       this.#emit()
@@ -253,6 +415,9 @@ export class CanvasSyncController {
       let remote = result.document
         ? parseCanvasDocument(result.document)
         : this.#baseDocument
+      const revealNodeIds = result.document
+        ? changedSnapshotNodeIds(this.#baseDocument, remote)
+        : remoteRevealNodeIds(result.transactions)
       if (!result.document) {
         for (const transaction of result.transactions) {
           remote = applyTransaction(remote, transaction).document
@@ -260,6 +425,14 @@ export class CanvasSyncController {
       }
       this.#baseDocument = remote
       this.#revision = result.revision
+      if (revealNodeIds.length > 0) {
+        this.#remoteChangeSequence += 1
+        this.#remoteChange = {
+          sequence: this.#remoteChangeSequence,
+          revision: result.revision,
+          nodeIds: revealNodeIds,
+        }
+      }
       const rebased = rebaseTransactions(remote, this.#pending)
       if (!rebased.ok) {
         this.engine.replaceDocument(rebased.document)
@@ -286,10 +459,43 @@ export class CanvasSyncController {
     }, delay)
   }
 
+  #scheduleRefresh(delay: number) {
+    if (this.#closed) return
+    if (this.#refreshTimer) clearTimeout(this.#refreshTimer)
+    this.#refreshTimer = setTimeout(() => {
+      this.#refreshTimer = null
+      void this.refresh().finally(() => {
+        this.#scheduleRefresh(
+          document.visibilityState === 'hidden'
+            ? 5_000
+            : REMOTE_REFRESH_INTERVAL_MS,
+        )
+      })
+    }, delay)
+  }
+
+  #setAgentActivity(activity: CanvasAgentActivity | null) {
+    const current = this.#agentActivity
+    if (
+      current?.id === activity?.id &&
+      current?.phase === activity?.phase &&
+      current?.updatedAt === activity?.updatedAt &&
+      current?.label === activity?.label &&
+      current?.nodeIds.join('\u0000') === activity?.nodeIds.join('\u0000')
+    ) {
+      return
+    }
+    this.#agentActivity = activity
+      ? { ...activity, nodeIds: [...activity.nodeIds] }
+      : null
+    this.#emit()
+  }
+
   #online = () => {
     if (this.#status === 'offline') this.#status = 'ready'
     this.#emit()
     this.#schedule(0)
+    this.#scheduleRefresh(0)
   }
 
   #offline = () => {
@@ -300,6 +506,10 @@ export class CanvasSyncController {
   #pageHide = () => {
     void writePending(targetKey(this.target), this.#pending)
     void this.flush()
+  }
+
+  #visibilityChange = () => {
+    if (document.visibilityState === 'visible') this.#scheduleRefresh(0)
   }
 
   #emit() {

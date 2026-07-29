@@ -1,12 +1,19 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { z } from 'zod'
 import {
+  compileJsxComponent,
+  compileStandaloneHtml,
+  compileTailwindComponent,
+} from '@loora/canvas/export'
+import {
   canvasId,
   createInstanceNode,
   defaultLayout,
   defaultStyle,
   orderedChildren,
+  type CanvasDocument,
   type CanvasNode,
+  type NodeRef,
 } from '@loora/canvas/model'
 import {
   createComponentInputSchema,
@@ -53,6 +60,7 @@ import {
   reopenDraft,
   proposeDraft,
 } from './designs'
+import { renderCanvasScreenshot } from './screenshot'
 
 function json(data: unknown) {
   return {
@@ -94,23 +102,61 @@ const targetShape = {
   draftId: draftId.optional().describe('Branch target; omit for Main'),
 }
 
-function appUrl(
+export function appUrl(
   design: string,
   branch?: string,
   extra: Record<string, string | undefined> = {},
 ) {
   const origin = (process.env.LOORA_APP_URL?.trim() || 'https://loora.design').replace(/\/+$/, '')
-  const url = new URL(origin)
-  url.searchParams.set('design', design)
-  if (branch) url.searchParams.set('draft', branch)
+  const path = branch
+    ? `/design/${encodeURIComponent(design)}/b/${encodeURIComponent(branch)}`
+    : `/design/${encodeURIComponent(design)}`
+  const url = new URL(path, `${origin}/`)
   for (const [key, value] of Object.entries(extra)) {
     if (value) url.searchParams.set(key, value)
   }
   return url.toString()
 }
 
+export function exportCanvasCode(
+  document: CanvasDocument,
+  input: {
+    format: 'tailwind' | 'html' | 'jsx'
+    pageId?: string
+    ref?: NodeRef
+    width: number
+  },
+) {
+  if (input.pageId && input.ref) {
+    throw new Error('Choose either pageId or ref, not both')
+  }
+  if (input.ref) readCanvasNodeRef(document, input.ref, input.width)
+  const defaultPage = orderedChildren(document, null).find(
+    (node) => node.type === 'page' && !node.hidden,
+  )
+  const pageId =
+    input.ref
+      ? undefined
+      : input.pageId ??
+        (defaultPage?.type === 'page' ? defaultPage.id : undefined)
+  if (!input.ref && !pageId) {
+    throw new Error('The Canvas has no visible Page to export')
+  }
+  const nodeId = input.ref
+    ? input.ref.instancePath[0] ?? input.ref.nodeId
+    : undefined
+  const options = { pageId, nodeId, width: input.width }
+  const code =
+    input.format === 'tailwind'
+      ? compileTailwindComponent(document, options)
+      : input.format === 'jsx'
+        ? compileJsxComponent(document, options)
+        : compileStandaloneHtml(document, options)
+  return { code, pageId, nodeId }
+}
+
 export function createLooraServer(userId: string) {
-  const server = new McpServer({ name: 'loora', version: '0.2.0' })
+  const server = new McpServer({ name: 'loora', version: '0.3.0' })
 
   function tool<Args>(run: (args: Args) => Promise<unknown>) {
     return async (args: Args) => {
@@ -122,21 +168,122 @@ export function createLooraServer(userId: string) {
     }
   }
 
+  function pngTool<Args>(
+    run: (args: Args) => Promise<{
+      png: Uint8Array
+      metadata: unknown
+    }>,
+  ) {
+    return async (args: Args) => {
+      try {
+        const result = await run(args)
+        return {
+          content: [
+            {
+              type: 'text' as const,
+              text: JSON.stringify(result.metadata, null, 2),
+            },
+            {
+              type: 'image' as const,
+              data: Buffer.from(result.png).toString('base64'),
+              mimeType: 'image/png',
+            },
+          ],
+        }
+      } catch (error) {
+        return fail(error)
+      }
+    }
+  }
+
   server.registerTool(
     'listDesigns',
-    { description: 'List the signed-in user’s structured Loora designs.' },
-    tool(async (_args: unknown) => listDesigns(userId)),
+    {
+      description:
+        'Start here. List the signed-in user’s structured Loora designs and canonical editor URLs.',
+      annotations: { readOnlyHint: true },
+    },
+    tool(async (_args: unknown) =>
+      (await listDesigns(userId)).map((design) => ({
+        ...design,
+        openUrl: appUrl(design.id),
+      })),
+    ),
+  )
+
+  server.registerTool(
+    'getDesignContext',
+    {
+      description:
+        'Read the target, revision, responsive settings, tokens, Pages, components, and a compact tree in one call. Use this before editing.',
+      inputSchema: {
+        ...targetShape,
+        depth: z.number().int().min(1).max(10).default(4),
+      },
+      annotations: { readOnlyHint: true },
+    },
+    tool(
+      async (args: {
+        designId: string
+        draftId?: string
+        depth: number
+      }) => {
+        const found = await getCanvasTarget(userId, args)
+        const roots = orderedChildren(found.document, null)
+        return {
+          target: {
+            designId: args.designId,
+            designName: found.name,
+            draftId: found.draftId,
+            draftName: found.draftName,
+            status: found.status,
+          },
+          revision: found.revision,
+          updatedAt: found.updatedAt.toISOString(),
+          openUrl: appUrl(args.designId, args.draftId),
+          breakpoints: found.document.breakpoints,
+          activeThemeId: found.document.activeThemeId,
+          themes: Object.values(found.document.themes),
+          tokens: Object.values(found.document.tokens),
+          pages: roots
+            .filter((node) => node.type === 'page')
+            .map((page) => ({
+              id: page.id,
+              name: page.name,
+              hidden: page.hidden,
+              x: page.layout.x,
+              y: page.layout.y,
+              width:
+                page.layout.width.unit === 'px'
+                  ? page.layout.width.value
+                  : page.viewport.width,
+              minHeight: page.viewport.minHeight,
+            })),
+          components: roots
+            .filter((node) => node.type === 'component')
+            .map((component) => ({
+              id: component.id,
+              name: component.name,
+              variants: component.variants,
+              defaultVariant: component.defaultVariant,
+            })),
+          tree: semanticTree(found.document, null, args.depth),
+        }
+      },
+    ),
   )
 
   server.registerTool(
     'readTree',
     {
-      description: 'Read a compact semantic Canvas tree. No generated source is returned.',
+      description:
+        'Read a compact semantic Canvas tree. Use NodeRefs from this result for precise edits.',
       inputSchema: {
         ...targetShape,
         root: readTreeInputSchema.shape.root,
         depth: readTreeInputSchema.shape.depth,
       },
+      annotations: { readOnlyHint: true },
     },
     tool(
       async (args: {
@@ -164,6 +311,7 @@ export function createLooraServer(userId: string) {
     {
       description: 'Read one complete structured source node and an optional instance override.',
       inputSchema: { ...targetShape, ref: readNodeInputSchema.shape.ref },
+      annotations: { readOnlyHint: true },
     },
     tool(
       async (args: {
@@ -189,6 +337,7 @@ export function createLooraServer(userId: string) {
         query: searchNodesInputSchema.shape.query,
         types: searchNodesInputSchema.shape.types,
       },
+      annotations: { readOnlyHint: true },
     },
     tool(
       async (args: {
@@ -209,7 +358,8 @@ export function createLooraServer(userId: string) {
   server.registerTool(
     'createPage',
     {
-      description: 'Create an editable responsive Page with optional nested structured nodes.',
+      description:
+        'Create an editable responsive Page with nested structured nodes in one engine transaction. Model normal Tailwind layouts with flex/grid, gap, padding, fill, and hug; use absolute positioning only intentionally.',
       inputSchema: { ...targetShape, ...createPageInputSchema.shape },
     },
     tool(
@@ -236,7 +386,7 @@ export function createLooraServer(userId: string) {
     'insertNodes',
     {
       description:
-        'Insert nested structured nodes. Temporary refs are mapped to permanent ids. HTML, JSX, CSS, and code strings are not accepted.',
+        'Insert nested structured nodes through the Canvas engine. Think in Tailwind layout terms, then express them as validated layout/style fields. Temporary refs are mapped to permanent ids; source code is export-only.',
       inputSchema: { ...targetShape, ...insertNodesInputSchema.shape },
     },
     tool(
@@ -272,7 +422,7 @@ export function createLooraServer(userId: string) {
     'patchNodes',
     {
       description:
-        'Patch structured node fields or instance overrides atomically.',
+        'Patch structured layout, visual, text, responsive, variant, and interaction fields atomically through the Canvas engine.',
       inputSchema: { ...targetShape, ...patchNodesInputSchema.shape },
     },
     tool(
@@ -491,11 +641,127 @@ export function createLooraServer(userId: string) {
   )
 
   server.registerTool(
+    'exportCode',
+    {
+      description:
+        'Generate implementation-ready code for one Page or node. Tailwind returns readable JSX with literal utilities; HTML and JSX are also available. Export is one-way—continue editing through structured Canvas tools.',
+      inputSchema: {
+        ...targetShape,
+        format: z.enum(['tailwind', 'html', 'jsx']).default('tailwind'),
+        pageId: z.string().min(1).max(128).optional(),
+        ref: readNodeInputSchema.shape.ref.optional(),
+        width: z.number().finite().min(200).max(3_840).default(1_440),
+      },
+      annotations: { readOnlyHint: true },
+    },
+    tool(
+      async (args: {
+        designId: string
+        draftId?: string
+        format: 'tailwind' | 'html' | 'jsx'
+        pageId?: string
+        ref?: { nodeId: string; instancePath: string[] }
+        width: number
+      }) => {
+        const found = await getCanvasTarget(userId, args)
+        const { code, pageId, nodeId } = exportCanvasCode(
+          found.document,
+          args,
+        )
+        if (Buffer.byteLength(code, 'utf8') > 2_000_000) {
+          throw new Error(
+            'The generated code is too large for one MCP response. Export a Page or node instead.',
+          )
+        }
+        const extension = args.format === 'html' ? 'html' : 'tsx'
+        return {
+          format: args.format,
+          code,
+          extension,
+          mediaType:
+            args.format === 'html'
+              ? 'text/html'
+              : 'text/typescript',
+          revision: found.revision,
+          target: {
+            pageId: pageId ?? null,
+            ref: args.ref ?? null,
+            exportedRootNodeId: nodeId ?? pageId,
+          },
+          openUrl: appUrl(args.designId, args.draftId, {
+            page: pageId,
+            node: args.ref?.nodeId,
+            instancePath: args.ref?.instancePath.join('/'),
+          }),
+        }
+      },
+    ),
+  )
+
+  server.registerTool(
+    'getScreenshot',
+    {
+      description:
+        'Render a real PNG of one Page or NodeRef with the same DOM/CSS export engine. Call this after meaningful edits to verify the visual result.',
+      inputSchema: {
+        ...targetShape,
+        pageId: z.string().min(1).max(128).optional(),
+        ref: readNodeInputSchema.shape.ref.optional(),
+        width: z.number().finite().min(200).max(3_840).default(1_440),
+        pixelRatio: z.number().finite().min(1).max(2).default(1),
+      },
+      annotations: { readOnlyHint: true, openWorldHint: false },
+    },
+    pngTool(
+      async (args: {
+        designId: string
+        draftId?: string
+        pageId?: string
+        ref?: { nodeId: string; instancePath: string[] }
+        width: number
+        pixelRatio: number
+      }) => {
+        if (args.pageId && args.ref) {
+          throw new Error('Choose either pageId or ref, not both')
+        }
+        const found = await getCanvasTarget(userId, args)
+        const screenshot = await renderCanvasScreenshot(
+          userId,
+          found.document,
+          args,
+        )
+        return {
+          png: screenshot.png,
+          metadata: {
+            mimeType: 'image/png',
+            width: screenshot.width,
+            height: screenshot.height,
+            revision: found.revision,
+            target: {
+              designId: args.designId,
+              draftId: args.draftId ?? null,
+              pageId: screenshot.pageId,
+              ref: screenshot.ref,
+            },
+            skippedImages: screenshot.skippedImages,
+            openUrl: appUrl(args.designId, args.draftId, {
+              page: screenshot.pageId ?? undefined,
+              node: screenshot.ref?.nodeId,
+              instancePath: screenshot.ref?.instancePath.join('/'),
+            }),
+          },
+        }
+      },
+    ),
+  )
+
+  server.registerTool(
     'viewNode',
     {
       description:
-        'Return an open-in-Loora visual URL and semantic details for one node.',
+        'Return a canonical open-in-Loora URL and semantic details for one node. Use getScreenshot when image pixels are needed.',
       inputSchema: { ...targetShape, ...viewNodeInputSchema.shape },
+      annotations: { readOnlyHint: true },
     },
     tool(
       async (args: z.infer<typeof viewNodeInputSchema> & {
@@ -506,6 +772,7 @@ export function createLooraServer(userId: string) {
         const node = readCanvasNodeRef(found.document, args.ref)
         return {
           node,
+          revision: found.revision,
           openUrl: appUrl(args.designId, args.draftId, {
             node: args.ref.nodeId,
             instancePath: args.ref.instancePath.join('/'),
@@ -519,8 +786,9 @@ export function createLooraServer(userId: string) {
     'viewPage',
     {
       description:
-        'Return an open-in-Loora visual URL and semantic tree for one Page.',
+        'Return a canonical open-in-Loora URL and semantic tree for one Page. Use getScreenshot when image pixels are needed.',
       inputSchema: { ...targetShape, ...viewPageInputSchema.shape },
+      annotations: { readOnlyHint: true },
     },
     tool(
       async (args: z.infer<typeof viewPageInputSchema> & {
@@ -533,6 +801,7 @@ export function createLooraServer(userId: string) {
         }
         return {
           tree: semanticTree(found.document, args.pageId, 20),
+          revision: found.revision,
           openUrl: appUrl(args.designId, args.draftId, {
             page: args.pageId,
             width: args.width ? String(args.width) : undefined,
@@ -545,8 +814,10 @@ export function createLooraServer(userId: string) {
   server.registerTool(
     'viewCanvas',
     {
-      description: 'Return an open-in-Loora visual URL and the current Page summary.',
+      description:
+        'Return a canonical open-in-Loora URL and Page summary. Use getScreenshot to inspect pixels.',
       inputSchema: { ...targetShape, ...viewCanvasInputSchema.shape },
+      annotations: { readOnlyHint: true },
     },
     tool(
       async (args: z.infer<typeof viewCanvasInputSchema> & {
@@ -555,6 +826,8 @@ export function createLooraServer(userId: string) {
       }) => {
         const found = await getCanvasTarget(userId, args)
         return {
+          name: found.name,
+          revision: found.revision,
           pages: orderedChildren(found.document, null)
             .filter((node) => node.type === 'page')
             .map((page) => ({ id: page.id, name: page.name })),

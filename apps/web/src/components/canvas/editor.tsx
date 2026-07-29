@@ -1,9 +1,11 @@
 import {
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
   useSyncExternalStore,
+  type CSSProperties,
   type ElementType,
   type ReactNode,
   type RefObject,
@@ -44,6 +46,7 @@ import {
   type CanvasDropPlacement,
   type CanvasSurfaceControls,
   useCanvasDocument,
+  useCanvasDomRegistry,
   useCanvasHistory,
   useCanvasReadOnly,
   useCanvasSelection,
@@ -69,6 +72,8 @@ import {
   type ShapeNode,
 } from '@loora/canvas/model'
 import type {
+  CanvasAgentActivity,
+  CanvasRemoteChange,
   CanvasSyncStatus,
   CanvasSyncTarget,
 } from '#/lib/canvas-client'
@@ -77,15 +82,11 @@ import type {
   CanvasOperation,
   CanvasTransaction,
 } from '@loora/canvas/engine'
-import {
-  CanvasLayersPanel,
-  type CanvasPanelPosition,
-} from './layers-panel'
+import { CanvasLayersPanel } from './layers-panel'
 import { CanvasPropertiesPanel } from './properties-panel'
 import { CanvasContextMenu } from './canvas-menu'
 import { CanvasExport } from './export-panel'
 import { CanvasHistory } from './history'
-import { CanvasPublish } from './publish'
 import { HtmlImportDialog } from './html-import-dialog'
 import {
   ASSET_DRAG_TYPE,
@@ -137,8 +138,6 @@ import { Dialog, DialogPopup } from '#/components/ui/dialog'
 
 const INSPECTOR_MIN_WIDTH = 220
 const INSPECTOR_MAX_WIDTH = 420
-const INSPECTOR_MIN_HEIGHT = 180
-const INSPECTOR_MAX_HEIGHT = 480
 
 function clampInspectorWidth(width: number) {
   return Math.round(
@@ -149,19 +148,9 @@ function clampInspectorWidth(width: number) {
   )
 }
 
-function clampInspectorHeight(height: number) {
-  return Math.round(
-    Math.min(
-      INSPECTOR_MAX_HEIGHT,
-      Math.max(INSPECTOR_MIN_HEIGHT, height),
-    ),
-  )
-}
-
-function storedInspectorPosition(): CanvasPanelPosition {
-  if (typeof window === 'undefined') return 'right'
-  const value = window.localStorage.getItem('loora:layers-position')
-  return value === 'left' || value === 'bottom' ? value : 'right'
+export interface CanvasTopBarActions {
+  openAssets: () => void
+  openHistory: () => void
 }
 
 export function CanvasEditor({
@@ -172,7 +161,7 @@ export function CanvasEditor({
 }: {
   controller: CanvasEditorController
   name: string
-  topBar?: ReactNode
+  topBar?: ReactNode | ((actions: CanvasTopBarActions) => ReactNode)
   readOnly?: boolean
 }) {
   return (
@@ -229,7 +218,7 @@ function CanvasShell({
 }: {
   controller: CanvasEditorController
   name: string
-  topBar?: ReactNode
+  topBar?: ReactNode | ((actions: CanvasTopBarActions) => ReactNode)
   readOnly: boolean
 }) {
   const isMobile = useIsMobile()
@@ -239,6 +228,7 @@ function CanvasShell({
     () => (isMobile ? null : 'layers'),
   )
   const [assetsOpen, setAssetsOpen] = useState(false)
+  const [historyOpen, setHistoryOpen] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [exportOpen, setExportOpen] = useState(false)
   const [htmlImportOpen, setHtmlImportOpen] = useState(false)
@@ -263,15 +253,6 @@ function CanvasShell({
       ? clampInspectorWidth(value)
       : 280
   })
-  const [inspectorHeight, setInspectorHeight] = useState(() => {
-    if (typeof window === 'undefined') return 260
-    const value = Number(window.localStorage.getItem('loora:layers-height'))
-    return Number.isFinite(value) && value > 0
-      ? clampInspectorHeight(value)
-      : 260
-  })
-  const [inspectorPosition, setInspectorPosition] =
-    useState<CanvasPanelPosition>(storedInspectorPosition)
   const [resizingInspector, setResizingInspector] = useState(false)
   const [shortcutConfig, setShortcutConfig] = useState<ShortcutConfig>(() =>
     controller.target
@@ -289,11 +270,6 @@ function CanvasShell({
       )
     })
   }
-  const moveInspector = (position: CanvasPanelPosition) => {
-    setInspectorPosition(position)
-    window.localStorage.setItem('loora:layers-position', position)
-  }
-
   useEffect(() => {
     if (typeof window === 'undefined') return
     const params = new URLSearchParams(window.location.search)
@@ -673,43 +649,33 @@ function CanvasShell({
         onReorder={actions.reorderSelection}
         canReorder={actions.canReorder}
         onAddPage={addPageAndFocus}
-        position={inspectorPosition}
-        onPositionChange={isMobile ? undefined : moveInspector}
+        position="left"
         onClose={() => setInspector(null)}
       />
     ) : inspector === 'design' ? (
       <CanvasPropertiesPanel onClose={() => setInspector(null)} />
     ) : null
 
+  const inspectorPosition = inspector === 'layers' ? 'left' : 'right'
   const inspectorTitle = inspector === 'layers' ? 'Layers' : 'Design'
   const desktopInspectorPanel =
     !isMobile && inspectorPanel ? (
       <div
-        className={`pointer-events-auto relative flex shrink-0 bg-surface ${
-          inspectorPosition === 'bottom'
-            ? 'w-full border-t border-line'
-            : inspectorPosition === 'left'
-              ? 'h-full border-e border-line'
-              : 'h-full border-s border-line'
+        className={`pointer-events-auto relative flex h-full shrink-0 bg-surface ${
+          inspectorPosition === 'left'
+            ? 'border-e border-line'
+            : 'border-s border-line'
         }`}
-        style={
-          inspectorPosition === 'bottom'
-            ? { height: inspectorHeight }
-            : { width: inspectorWidth }
-        }
+        style={{ width: inspectorWidth }}
       >
         <div
           role="separator"
           aria-label={`Resize ${inspectorTitle} panel`}
-          aria-orientation={
-            inspectorPosition === 'bottom' ? 'horizontal' : 'vertical'
-          }
+          aria-orientation="vertical"
           className={
-            inspectorPosition === 'bottom'
-              ? 'absolute inset-x-0 -top-1 z-20 h-2 cursor-row-resize touch-none hover:bg-line'
-              : inspectorPosition === 'left'
-                ? 'absolute inset-y-0 -end-1 z-20 w-2 cursor-col-resize touch-none hover:bg-line'
-                : 'absolute inset-y-0 -start-1 z-20 w-2 cursor-col-resize touch-none hover:bg-line'
+            inspectorPosition === 'left'
+              ? 'absolute inset-y-0 -end-1 z-20 w-2 cursor-col-resize touch-none hover:bg-line'
+              : 'absolute inset-y-0 -start-1 z-20 w-2 cursor-col-resize touch-none hover:bg-line'
           }
           onPointerDown={(event) => {
             event.currentTarget.setPointerCapture(event.pointerId)
@@ -717,12 +683,6 @@ function CanvasShell({
           }}
           onPointerMove={(event) => {
             if (!resizingInspector) return
-            if (inspectorPosition === 'bottom') {
-              setInspectorHeight(
-                clampInspectorHeight(window.innerHeight - event.clientY),
-              )
-              return
-            }
             setInspectorWidth(
               clampInspectorWidth(
                 inspectorPosition === 'left'
@@ -735,17 +695,6 @@ function CanvasShell({
             if (!resizingInspector) return
             event.currentTarget.releasePointerCapture(event.pointerId)
             setResizingInspector(false)
-            if (inspectorPosition === 'bottom') {
-              const height = clampInspectorHeight(
-                window.innerHeight - event.clientY,
-              )
-              setInspectorHeight(height)
-              window.localStorage.setItem(
-                'loora:layers-height',
-                String(height),
-              )
-              return
-            }
             const width = clampInspectorWidth(
               inspectorPosition === 'left'
                 ? event.clientX
@@ -803,6 +752,18 @@ function CanvasShell({
             }}
           />
         </CanvasContextMenu>
+
+        <CanvasAgentPresence controller={controller} />
+
+        {controller.target ? (
+          <CanvasHistory
+            controller={controller}
+            readOnly={readOnly}
+            open={historyOpen}
+            onOpenChange={setHistoryOpen}
+            showTrigger={false}
+          />
+        ) : null}
 
         <Drawer
           open={assetsOpen}
@@ -886,11 +847,16 @@ function CanvasShell({
           </span>
           <span className="text-muted-foreground/35 max-sm:hidden">/</span>
           <div className="flex min-w-0 items-center gap-1.5 overflow-hidden max-sm:max-w-40">
-            {topBar ?? (
-              <span className="max-w-48 truncate text-xs text-muted-foreground">
-                {name}
-              </span>
-            )}
+            {typeof topBar === 'function'
+              ? topBar({
+                  openAssets: () => setAssetsOpen(true),
+                  openHistory: () => setHistoryOpen(true),
+                })
+              : topBar ?? (
+                  <span className="max-w-48 truncate text-xs text-muted-foreground">
+                    {name}
+                  </span>
+                )}
           </div>
           <span className="text-muted-foreground/35 max-sm:hidden">/</span>
           <div className="max-sm:hidden">
@@ -902,38 +868,6 @@ function CanvasShell({
           </div>
 
           <div className="ms-auto flex shrink-0 items-center gap-1.5">
-            {/* Document actions. Commands lives in the overflow menu — it has a
-                chord, and a ⌘ glyph beside four nouns read as noise. */}
-            <div className="flex items-center gap-0.5">
-              <Button
-                variant="ghost"
-                size="icon-sm"
-                aria-label="Assets"
-                title="Assets"
-                aria-pressed={assetsOpen}
-                disabled={!controller.target}
-                data-active={assetsOpen || undefined}
-                className="data-active:bg-accent"
-                onClick={() => setAssetsOpen((open) => !open)}
-              >
-                <ImageIcon />
-              </Button>
-              {controller.target ? (
-                <>
-                  <CanvasHistory
-                    controller={controller}
-                    readOnly={readOnly}
-                    iconOnly
-                  />
-                  <CanvasPublish
-                    target={controller.target}
-                    onFlush={controller.flush}
-                    iconOnly
-                  />
-                </>
-              ) : null}
-            </div>
-
             {/* One segmented control, so the panel toggles read as a pair of
                 view states rather than two more loose actions. */}
             <div
@@ -1017,11 +951,7 @@ function CanvasShell({
           </div>
         </header>
 
-        <div
-          className={`flex min-h-0 flex-1 ${
-            inspectorPosition === 'bottom' ? 'flex-col' : ''
-          }`}
-        >
+        <div className="flex min-h-0 flex-1">
           {inspectorPosition === 'left' ? desktopInspectorPanel : null}
           {/* The free canvas area. The tool clusters float inside it so they
               stay centred on what is visible, not on the whole viewport. */}
@@ -1040,7 +970,7 @@ function CanvasShell({
             </TooltipProvider>
           </div>
 
-          {inspectorPosition !== 'left' ? desktopInspectorPanel : null}
+          {inspectorPosition === 'right' ? desktopInspectorPanel : null}
         </div>
       </div>
     </div>
@@ -1053,6 +983,8 @@ export interface CanvasEditorController {
   status: CanvasSyncStatus
   pendingCount: number
   revision?: number
+  agentActivity?: CanvasAgentActivity | null
+  remoteChange?: CanvasRemoteChange | null
   subscribe: (listener: () => void) => () => void
   enqueue: (transaction: CanvasTransaction) => void
   flush?: () => Promise<void>
@@ -1084,6 +1016,167 @@ function CanvasSyncIndicator({ controller }: { controller: CanvasEditorControlle
     >
       {label}
     </p>
+  )
+}
+
+const AGENT_DOT_OPACITIES = [
+  0.9, 0.75, 0.12, 0.2, 0.35, 0.52, 0.7, 0.88, 1, 0.86, 0.68, 0.45,
+  1, 0.82, 0.16, 0.3, 0.48, 0.68, 0.9, 1, 0.86, 0.7, 0.5, 0.32,
+]
+
+function CanvasAgentPresence({
+  controller,
+}: {
+  controller: CanvasEditorController
+}) {
+  const registry = useCanvasDomRegistry()
+  const overlayRef = useRef<HTMLDivElement>(null)
+  const indicatorRef = useRef<HTMLDivElement>(null)
+  const outlineRef = useRef<HTMLDivElement>(null)
+  const activity = useSyncExternalStore(
+    controller.subscribe,
+    () => controller.agentActivity ?? null,
+    () => null,
+  )
+  const remoteChange = useSyncExternalStore(
+    controller.subscribe,
+    () => controller.remoteChange ?? null,
+    () => null,
+  )
+
+  useLayoutEffect(() => {
+    if (
+      !remoteChange ||
+      window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
+    ) {
+      return
+    }
+    const ids = new Set(remoteChange.nodeIds)
+    const elements = [
+      ...new Set(
+        registry
+          .entries()
+          .filter((entry) => ids.has(entry.ref.nodeId))
+          .map((entry) => entry.element),
+      ),
+    ].slice(0, 40)
+    const animations = elements.flatMap((element, index) => {
+      if (!element.isConnected || typeof element.animate !== 'function') return []
+      const styles = window.getComputedStyle(element)
+      return [
+        element.animate(
+          [
+            { opacity: 0, filter: 'blur(2px)' },
+            { opacity: styles.opacity, filter: styles.filter },
+          ],
+          {
+            duration: 520,
+            delay: Math.min(index * 38, 280),
+            easing: 'cubic-bezier(0.22, 1, 0.36, 1)',
+            fill: 'backwards',
+          },
+        ),
+      ]
+    })
+    return () => {
+      for (const animation of animations) animation.cancel()
+    }
+  }, [registry, remoteChange])
+
+  useEffect(() => {
+    if (!activity) return
+    let frame = 0
+    const updatePosition = () => {
+      const overlay = overlayRef.current
+      const indicator = indicatorRef.current
+      const outline = outlineRef.current
+      if (!overlay || !indicator || !outline) return
+      const host = overlay.getBoundingClientRect()
+      const wanted = new Set(activity.nodeIds)
+      const target = registry
+        .entries()
+        .find(
+          (entry) =>
+            wanted.has(entry.ref.nodeId) &&
+            entry.element.getClientRects().length > 0,
+        )
+      const rect = target?.element.getBoundingClientRect()
+      const indicatorWidth = 112
+      const indicatorHeight = 22
+      const minY = 44
+      const rawX = rect
+        ? rect.left - host.left + 5
+        : host.width / 2 - indicatorWidth / 2
+      const rawY = rect
+        ? rect.top - host.top - indicatorHeight
+        : minY + 14
+      const x = Math.max(
+        10,
+        Math.min(host.width - indicatorWidth - 10, rawX),
+      )
+      const y = Math.max(
+        minY,
+        Math.min(host.height - indicatorHeight - 10, rawY),
+      )
+      indicator.style.transform = `translate3d(${Math.round(x)}px, ${Math.round(y)}px, 0)`
+      indicator.style.opacity = '1'
+
+      const visible =
+        rect &&
+        rect.right > host.left &&
+        rect.left < host.right &&
+        rect.bottom > host.top + minY &&
+        rect.top < host.bottom
+      if (visible && rect) {
+        outline.hidden = false
+        outline.style.transform =
+          `translate3d(${Math.round(rect.left - host.left)}px, ${Math.round(rect.top - host.top)}px, 0)`
+        outline.style.width = `${Math.round(rect.width)}px`
+        outline.style.height = `${Math.round(rect.height)}px`
+      } else {
+        outline.hidden = true
+      }
+      frame = window.requestAnimationFrame(updatePosition)
+    }
+    frame = window.requestAnimationFrame(updatePosition)
+    return () => window.cancelAnimationFrame(frame)
+  }, [activity, registry])
+
+  if (!activity) return null
+  return (
+    <div
+      ref={overlayRef}
+      className="pointer-events-none absolute inset-0 z-10 overflow-hidden"
+      role="status"
+      aria-live="polite"
+      aria-label={activity.label}
+    >
+      <div
+        ref={outlineRef}
+        className="cx-agent-target"
+        aria-hidden="true"
+        hidden
+      />
+      <div
+        ref={indicatorRef}
+        className="cx-agent-dots"
+        data-phase={activity.phase}
+        aria-hidden="true"
+      >
+        {AGENT_DOT_OPACITIES.map((opacity, index) => (
+          <span
+            key={index}
+            className="cx-agent-dot"
+            style={
+              {
+                '--cx-agent-dot-opacity': opacity,
+                '--cx-agent-dot-delay': `${index * -54}ms`,
+              } as CSSProperties
+            }
+          />
+        ))}
+      </div>
+    </div>
   )
 }
 

@@ -15,7 +15,6 @@ import { Route as DotwellKnownOauthAuthorizationServerRouteImport } from './rout
 import { Route as AppIndexRouteImport } from './routes/app.index'
 import { Route as AppDesignRouteImport } from './routes/app.design'
 import { Route as DesignIdRouteImport } from './routes/design.$id'
-import { Route as PLinkIdRouteImport } from './routes/p.$linkId'
 import { Route as ApiAssetIdRouteImport } from './routes/api.asset.$id'
 import { Route as ApiAuthSplatRouteImport } from './routes/api.auth.$'
 import { Route as ApiFigmaCallbackRouteImport } from './routes/api.figma.callback'
@@ -26,11 +25,9 @@ import { Route as ApiGithubInstallRouteImport } from './routes/api.github.instal
 import { Route as ApiGithubSetupRouteImport } from './routes/api.github.setup'
 import { Route as ApiGithubWebhookRouteImport } from './routes/api.github.webhook'
 import { Route as ApiHandoffTokenRouteImport } from './routes/api.handoff.$token'
-import { Route as ApiPLinkIdRouteImport } from './routes/api.p.$linkId'
 import { Route as ApiRpcSplatRouteImport } from './routes/api.rpc.$'
 import { Route as DesignIdBBranchIdRouteImport } from './routes/design.$id_.b.$branchId'
 import { Route as ApiHandoffTokenAssetIdRouteImport } from './routes/api.handoff.$token.asset.$id'
-import { Route as ApiPLinkIdAssetIdRouteImport } from './routes/api.p.$linkId.asset.$id'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
@@ -61,11 +58,6 @@ const AppDesignRoute = AppDesignRouteImport.update({
 const DesignIdRoute = DesignIdRouteImport.update({
   id: '/design/$id',
   path: '/design/$id',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const PLinkIdRoute = PLinkIdRouteImport.update({
-  id: '/p/$linkId',
-  path: '/p/$linkId',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ApiAssetIdRoute = ApiAssetIdRouteImport.update({
@@ -118,11 +110,6 @@ const ApiHandoffTokenRoute = ApiHandoffTokenRouteImport.update({
   path: '/api/handoff/$token',
   getParentRoute: () => rootRouteImport,
 } as any)
-const ApiPLinkIdRoute = ApiPLinkIdRouteImport.update({
-  id: '/api/p/$linkId',
-  path: '/api/p/$linkId',
-  getParentRoute: () => rootRouteImport,
-} as any)
 const ApiRpcSplatRoute = ApiRpcSplatRouteImport.update({
   id: '/api/rpc/$',
   path: '/api/rpc/$',
@@ -138,11 +125,6 @@ const ApiHandoffTokenAssetIdRoute = ApiHandoffTokenAssetIdRouteImport.update({
   path: '/asset/$id',
   getParentRoute: () => ApiHandoffTokenRoute,
 } as any)
-const ApiPLinkIdAssetIdRoute = ApiPLinkIdAssetIdRouteImport.update({
-  id: '/asset/$id',
-  path: '/asset/$id',
-  getParentRoute: () => ApiPLinkIdRoute,
-} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -150,7 +132,6 @@ export interface FileRoutesByFullPath {
   '/.well-known/oauth-authorization-server': typeof DotwellKnownOauthAuthorizationServerRoute
   '/app/design': typeof AppDesignRoute
   '/design/$id': typeof DesignIdRoute
-  '/p/$linkId': typeof PLinkIdRoute
   '/app/': typeof AppIndexRoute
   '/api/asset/$id': typeof ApiAssetIdRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
@@ -162,11 +143,9 @@ export interface FileRoutesByFullPath {
   '/api/github/setup': typeof ApiGithubSetupRoute
   '/api/github/webhook': typeof ApiGithubWebhookRoute
   '/api/handoff/$token': typeof ApiHandoffTokenRouteWithChildren
-  '/api/p/$linkId': typeof ApiPLinkIdRouteWithChildren
   '/api/rpc/$': typeof ApiRpcSplatRoute
   '/design/$id/b/$branchId': typeof DesignIdBBranchIdRoute
   '/api/handoff/$token/asset/$id': typeof ApiHandoffTokenAssetIdRoute
-  '/api/p/$linkId/asset/$id': typeof ApiPLinkIdAssetIdRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -174,7 +153,6 @@ export interface FileRoutesByTo {
   '/.well-known/oauth-authorization-server': typeof DotwellKnownOauthAuthorizationServerRoute
   '/app/design': typeof AppDesignRoute
   '/design/$id': typeof DesignIdRoute
-  '/p/$linkId': typeof PLinkIdRoute
   '/app': typeof AppIndexRoute
   '/api/asset/$id': typeof ApiAssetIdRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
@@ -186,11 +164,9 @@ export interface FileRoutesByTo {
   '/api/github/setup': typeof ApiGithubSetupRoute
   '/api/github/webhook': typeof ApiGithubWebhookRoute
   '/api/handoff/$token': typeof ApiHandoffTokenRouteWithChildren
-  '/api/p/$linkId': typeof ApiPLinkIdRouteWithChildren
   '/api/rpc/$': typeof ApiRpcSplatRoute
   '/design/$id/b/$branchId': typeof DesignIdBBranchIdRoute
   '/api/handoff/$token/asset/$id': typeof ApiHandoffTokenAssetIdRoute
-  '/api/p/$linkId/asset/$id': typeof ApiPLinkIdAssetIdRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -199,7 +175,6 @@ export interface FileRoutesById {
   '/.well-known/oauth-authorization-server': typeof DotwellKnownOauthAuthorizationServerRoute
   '/app/design': typeof AppDesignRoute
   '/design/$id': typeof DesignIdRoute
-  '/p/$linkId': typeof PLinkIdRoute
   '/app/': typeof AppIndexRoute
   '/api/asset/$id': typeof ApiAssetIdRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
@@ -211,11 +186,9 @@ export interface FileRoutesById {
   '/api/github/setup': typeof ApiGithubSetupRoute
   '/api/github/webhook': typeof ApiGithubWebhookRoute
   '/api/handoff/$token': typeof ApiHandoffTokenRouteWithChildren
-  '/api/p/$linkId': typeof ApiPLinkIdRouteWithChildren
   '/api/rpc/$': typeof ApiRpcSplatRoute
   '/design/$id_/b/$branchId': typeof DesignIdBBranchIdRoute
   '/api/handoff/$token/asset/$id': typeof ApiHandoffTokenAssetIdRoute
-  '/api/p/$linkId/asset/$id': typeof ApiPLinkIdAssetIdRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -225,7 +198,6 @@ export interface FileRouteTypes {
     | '/.well-known/oauth-authorization-server'
     | '/app/design'
     | '/design/$id'
-    | '/p/$linkId'
     | '/app/'
     | '/api/asset/$id'
     | '/api/auth/$'
@@ -237,11 +209,9 @@ export interface FileRouteTypes {
     | '/api/github/setup'
     | '/api/github/webhook'
     | '/api/handoff/$token'
-    | '/api/p/$linkId'
     | '/api/rpc/$'
     | '/design/$id/b/$branchId'
     | '/api/handoff/$token/asset/$id'
-    | '/api/p/$linkId/asset/$id'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -249,7 +219,6 @@ export interface FileRouteTypes {
     | '/.well-known/oauth-authorization-server'
     | '/app/design'
     | '/design/$id'
-    | '/p/$linkId'
     | '/app'
     | '/api/asset/$id'
     | '/api/auth/$'
@@ -261,11 +230,9 @@ export interface FileRouteTypes {
     | '/api/github/setup'
     | '/api/github/webhook'
     | '/api/handoff/$token'
-    | '/api/p/$linkId'
     | '/api/rpc/$'
     | '/design/$id/b/$branchId'
     | '/api/handoff/$token/asset/$id'
-    | '/api/p/$linkId/asset/$id'
   id:
     | '__root__'
     | '/'
@@ -273,7 +240,6 @@ export interface FileRouteTypes {
     | '/.well-known/oauth-authorization-server'
     | '/app/design'
     | '/design/$id'
-    | '/p/$linkId'
     | '/app/'
     | '/api/asset/$id'
     | '/api/auth/$'
@@ -285,11 +251,9 @@ export interface FileRouteTypes {
     | '/api/github/setup'
     | '/api/github/webhook'
     | '/api/handoff/$token'
-    | '/api/p/$linkId'
     | '/api/rpc/$'
     | '/design/$id_/b/$branchId'
     | '/api/handoff/$token/asset/$id'
-    | '/api/p/$linkId/asset/$id'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -298,7 +262,6 @@ export interface RootRouteChildren {
   DotwellKnownOauthAuthorizationServerRoute: typeof DotwellKnownOauthAuthorizationServerRoute
   AppDesignRoute: typeof AppDesignRoute
   DesignIdRoute: typeof DesignIdRoute
-  PLinkIdRoute: typeof PLinkIdRoute
   AppIndexRoute: typeof AppIndexRoute
   ApiAssetIdRoute: typeof ApiAssetIdRoute
   ApiAuthSplatRoute: typeof ApiAuthSplatRoute
@@ -310,7 +273,6 @@ export interface RootRouteChildren {
   ApiGithubSetupRoute: typeof ApiGithubSetupRoute
   ApiGithubWebhookRoute: typeof ApiGithubWebhookRoute
   ApiHandoffTokenRoute: typeof ApiHandoffTokenRouteWithChildren
-  ApiPLinkIdRoute: typeof ApiPLinkIdRouteWithChildren
   ApiRpcSplatRoute: typeof ApiRpcSplatRoute
   DesignIdBBranchIdRoute: typeof DesignIdBBranchIdRoute
 }
@@ -357,13 +319,6 @@ declare module '@tanstack/react-router' {
       path: '/design/$id'
       fullPath: '/design/$id'
       preLoaderRoute: typeof DesignIdRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/p/$linkId': {
-      id: '/p/$linkId'
-      path: '/p/$linkId'
-      fullPath: '/p/$linkId'
-      preLoaderRoute: typeof PLinkIdRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/api/asset/$id': {
@@ -436,13 +391,6 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiHandoffTokenRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/api/p/$linkId': {
-      id: '/api/p/$linkId'
-      path: '/api/p/$linkId'
-      fullPath: '/api/p/$linkId'
-      preLoaderRoute: typeof ApiPLinkIdRouteImport
-      parentRoute: typeof rootRouteImport
-    }
     '/api/rpc/$': {
       id: '/api/rpc/$'
       path: '/api/rpc/$'
@@ -464,13 +412,6 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiHandoffTokenAssetIdRouteImport
       parentRoute: typeof ApiHandoffTokenRoute
     }
-    '/api/p/$linkId/asset/$id': {
-      id: '/api/p/$linkId/asset/$id'
-      path: '/asset/$id'
-      fullPath: '/api/p/$linkId/asset/$id'
-      preLoaderRoute: typeof ApiPLinkIdAssetIdRouteImport
-      parentRoute: typeof ApiPLinkIdRoute
-    }
   }
 }
 
@@ -486,18 +427,6 @@ const ApiHandoffTokenRouteWithChildren = ApiHandoffTokenRoute._addFileChildren(
   ApiHandoffTokenRouteChildren,
 )
 
-interface ApiPLinkIdRouteChildren {
-  ApiPLinkIdAssetIdRoute: typeof ApiPLinkIdAssetIdRoute
-}
-
-const ApiPLinkIdRouteChildren: ApiPLinkIdRouteChildren = {
-  ApiPLinkIdAssetIdRoute: ApiPLinkIdAssetIdRoute,
-}
-
-const ApiPLinkIdRouteWithChildren = ApiPLinkIdRoute._addFileChildren(
-  ApiPLinkIdRouteChildren,
-)
-
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   McpConsentRoute: McpConsentRoute,
@@ -505,7 +434,6 @@ const rootRouteChildren: RootRouteChildren = {
     DotwellKnownOauthAuthorizationServerRoute,
   AppDesignRoute: AppDesignRoute,
   DesignIdRoute: DesignIdRoute,
-  PLinkIdRoute: PLinkIdRoute,
   AppIndexRoute: AppIndexRoute,
   ApiAssetIdRoute: ApiAssetIdRoute,
   ApiAuthSplatRoute: ApiAuthSplatRoute,
@@ -517,7 +445,6 @@ const rootRouteChildren: RootRouteChildren = {
   ApiGithubSetupRoute: ApiGithubSetupRoute,
   ApiGithubWebhookRoute: ApiGithubWebhookRoute,
   ApiHandoffTokenRoute: ApiHandoffTokenRouteWithChildren,
-  ApiPLinkIdRoute: ApiPLinkIdRouteWithChildren,
   ApiRpcSplatRoute: ApiRpcSplatRoute,
   DesignIdBBranchIdRoute: DesignIdBBranchIdRoute,
 }

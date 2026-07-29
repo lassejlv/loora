@@ -20,8 +20,10 @@
         "@loora/billing": "workspace:*",
         "@loora/canvas": "workspace:*",
         "@loora/db": "workspace:*",
+        "@loora/rpc": "workspace:*",
         "@modelcontextprotocol/sdk": "^1.21.0",
         "drizzle-orm": "catalog:",
+        "playwright-core": "^1.61.1",
         "zod": "catalog:",
       },
       "devDependencies": {

@@ -35,8 +35,6 @@ interface AdminUser {
   isAdmin: boolean
   previewAccess: boolean
   previewAccessRequestedAt: Date | null
-  publishEgressBytes: number
-  publishEgressLimitBytes: number
 }
 
 function BillingTab({
@@ -74,7 +72,7 @@ function BillingTab({
       <div>
         <h2 className="text-sm font-semibold">Billing</h2>
         <p className="mt-1 text-xs text-muted-foreground">
-          Manage the plan that unlocks the editor, branches, MCP, and publishing.
+          Manage the plan that unlocks the editor, branches, MCP, and exports.
         </p>
       </div>
       <div className="rounded-lg border border-border p-4">
@@ -254,7 +252,7 @@ function AdminTab({ currentUserId }: { currentUserId: string }) {
       <div>
         <h2 className="text-sm font-semibold">Admin</h2>
         <p className="mt-1 text-xs text-muted-foreground">
-          Manage preview access and review publish bandwidth.
+          Manage preview access.
         </p>
       </div>
       {error ? <p className="text-xs text-destructive-foreground">{error}</p> : null}
@@ -279,15 +277,6 @@ function AdminTab({ currentUserId }: { currentUserId: string }) {
                 ) : null}
               </p>
               <p className="truncate text-xs text-muted-foreground">{account.email}</p>
-              <p
-                className={`mt-1 font-mono text-xs ${
-                  !account.isAdmin && account.publishEgressBytes >= account.publishEgressLimitBytes
-                    ? 'text-destructive'
-                    : 'text-muted-foreground'
-                }`}
-              >
-                {`${formatGigabytes(account.publishEgressBytes)} / ${formatGigabytes(account.publishEgressLimitBytes)} GB publish egress (30d)${account.isAdmin ? ' · uncapped' : ''}`}
-              </p>
             </div>
             <div className="flex flex-col gap-2 sm:items-end">
               {!account.isAdmin ? (
@@ -327,178 +316,6 @@ const THEME_OPTIONS: { value: ThemePreference; label: string }[] = [
   { value: 'light', label: 'Light' },
   { value: 'dark', label: 'Dark' },
 ]
-
-interface PublishedLink {
-  id: string
-  designId: string
-  elementId: string | null
-  pageId: string | null
-  expiresAt: number
-  designName: string
-  elementName: string | null
-  pageName: string | null
-}
-
-interface PublishEgress {
-  usedBytes: number
-  limitBytes: number
-  windowDays: number
-  unlimited: boolean
-}
-
-function formatGigabytes(bytes: number) {
-  const gb = bytes / 1024 ** 3
-  if (gb >= 10) return gb.toFixed(0)
-  if (gb >= 0.1) return gb.toFixed(1)
-  return gb === 0 ? '0' : '<0.1'
-}
-
-function PublishedLinksSection() {
-  const [links, setLinks] = useState<PublishedLink[] | null>(null)
-  const [egress, setEgress] = useState<PublishEgress | null>(null)
-  const [error, setError] = useState(false)
-  const [copiedId, setCopiedId] = useState<string | null>(null)
-  const [busyId, setBusyId] = useState<string | null>(null)
-
-  useEffect(() => {
-    let cancelled = false
-    orpc.publish
-      .listAll()
-      .then((rows) => {
-        if (!cancelled) setLinks(rows)
-      })
-      .catch(() => {
-        if (!cancelled) setError(true)
-      })
-    orpc.publish
-      .egress()
-      .then((status) => {
-        if (!cancelled) setEgress(status)
-      })
-      .catch(() => {})
-    return () => {
-      cancelled = true
-    }
-  }, [])
-
-  async function copyLink(id: string) {
-    try {
-      await navigator.clipboard.writeText(`${window.location.origin}/p/${id}`)
-      setCopiedId(id)
-      window.setTimeout(() => setCopiedId((current) => (current === id ? null : current)), 2000)
-    } catch {
-      // Row link stays visible for a manual copy.
-    }
-  }
-
-  async function deleteLink(id: string) {
-    setBusyId(id)
-    try {
-      await orpc.publish.delete({ id })
-      setLinks((current) => current?.filter((link) => link.id !== id) ?? current)
-    } catch {
-      setError(true)
-    } finally {
-      setBusyId(null)
-    }
-  }
-
-  return (
-    <div className="flex flex-col gap-3 border-t pt-6">
-      <div>
-        <h2 className="text-sm font-semibold">Published links</h2>
-        <p className="mt-1 text-xs text-muted-foreground">
-          Live public links to your pages. Each expires 12 hours after publishing; delete one to
-          take it offline immediately.
-        </p>
-      </div>
-      {egress ? (
-        <div className="flex flex-col gap-1.5">
-          <div className="flex items-baseline justify-between text-xs">
-            <span className="text-muted-foreground">
-              Bandwidth (last {egress.windowDays} days)
-            </span>
-            <span
-              className={
-                !egress.unlimited && egress.usedBytes >= egress.limitBytes
-                  ? 'font-medium text-destructive'
-                  : 'font-medium'
-              }
-            >
-              {egress.unlimited
-                ? `${formatGigabytes(egress.usedBytes)} GB · uncapped`
-                : `${formatGigabytes(egress.usedBytes)} / ${formatGigabytes(egress.limitBytes)} GB`}
-            </span>
-          </div>
-          {!egress.unlimited ? (
-            <div className="h-1.5 overflow-hidden rounded-full bg-input">
-              <div
-                className={
-                  egress.usedBytes >= egress.limitBytes
-                    ? 'h-full rounded-full bg-destructive'
-                    : 'h-full rounded-full bg-cx-accent'
-                }
-                style={{
-                  width: `${Math.min(100, (egress.usedBytes / egress.limitBytes) * 100)}%`,
-                }}
-              />
-            </div>
-          ) : null}
-          {!egress.unlimited && egress.usedBytes >= egress.limitBytes ? (
-            <p className="text-xs text-destructive">
-              Limit reached — your published links are paused until usage drops out of the window.
-            </p>
-          ) : null}
-        </div>
-      ) : null}
-      {error ? (
-        <p className="text-xs text-destructive">Could not load published links.</p>
-      ) : links === null ? (
-        <p className="cx-shimmer text-xs">Loading links…</p>
-      ) : links.length === 0 ? (
-        <p className="text-xs text-muted-foreground">No active links.</p>
-      ) : (
-        <ul className="flex flex-col divide-y rounded-lg border">
-          {links.map((link) => (
-            <li key={link.id} className="flex items-center gap-3 px-3 py-2">
-              <div className="min-w-0 flex-1">
-                <a
-                  href={`/p/${link.id}`}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="block truncate text-xs font-medium hover:underline"
-                >
-                  {link.pageName || link.elementName || link.designName}
-                </a>
-                <p className="truncate text-xs text-muted-foreground">
-                  {link.designName} · expires in{' '}
-                  {Math.max(1, Math.round((link.expiresAt - Date.now()) / 3_600_000))}h
-                </p>
-              </div>
-              <Button
-                variant="outline"
-                size="sm"
-                className="h-7 px-2.5 text-xs"
-                onClick={() => void copyLink(link.id)}
-              >
-                {copiedId === link.id ? 'Copied' : 'Copy'}
-              </Button>
-              <Button
-                variant="ghost"
-                size="sm"
-                className="h-7 px-2.5 text-xs text-destructive-foreground"
-                disabled={busyId === link.id}
-                onClick={() => void deleteLink(link.id)}
-              >
-                Delete
-              </Button>
-            </li>
-          ))}
-        </ul>
-      )}
-    </div>
-  )
-}
 
 function AppearanceSection() {
   const [preference, setPreference] = useState<ThemePreference>(() => getThemePreference())
@@ -676,7 +493,6 @@ export function SettingsPanel({
               Sign out
             </Button>
           </div>
-          <PublishedLinksSection />
           <AppearanceSection />
           <DeleteAccountSection />
         </TabsPanel>

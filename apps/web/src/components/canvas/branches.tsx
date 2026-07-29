@@ -504,7 +504,7 @@ export function CanvasBranches({
                 <div className="min-w-0 flex-1">
                   <p className="text-xs font-medium">Main</p>
                   <p className="text-xs text-muted-foreground">
-                    The published, shared document.
+                    The shared source of truth.
                   </p>
                 </div>
                 {activeDraftId ? (

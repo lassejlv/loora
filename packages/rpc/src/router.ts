@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, gt, gte, inArray, isNotNull, isNull, lt, or, sql } from 'drizzle-orm'
+import { and, asc, desc, eq, gt, inArray, isNotNull, isNull, lt, or } from 'drizzle-orm'
 import { ORPCError, os } from '@orpc/server'
 import { z } from 'zod'
 import { db } from '@loora/db'
@@ -12,8 +12,6 @@ import {
   oauthAccessToken,
   oauthApplication,
   oauthConsent,
-  publishEgress,
-  publishLink,
   user,
   userPreferences,
 } from '@loora/db/schema'
@@ -37,6 +35,7 @@ import {
   type CanvasMergeResolutions,
 } from '@loora/canvas/merge'
 import { EMPTY_SHORTCUT_CONFIG } from '@loora/db/shortcuts'
+import { getCanvasAgentActivity } from '@loora/db/canvas-agent-activity'
 import { parseShortcutConfig, shortcutConfigSchema } from './shortcuts'
 import { googleOAuthEnabled, type getSession } from '@loora/auth'
 import { type CanvasElement, type CanvasPage } from '@loora/db/canvas'
@@ -46,15 +45,6 @@ import {
 } from '@loora/db/drafts'
 import { assetKey, s3 } from './storage'
 import { createHandoffToken } from './handoff-token'
-import {
-  egressWindowCutoff,
-  PUBLISH_EGRESS_LIMIT_BYTES,
-  PUBLISH_EGRESS_WINDOW_DAYS,
-  PUBLISH_TTL_MS,
-  publishEgressUsed,
-  publishLinkId,
-  sweepPublishEgress,
-} from './publish'
 import {
   authorizeBilling,
   createPlanCheckout,
@@ -504,16 +494,28 @@ const getCanvas = protectedProcedure
       }
     }
     const document = parseCanvasDocument(target.document)
-    if (
-      input.sinceRevision === undefined ||
-      input.sinceRevision === target.revision
-    ) {
+    const activity = await getCanvasAgentActivity(
+      context.user.id,
+      input,
+    )
+    if (input.sinceRevision === undefined) {
       return {
         status: 'ready' as const,
         version: CANVAS_SCHEMA_VERSION,
         revision: target.revision,
         document,
         transactions: [] as CanvasTransaction[],
+        activity,
+      }
+    }
+    if (input.sinceRevision === target.revision) {
+      return {
+        status: 'ready' as const,
+        version: CANVAS_SCHEMA_VERSION,
+        revision: target.revision,
+        document: null,
+        transactions: [] as CanvasTransaction[],
+        activity,
       }
     }
     const intervening = await canvasInterveningTransactions(
@@ -534,6 +536,7 @@ const getCanvas = protectedProcedure
       transactions: complete
         ? intervening.map((entry) => parseCanvasTransaction(entry.transaction))
         : [],
+      activity,
     }
   })
 
@@ -1348,177 +1351,6 @@ const createDesignHandoff = protectedProcedure
     }
     return createHandoffToken(input.designId, context.user.id, undefined, input.draftId)
   })
-
-// Live public link to one element or Page: the row id is the URL capability, deleting
-// the row revokes it. Content stays live — the public route reads the design
-// at request time.
-const createPublishLink = protectedProcedure
-  .input(
-    z
-      .object({
-        designId: z.string().min(1).max(128),
-        elementId: z.string().min(1).max(128).optional(),
-        pageId: z.string().min(1).max(128).optional(),
-      })
-      .refine((value) => Boolean(value.elementId) !== Boolean(value.pageId), {
-        message: 'Choose exactly one publish target.',
-      }),
-  )
-  .handler(async ({ context, input }) => {
-    const [found] = await db
-      .select({
-        canvasVersion: design.canvasVersion,
-        canvasDocument: design.canvasDocument,
-        shapes: design.shapes,
-        pages: design.pages,
-      })
-      .from(design)
-      .where(and(eq(design.id, input.designId), eq(design.userId, context.user.id)))
-      .limit(1)
-    const shapesById = new Map(found?.shapes.map((shape) => [shape.id, shape]) ?? [])
-    const targetExists =
-      found &&
-      (found.canvasVersion === CANVAS_SCHEMA_VERSION && found.canvasDocument
-        ? (() => {
-            if (!input.pageId || input.elementId) return false
-            const document = parseCanvasDocument(found.canvasDocument)
-            const page = document.nodes[input.pageId]
-            return page?.type === 'page' && !page.hidden
-          })()
-        : input.elementId
-          ? (() => {
-              const shape = shapesById.get(input.elementId)
-              return Boolean(shape && !shape.hidden && shape.code)
-            })()
-          : (() => {
-              const page = found.pages.find((candidate) => candidate.id === input.pageId)
-              return Boolean(
-                page &&
-                  page.items.length > 0 &&
-                  page.items.every(({ elementId }) => {
-                    const shape = shapesById.get(elementId)
-                    return shape && !shape.hidden && shape.code
-                  }),
-              )
-            })())
-    if (!targetExists) {
-      throw new ORPCError('NOT_FOUND')
-    }
-
-    // Lazy cleanup: publishing sweeps this user's expired links and stale
-    // egress counter rows.
-    await db
-      .delete(publishLink)
-      .where(and(eq(publishLink.userId, context.user.id), lt(publishLink.expiresAt, new Date())))
-    await sweepPublishEgress(context.user.id)
-
-    const expiresAt = new Date(Date.now() + PUBLISH_TTL_MS)
-
-    // Publishing the same target twice extends the link that is already out
-    // there rather than minting a second capability URL for it. A link that
-    // was explicitly unpublished is gone, so it never comes back this way.
-    const [live] = await db
-      .select({ id: publishLink.id })
-      .from(publishLink)
-      .where(
-        and(
-          eq(publishLink.userId, context.user.id),
-          eq(publishLink.designId, input.designId),
-          input.pageId
-            ? eq(publishLink.pageId, input.pageId)
-            : eq(publishLink.elementId, input.elementId!),
-        ),
-      )
-      .limit(1)
-    if (live) {
-      await db
-        .update(publishLink)
-        .set({ expiresAt })
-        .where(and(eq(publishLink.id, live.id), eq(publishLink.userId, context.user.id)))
-      return { id: live.id, expiresAt: expiresAt.getTime() }
-    }
-
-    const id = publishLinkId()
-    await db.insert(publishLink).values({
-      id,
-      designId: input.designId,
-      userId: context.user.id,
-      elementId: input.elementId ?? null,
-      pageId: input.pageId ?? null,
-      expiresAt,
-    })
-    return { id, expiresAt: expiresAt.getTime() }
-  })
-
-const deletePublishLink = protectedProcedure
-  .input(z.object({ id: z.string().min(1).max(64) }))
-  .handler(async ({ context, input }) => {
-    const deleted = await db
-      .delete(publishLink)
-      .where(and(eq(publishLink.id, input.id), eq(publishLink.userId, context.user.id)))
-      .returning({ id: publishLink.id })
-    return { deleted: deleted.length > 0 }
-  })
-
-const listPublishLinks = protectedProcedure
-  .input(z.object({ designId: z.string().min(1).max(128) }))
-  .handler(async ({ context, input }) => {
-    const rows = await db
-      .select({
-        id: publishLink.id,
-        elementId: publishLink.elementId,
-        pageId: publishLink.pageId,
-        expiresAt: publishLink.expiresAt,
-      })
-      .from(publishLink)
-      .where(
-        and(
-          eq(publishLink.userId, context.user.id),
-          eq(publishLink.designId, input.designId),
-          gt(publishLink.expiresAt, new Date()),
-        ),
-      )
-    return rows.map((row) => ({ ...row, expiresAt: row.expiresAt.getTime() }))
-  })
-
-const getPublishEgress = protectedProcedure.handler(async ({ context }) => {
-  return {
-    usedBytes: await publishEgressUsed(context.user.id),
-    limitBytes: PUBLISH_EGRESS_LIMIT_BYTES,
-    windowDays: PUBLISH_EGRESS_WINDOW_DAYS,
-    unlimited: context.user.isAdmin === true,
-  }
-})
-
-// All of a user's live links across designs (settings panel). The element
-// name is extracted in SQL so the full shapes JSONB never leaves the database.
-const listAllPublishLinks = protectedProcedure.handler(async ({ context }) => {
-  const rows = await db
-    .select({
-      id: publishLink.id,
-      designId: publishLink.designId,
-      elementId: publishLink.elementId,
-      pageId: publishLink.pageId,
-      expiresAt: publishLink.expiresAt,
-      designName: design.name,
-      elementName: sql<string | null>`(
-        select elem->>'name' from jsonb_array_elements(${design.shapes}) elem
-        where elem->>'id' = ${publishLink.elementId} limit 1
-      )`,
-      pageName: sql<string | null>`(
-        select page->>'name' from jsonb_array_elements(${design.pages}) page
-        where page->>'id' = ${publishLink.pageId} limit 1
-      )`,
-    })
-    .from(publishLink)
-    .innerJoin(
-      design,
-      and(eq(design.id, publishLink.designId), eq(design.userId, publishLink.userId)),
-    )
-    .where(and(eq(publishLink.userId, context.user.id), gt(publishLink.expiresAt, new Date())))
-    .orderBy(desc(publishLink.createdAt))
-  return rows.map((row) => ({ ...row, expiresAt: row.expiresAt.getTime() }))
-})
 
 const listVersions = protectedProcedure
   .input(
@@ -2381,33 +2213,17 @@ const createSubscriptionCheckout = previewProcedure
   })
 
 const listUsersWithUsage = adminProcedure.handler(async () => {
-  const [accounts, egress] = await Promise.all([
-    db
-      .select({
-        id: user.id,
-        name: user.name,
-        email: user.email,
-        isAdmin: user.isAdmin,
-        previewAccess: user.previewAccess,
-        previewAccessRequestedAt: user.previewAccessRequestedAt,
-      })
-      .from(user)
-      .orderBy(asc(user.email)),
-    db
-      .select({
-        userId: publishEgress.userId,
-        total: sql<string>`sum(${publishEgress.bytes})`,
-      })
-      .from(publishEgress)
-      .where(gte(publishEgress.day, egressWindowCutoff()))
-      .groupBy(publishEgress.userId),
-  ])
-  const egressByUser = new Map(egress.map((row) => [row.userId, Number(row.total)]))
-  return accounts.map((account) => ({
-    ...account,
-    publishEgressBytes: egressByUser.get(account.id) ?? 0,
-    publishEgressLimitBytes: PUBLISH_EGRESS_LIMIT_BYTES,
-  }))
+  return db
+    .select({
+      id: user.id,
+      name: user.name,
+      email: user.email,
+      isAdmin: user.isAdmin,
+      previewAccess: user.previewAccess,
+      previewAccessRequestedAt: user.previewAccessRequestedAt,
+    })
+    .from(user)
+    .orderBy(asc(user.email))
 })
 
 const setUserPreviewAccess = adminProcedure
@@ -2541,13 +2357,6 @@ export const appRouter = {
   },
   handoff: {
     create: createDesignHandoff,
-  },
-  publish: {
-    create: createPublishLink,
-    delete: deletePublishLink,
-    list: listPublishLinks,
-    listAll: listAllPublishLinks,
-    egress: getPublishEgress,
   },
   history: {
     list: listVersions,

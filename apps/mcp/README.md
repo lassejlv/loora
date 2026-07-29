@@ -26,8 +26,11 @@ Same `.env` as the web app (`DATABASE_URL`, `BETTER_AUTH_SECRET`,
 `BETTER_AUTH_URL`), plus:
 
 - `MCP_PUBLIC_URL` — public origin of this server, e.g. `https://mcp.loora.design`
+- `LOORA_APP_URL` — canonical web app origin used in returned editor links
 - `PORT` — defaults to 4100
 - `LOORA_MCP_USER` — stdio mode only: email or id of the acting user
+- `PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH` — optional local Chromium override;
+  the Railway image installs Chromium at `/usr/bin/chromium`
 
 Optionally set `MCP_RESOURCE_URL=https://mcp.loora.design/mcp` for the web app
 so Better Auth's own protected-resource metadata names the right resource.
@@ -65,19 +68,23 @@ Separate Railway service off the same repo, config `apps/mcp/railway.json`
 (builds `apps/mcp/Dockerfile`). Point mcp.loora.design at it. Migrations stay
 with the web service.
 
-## Draft targets
+## Agent workflow
 
-Element and history tools accept an optional `draftId`; omitting it keeps the
-backward-compatible Main behavior. Draft lifecycle tools are:
+1. `listDesigns`, then `getDesignContext`.
+2. Build through `createPage`, `insertNodes`, `patchNodes`, components, tokens,
+   and the other structured mutation tools. These all commit validated Canvas
+   transactions through the same engine as the web editor.
+3. Call `getScreenshot` after meaningful edits. It returns real `image/png`
+   MCP content for a Page or NodeRef; outbound document URLs are blocked and
+   owned image assets are inlined.
+4. Call `exportCode` with `tailwind`, `jsx`, or `html` when implementation code
+   is needed. Tailwind output is JSX with literal utilities and no hidden
+   generated stylesheet.
 
-- `list_drafts`, `create_draft`
-- `propose_draft`, `reopen_draft`, `close_draft`
-- `compare_draft`, `apply_draft`
+Canvas source remains structured. HTML, JSX, and Tailwind are one-way exports,
+not editable code blobs inside the document.
 
-`compare_draft` returns the current Main and draft revisions plus whole-element
-and layer-order conflicts. Pass those revisions and one `main` or `draft`
-choice for every conflict to `apply_draft`.
-
-Main and draft element writes use revision-checked retries. That preserves
-unrelated browser or MCP changes and returns the resolved target revision.
-Proposed, applied, and closed drafts are read-only.
+Most target tools accept an optional `draftId`; omit it for Main. Branch
+lifecycle tools are `listBranches`, `createBranch`, `proposeBranch`,
+`reopenBranch`, `compareBranch`, `applyBranch`, and `closeBranch`. Proposed,
+applied, and closed branches are read-only.

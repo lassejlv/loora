@@ -40,7 +40,7 @@ const BEATS = [
   },
   {
     title: 'Branch, merge, and ship',
-    body: 'Fork a design, compare any two points, then export or publish from Main.',
+    body: 'Fork a design, compare any two points, then export from Main.',
   },
 ] as const
 

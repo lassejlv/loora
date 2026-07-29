@@ -10,6 +10,8 @@ import {
   CheckIcon,
   ChevronDownIcon,
   FigmaIcon,
+  HistoryIcon,
+  ImageIcon,
   RefreshCwIcon,
 } from '#/components/icons'
 import { CanvasEngine, type CanvasTransaction } from '@loora/canvas/engine'
@@ -54,6 +56,8 @@ function CanvasDocSwitcher({
   onSwitch,
   onNew,
   onImport,
+  onAssets,
+  onHistory,
   onRename,
   onDelete,
 }: {
@@ -62,6 +66,8 @@ function CanvasDocSwitcher({
   onSwitch: (id: string) => void
   onNew: () => void
   onImport: () => void
+  onAssets: () => void
+  onHistory: () => void
   onRename: () => void
   onDelete: () => void
 }) {
@@ -107,6 +113,14 @@ function CanvasDocSwitcher({
         <DropdownMenuItem onClick={onImport}>
           <FigmaIcon data-slot="icon" />
           Import from Figma
+        </DropdownMenuItem>
+        <DropdownMenuItem onClick={onAssets}>
+          <ImageIcon data-slot="icon" />
+          Assets
+        </DropdownMenuItem>
+        <DropdownMenuItem onClick={onHistory}>
+          <HistoryIcon data-slot="icon" />
+          Version history
         </DropdownMenuItem>
         <DropdownMenuItem onClick={onRename}>
           <PencilIcon data-slot="icon" />
@@ -396,7 +410,7 @@ export function CanvasApp({
           activeBranch?.status === 'applied' ||
           activeBranch?.status === 'closed'
         }
-        topBar={
+        topBar={({ openAssets, openHistory }) => (
           <>
             <CanvasDocSwitcher
               documents={documents}
@@ -404,6 +418,8 @@ export function CanvasApp({
               onSwitch={switchDesign}
               onNew={() => void newDesign()}
               onImport={() => setFigmaOpen(true)}
+              onAssets={openAssets}
+              onHistory={openHistory}
               onRename={() => {
                 setRenameName(active?.name ?? '')
                 setRenameOpen(true)
@@ -420,7 +436,7 @@ export function CanvasApp({
               onSwitch={switchTarget}
             />
           </>
-        }
+        )}
       />
       <FigmaImportDialog
         open={figmaOpen}

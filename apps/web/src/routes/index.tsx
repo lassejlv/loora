@@ -766,10 +766,6 @@ const FEATURES = [
     product: 'History',
     description: 'Commit as you go, compare any two points, roll back.',
   },
-  {
-    product: 'Publish',
-    description: 'Put a live element behind a public link, or share read-only.',
-  },
 ] as const
 
 /** Keep in sync with `SubscriptionScreen` / Polar products. */
@@ -777,14 +773,14 @@ const PLANS = [
   {
     plan: 'Pro',
     price: '$20',
-    includes: 'Canvas, branches, MCP, exports, publish',
+    includes: 'Canvas, branches, MCP, and exports',
     note: '3-day free trial',
     cta: 'Start free trial',
   },
   {
     plan: 'Studio',
     price: '$49',
-    includes: 'Pro plus higher publish bandwidth',
+    includes: 'Pro plus priority support',
     note: 'For teams',
     cta: 'Choose Studio',
   },
@@ -909,7 +905,7 @@ function LandingPage() {
             <a href="#features" className="underline-offset-2 hover:underline" style={link}>
               branch
             </a>
-            , merge when it&apos;s right, then export or publish.
+            , merge when it&apos;s right, then export.
           </p>
 
           <p className="mt-6">
@@ -994,8 +990,8 @@ function LandingPage() {
             Pricing
           </h2>
           <p className="mt-4 text-muted-foreground">
-            Both plans include the full editor, saving, history, exports, branches, MCP, and
-            publish. You bring your own agent, so there are no AI credits to buy or run out of.
+            Both plans include the full editor, saving, history, exports, branches, and MCP. You
+            bring your own agent, so there are no AI credits to buy or run out of.
           </p>
 
           <div className="mt-5 overflow-x-auto">

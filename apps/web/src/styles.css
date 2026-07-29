@@ -265,6 +265,66 @@ body {
   }
 }
 
+.cx-agent-dots {
+  position: absolute;
+  top: 0;
+  left: 0;
+  display: grid;
+  grid-template-columns: repeat(12, 5px);
+  grid-auto-rows: 5px;
+  gap: 4px;
+  width: max-content;
+  opacity: 0;
+  filter: drop-shadow(0 0 5px rgb(59 130 246 / 22%));
+  transition:
+    opacity 180ms ease,
+    transform 140ms cubic-bezier(0.22, 1, 0.36, 1);
+  will-change: transform;
+}
+
+.cx-agent-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 999px;
+  background: #3b82f6;
+  opacity: var(--cx-agent-dot-opacity);
+  animation: cx-agent-dot-wave 1.2s ease-in-out var(--cx-agent-dot-delay)
+    infinite;
+}
+
+.cx-agent-dots[data-phase='settled'] .cx-agent-dot {
+  animation-duration: 1.7s;
+}
+
+.cx-agent-target {
+  position: absolute;
+  top: 0;
+  left: 0;
+  border: 1px solid rgb(59 130 246 / 30%);
+  border-radius: 4px;
+  box-shadow:
+    0 0 0 3px rgb(59 130 246 / 6%),
+    0 0 24px rgb(59 130 246 / 5%);
+  opacity: 0.75;
+  transition:
+    width 140ms cubic-bezier(0.22, 1, 0.36, 1),
+    height 140ms cubic-bezier(0.22, 1, 0.36, 1),
+    transform 140ms cubic-bezier(0.22, 1, 0.36, 1);
+  will-change: width, height, transform;
+}
+
+@keyframes cx-agent-dot-wave {
+  0%,
+  100% {
+    opacity: calc(var(--cx-agent-dot-opacity) * 0.3);
+    transform: scale(0.78);
+  }
+  48% {
+    opacity: var(--cx-agent-dot-opacity);
+    transform: scale(1);
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .cx-shimmer {
     animation: none;
@@ -273,6 +333,15 @@ body {
     -webkit-background-clip: unset;
     color: var(--color-muted-foreground);
     -webkit-text-fill-color: var(--color-muted-foreground);
+  }
+
+  .cx-agent-dots,
+  .cx-agent-target {
+    transition: none;
+  }
+
+  .cx-agent-dot {
+    animation: none;
   }
 }
 
