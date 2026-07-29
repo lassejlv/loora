@@ -183,8 +183,8 @@ function LandingContent() {
 
       <h2 className="mt-14 text-[15px] font-semibold">Pricing</h2>
       <p className="mt-4 text-muted-foreground">
-        Two plans, both with the full editor and the MCP server. You bring your own agent, so there
-        are no AI credits to buy or run out of.
+        Free is $0/month with 50 design files and 200 MCP calls a week. Pro is $20/month for
+        unlimited files, 100 GB of assets, and a million calls a week.
       </p>
       <p className="mt-4">
         <Link to="/pricing" className="underline-offset-2 hover:underline" style={link}>

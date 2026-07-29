@@ -1,25 +1,39 @@
 /** Keep in sync with `SubscriptionScreen` / Polar products. */
 export const PLANS = [
   {
-    plan: 'Pro',
-    price: '$20',
-    includes: 'Canvas, branches, MCP, and exports',
-    note: '3-day free trial',
-    cta: 'Start free trial',
+    plan: 'Free',
+    price: '$0',
+    period: '/month',
+    annual: null,
+    summary: 'Enough to build something real before you pay for anything.',
+    features: ['50 design files', '1 GB asset storage', '200 MCP calls / week'],
+    cta: 'Start free',
+    featured: false,
   },
   {
-    plan: 'Studio',
-    price: '$49',
-    includes: 'Pro plus priority support',
-    note: 'For teams',
-    cta: 'Choose Studio',
+    plan: 'Pro',
+    price: '$20',
+    period: '/month',
+    // Two months off the monthly rate: 10 × $20.
+    annual: '$200 / year',
+    summary: 'For daily design work and agents that run all week.',
+    features: [
+      'Unlimited design files',
+      '100 GB asset storage',
+      '1,000,000 MCP calls / week',
+      'In-app agent access',
+      'Image generation',
+      'Team workspace, up to 5 users',
+    ],
+    cta: 'Go Pro',
+    featured: true,
   },
 ] as const
 
 /**
- * What a plan actually unlocks. Every row is a shipped surface — no roadmap
- * entries, and no per-seat or usage metering, because billing is plan access
- * only.
+ * What the product does on either plan. Every row is a shipped surface — no
+ * roadmap entries, and nothing here is gated behind Pro; Pro raises the limits
+ * in the cards above.
  */
 export const PLAN_INCLUDES = [
   { capability: 'Canvas editor', detail: 'Infinite canvas, components, tokens, breakpoints' },
