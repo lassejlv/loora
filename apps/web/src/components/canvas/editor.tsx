@@ -13,9 +13,7 @@ import {
 import {
   BracesIcon,
   CodeXmlIcon,
-  CommandIcon,
   ComponentIcon,
-  EllipsisIcon,
   FileCode2Icon,
   GroupIcon,
   ImageIcon,
@@ -116,12 +114,6 @@ import {
   pasteNodes,
   validatePaste,
 } from '#/lib/canvas-clipboard'
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from '#/components/ui/dropdown-menu'
 import { Drawer, DrawerPopup } from '#/components/ui/drawer'
 import { useIsMobile } from '#/hooks/use-media-query'
 import {
@@ -145,6 +137,68 @@ function clampInspectorWidth(width: number) {
       INSPECTOR_MAX_WIDTH,
       Math.max(INSPECTOR_MIN_WIDTH, width),
     ),
+  )
+}
+
+function CanvasDockedPanel({
+  side,
+  title,
+  storageKey,
+  children,
+}: {
+  side: 'left' | 'right'
+  title: string
+  storageKey: string
+  children: ReactNode
+}) {
+  const [width, setWidth] = useState(() => {
+    if (typeof window === 'undefined') return 280
+    const value = Number(window.localStorage.getItem(storageKey))
+    return Number.isFinite(value) && value > 0
+      ? clampInspectorWidth(value)
+      : 280
+  })
+  const [resizing, setResizing] = useState(false)
+  const widthFromPointer = (clientX: number) =>
+    clampInspectorWidth(
+      side === 'left' ? clientX : window.innerWidth - clientX,
+    )
+
+  return (
+    <div
+      className={`pointer-events-auto relative flex h-full shrink-0 bg-surface ${
+        side === 'left' ? 'border-e border-line' : 'border-s border-line'
+      }`}
+      style={{ width }}
+    >
+      <div
+        role="separator"
+        aria-label={`Resize ${title} panel`}
+        aria-orientation="vertical"
+        data-resizing={resizing || undefined}
+        className={`absolute inset-y-0 z-20 w-2 cursor-col-resize touch-none after:pointer-events-none after:absolute after:inset-y-0 after:left-1/2 after:w-px after:-translate-x-1/2 after:bg-line data-resizing:after:bg-foreground/25 ${
+          side === 'left' ? '-end-1' : '-start-1'
+        }`}
+        onPointerDown={(event) => {
+          event.currentTarget.setPointerCapture(event.pointerId)
+          setResizing(true)
+        }}
+        onPointerMove={(event) => {
+          if (!resizing) return
+          setWidth(widthFromPointer(event.clientX))
+        }}
+        onPointerUp={(event) => {
+          if (!resizing) return
+          event.currentTarget.releasePointerCapture(event.pointerId)
+          setResizing(false)
+          const next = widthFromPointer(event.clientX)
+          setWidth(next)
+          window.localStorage.setItem(storageKey, String(next))
+        }}
+        onPointerCancel={() => setResizing(false)}
+      />
+      <div className="flex min-h-0 w-full overflow-hidden">{children}</div>
+    </div>
   )
 }
 
@@ -224,9 +278,9 @@ function CanvasShell({
   const isMobile = useIsMobile()
   const canvasSession = useCanvasSession()
   const controlsRef = useRef<CanvasSurfaceControls>(null)
-  const [inspector, setInspector] = useState<'layers' | 'design' | null>(
-    () => (isMobile ? null : 'layers'),
-  )
+  const [mobileInspector, setMobileInspector] = useState<
+    'layers' | 'design' | null
+  >(null)
   const [assetsOpen, setAssetsOpen] = useState(false)
   const [historyOpen, setHistoryOpen] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
@@ -246,14 +300,6 @@ function CanvasShell({
     [controller.engine],
   )
   const [zoom, setZoom] = useState(0.75)
-  const [inspectorWidth, setInspectorWidth] = useState(() => {
-    if (typeof window === 'undefined') return 280
-    const value = Number(window.localStorage.getItem('loora:layers-width'))
-    return Number.isFinite(value) && value > 0
-      ? clampInspectorWidth(value)
-      : 280
-  })
-  const [resizingInspector, setResizingInspector] = useState(false)
   const [shortcutConfig, setShortcutConfig] = useState<ShortcutConfig>(() =>
     controller.target
       ? loadCachedShortcuts()
@@ -382,11 +428,7 @@ function CanvasShell({
       const hit = matchShortcut(event, shortcutConfig)
       if (!hit) return
       const run = () => {
-        if (hit === 'toggleLayers') {
-          setInspector((current) =>
-            current === 'layers' ? null : 'layers',
-          )
-        } else if (hit === 'toggleAssets') {
+        if (hit === 'toggleAssets') {
           setAssetsOpen((open) => !open)
         } else if (hit === 'openCommandMenu') setCommandMenuOpen(true)
         else if (hit === 'openSettings') setSettingsOpen(true)
@@ -597,27 +639,22 @@ function CanvasShell({
     {
       label: 'View',
       commands: [
-        {
-          id: 'view-layers',
-          label: 'Layers',
-          icon: LayersIcon,
-          active: inspector === 'layers',
-          shortcut: shortcutLabel('toggleLayers'),
-          run: () =>
-            setInspector((current) =>
-              current === 'layers' ? null : 'layers',
-            ),
-        },
-        {
-          id: 'view-design',
-          label: 'Design properties',
-          icon: SlidersHorizontalIcon,
-          active: inspector === 'design',
-          run: () =>
-            setInspector((current) =>
-              current === 'design' ? null : 'design',
-            ),
-        },
+        ...(isMobile
+          ? [
+              {
+                id: 'view-layers',
+                label: 'Layers',
+                icon: LayersIcon,
+                run: () => setMobileInspector('layers'),
+              },
+              {
+                id: 'view-properties',
+                label: 'Properties',
+                icon: SlidersHorizontalIcon,
+                run: () => setMobileInspector('design'),
+              },
+            ]
+          : []),
         {
           id: 'zoom-fit',
           label: 'Zoom to fit',
@@ -643,75 +680,20 @@ function CanvasShell({
     },
   ]
 
-  const inspectorPanel =
-    inspector === 'layers' ? (
-      <CanvasLayersPanel
-        onReorder={actions.reorderSelection}
-        canReorder={actions.canReorder}
-        onAddPage={addPageAndFocus}
-        position="left"
-        onClose={() => setInspector(null)}
-      />
-    ) : inspector === 'design' ? (
-      <CanvasPropertiesPanel onClose={() => setInspector(null)} />
-    ) : null
-
-  const inspectorPosition = inspector === 'layers' ? 'left' : 'right'
-  const inspectorTitle = inspector === 'layers' ? 'Layers' : 'Design'
-  const desktopInspectorPanel =
-    !isMobile && inspectorPanel ? (
-      <div
-        className={`pointer-events-auto relative flex h-full shrink-0 bg-surface ${
-          inspectorPosition === 'left'
-            ? 'border-e border-line'
-            : 'border-s border-line'
-        }`}
-        style={{ width: inspectorWidth }}
-      >
-        <div
-          role="separator"
-          aria-label={`Resize ${inspectorTitle} panel`}
-          aria-orientation="vertical"
-          className={
-            inspectorPosition === 'left'
-              ? 'absolute inset-y-0 -end-1 z-20 w-2 cursor-col-resize touch-none hover:bg-line'
-              : 'absolute inset-y-0 -start-1 z-20 w-2 cursor-col-resize touch-none hover:bg-line'
-          }
-          onPointerDown={(event) => {
-            event.currentTarget.setPointerCapture(event.pointerId)
-            setResizingInspector(true)
-          }}
-          onPointerMove={(event) => {
-            if (!resizingInspector) return
-            setInspectorWidth(
-              clampInspectorWidth(
-                inspectorPosition === 'left'
-                  ? event.clientX
-                  : window.innerWidth - event.clientX,
-              ),
-            )
-          }}
-          onPointerUp={(event) => {
-            if (!resizingInspector) return
-            event.currentTarget.releasePointerCapture(event.pointerId)
-            setResizingInspector(false)
-            const width = clampInspectorWidth(
-              inspectorPosition === 'left'
-                ? event.clientX
-                : window.innerWidth - event.clientX,
-            )
-            setInspectorWidth(width)
-            window.localStorage.setItem(
-              'loora:layers-width',
-              String(width),
-            )
-          }}
-        />
-        <div className="flex min-h-0 w-full overflow-hidden">
-          {inspectorPanel}
-        </div>
-      </div>
-    ) : null
+  const layersPanel = (
+    <CanvasLayersPanel
+      onReorder={actions.reorderSelection}
+      canReorder={actions.canReorder}
+      onAddPage={addPageAndFocus}
+      position="left"
+      onClose={isMobile ? () => setMobileInspector(null) : undefined}
+    />
+  )
+  const propertiesPanel = (
+    <CanvasPropertiesPanel
+      onClose={isMobile ? () => setMobileInspector(null) : undefined}
+    />
+  )
 
   return (
     <div className="relative h-full min-h-0 w-full bg-cx-canvas">
@@ -786,8 +768,8 @@ function CanvasShell({
 
         {isMobile ? (
           <Drawer
-            open={inspector !== null}
-            onOpenChange={(open) => !open && setInspector(null)}
+            open={mobileInspector !== null}
+            onOpenChange={(open) => !open && setMobileInspector(null)}
             position="bottom"
           >
             <DrawerPopup
@@ -795,7 +777,7 @@ function CanvasShell({
               variant="inset"
               className="mx-auto h-[min(60svh,34rem)] w-full max-w-sm overflow-hidden rounded-lg bg-surface shadow-panel-lg"
             >
-              {inspectorPanel}
+              {mobileInspector === 'layers' ? layersPanel : propertiesPanel}
             </DrawerPopup>
           </Drawer>
         ) : null}
@@ -867,92 +849,18 @@ function CanvasShell({
             )}
           </div>
 
-          <div className="ms-auto flex shrink-0 items-center gap-1.5">
-            {/* One segmented control, so the panel toggles read as a pair of
-                view states rather than two more loose actions. */}
-            <div
-              role="group"
-              aria-label="Inspector"
-              className="flex items-center gap-0.5 rounded-md border border-line p-0.5"
-            >
-              <Button
-                variant="ghost"
-                size="icon-xs"
-                aria-label="Layers"
-                title="Layers"
-                aria-pressed={inspector === 'layers'}
-                data-active={inspector === 'layers' || undefined}
-                className="data-active:bg-accent data-active:text-foreground"
-                onClick={() =>
-                  setInspector((current) =>
-                    current === 'layers' ? null : 'layers',
-                  )
-                }
-              >
-                <LayersIcon />
-              </Button>
-              <Button
-                variant="ghost"
-                size="icon-xs"
-                aria-label="Design properties"
-                title="Design properties"
-                aria-pressed={inspector === 'design'}
-                data-active={inspector === 'design' || undefined}
-                className="data-active:bg-accent data-active:text-foreground"
-                onClick={() =>
-                  setInspector((current) =>
-                    current === 'design' ? null : 'design',
-                  )
-                }
-              >
-                <SlidersHorizontalIcon />
-              </Button>
-            </div>
-
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button
-                  variant="ghost"
-                  size="icon-sm"
-                  aria-label="More actions"
-                  title="More actions"
-                >
-                  <EllipsisIcon />
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="w-52">
-                <DropdownMenuItem onClick={() => setCommandMenuOpen(true)}>
-                  <CommandIcon data-slot="icon" />
-                  Commands
-                  <span className="ms-auto text-muted-foreground">
-                    {shortcutLabel('openCommandMenu')}
-                  </span>
-                </DropdownMenuItem>
-                <DropdownMenuItem
-                  disabled={readOnly}
-                  onClick={() => setHtmlImportOpen(true)}
-                >
-                  <FileCode2Icon data-slot="icon" />
-                  Import HTML & CSS…
-                </DropdownMenuItem>
-                <DropdownMenuItem onClick={() => setExportOpen(true)}>
-                  <DownloadIcon data-slot="icon" />
-                  Export…
-                </DropdownMenuItem>
-                <DropdownMenuItem
-                  disabled={!controller.target}
-                  onClick={() => setSettingsOpen(true)}
-                >
-                  <SettingsIcon data-slot="icon" />
-                  Settings
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
-          </div>
         </header>
 
         <div className="flex min-h-0 flex-1">
-          {inspectorPosition === 'left' ? desktopInspectorPanel : null}
+          {!isMobile ? (
+            <CanvasDockedPanel
+              side="left"
+              title="Layers"
+              storageKey="loora:layers-width"
+            >
+              {layersPanel}
+            </CanvasDockedPanel>
+          ) : null}
           {/* The free canvas area. The tool clusters float inside it so they
               stay centred on what is visible, not on the whole viewport. */}
           <div className="relative min-h-0 min-w-0 flex-1">
@@ -970,7 +878,15 @@ function CanvasShell({
             </TooltipProvider>
           </div>
 
-          {inspectorPosition === 'right' ? desktopInspectorPanel : null}
+          {!isMobile ? (
+            <CanvasDockedPanel
+              side="right"
+              title="Properties"
+              storageKey="loora:properties-width"
+            >
+              {propertiesPanel}
+            </CanvasDockedPanel>
+          ) : null}
         </div>
       </div>
     </div>

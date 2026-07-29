@@ -17,13 +17,6 @@ import {
   SquareIcon,
   TypeIcon,
 } from '#/components/icons'
-import { MoonIcon, SunIcon } from '#/components/icons'
-import {
-  getThemePreference,
-  setThemePreference,
-  watchSystemTheme,
-  type ThemePreference,
-} from '#/lib/theme'
 
 export const Route = createFileRoute('/')({
   ssr: false,
@@ -111,46 +104,9 @@ const LIGHT: Palette = {
   accentInk: '#ffffff',
 }
 
-const DARK: Palette = {
-  accent: '#1e3dea',
-  accentSoft: 'rgba(30,61,234,0.14)',
-  accentFaint: 'rgba(30,61,234,0.07)',
-  accentWire: 'rgba(30,61,234,0.40)',
-  wireStrong: '#5a5a5f',
-  wireMid: '#47474c',
-  wireSoft: '#343438',
-  surface: '#19191b',
-  tint: '#1f1f21',
-  line: '#343436',
-  dot: '#29292c',
-  page: '#0f0f11',
-  ok: '#34d399',
-  dotAccent: 'rgba(30,61,234,0.40)',
-  glow: 'rgba(227,228,230,0.05)',
-  accentInk: '#ffffff',
-}
-
 const PaletteContext = createContext<Palette>(LIGHT)
 
 const usePalette = () => useContext(PaletteContext)
-
-/** Tracks the `dark` class so the mocks re-render with matching colours. */
-function useThemePalette(): Palette {
-  const [dark, setDark] = useState(
-    () => typeof document !== 'undefined' && document.documentElement.classList.contains('dark'),
-  )
-
-  useEffect(() => {
-    const root = document.documentElement
-    const sync = () => setDark(root.classList.contains('dark'))
-    sync()
-    const observer = new MutationObserver(sync)
-    observer.observe(root, { attributes: true, attributeFilter: ['class'] })
-    return () => observer.disconnect()
-  }, [])
-
-  return dark ? DARK : LIGHT
-}
 
 
 /**
@@ -792,8 +748,7 @@ function NavSep() {
 
 function LandingPage() {
   const reduceMotion = useReducedMotion()
-  const palette = useThemePalette()
-  const [theme, setTheme] = useState<ThemePreference>('system')
+  const palette = LIGHT
 
   // App shell locks body scroll for the canvas editor (`overflow: hidden` in
   // styles.css). Clearing the inline style is a no-op — the stylesheet still
@@ -810,18 +765,6 @@ function LandingPage() {
       body.style.overflow = prevBody
     }
   }, [])
-
-  useEffect(() => {
-    setTheme(getThemePreference())
-    return watchSystemTheme()
-  }, [])
-
-  const toggleTheme = () => {
-    const dark = document.documentElement.classList.contains('dark')
-    const pref: ThemePreference = dark ? 'light' : 'dark'
-    setThemePreference(pref)
-    setTheme(pref)
-  }
 
   const link = { color: palette.accent }
 
@@ -851,22 +794,6 @@ function LandingPage() {
               </span>
             </div>
             <div className="flex items-center gap-3 text-[13px]">
-              <button
-                type="button"
-                onClick={toggleTheme}
-                aria-label="Toggle theme"
-                className="text-muted-foreground transition-colors hover:text-foreground"
-              >
-                {theme === 'dark' ||
-                (theme === 'system' &&
-                  typeof document !== 'undefined' &&
-                  document.documentElement.classList.contains('dark')) ? (
-                  <SunIcon className="size-3.5" strokeWidth={1.75} />
-                ) : (
-                  <MoonIcon className="size-3.5" strokeWidth={1.75} />
-                )}
-              </button>
-              <NavSep />
               <Link
                 to="/app"
                 className="px-2.5 py-1 font-medium text-white"

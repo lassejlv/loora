@@ -24,7 +24,6 @@ import { ShortcutsSettings } from '#/components/shortcuts-settings'
 import { clearWelcomeSeen } from '#/components/welcome-dialog'
 import { editorSearchParams, type IntegrationTab, type SettingsTab } from '#/lib/url-state'
 import type { ShortcutConfig } from '#/lib/shortcuts'
-import { getThemePreference, setThemePreference, type ThemePreference } from '#/lib/theme'
 
 type BillingStatus = Awaited<ReturnType<typeof orpc.billing.status>>
 
@@ -311,42 +310,6 @@ function AdminTab({ currentUserId }: { currentUserId: string }) {
   )
 }
 
-const THEME_OPTIONS: { value: ThemePreference; label: string }[] = [
-  { value: 'system', label: 'System' },
-  { value: 'light', label: 'Light' },
-  { value: 'dark', label: 'Dark' },
-]
-
-function AppearanceSection() {
-  const [preference, setPreference] = useState<ThemePreference>(() => getThemePreference())
-
-  return (
-    <div className="flex flex-col gap-3 border-t pt-6">
-      <div>
-        <h2 className="text-sm font-semibold">Appearance</h2>
-        <p className="mt-1 text-xs text-muted-foreground">
-          Theme for this device. System follows your OS setting.
-        </p>
-      </div>
-      <div className="flex gap-1.5">
-        {THEME_OPTIONS.map((option) => (
-          <Button
-            key={option.value}
-            size="sm"
-            variant={preference === option.value ? 'secondary' : 'outline'}
-            onClick={() => {
-              setThemePreference(option.value)
-              setPreference(option.value)
-            }}
-          >
-            {option.label}
-          </Button>
-        ))}
-      </div>
-    </div>
-  )
-}
-
 function DeleteAccountSection() {
   const [deleting, setDeleting] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -493,7 +456,6 @@ export function SettingsPanel({
               Sign out
             </Button>
           </div>
-          <AppearanceSection />
           <DeleteAccountSection />
         </TabsPanel>
 

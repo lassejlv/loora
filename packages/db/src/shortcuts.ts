@@ -42,7 +42,6 @@ export type BuiltInShortcutId =
   | 'nudgeRight'
   | 'nudgeUp'
   | 'nudgeDown'
-  | 'toggleLayers'
   | 'toggleAssets'
   | 'toggleHistory'
   | 'openCommandMenu'

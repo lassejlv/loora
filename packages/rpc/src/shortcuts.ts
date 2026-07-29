@@ -34,7 +34,6 @@ const BUILTIN_IDS = [
   'nudgeRight',
   'nudgeUp',
   'nudgeDown',
-  'toggleLayers',
   'toggleAssets',
   'toggleHistory',
   'openCommandMenu',
