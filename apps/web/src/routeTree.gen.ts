@@ -11,8 +11,10 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as McpConsentRouteImport } from './routes/mcp-consent'
+import { Route as PricingRouteImport } from './routes/pricing'
 import { Route as DotwellKnownOauthAuthorizationServerRouteImport } from './routes/[.]well-known.oauth-authorization-server'
 import { Route as ApiCanvasEventsRouteImport } from './routes/api.canvas-events'
+import { Route as ApiReadyRouteImport } from './routes/api.ready'
 import { Route as AppIndexRouteImport } from './routes/app.index'
 import { Route as AppDesignRouteImport } from './routes/app.design'
 import { Route as DesignIdRouteImport } from './routes/design.$id'
@@ -40,6 +42,11 @@ const McpConsentRoute = McpConsentRouteImport.update({
   path: '/mcp-consent',
   getParentRoute: () => rootRouteImport,
 } as any)
+const PricingRoute = PricingRouteImport.update({
+  id: '/pricing',
+  path: '/pricing',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const DotwellKnownOauthAuthorizationServerRoute =
   DotwellKnownOauthAuthorizationServerRouteImport.update({
     id: '/.well-known/oauth-authorization-server',
@@ -49,6 +56,11 @@ const DotwellKnownOauthAuthorizationServerRoute =
 const ApiCanvasEventsRoute = ApiCanvasEventsRouteImport.update({
   id: '/api/canvas-events',
   path: '/api/canvas-events',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiReadyRoute = ApiReadyRouteImport.update({
+  id: '/api/ready',
+  path: '/api/ready',
   getParentRoute: () => rootRouteImport,
 } as any)
 const AppIndexRoute = AppIndexRouteImport.update({
@@ -135,8 +147,10 @@ const ApiHandoffTokenAssetIdRoute = ApiHandoffTokenAssetIdRouteImport.update({
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/mcp-consent': typeof McpConsentRoute
+  '/pricing': typeof PricingRoute
   '/.well-known/oauth-authorization-server': typeof DotwellKnownOauthAuthorizationServerRoute
   '/api/canvas-events': typeof ApiCanvasEventsRoute
+  '/api/ready': typeof ApiReadyRoute
   '/app/design': typeof AppDesignRoute
   '/design/$id': typeof DesignIdRoute
   '/app/': typeof AppIndexRoute
@@ -157,8 +171,10 @@ export interface FileRoutesByFullPath {
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/mcp-consent': typeof McpConsentRoute
+  '/pricing': typeof PricingRoute
   '/.well-known/oauth-authorization-server': typeof DotwellKnownOauthAuthorizationServerRoute
   '/api/canvas-events': typeof ApiCanvasEventsRoute
+  '/api/ready': typeof ApiReadyRoute
   '/app/design': typeof AppDesignRoute
   '/design/$id': typeof DesignIdRoute
   '/app': typeof AppIndexRoute
@@ -180,8 +196,10 @@ export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/mcp-consent': typeof McpConsentRoute
+  '/pricing': typeof PricingRoute
   '/.well-known/oauth-authorization-server': typeof DotwellKnownOauthAuthorizationServerRoute
   '/api/canvas-events': typeof ApiCanvasEventsRoute
+  '/api/ready': typeof ApiReadyRoute
   '/app/design': typeof AppDesignRoute
   '/design/$id': typeof DesignIdRoute
   '/app/': typeof AppIndexRoute
@@ -204,8 +222,10 @@ export interface FileRouteTypes {
   fullPaths:
     | '/'
     | '/mcp-consent'
+    | '/pricing'
     | '/.well-known/oauth-authorization-server'
     | '/api/canvas-events'
+    | '/api/ready'
     | '/app/design'
     | '/design/$id'
     | '/app/'
@@ -226,8 +246,10 @@ export interface FileRouteTypes {
   to:
     | '/'
     | '/mcp-consent'
+    | '/pricing'
     | '/.well-known/oauth-authorization-server'
     | '/api/canvas-events'
+    | '/api/ready'
     | '/app/design'
     | '/design/$id'
     | '/app'
@@ -248,8 +270,10 @@ export interface FileRouteTypes {
     | '__root__'
     | '/'
     | '/mcp-consent'
+    | '/pricing'
     | '/.well-known/oauth-authorization-server'
     | '/api/canvas-events'
+    | '/api/ready'
     | '/app/design'
     | '/design/$id'
     | '/app/'
@@ -271,8 +295,10 @@ export interface FileRouteTypes {
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   McpConsentRoute: typeof McpConsentRoute
+  PricingRoute: typeof PricingRoute
   DotwellKnownOauthAuthorizationServerRoute: typeof DotwellKnownOauthAuthorizationServerRoute
   ApiCanvasEventsRoute: typeof ApiCanvasEventsRoute
+  ApiReadyRoute: typeof ApiReadyRoute
   AppDesignRoute: typeof AppDesignRoute
   DesignIdRoute: typeof DesignIdRoute
   AppIndexRoute: typeof AppIndexRoute
@@ -306,6 +332,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof McpConsentRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/pricing': {
+      id: '/pricing'
+      path: '/pricing'
+      fullPath: '/pricing'
+      preLoaderRoute: typeof PricingRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/.well-known/oauth-authorization-server': {
       id: '/.well-known/oauth-authorization-server'
       path: '/.well-known/oauth-authorization-server'
@@ -318,6 +351,13 @@ declare module '@tanstack/react-router' {
       path: '/api/canvas-events'
       fullPath: '/api/canvas-events'
       preLoaderRoute: typeof ApiCanvasEventsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/ready': {
+      id: '/api/ready'
+      path: '/api/ready'
+      fullPath: '/api/ready'
+      preLoaderRoute: typeof ApiReadyRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/app/': {
@@ -450,9 +490,11 @@ const ApiHandoffTokenRouteWithChildren = ApiHandoffTokenRoute._addFileChildren(
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   McpConsentRoute: McpConsentRoute,
+  PricingRoute: PricingRoute,
   DotwellKnownOauthAuthorizationServerRoute:
     DotwellKnownOauthAuthorizationServerRoute,
   ApiCanvasEventsRoute: ApiCanvasEventsRoute,
+  ApiReadyRoute: ApiReadyRoute,
   AppDesignRoute: AppDesignRoute,
   DesignIdRoute: DesignIdRoute,
   AppIndexRoute: AppIndexRoute,
