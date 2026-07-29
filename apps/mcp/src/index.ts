@@ -19,6 +19,7 @@ import {
 } from '@loora/rpc/request-timing'
 import { createLooraServer } from './server'
 import { AccessDeniedError, requireAppAccess } from './access'
+import { createMcpUsageController } from './usage'
 
 const PORT = Number(process.env.PORT ?? 4100)
 const PUBLIC_URL = (process.env.MCP_PUBLIC_URL?.trim() || `http://localhost:${PORT}`).replace(
@@ -75,9 +76,12 @@ async function handleMcp(
   }
 
   let userId: string
+  let mcpPlan: Awaited<ReturnType<typeof requireAppAccess>>['mcpPlan']
   const accessStartedAt = performance.now()
   try {
-    userId = (await requireAppAccess(session.userId)).id
+    const access = await requireAppAccess(session.userId)
+    userId = access.account.id
+    mcpPlan = access.mcpPlan
     phases.access = elapsedMilliseconds(accessStartedAt)
   } catch (error) {
     phases.access = elapsedMilliseconds(accessStartedAt)
@@ -96,7 +100,10 @@ async function handleMcp(
   }
 
   const setupStartedAt = performance.now()
-  const server = createLooraServer(userId)
+  const server = createLooraServer(
+    userId,
+    createMcpUsageController(userId, mcpPlan),
+  )
   const transport = new StreamableHTTPServerTransport({
     sessionIdGenerator: undefined,
     enableJsonResponse: true,

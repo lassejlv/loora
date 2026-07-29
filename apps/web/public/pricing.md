@@ -1,53 +1,61 @@
 ---
 title: Loora Pricing
-description: Monthly Loora plans with full editor access and included AI credits.
-url: https://loora.design
+description: Free and Pro Loora plans with full editor access and no per-generation billing.
+url: https://loora.design/pricing
 currency: USD
 ---
 
 # Pricing
 
-Loora has two monthly plans. Both include the full canvas editor, saved designs, history, exports, and handoffs.
+Start free and keep the whole editor. Pro lifts the limits and adds the in-app agent. You pay for capacity, not credits or individual generations.
 
 ## Plans
 
-| Plan | Price | Included AI credits | Trial |
-| --- | ---: | ---: | --- |
-| Pro | $20/month | 100/month after the trial | 3 days free |
-| Studio | $49/month | 300/month | No trial |
+| Plan | Price | Design files | Asset storage | MCP calls | History |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Free | $0/month | 50 | 1 GB | 200/week | 2 days |
+| Pro | $20/month or $200/year | Unlimited | 100 GB | 1,000,000/week | 90 days |
+
+### Free
+
+Free needs no card and does not expire. It includes:
+
+- 50 design files
+- 1 GB of asset storage
+- 200 MCP calls per week
+- 2 days of version history
 
 ### Pro
 
-Pro is $20 per month and begins with a 3-day free trial. During the trial, the full editor is available and you can connect ChatGPT or add your own provider API key for AI features. Loora-managed AI and prepaid credit top-ups unlock after the trial ends.
+Pro includes everything in Free at production limits:
 
-Unless canceled, the subscription renews at $20 per month when the trial ends.
+- Unlimited design files
+- 100 GB of asset storage
+- 1,000,000 MCP calls per week
+- 90 days of version history
+- Branches: fork, compare, and merge
+- In-app agent access
+- Image generation
+- A team workspace for up to 5 users
 
-### Studio
+## On both plans
 
-Studio is $49 per month with 300 AI credits each month. It includes 3 times the managed AI capacity of Pro and starts immediately without a trial.
-
-## AI credits
-
-AI credits pay for Loora-managed model usage. Included credits reset each billing month and do not roll over. ChatGPT-backed requests and requests made with connected OpenRouter, Google Gemini, OpenAI, or Anthropic API keys require an active plan but do not consume Loora AI credits.
-
-Running out of AI credits does not disable the editor, saved designs, history, exports, or handoffs. You can keep working manually, use a connected provider, or add prepaid credits.
-
-## Prepaid credits
-
-Active, non-trial subscribers can add prepaid AI credits without changing plans.
-
-- $1 adds 10 AI credits.
-- Purchases range from $5 to $500.
-- Top-ups do not renew automatically.
-- Included monthly credits are used before prepaid credits.
+- Infinite canvas editor with components, tokens, and breakpoints
+- MCP server for driving the same document from an external agent
+- HTML/CSS, React/TSX, JSON, and PNG exports
+- Figma import and GitHub read access
 
 ## Billing
 
-- Plans are billed monthly in USD.
-- There is no annual plan and no automatic usage overage.
-- Manage, change, or cancel a subscription from Billing in Loora settings.
+- Free is $0/month, needs no card, and does not expire.
+- Pro is $20/month or $200 billed yearly.
+- Subscriptions run through Polar and can be changed or canceled from Billing in Loora.
+- MCP allowances reset weekly.
+- Version history uses a rolling window.
+- Nothing is billed per generation. External agents connected over MCP use their own plan and key.
 
 ## Related
 
 - Product: <https://loora.design>
+- Pricing: <https://loora.design/pricing>
 - Design system: <https://loora.design/design.md>

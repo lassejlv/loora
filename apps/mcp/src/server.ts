@@ -61,14 +61,62 @@ import {
   proposeDraft,
 } from './designs'
 import { renderCanvasScreenshot } from './screenshot'
+import {
+  McpUsageLimitError,
+  McpUsageUnavailableError,
+  type McpIncludedUsage,
+} from '@loora/billing/mcp-usage'
 
-function json(data: unknown) {
+export interface McpUsageController {
+  current: () => Promise<McpIncludedUsage>
+  reserve: () => Promise<McpIncludedUsage>
+}
+
+function usageMeta(usage?: McpIncludedUsage) {
+  return usage ? { _meta: { 'loora/usage': usage } } : {}
+}
+
+function json(data: unknown, usage?: McpIncludedUsage) {
   return {
     content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }],
+    ...usageMeta(usage),
   }
 }
 
-function fail(error: unknown) {
+function fail(error: unknown, usage?: McpIncludedUsage) {
+  if (error instanceof McpUsageLimitError) {
+    return {
+      content: [
+        {
+          type: 'text' as const,
+          text: JSON.stringify(
+            {
+              error: error.message,
+              code: 'MCP_USAGE_LIMIT_REACHED',
+              usage: error.usage,
+            },
+            null,
+            2,
+          ),
+        },
+      ],
+      isError: true,
+      ...usageMeta(error.usage),
+    }
+  }
+  if (error instanceof McpUsageUnavailableError) {
+    return {
+      content: [{
+        type: 'text' as const,
+        text: JSON.stringify({
+          error: error.message,
+          code: 'MCP_USAGE_UNAVAILABLE',
+        }),
+      }],
+      isError: true,
+      ...usageMeta(usage),
+    }
+  }
   if (error instanceof CanvasUnavailableError) {
     return {
       content: [
@@ -86,12 +134,14 @@ function fail(error: unknown) {
         },
       ],
       isError: true,
+      ...usageMeta(usage),
     }
   }
   const message = error instanceof Error ? error.message : String(error)
   return {
     content: [{ type: 'text' as const, text: message }],
     isError: true,
+    ...usageMeta(usage),
   }
 }
 
@@ -155,15 +205,20 @@ export function exportCanvasCode(
   return { code, pageId, nodeId }
 }
 
-export function createLooraServer(userId: string) {
+export function createLooraServer(
+  userId: string,
+  usage: McpUsageController,
+) {
   const server = new McpServer({ name: 'loora', version: '0.3.0' })
 
   function tool<Args>(run: (args: Args) => Promise<unknown>) {
     return async (args: Args) => {
+      let currentUsage: McpIncludedUsage | undefined
       try {
-        return json(await run(args))
+        currentUsage = await usage.reserve()
+        return json(await run(args), currentUsage)
       } catch (error) {
-        return fail(error)
+        return fail(error, currentUsage)
       }
     }
   }
@@ -175,7 +230,9 @@ export function createLooraServer(userId: string) {
     }>,
   ) {
     return async (args: Args) => {
+      let currentUsage: McpIncludedUsage | undefined
       try {
+        currentUsage = await usage.reserve()
         const result = await run(args)
         return {
           content: [
@@ -189,12 +246,30 @@ export function createLooraServer(userId: string) {
               mimeType: 'image/png',
             },
           ],
+          ...usageMeta(currentUsage),
         }
       } catch (error) {
-        return fail(error)
+        return fail(error, currentUsage)
       }
     }
   }
+
+  server.registerTool(
+    'getUsage',
+    {
+      description:
+        'Read MCP tool calls used, included, remaining, and the weekly reset time. This status check does not consume usage.',
+      annotations: { readOnlyHint: true },
+    },
+    async () => {
+      try {
+        const current = await usage.current()
+        return json(current, current)
+      } catch (error) {
+        return fail(error)
+      }
+    },
+  )
 
   server.registerTool(
     'listDesigns',

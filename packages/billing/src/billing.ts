@@ -28,6 +28,8 @@ export interface BillingStatus {
   source: 'polar' | 'cache' | 'admin' | 'disabled'
 }
 
+export type CheckoutPlan = 'free' | 'pro'
+
 export function subscriptionRequiredResponse() {
   return Response.json(
     { error: 'An active Loora plan is required.', code: 'SUBSCRIPTION_REQUIRED' },
@@ -161,7 +163,11 @@ function statusFromEntitlement(
   return {
     required: true,
     access: cachedEntitlementGrantsAccess(entitlement),
-    plan: entitlement?.plan === 'pro' || entitlement?.plan === 'studio' ? entitlement.plan : null,
+    plan: entitlement?.plan === 'free' ||
+      entitlement?.plan === 'pro' ||
+      entitlement?.plan === 'studio'
+      ? entitlement.plan
+      : null,
     currentPeriodEnd: entitlement?.currentPeriodEnd?.toISOString() ?? null,
     cancelAtPeriodEnd: entitlement?.cancelAtPeriodEnd ?? false,
     trial: trialActive && entitlement?.trialEnd
@@ -217,25 +223,24 @@ export async function getBillingStatus(user: BillingUser, force = false): Promis
 
 export async function createPlanCheckout(
   user: { id: string; email: string },
-  plan: BillingPlan,
+  plan: CheckoutPlan,
 ) {
   const { config } = getPolarRuntime()
   if (!config) throw new Error('Polar is not configured')
-  const proTrial = plan === 'pro'
   const checkout = await getPolarClient().checkouts.create({
-    products: [proTrial ? config.proProductId : config.studioProductId],
+    products: plan === 'free'
+      ? [config.freeProductId]
+      : [config.proProductId, config.proYearlyProductId],
     externalCustomerId: user.id,
     customerEmail: user.email,
-    allowTrial: proTrial,
-    trialInterval: proTrial ? 'day' : undefined,
-    trialIntervalCount: proTrial ? 3 : undefined,
+    allowTrial: false,
     metadata: {
       loora_kind: 'subscription',
       loora_plan: plan,
       loora_user_id: user.id,
     },
-    successUrl: `${config.origin}/?checkout=success&checkout_id={CHECKOUT_ID}`,
-    returnUrl: config.origin,
+    successUrl: `${config.origin}/app?checkout=success&checkout_id={CHECKOUT_ID}`,
+    returnUrl: `${config.origin}/app`,
   })
   return { url: checkout.url }
 }

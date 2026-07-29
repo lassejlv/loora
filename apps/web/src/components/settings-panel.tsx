@@ -65,13 +65,17 @@ function BillingTab({
 
   const plan = billing.trial
     ? 'Pro trial'
-    : billing.plan === 'studio' ? 'Studio' : billing.plan === 'pro' ? 'Pro' : 'No plan'
+    : billing.plan === 'studio'
+      ? 'Studio (legacy)'
+      : billing.plan === 'pro'
+        ? 'Pro'
+        : billing.plan === 'free' ? 'Free' : 'No plan'
   return (
     <div className="flex flex-col gap-5">
       <div>
         <h2 className="text-sm font-semibold">Billing</h2>
         <p className="mt-1 text-xs text-muted-foreground">
-          Manage the plan that unlocks the editor, branches, MCP, and exports.
+          Manage your Loora plan and capacity.
         </p>
       </div>
       <div className="rounded-lg border border-border p-4">

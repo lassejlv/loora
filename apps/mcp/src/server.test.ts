@@ -13,6 +13,7 @@ import {
   exportCanvasCode,
 } from './server'
 import { canvasAgentActivityNodeIds } from './designs'
+import type { McpUsageController } from './server'
 
 const originalAppUrl = process.env.LOORA_APP_URL
 
@@ -36,6 +37,22 @@ function documentFixture() {
   document.nodes[page.id] = page
   document.nodes[text.id] = text
   return document
+}
+
+function usageController(): McpUsageController {
+  const snapshot = {
+    metric: 'mcp_tool_calls' as const,
+    plan: 'free' as const,
+    included: 200,
+    used: 12,
+    remaining: 188,
+    periodStart: '2026-07-27T00:00:00.000Z',
+    resetsAt: '2026-08-03T00:00:00.000Z',
+  }
+  return {
+    current: async () => snapshot,
+    reserve: async () => snapshot,
+  }
 }
 
 describe('MCP agent workflow', () => {
@@ -139,7 +156,15 @@ describe('MCP agent workflow', () => {
   })
 
   test('advertises context, code export, and a real screenshot tool', async () => {
-    const server = createLooraServer('user-test')
+    let reservations = 0
+    const usage = usageController()
+    const server = createLooraServer('user-test', {
+      current: usage.current,
+      reserve: async () => {
+        reservations += 1
+        return usage.reserve()
+      },
+    })
     const client = new Client({ name: 'loora-test', version: '1.0.0' })
     const [clientTransport, serverTransport] =
       InMemoryTransport.createLinkedPair()
@@ -151,6 +176,7 @@ describe('MCP agent workflow', () => {
       expect(names.has('getDesignContext')).toBe(true)
       expect(names.has('exportCode')).toBe(true)
       expect(names.has('getScreenshot')).toBe(true)
+      expect(names.has('getUsage')).toBe(true)
       const createPage = tools.tools.find(
         (tool) => tool.name === 'createPage',
       )
@@ -170,6 +196,23 @@ describe('MCP agent workflow', () => {
         tools.tools.find((tool) => tool.name === 'getScreenshot')
           ?.annotations?.readOnlyHint,
       ).toBe(true)
+      const usageResult = await client.callTool({
+        name: 'getUsage',
+        arguments: {},
+      })
+      expect(usageResult.isError).not.toBe(true)
+      if (!Array.isArray(usageResult.content)) {
+        throw new Error('Expected getUsage to return content')
+      }
+      const usageContent = usageResult.content[0]
+      if (usageContent?.type !== 'text') {
+        throw new Error('Expected getUsage to return text')
+      }
+      expect(JSON.parse(usageContent.text).remaining).toBe(188)
+      expect(usageResult._meta?.['loora/usage']).toEqual(
+        await usage.current(),
+      )
+      expect(reservations).toBe(0)
     } finally {
       await client.close()
       await server.close()

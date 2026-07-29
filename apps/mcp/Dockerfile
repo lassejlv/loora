@@ -2,7 +2,7 @@
 # mcp.loora.design — remote MCP server. Runs TS straight through Bun, no
 # build step; only needs deps plus the workspace packages it imports.
 
-FROM oven/bun:1.3.14 AS deps
+FROM oven/bun:canary AS deps
 WORKDIR /app
 
 COPY package.json bun.lock bunfig.toml ./
@@ -16,7 +16,7 @@ COPY packages/canvas/package.json packages/canvas/
 COPY packages/rpc/package.json packages/rpc/
 RUN bun install --frozen-lockfile
 
-FROM oven/bun:1.3.14-slim AS runtime
+FROM oven/bun:canary-slim AS runtime
 WORKDIR /app
 
 ENV NODE_ENV=production

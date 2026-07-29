@@ -1,7 +1,7 @@
 import type { CustomerState } from '@polar-sh/sdk/models/components/customerstate.js'
 import type { PolarConfig } from './polar'
 
-export type BillingPlan = 'pro' | 'studio'
+export type BillingPlan = 'free' | 'pro' | 'studio'
 
 export interface NormalizedEntitlement {
   polarCustomerId: string
@@ -24,24 +24,36 @@ export function shouldApplyWebhook(lastEventAt: Date | null, eventAt: Date) {
 
 export function normalizeCustomerState(
   state: CustomerState,
-  config: Pick<PolarConfig, 'proProductId' | 'studioProductId' | 'accessBenefitId'>,
+  config: Pick<
+    PolarConfig,
+    'freeProductId' | 'proProductId' | 'proYearlyProductId' | 'studioProductId' | 'accessBenefitId'
+  >,
   now = new Date(),
 ): NormalizedEntitlement {
+  const planForProduct = (productId: string): BillingPlan | null => {
+    if (productId === config.freeProductId) return 'free'
+    if (productId === config.proProductId || productId === config.proYearlyProductId) return 'pro'
+    if (config.studioProductId && productId === config.studioProductId) return 'studio'
+    return null
+  }
   const recognized = state.activeSubscriptions
     .filter((subscription) => {
-      const recognizedProduct = subscription.productId === config.proProductId ||
-        subscription.productId === config.studioProductId
+      const plan = planForProduct(subscription.productId)
       const active = subscription.status === 'active'
       const proTrial = subscription.status === 'trialing' &&
-        subscription.productId === config.proProductId &&
+        plan === 'pro' &&
         Boolean(subscription.trialEnd && subscription.trialEnd.getTime() > now.getTime())
-      return recognizedProduct && subscription.currentPeriodEnd.getTime() > now.getTime() &&
+      return plan && subscription.currentPeriodEnd.getTime() > now.getTime() &&
         (active || proTrial)
     })
     .sort((left, right) => {
-      const score = (subscription: typeof left) => subscription.status === 'active'
-        ? subscription.productId === config.studioProductId ? 3 : 2
-        : 1
+      const score = (subscription: typeof left) => {
+        if (subscription.status !== 'active') return 2
+        const plan = planForProduct(subscription.productId)
+        if (plan === 'studio') return 4
+        if (plan === 'pro') return 3
+        return 1
+      }
       return score(right) - score(left)
     })
   const subscription = recognized[0] ?? null
@@ -54,11 +66,7 @@ export function normalizeCustomerState(
     polarCustomerId: state.id,
     polarSubscriptionId: subscription?.id ?? null,
     productId: subscription?.productId ?? null,
-    plan: subscription
-      ? subscription.productId === config.studioProductId
-        ? 'studio'
-        : 'pro'
-      : null,
+    plan: subscription ? planForProduct(subscription.productId) : null,
     subscriptionStatus: subscription?.status === 'active'
       ? 'active'
       : subscription?.status === 'trialing' ? 'trialing' : null,

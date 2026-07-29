@@ -3,6 +3,7 @@ import { db } from '@loora/db'
 import { user } from '@loora/db/schema'
 import { canUseApp } from '@loora/auth/preview-access'
 import { authorizeBilling } from '@loora/billing/billing'
+import type { McpUsagePlan } from '@loora/billing/mcp-usage'
 
 export class AccessDeniedError extends Error {}
 
@@ -13,8 +14,21 @@ export async function requireAppAccess(userId: string) {
   const [account] = await db.select().from(user).where(eq(user.id, userId)).limit(1)
   if (!account) throw new AccessDeniedError('Unknown user.')
   if (!canUseApp(account)) throw new AccessDeniedError('Preview access is required.')
-  if (!(await authorizeBilling(account)).access) {
+  const billing = await authorizeBilling(account)
+  if (!billing.access) {
     throw new AccessDeniedError('An active Loora plan is required.')
   }
-  return account
+  let mcpPlan: McpUsagePlan
+  if (billing.source === 'admin' || billing.source === 'disabled') {
+    mcpPlan = billing.source
+  } else if (
+    billing.entitlement?.plan === 'free' ||
+    billing.entitlement?.plan === 'pro' ||
+    billing.entitlement?.plan === 'studio'
+  ) {
+    mcpPlan = billing.entitlement.plan
+  } else {
+    throw new AccessDeniedError('A recognized Loora plan is required.')
+  }
+  return { account, mcpPlan }
 }

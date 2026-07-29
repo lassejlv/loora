@@ -6,8 +6,11 @@ export interface PolarConfig {
   server: PolarServer
   accessToken: string
   webhookSecret: string
+  freeProductId: string
   proProductId: string
-  studioProductId: string
+  proYearlyProductId: string
+  studioProductId: string | null
+  mcpMeterId: string
   accessBenefitId: string
   origin: string
 }
@@ -26,8 +29,10 @@ export function resolvePolarConfig(
     'POLAR_SERVER',
     'POLAR_ACCESS_TOKEN',
     'POLAR_WEBHOOK_SECRET',
+    'POLAR_FREE_PRODUCT_ID',
     'POLAR_PRO_PRODUCT_ID',
-    'POLAR_STUDIO_PRODUCT_ID',
+    'POLAR_PRO_YEARLY_PRODUCT_ID',
+    'POLAR_MCP_METER_ID',
     'POLAR_ACCESS_BENEFIT_ID',
     'BETTER_AUTH_URL',
   ] as const
@@ -58,8 +63,11 @@ export function resolvePolarConfig(
       server: values.POLAR_SERVER,
       accessToken: values.POLAR_ACCESS_TOKEN!,
       webhookSecret: values.POLAR_WEBHOOK_SECRET!,
+      freeProductId: values.POLAR_FREE_PRODUCT_ID!,
       proProductId: values.POLAR_PRO_PRODUCT_ID!,
-      studioProductId: values.POLAR_STUDIO_PRODUCT_ID!,
+      proYearlyProductId: values.POLAR_PRO_YEARLY_PRODUCT_ID!,
+      studioProductId: env.POLAR_STUDIO_PRODUCT_ID?.trim() || null,
+      mcpMeterId: values.POLAR_MCP_METER_ID!,
       accessBenefitId: values.POLAR_ACCESS_BENEFIT_ID!,
       origin,
     },

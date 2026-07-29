@@ -6,8 +6,11 @@ const complete = {
   POLAR_SERVER: 'production',
   POLAR_ACCESS_TOKEN: 'token',
   POLAR_WEBHOOK_SECRET: 'secret',
+  POLAR_FREE_PRODUCT_ID: 'free',
   POLAR_PRO_PRODUCT_ID: 'pro',
+  POLAR_PRO_YEARLY_PRODUCT_ID: 'pro-yearly',
   POLAR_STUDIO_PRODUCT_ID: 'studio',
+  POLAR_MCP_METER_ID: 'mcp-meter',
   POLAR_ACCESS_BENEFIT_ID: 'access',
   BETTER_AUTH_URL: 'https://loora.example/path',
 }
@@ -37,11 +40,21 @@ describe('Polar configuration', () => {
         server: 'production',
         accessToken: 'token',
         webhookSecret: 'secret',
+        freeProductId: 'free',
         proProductId: 'pro',
+        proYearlyProductId: 'pro-yearly',
         studioProductId: 'studio',
+        mcpMeterId: 'mcp-meter',
         accessBenefitId: 'access',
         origin: 'https://loora.example',
       },
     })
+  })
+
+  test('keeps the legacy Studio product optional', () => {
+    expect(resolvePolarConfig({
+      ...complete,
+      POLAR_STUDIO_PRODUCT_ID: undefined,
+    }).config?.studioProductId).toBeNull()
   })
 })

@@ -14,7 +14,7 @@ import {
   DialogTitle,
 } from '#/components/ui/dialog'
 
-type Plan = 'pro' | 'studio'
+type Plan = 'free' | 'pro'
 type BillingStatus = Awaited<ReturnType<typeof orpc.billing.status>>
 
 interface SubscriptionScreenProps {
@@ -26,18 +26,18 @@ interface SubscriptionScreenProps {
 
 const plans = [
   {
+    id: 'free' as const,
+    name: 'Free',
+    price: '$0',
+    summary: '50 files, 1 GB assets, and 200 MCP calls a week',
+    note: 'No card required',
+  },
+  {
     id: 'pro' as const,
     name: 'Pro',
     price: '$20',
-    summary: 'Full canvas, branches, MCP, and exports',
-    note: '3-day free trial',
-  },
-  {
-    id: 'studio' as const,
-    name: 'Studio',
-    price: '$49',
-    summary: 'Pro plus priority support',
-    note: 'For teams',
+    summary: 'Unlimited files, branches, agent access, and a 5-seat workspace',
+    note: '$200 / year',
   },
 ]
 
@@ -89,7 +89,7 @@ export function SubscriptionScreen({ userId, children, preview, redirect }: Subs
       const goToCheckout = redirect ?? ((url: string) => window.location.assign(url))
       goToCheckout(checkout.url)
     } catch {
-      setError(`Could not open ${plan === 'pro' ? 'Pro' : 'Studio'} checkout. Please retry.`)
+      setError(`Could not open ${plan === 'free' ? 'Free' : 'Pro'} checkout. Please retry.`)
       setPending(false)
     }
   }
@@ -117,8 +117,8 @@ export function SubscriptionScreen({ userId, children, preview, redirect }: Subs
             </p>
             <DialogTitle>Choose your Loora plan</DialogTitle>
             <DialogDescription>
-              Both plans include the full editor, saving, history, branches, exports, handoffs, and
-              the MCP server for driving the canvas from your own agent.
+              Free is the whole editor, not a demo. Pro lifts the limits and adds branches,
+              the in-app agent, image generation, and a team workspace.
             </DialogDescription>
           </DialogHeader>
           <DialogPanel className="flex flex-col gap-4 pt-1">
@@ -141,19 +141,22 @@ export function SubscriptionScreen({ userId, children, preview, redirect }: Subs
                   </p>
                   {plan.id === 'pro' ? (
                     <p className="mt-2 text-xs text-muted-foreground">
-                      Free for 3 days, then $20/month unless canceled. Everything is unlocked during
-                      the trial.
+                      Or $200 billed yearly — two months off. Nothing is billed per generation.
                     </p>
-                  ) : null}
+                  ) : (
+                    <p className="mt-2 text-xs text-muted-foreground">
+                      Does not expire. Upgrade whenever you need more capacity.
+                    </p>
+                  )}
                   <div className="mt-4 flex flex-1 flex-col justify-end">
                     <Button
-                      variant={plan.id === 'studio' ? 'default' : 'outline'}
+                      variant={plan.id === 'pro' ? 'default' : 'outline'}
                       disabled={pending}
                       onClick={() => void startCheckout(plan.id)}
                     >
                       {pending && selectedPlan === plan.id
                         ? 'Opening checkout…'
-                        : plan.id === 'pro' ? 'Start free trial' : `Choose ${plan.name}`}
+                        : plan.id === 'free' ? 'Start free' : 'Go Pro'}
                     </Button>
                   </div>
                 </div>

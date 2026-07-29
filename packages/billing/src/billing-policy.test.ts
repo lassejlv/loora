@@ -8,7 +8,9 @@ import {
 
 const now = new Date('2026-07-20T12:00:00Z')
 const config = {
+  freeProductId: 'free',
   proProductId: 'pro',
+  proYearlyProductId: 'pro-yearly',
   studioProductId: 'studio',
   accessBenefitId: 'access',
 }
@@ -57,7 +59,23 @@ describe('billing policy', () => {
     expect(missingBenefit.accessGranted).toBe(false)
   })
 
-  test('Studio takes precedence and cancellation retains access through period end', () => {
+  test('recognizes Free and both Pro billing cycles', () => {
+    const free = normalizeCustomerState(state({
+      activeSubscriptions: [subscription('free')],
+      grantedBenefits: [{ benefitId: 'access' } as never],
+    }), config, now)
+    expect(free.plan).toBe('free')
+    expect(free.accessGranted).toBe(true)
+
+    const yearly = normalizeCustomerState(state({
+      activeSubscriptions: [subscription('pro-yearly')],
+      grantedBenefits: [{ benefitId: 'access' } as never],
+    }), config, now)
+    expect(yearly.plan).toBe('pro')
+    expect(yearly.accessGranted).toBe(true)
+  })
+
+  test('legacy Studio takes precedence and cancellation retains access through period end', () => {
     const studio = { ...subscription('studio'), cancelAtPeriodEnd: true }
     const normalized = normalizeCustomerState(state({
       activeSubscriptions: [subscription('pro'), studio],

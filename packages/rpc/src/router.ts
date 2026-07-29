@@ -2338,7 +2338,7 @@ const refreshCurrentBilling = previewProcedure.handler(({ context }) =>
 )
 
 const createSubscriptionCheckout = previewProcedure
-  .input(z.object({ plan: z.enum(['pro', 'studio']) }))
+  .input(z.object({ plan: z.enum(['free', 'pro']) }))
   .handler(async ({ context, input }) => {
     const billing = await authorizeBilling(context.user)
     if (billing.access) {
