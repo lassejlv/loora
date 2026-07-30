@@ -52,6 +52,8 @@ const REALTIME_RETRY_MAX_MS = 30_000
 const CLOSE_REALTIME_REAUTH = 4001
 /** After this many sockets that never opened, stay on the event stream. */
 const MAX_SOCKET_FAILURES = 3
+/** Offered alongside the ticket so the service knows which dialect this is. */
+const REALTIME_PROTOCOL = 'loora.realtime.v1'
 /** A pointer moves at frame rate; the wire does not have to. */
 const PRESENCE_THROTTLE_MS = 80
 const PRESENCE_HEARTBEAT_MS = 20_000
@@ -888,9 +890,13 @@ export class CanvasSyncController {
       return
     }
 
-    const socket = new WebSocket(
-      `${ticket.url}?ticket=${encodeURIComponent(ticket.ticket)}`,
-    )
+    // The ticket rides the subprotocol rather than the query string: a browser
+    // cannot set headers on a WebSocket, and a URL is the part of a request
+    // proxies and edge logs are most likely to keep.
+    const socket = new WebSocket(ticket.url, [
+      REALTIME_PROTOCOL,
+      ticket.ticket,
+    ])
     this.#socket = socket
     socket.addEventListener('message', this.#socketMessage)
     socket.addEventListener('close', this.#socketClose)

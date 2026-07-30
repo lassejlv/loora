@@ -35,7 +35,32 @@ const MAX_SOCKET_PAYLOAD_BYTES = 16 * 1024
 const SWEEP_INTERVAL_MS = 30_000
 /** Closing with 4001 tells the client to re-ticket and reconnect at once. */
 export const CLOSE_REAUTH = 4001
+/** One account, many tabs — but not unbounded. The oldest socket gives way. */
+export const CLOSE_TOO_MANY = 4002
+export const MAX_SOCKETS_PER_USER = 20
 const CLOSE_GOING_AWAY = 1012
+
+/**
+ * The subprotocol a client offers alongside its ticket. A browser cannot set
+ * headers on a WebSocket, and a query string is the one part of a request that
+ * proxies and edge logs are most likely to keep, so the ticket travels as the
+ * second offered subprotocol instead. The query form stays supported for
+ * clients running a bundle from before this existed.
+ */
+const TICKET_PROTOCOL = 'loora.realtime.v1'
+
+export function ticketFromRequest(request: Request, url: URL) {
+  const offered = (request.headers.get('sec-websocket-protocol') ?? '')
+    .split(',')
+    .map((entry) => entry.trim())
+    .filter(Boolean)
+  const fromProtocol = offered.find((entry) => entry !== TICKET_PROTOCOL)
+  return {
+    ticket: fromProtocol ?? url.searchParams.get('ticket') ?? '',
+    /** Echoed back only when the client actually asked for the protocol. */
+    protocol: offered.includes(TICKET_PROTOCOL) ? TICKET_PROTOCOL : null,
+  }
+}
 
 export interface RealtimeService {
   server: Server<SocketData>
@@ -47,6 +72,7 @@ export interface RealtimeService {
 
 export function createRealtimeService(config: WsConfig): RealtimeService {
   const sockets = new Set<ServerWebSocket<SocketData>>()
+  const byUser = new Map<string, Set<ServerWebSocket<SocketData>>>()
   const bus = createBus(config.redisUrl)
   const hub = new RealtimeHub(bus, (channel, payload) => {
     server.publish(channel, payload)
@@ -168,12 +194,24 @@ export function createRealtimeService(config: WsConfig): RealtimeService {
         if (!originAllowed(request)) {
           return new Response('Forbidden origin', { status: 403 })
         }
-        const claims = await verifyRealtimeTicket(
-          url.searchParams.get('ticket') ?? '',
-          config.ticketSecret,
-        )
+        const { ticket, protocol } = ticketFromRequest(request, url)
+        const claims = await verifyRealtimeTicket(ticket, config.ticketSecret)
         if (!claims) return new Response('Invalid ticket', { status: 401 })
+        // Spend the ticket. A second connection on the same one is a replay,
+        // not a reconnect: the client asks the web app for a fresh ticket every
+        // time it opens a socket.
+        let claimed = false
+        try {
+          claimed = await bus.claimTicket(
+            claims.jti,
+            claims.expiresAt - Date.now() + 5_000,
+          )
+        } catch {
+          console.error('[loora-ws] could not claim ticket')
+        }
+        if (!claimed) return new Response('Ticket already used', { status: 401 })
         const upgraded = server.upgrade(request, {
+          headers: protocol ? { 'Sec-WebSocket-Protocol': protocol } : undefined,
           data: {
             channel: hub.channelFor(claims.ownerUserId, {
               designId: claims.designId,
@@ -198,6 +236,19 @@ export function createRealtimeService(config: WsConfig): RealtimeService {
       maxPayloadLength: MAX_SOCKET_PAYLOAD_BYTES,
       async open(ws) {
         sockets.add(ws)
+        // One account should not be able to hold the service open with an
+        // unbounded number of sockets. The newest tab is the one somebody is
+        // looking at, so the oldest gives way rather than the arriving one.
+        const mine = byUser.get(ws.data.claims.userId) ?? new Set()
+        mine.add(ws)
+        byUser.set(ws.data.claims.userId, mine)
+        if (mine.size > MAX_SOCKETS_PER_USER) {
+          for (const oldest of mine) {
+            if (mine.size <= MAX_SOCKETS_PER_USER) break
+            mine.delete(oldest)
+            oldest.close(CLOSE_TOO_MANY, 'Too many connections')
+          }
+        }
         ws.subscribe(ws.data.channel)
         try {
           await hub.join(ws.data.channel)
@@ -237,6 +288,11 @@ export function createRealtimeService(config: WsConfig): RealtimeService {
       },
       async close(ws) {
         sockets.delete(ws)
+        const mine = byUser.get(ws.data.claims.userId)
+        if (mine) {
+          mine.delete(ws)
+          if (mine.size === 0) byUser.delete(ws.data.claims.userId)
+        }
         ws.unsubscribe(ws.data.channel)
         await hub.clearPresence(ws.data.channel, ws.data.claims.sessionId)
         await hub.leave(ws.data.channel)

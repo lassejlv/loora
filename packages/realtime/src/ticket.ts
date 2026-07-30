@@ -16,6 +16,12 @@
 
 export interface RealtimeTicketClaims {
   v: 1
+  /**
+   * Ticket id. The socket service claims it once and refuses it afterwards, so
+   * a ticket that leaks — out of a proxy log, a crash dump, a shared machine —
+   * is worth at most the one connection it was minted for.
+   */
+  jti: string
   /** Who is connecting. */
   userId: string
   /** One browser tab. Presence is keyed by it. */
@@ -97,6 +103,7 @@ function claimsFrom(value: unknown, now: number): RealtimeTicketClaims | null {
     typeof field === 'string' && field.length > 0 && field.length <= max
   if (
     claims.v !== 1 ||
+    !text(claims.jti, 128) ||
     !text(claims.userId, 128) ||
     !text(claims.sessionId, 128) ||
     !text(claims.ownerUserId, 128) ||

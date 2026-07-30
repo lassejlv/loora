@@ -25,7 +25,7 @@ ws  <──pub/sub──>  redis                            between ws instances
 
 | Method | Path | Who calls it |
 |--------|------|--------------|
-| `GET` | `/canvas?ticket=…` | Browser. Upgrades to a socket; the ticket is minted by the web app. |
+| `GET` | `/canvas` | Browser. Upgrades to a socket; the ticket rides the `Sec-WebSocket-Protocol` header (`?ticket=` still accepted). |
 | `POST` | `/publish` | Web / MCP, with `Authorization: Bearer $REALTIME_INTERNAL_TOKEN`. |
 | `POST` | `/state` | Web, same token. Room state for a tab connecting over SSE. |
 | `GET` | `/health`, `/ready` | Platform checks. |
@@ -36,9 +36,20 @@ This process never touches the database. The web app runs every check it
 already runs for the editor — session, legal consent, design access, preview
 access, plan — and signs a 60-second ticket (`@loora/realtime/ticket`) that
 carries the person's identity, role, and room. Presence is stamped from those
-claims, so a client can say where its pointer is but never who it is. A socket
-is closed with code `4001` after 15 minutes and the client reconnects with a
-fresh ticket, which is what bounds how long revoked access can linger.
+claims, so a client can say where its pointer is but never who it is.
+
+- **Single use.** Each ticket carries a `jti` that this service claims on the
+  bus (`SET NX`) as the socket connects. A second connection on the same ticket
+  is a replay and is refused, so a leaked ticket is worth one connection at
+  most — and the claim is shared, so it holds across instances.
+- **Not in the URL.** A browser cannot set headers on a WebSocket, so the
+  ticket is offered as the second subprotocol alongside `loora.realtime.v1`.
+  Query strings are the part of a request proxies and edge logs keep.
+- **Bounded lifetime.** A socket is closed with code `4001` after 15 minutes
+  and the client reconnects with a fresh ticket, which bounds how long revoked
+  access can linger.
+- **Bounded fan-out.** One account may hold 20 sockets; past that the oldest is
+  closed with `4002`, since the newest tab is the one somebody is looking at.
 
 ## Messages
 

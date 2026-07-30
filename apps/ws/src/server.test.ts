@@ -4,19 +4,27 @@ import {
   signRealtimeTicket,
   type RealtimeTicketClaims,
 } from '@loora/realtime/ticket'
-import { createRealtimeService, type RealtimeService } from './server'
+import {
+  CLOSE_TOO_MANY,
+  createRealtimeService,
+  MAX_SOCKETS_PER_USER,
+  type RealtimeService,
+} from './server'
 
 const SECRET = 's'.repeat(32)
 const TOKEN = 't'.repeat(32)
 
 let service: RealtimeService
 let origin: string
+// Tickets are single use, so every connection in this file needs its own id.
+let ticketCounter = 0
 
 function ticketFor(overrides: Partial<RealtimeTicketClaims> = {}) {
   const issuedAt = Date.now()
   return signRealtimeTicket(
     {
       v: 1,
+      jti: `ticket-${++ticketCounter}`,
       userId: 'user-1',
       sessionId: 'session-1',
       ownerUserId: 'owner-1',
@@ -34,9 +42,16 @@ function ticketFor(overrides: Partial<RealtimeTicketClaims> = {}) {
   )
 }
 
-/** Opens a socket and hands back the messages it receives, in order. */
+/**
+ * Opens a socket and hands back the messages it receives, in order. The ticket
+ * travels as a subprotocol, which is how the browser client sends it; the query
+ * form has its own test.
+ */
 async function connect(ticket: string) {
-  const socket = new WebSocket(`${origin.replace('http', 'ws')}/canvas?ticket=${ticket}`)
+  const socket = new WebSocket(`${origin.replace('http', 'ws')}/canvas`, [
+    'loora.realtime.v1',
+    ticket,
+  ])
   const received: Record<string, unknown>[] = []
   const waiters: ((message: Record<string, unknown>) => void)[] = []
   socket.addEventListener('message', (event) => {
@@ -244,6 +259,72 @@ describe('realtime service', () => {
     // The pong arrives first only because the other room's event never does.
     await expect(client.next()).resolves.toMatchObject({ type: 'pong' })
     await client.close()
+  })
+
+  test('still accepts a ticket in the query string', async () => {
+    const ticket = await ticketFor({ sessionId: 'session-query' })
+    const socket = new WebSocket(
+      `${origin.replace('http', 'ws')}/canvas?ticket=${encodeURIComponent(ticket)}`,
+    )
+    const opened = new Promise<void>((resolve, reject) => {
+      socket.addEventListener('open', () => resolve(), { once: true })
+      socket.addEventListener('error', () => reject(new Error('socket failed')), {
+        once: true,
+      })
+    })
+
+    await expect(opened).resolves.toBeUndefined()
+    socket.close()
+  })
+
+  test('spends a ticket once: a replay is refused', async () => {
+    const ticket = await ticketFor({ sessionId: 'session-replay' })
+    const client = await connect(ticket)
+    await client.next()
+
+    const replay = await fetch(
+      `${origin}/canvas?ticket=${encodeURIComponent(ticket)}`,
+      { headers: { Upgrade: 'websocket' } },
+    )
+
+    expect(replay.status).toBe(401)
+    expect(await replay.text()).toBe('Ticket already used')
+    await client.close()
+  })
+
+  test('caps how many sockets one account can hold open', async () => {
+    const clients = []
+    for (let index = 0; index <= MAX_SOCKETS_PER_USER; index += 1) {
+      const client = await connect(await ticketFor({ sessionId: `cap-${index}` }))
+      await client.next()
+      clients.push(client)
+    }
+
+    // The oldest gives way; the tab that just connected keeps working.
+    const [oldest] = clients
+    const closed = await new Promise<number>((resolve) => {
+      if (oldest!.socket.readyState === WebSocket.CLOSED) {
+        resolve(CLOSE_TOO_MANY)
+        return
+      }
+      oldest!.socket.addEventListener(
+        'close',
+        (event) => resolve((event as CloseEvent).code),
+        { once: true },
+      )
+    })
+    expect(closed).toBe(CLOSE_TOO_MANY)
+
+    // The room also announces the closed peer, so read past whatever else
+    // arrived and look for the answer to this ping.
+    const newest = clients.at(-1)!
+    newest.send({ type: 'ping' })
+    let answered = false
+    for (let attempt = 0; attempt < 5 && !answered; attempt += 1) {
+      answered = (await newest.next()).type === 'pong'
+    }
+    expect(answered).toBe(true)
+    await Promise.all(clients.slice(1).map((client) => client.close()))
   })
 
   test('refuses ingest without the internal token', async () => {

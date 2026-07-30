@@ -12,6 +12,7 @@ function claims(overrides: Partial<RealtimeTicketClaims> = {}) {
   const issuedAt = 1_700_000_000_000
   return {
     v: 1,
+    jti: 'ticket-1',
     userId: 'user-1',
     sessionId: 'session-1',
     ownerUserId: 'owner-1',
@@ -74,6 +75,18 @@ describe('realtime tickets', () => {
 
     expect(
       await verifyRealtimeTicket(ticket, SECRET, payload.issuedAt),
+    ).toBeNull()
+  })
+
+  test('rejects a ticket with no id to spend', async () => {
+    const { jti: _dropped, ...withoutId } = claims()
+    const ticket = await signRealtimeTicket(
+      withoutId as unknown as RealtimeTicketClaims,
+      SECRET,
+    )
+
+    expect(
+      await verifyRealtimeTicket(ticket, SECRET, claims().issuedAt),
     ).toBeNull()
   })
 

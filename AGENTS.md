@@ -174,11 +174,14 @@ One protocol, two transports, and one gate in front of both.
 - Browsers prefer a WebSocket to `apps/ws`. `/api/realtime-ticket` runs the
   same checks as the editor (session, legal consent, design access, preview
   access, plan) and signs a 60-second ticket; the socket service verifies it and
-  stamps presence identity from those claims. A socket is closed with `4001`
-  after 15 minutes so the client re-tickets.
+  stamps presence identity from those claims. Tickets are single use (`jti`
+  claimed on the bus), travel in the `Sec-WebSocket-Protocol` header rather than
+  the URL, and a socket is closed with `4001` after 15 minutes so the client
+  re-tickets. One account may hold 20 sockets; the oldest gives way with `4002`.
 - `/api/canvas-events` (SSE) plus `/api/canvas-presence` remain the fallback,
   used when no socket service is configured or a socket cannot be established.
-  Both transports carry identical events.
+  Both transports carry identical events. Presence uses one of them at a time:
+  the HTTP post is only for the SSE path, never while a socket is connecting.
 - Server-side publishers (oRPC, MCP tools) call the same
   `@loora/db/canvas-realtime` functions as before. Those now post to the socket
   service's `/publish` when `REALTIME_INGEST_URL` is set and fall back to

@@ -65,6 +65,9 @@ export async function realtimeTicketResponse(request: Request) {
   const ticket = await signRealtimeTicket(
     {
       v: 1,
+      // Spent on first use by the socket service, so a ticket that leaks is
+      // worth at most the one connection it was minted for.
+      jti: crypto.randomUUID(),
       userId: session.user.id,
       sessionId,
       ownerUserId,

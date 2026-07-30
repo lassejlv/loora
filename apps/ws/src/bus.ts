@@ -30,6 +30,12 @@ export interface RealtimeBus {
     activity: CanvasRealtimeActivity | null,
   ): Promise<void>
   readActivity(channel: string): Promise<CanvasRealtimeActivity | null>
+  /**
+   * Records a ticket id as spent. `false` means it was already used, which is
+   * a replay — the guarantee has to hold across instances, so it lives on the
+   * bus rather than in one process's memory.
+   */
+  claimTicket(ticketId: string, ttlMs: number): Promise<boolean>
   close(): void
 }
 
@@ -42,6 +48,10 @@ function presenceKey(channel: string) {
 
 function activityKey(channel: string) {
   return `${channel}:agent`
+}
+
+function ticketKey(ticketId: string) {
+  return `loora:realtime:ticket:${ticketId}`
 }
 
 function livePresence(values: unknown[], now: number) {
@@ -84,6 +94,7 @@ export class MemoryBus implements RealtimeBus {
   #handlers = new Map<string, (message: string) => void>()
   #presence = new Map<string, Map<string, CanvasPresencePeer>>()
   #activity = new Map<string, CanvasRealtimeActivity>()
+  #tickets = new Map<string, number>()
 
   async subscribe(channel: string, onMessage: (message: string) => void) {
     this.#handlers.set(channel, onMessage)
@@ -139,10 +150,21 @@ export class MemoryBus implements RealtimeBus {
     return activity
   }
 
+  async claimTicket(ticketId: string, ttlMs: number) {
+    const now = Date.now()
+    for (const [id, expiresAt] of this.#tickets) {
+      if (expiresAt <= now) this.#tickets.delete(id)
+    }
+    if (this.#tickets.has(ticketId)) return false
+    this.#tickets.set(ticketId, now + ttlMs)
+    return true
+  }
+
   close() {
     this.#handlers.clear()
     this.#presence.clear()
     this.#activity.clear()
+    this.#tickets.clear()
   }
 }
 
@@ -342,6 +364,22 @@ export class RedisBus implements RealtimeBus {
   async readActivity(channel: string) {
     const value = await this.#command((client) => client.get(activityKey(channel)))
     return liveActivity(value, Date.now())
+  }
+
+  async claimTicket(ticketId: string, ttlMs: number) {
+    // SET NX is the whole guarantee: the first connection wins the key, every
+    // later one finds it taken. A Redis that is unreachable fails the claim
+    // rather than waving the connection through.
+    const claimed = await this.#command((client) =>
+      client.send('SET', [
+        ticketKey(ticketId),
+        '1',
+        'NX',
+        'PX',
+        String(Math.max(1_000, Math.round(ttlMs))),
+      ]),
+    )
+    return claimed === 'OK' || claimed === true
   }
 
   close() {
