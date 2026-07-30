@@ -67,6 +67,7 @@ const styleProperties = [
   'overflow-x',
   'overflow-y',
   'background-color',
+  'background-image',
   'color',
   'box-shadow',
   'mix-blend-mode',

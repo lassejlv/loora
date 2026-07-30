@@ -115,6 +115,12 @@ import {
   pasteNodes,
   validatePaste,
 } from '#/lib/canvas-clipboard'
+import { importHtmlCssToCanvas } from '#/lib/canvas-html-import'
+import {
+  fetchImageFile,
+  importedImageNodes,
+  placeHtmlImport,
+} from '#/lib/canvas-html-paste'
 import { Drawer, DrawerPopup } from '#/components/ui/drawer'
 import { useIsMobile } from '#/hooks/use-media-query'
 import {
@@ -500,7 +506,13 @@ function CanvasShell({
     }
     const onPaste = (event: ClipboardEvent) => {
       if (readOnly || isEditableTarget(event.target)) return
+      const html = event.clipboardData?.getData('text/html')
       const text = event.clipboardData?.getData('text/plain')
+      if (html) {
+        event.preventDefault()
+        void actions.pasteFromHtml(html, text || '')
+        return
+      }
       if (!text) return
       event.preventDefault()
       actions.pasteFromText(text)
@@ -1134,6 +1146,7 @@ export interface CanvasEditorActions {
   cutSelection: () => void
   pasteClipboard: () => void
   pasteFromText: (text: string) => void
+  pasteFromHtml: (html: string, fallbackText?: string) => Promise<void>
   addShape: () => void
   addComponent: () => void
   insertDocument: (document: CanvasDocument) => void
@@ -1635,6 +1648,80 @@ function useCanvasEditorActions(): CanvasEditorActions {
     session.select(pasted.rootIds.map((nodeId) => ({ nodeId, instancePath: [] })))
   }
 
+  const saveImportedImages = async (nodes: CanvasNode[]) => {
+    const images = importedImageNodes(nodes)
+    const bySource = new Map<string, ImageNode[]>()
+    for (const image of images) {
+      const matches = bySource.get(image.src) ?? []
+      matches.push(image)
+      bySource.set(image.src, matches)
+    }
+
+    const operations: CanvasOperation[] = []
+    for (const [source, matching] of bySource) {
+      try {
+        const file = await fetchImageFile(source, matching[0]?.name ?? 'Pasted image')
+        const saved = await orpc.asset.upload({
+          name: file.name,
+          mediaType: file.type,
+          data: await fileToBase64(file),
+        })
+        for (const image of matching) {
+          operations.push({
+            type: 'node.patch',
+            id: image.id,
+            patch: { src: `/api/asset/${saved.id}` },
+          })
+        }
+      } catch (cause) {
+        console.warn('[canvas] Could not save pasted image:', source, cause)
+      }
+    }
+    if (operations.length > 0) {
+      transact({
+        id: canvasId('tx'),
+        label: 'Save pasted images',
+        operations,
+      })
+    }
+  }
+
+  const pasteFromHtml = async (html: string, fallbackText = '') => {
+    if (!parent || readOnly || !html.trim()) return
+    try {
+      const width =
+        parent.type === 'page'
+          ? parent.viewport.width
+          : parent.layout.width.unit === 'px'
+            ? parent.layout.width.value
+            : 1_440
+      const imported = await importHtmlCssToCanvas({
+        html,
+        name: 'Paper Snapshot',
+        width,
+      })
+      const placed = placeHtmlImport(document, imported.document, parent.id)
+      if (
+        placed.nodes.length === 0 ||
+        !validatePaste(document, placed.nodes)
+      ) {
+        throw new Error('The pasted HTML did not produce valid Canvas nodes')
+      }
+      transact({
+        id: canvasId('tx'),
+        label: 'Paste Paper Snapshot',
+        operations: placed.nodes.map((node) => ({ type: 'node.insert', node })),
+      })
+      session.select(
+        placed.rootIds.map((nodeId) => ({ nodeId, instancePath: [] })),
+      )
+      void saveImportedImages(placed.nodes)
+    } catch (cause) {
+      console.warn('[canvas] HTML clipboard import failed:', cause)
+      if (fallbackText.trim()) pasteFromText(fallbackText)
+    }
+  }
+
   const copySelection = () => {
     const text = clipboardText()
     if (!text) return false
@@ -1650,6 +1737,18 @@ function useCanvasEditorActions(): CanvasEditorActions {
   const pasteClipboard = async () => {
     let text = localClipboard
     try {
+      if (navigator.clipboard?.read) {
+        const items = await navigator.clipboard.read()
+        for (const item of items) {
+          if (!item.types.includes('text/html')) continue
+          const html = await (await item.getType('text/html')).text()
+          const plain = item.types.includes('text/plain')
+            ? await (await item.getType('text/plain')).text()
+            : ''
+          await pasteFromHtml(html, plain)
+          return
+        }
+      }
       const fromSystem = await navigator.clipboard?.readText()
       if (fromSystem) text = fromSystem
     } catch {
@@ -1921,6 +2020,7 @@ function useCanvasEditorActions(): CanvasEditorActions {
     cutSelection,
     pasteClipboard: () => void pasteClipboard(),
     pasteFromText,
+    pasteFromHtml,
     addShape,
     addComponent,
     insertDocument,

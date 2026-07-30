@@ -357,6 +357,12 @@ function safeUrl(value: string | undefined) {
   return null
 }
 
+function backgroundImageUrl(value: string | undefined) {
+  if (!value || value === 'none') return null
+  const match = value.match(/url\(\s*(?:"([^"]+)"|'([^']+)'|([^)'"]+))\s*\)/i)
+  return safeUrl(match?.[1] || match?.[2] || match?.[3]?.trim())
+}
+
 function interactions(snapshot: HtmlCanvasSnapshot): CanvasInteraction[] {
   if (snapshot.tag !== 'a') return []
   const url = safeUrl(snapshot.attributes.href)
@@ -595,6 +601,29 @@ function convertSnapshot(
     },
   )
   nodes[id] = frame
+  const backgroundSrc = backgroundImageUrl(snapshot.style.backgroundImage)
+  if (backgroundSrc && Object.keys(nodes).length < MAX_HTML_IMPORT_NODES) {
+    const backgroundFrame = createFrameNode(`${frame.name} background`, {
+      id: canvasId('image'),
+      parentId: id,
+      order: 0,
+      layout: defaultLayout(
+        positiveDimension(snapshot.rect.width),
+        positiveDimension(snapshot.rect.height),
+        { position: 'absolute', x: 0, y: 0 },
+      ),
+      style: defaultStyle(),
+    })
+    const { semanticTag: _semanticTag, ...base } = backgroundFrame
+    nodes[backgroundFrame.id] = {
+      ...base,
+      type: 'image',
+      src: backgroundSrc,
+      alt: '',
+      fit: 'cover',
+      metadata: { importedHtmlTag: snapshot.tag, importedCssProperty: 'background-image' },
+    }
+  }
   snapshot.children.forEach((child, index) => {
     if (Object.keys(nodes).length >= MAX_HTML_IMPORT_NODES) {
       throw new Error(

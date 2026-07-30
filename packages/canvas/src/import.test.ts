@@ -103,4 +103,38 @@ describe('HTML snapshot import', () => {
     ).toBe(false)
     expect(result.warnings[0]).toContain('unsupported')
   })
+
+  it('preserves a CSS background image as an image layer for later asset upload', () => {
+    const result = convertHtmlSnapshotToCanvas({
+      id: 'background-import',
+      name: 'Snapshot',
+      width: 400,
+      height: 300,
+      root: {
+        tag: 'body',
+        attributes: {},
+        style: { display: 'block' },
+        rect: { x: 0, y: 0, width: 400, height: 300 },
+        children: [{
+          tag: 'section',
+          attributes: { 'aria-label': 'Hero' },
+          style: {
+            display: 'block',
+            backgroundImage: 'url("https://cdn.example.com/hero.webp")',
+          },
+          rect: { x: 0, y: 0, width: 400, height: 300 },
+          children: [],
+        }],
+      },
+    })
+
+    const image = Object.values(result.document.nodes).find(
+      (node) => node.type === 'image',
+    )
+    expect(image).toMatchObject({
+      type: 'image',
+      src: 'https://cdn.example.com/hero.webp',
+      parentId: expect.any(String),
+    })
+  })
 })
