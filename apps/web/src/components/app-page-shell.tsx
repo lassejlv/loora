@@ -64,11 +64,9 @@ export function AppPageShell({
           </div>
         </header>
 
-        <div className="mx-auto w-full max-w-3xl p-4 md:p-6">
-          <section className="rounded-lg bg-surface p-4 shadow-panel md:p-5">
-            {children}
-          </section>
-        </div>
+        {/* Content sits flat on the canvas like the designs dashboard; the
+            sections below bring their own surfaces where grouping helps. */}
+        <section className="mx-auto w-full max-w-3xl p-4 md:p-6">{children}</section>
       </main>
     </div>
   )

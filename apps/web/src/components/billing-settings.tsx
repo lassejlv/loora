@@ -72,7 +72,7 @@ export function BillingSettings() {
 
   return (
     <div className="flex flex-col gap-5">
-      <div className="rounded-lg border border-border p-4">
+      <div className="rounded-md border border-line bg-surface p-4">
         <p className="text-xs text-muted-foreground">Current plan</p>
         <p className="mt-1 text-lg font-semibold">{plan}</p>
         {billing.trial ? (
