@@ -47,8 +47,8 @@ import {
   ChevronDownIcon,
   ChevronRightIcon,
   Link2Icon,
-  XIcon,
 } from '#/components/icons'
+import { PanelEmpty, PanelShell } from '#/components/panel-shell'
 import { Button } from '#/components/ui/button'
 import { cn } from '#/lib/utils'
 
@@ -506,32 +506,14 @@ export function CanvasPropertiesPanel({ onClose }: { onClose?: () => void }) {
     }
   }, [breakpoint, document.breakpoints])
 
-  const header = (
-    <header className="flex h-8 shrink-0 items-center justify-between gap-2 border-b px-1.5">
-      <h2 className="ps-1 text-xs font-medium text-muted-foreground">Design</h2>
-      {onClose ? (
-        <Button
-          size="icon-xs"
-          variant="ghost"
-          aria-label="Close design panel"
-          onClick={onClose}
-        >
-          <XIcon />
-        </Button>
-      ) : null}
-    </header>
-  )
-
   if (!ref || !node) {
     return (
-      <aside className="flex h-full min-h-0 w-full flex-col bg-transparent">
-        {header}
-        <div className="grid min-h-0 flex-1 place-items-center px-6 text-center">
-          <p className="text-xs text-muted-foreground">
-            Select a layer to edit layout, style and actions.
-          </p>
-        </div>
-      </aside>
+      <PanelShell title="Design" className="bg-transparent" bodyScroll={false} onClose={onClose}>
+        <PanelEmpty
+          title="Nothing selected"
+          description="Select a layer to edit its layout, style, and actions."
+        />
+      </PanelShell>
     )
   }
 
@@ -668,16 +650,12 @@ export function CanvasPropertiesPanel({ onClose }: { onClose?: () => void }) {
   }
 
   return (
-    <aside
-      className={cn(
-        'flex h-full min-h-0 w-full flex-col bg-transparent',
-        readOnly && 'pointer-events-none opacity-70',
-      )}
-      aria-label="Properties"
-      aria-disabled={readOnly}
+    <PanelShell
+      title="Design"
+      className={cn('bg-transparent', readOnly && 'pointer-events-none opacity-70')}
+      bodyScroll={false}
+      onClose={onClose}
     >
-      {header}
-
       <div className="min-h-0 flex-1 overflow-y-auto">
         <div className="flex items-center gap-1 border-b px-2 py-1.5">
           {many ? (
@@ -1487,6 +1465,6 @@ export function CanvasPropertiesPanel({ onClose }: { onClose?: () => void }) {
           </Section>
         ) : null}
       </div>
-    </aside>
+    </PanelShell>
   )
 }

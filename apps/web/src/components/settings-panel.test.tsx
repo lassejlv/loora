@@ -37,8 +37,36 @@ mock.module('#/components/ui/tabs', () => ({
     useContext(TabsContext) === value ? <div>{children}</div> : null
   ),
 }))
+// `mock.module` is process-global, so this stub is what every later test file
+// in the run sees too — the canvas panels render their header buttons through
+// PanelShell. Keep the shape of the real thing: title, actions, close, body.
 mock.module('#/components/panel-shell', () => ({
-  PanelShell: ({ children }: { children: ReactNode }) => <div>{children}</div>,
+  PanelShell: ({
+    title,
+    actions,
+    onClose,
+    children,
+  }: {
+    title: string
+    actions?: ReactNode
+    onClose?: () => void
+    children: ReactNode
+  }) => (
+    <div>
+      <h2>{title}</h2>
+      {actions}
+      {onClose ? (
+        <button type="button" aria-label={`Close ${title}`} onClick={onClose} />
+      ) : null}
+      {children}
+    </div>
+  ),
+  PanelEmpty: ({ title, description }: { title?: string; description?: ReactNode }) => (
+    <div>
+      {title}
+      {description}
+    </div>
+  ),
   PanelLoading: ({ label }: { label: string }) => <div>{label}</div>,
 }))
 mock.module('#/components/shortcuts-settings', () => ({

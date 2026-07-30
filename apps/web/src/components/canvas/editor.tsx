@@ -30,11 +30,13 @@ import {
 import {
   CopyIcon,
   DownloadIcon,
+  EllipsisIcon,
   EyeIcon,
   FrameIcon,
   HandIcon,
   LayersIcon,
   MaximizeIcon,
+  PlusIcon,
   SettingsIcon,
   SlidersHorizontalIcon,
 } from '#/components/icons'
@@ -122,6 +124,12 @@ import {
   importedImageNodes,
   placeHtmlImport,
 } from '#/lib/canvas-html-paste'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '#/components/ui/dropdown-menu'
 import { Drawer, DrawerPopup } from '#/components/ui/drawer'
 import { useIsMobile } from '#/hooks/use-media-query'
 import {
@@ -886,9 +894,12 @@ function CanvasShell({
                 onPreview={() => setExportOpen(true)}
                 onAddPage={addPageAndFocus}
                 onAssetsOpen={() => setAssetsOpen(true)}
+                onOpenInspector={setMobileInspector}
+                onOpenCommands={() => setCommandMenuOpen(true)}
                 shortcutLabel={shortcutLabel}
                 controls={controlsRef}
                 zoom={zoom}
+                isMobile={isMobile}
               />
             </TooltipProvider>
           </div>
@@ -2105,6 +2116,121 @@ function CanvasAssets({ onInsert }: { onInsert: (asset: AssetMeta) => void }) {
   return <AssetsPanel usage={usage} onInsert={onInsert} />
 }
 
+/**
+ * The mobile strip. The docked panels do not exist at this width, so Layers and
+ * Design have to be reachable here — the command menu behind them opens from a
+ * keyboard chord that a touch device does not have. Insert tools collapse into
+ * one menu so the row still fits without becoming a scroller.
+ */
+function CanvasMobileStrip({
+  actions,
+  interactionMode,
+  onInteractionModeChange,
+  onAddPage,
+  onAssetsOpen,
+  onOpenInspector,
+  onOpenCommands,
+  shortcutLabel,
+}: {
+  actions: CanvasEditorActions
+  interactionMode: 'select' | 'pan'
+  onInteractionModeChange: (mode: 'select' | 'pan') => void
+  onAddPage: () => void
+  onAssetsOpen: () => void
+  onOpenInspector: (which: 'layers' | 'design') => void
+  onOpenCommands: () => void
+  shortcutLabel: (id: BuiltInShortcutId) => string
+}) {
+  const insert = (run: () => void) => () => {
+    run()
+    onInteractionModeChange('select')
+  }
+  return (
+    <div
+      role="toolbar"
+      aria-label="Tools"
+      aria-orientation="horizontal"
+      className="pointer-events-auto absolute bottom-3 left-1/2 flex max-w-[calc(100%-1.5rem)] -translate-x-1/2 items-center gap-0.5 rounded-lg bg-surface p-0.5 shadow-panel-lg"
+    >
+      <CanvasToolButton
+        icon={MousePointer2Icon}
+        label="Select"
+        active={interactionMode === 'select'}
+        onClick={() => onInteractionModeChange('select')}
+      />
+      <CanvasToolButton
+        icon={HandIcon}
+        label="Hand"
+        active={interactionMode === 'pan'}
+        onClick={() => onInteractionModeChange('pan')}
+      />
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <Button
+            size="icon-lg"
+            variant="ghost"
+            aria-label="Insert"
+            disabled={actions.readOnly}
+            className="shrink-0 rounded-md"
+          >
+            <PlusIcon />
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="center" className="w-48">
+          <DropdownMenuItem onClick={insert(onAddPage)}>
+            <PanelsTopLeftIcon data-slot="icon" />
+            New page
+          </DropdownMenuItem>
+          <DropdownMenuItem disabled={!actions.parent} onClick={insert(actions.addFrame)}>
+            <FrameIcon data-slot="icon" />
+            Frame
+          </DropdownMenuItem>
+          <DropdownMenuItem disabled={!actions.parent} onClick={insert(actions.addText)}>
+            <TypeIcon data-slot="icon" />
+            Text
+          </DropdownMenuItem>
+          <DropdownMenuItem disabled={!actions.parent} onClick={insert(actions.addShape)}>
+            <RectangleHorizontalIcon data-slot="icon" />
+            Rectangle
+          </DropdownMenuItem>
+          <DropdownMenuItem onClick={onAssetsOpen}>
+            <ImageIcon data-slot="icon" />
+            Image
+          </DropdownMenuItem>
+          <DropdownMenuItem disabled={!actions.parent} onClick={insert(actions.addComponent)}>
+            <ComponentIcon data-slot="icon" />
+            Component
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
+      <CanvasToolDivider />
+      <CanvasToolButton
+        icon={LayersIcon}
+        label="Layers"
+        onClick={() => onOpenInspector('layers')}
+      />
+      <CanvasToolButton
+        icon={SlidersHorizontalIcon}
+        label="Design"
+        onClick={() => onOpenInspector('design')}
+      />
+      <CanvasToolDivider />
+      <CanvasToolButton
+        icon={Undo2Icon}
+        label="Undo"
+        shortcut={shortcutLabel('undo')}
+        disabled={actions.readOnly || !actions.history.canUndo}
+        onClick={() => actions.history.undo()}
+      />
+      <CanvasToolButton
+        icon={EllipsisIcon}
+        label="More"
+        onClick={onOpenCommands}
+      />
+    </div>
+  )
+}
+
 /** Floating chrome: a centred tool bar, plus a zoom pill in the corner. */
 function CanvasToolStrip({
   actions,
@@ -2113,9 +2239,12 @@ function CanvasToolStrip({
   onPreview,
   onAddPage,
   onAssetsOpen,
+  onOpenInspector,
+  onOpenCommands,
   shortcutLabel,
   controls,
   zoom,
+  isMobile,
 }: {
   actions: CanvasEditorActions
   interactionMode: 'select' | 'pan'
@@ -2123,11 +2252,28 @@ function CanvasToolStrip({
   onPreview: () => void
   onAddPage: () => void
   onAssetsOpen: () => void
+  onOpenInspector: (which: 'layers' | 'design') => void
+  onOpenCommands: () => void
   shortcutLabel: (id: BuiltInShortcutId) => string
   controls: RefObject<CanvasSurfaceControls | null>
   zoom: number
+  isMobile: boolean
 }) {
   const selectionCount = actions.selection.length
+  if (isMobile) {
+    return (
+      <CanvasMobileStrip
+        actions={actions}
+        interactionMode={interactionMode}
+        onInteractionModeChange={onInteractionModeChange}
+        onAddPage={onAddPage}
+        onAssetsOpen={onAssetsOpen}
+        onOpenInspector={onOpenInspector}
+        onOpenCommands={onOpenCommands}
+        shortcutLabel={shortcutLabel}
+      />
+    )
+  }
   return (
     <>
       <div

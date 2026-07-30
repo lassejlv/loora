@@ -17,7 +17,6 @@ import {
   GripVerticalIcon,
   LockIcon,
   UnlockIcon,
-  XIcon,
 } from '#/components/icons'
 import {
   useCanvasDocument,
@@ -38,6 +37,7 @@ import {
   preconditionsForNodeMove,
   type CanvasOperation,
 } from '@loora/canvas/engine'
+import { PanelShell } from '#/components/panel-shell'
 import { Button } from '#/components/ui/button'
 import { Input } from '#/components/ui/input'
 import { cn } from '#/lib/utils'
@@ -431,17 +431,14 @@ export function CanvasLayersPanel({
   }
 
   return (
-    <aside
-      className="flex h-full min-h-0 w-full flex-col bg-transparent"
-      aria-label="Layers"
-    >
-      <header className="shrink-0 border-b px-2 py-1.5">
-        <div className="flex h-6 items-center justify-between gap-2">
-          <h2 className="ps-1 text-xs font-medium text-muted-foreground">
-            Layers
-          </h2>
-          <div className="flex shrink-0 items-center gap-0.5">
-            {onAddPage ? (
+    <PanelShell
+      title="Layers"
+      className="bg-transparent"
+      bodyScroll={false}
+      onClose={onClose}
+      actions={
+        <>
+          {onAddPage ? (
               <Button
                 size="icon-xs"
                 variant="ghost"
@@ -515,26 +512,18 @@ export function CanvasLayersPanel({
                 </Button>
               </>
             ) : null}
-            {onClose ? (
-              <Button
-                size="icon-xs"
-                variant="ghost"
-                aria-label="Close layers panel"
-                onClick={onClose}
-              >
-                <XIcon />
-              </Button>
-            ) : null}
-          </div>
-        </div>
+        </>
+      }
+    >
+      <div className="shrink-0 border-b border-line px-2 py-1.5">
         <Input
           value={query}
           aria-label="Search layers"
           placeholder="Search layers"
-          className="mt-1 h-6 text-xs"
+          className="h-6 text-xs"
           onChange={(event) => setQuery(event.target.value)}
         />
-      </header>
+      </div>
       <div
         ref={listRef}
         className="min-h-0 flex-1 overflow-y-auto py-1"
@@ -635,7 +624,7 @@ export function CanvasLayersPanel({
           </section>
         ) : null}
       </div>
-    </aside>
+    </PanelShell>
   )
 }
 
