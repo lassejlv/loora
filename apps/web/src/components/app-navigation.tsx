@@ -1,8 +1,10 @@
 import { Link } from '@tanstack/react-router'
+import { authClient } from '@loora/auth/client'
 import {
   ClockIcon,
   CreditCardIcon,
   LinkIcon,
+  LockIcon,
   LogOutIcon,
   SettingsIcon,
   SunIcon,
@@ -16,7 +18,12 @@ import {
 } from '#/components/ui/dropdown-menu'
 import { cn } from '#/lib/utils'
 
-export type AppSection = 'recents' | 'appearance' | 'billing' | 'integrations'
+export type AppSection =
+  | 'recents'
+  | 'appearance'
+  | 'billing'
+  | 'integrations'
+  | 'admin'
 
 const navigation = [
   { section: 'recents', label: 'Recents', to: '/app', icon: ClockIcon },
@@ -25,6 +32,21 @@ const navigation = [
   { section: 'integrations', label: 'Integrations', to: '/app/integrations', icon: LinkIcon },
 ] as const
 
+const adminNavigation = {
+  section: 'admin',
+  label: 'Admin',
+  to: '/app/admin',
+  icon: LockIcon,
+} as const
+
+/** Admin is staff-only, so the link only exists for accounts that have it. */
+function useNavigationItems() {
+  const { data: session } = authClient.useSession()
+  return session?.user.isAdmin === true
+    ? [...navigation, adminNavigation]
+    : [...navigation]
+}
+
 export function AppNavigation({
   active,
   onSettings,
@@ -32,9 +54,10 @@ export function AppNavigation({
   active: AppSection
   onSettings?: () => void
 }) {
+  const items = useNavigationItems()
   return (
     <nav className="flex flex-col gap-px px-1.5">
-      {navigation.map((item) => {
+      {items.map((item) => {
         const Icon = item.icon
         const selected = active === item.section
         return (
@@ -82,6 +105,7 @@ export function AppAccountMenu({
   onSignOut: () => void
   compact?: boolean
 }) {
+  const items = useNavigationItems()
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
@@ -102,7 +126,7 @@ export function AppAccountMenu({
         </button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="start" className="w-52">
-        {navigation.map((item) => {
+        {items.map((item) => {
           const Icon = item.icon
           return (
             <DropdownMenuItem key={item.section} asChild>

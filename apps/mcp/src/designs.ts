@@ -3,6 +3,7 @@ import {
   asc,
   desc,
   eq,
+  gte,
   inArray,
   isNull,
   lt,
@@ -36,10 +37,19 @@ import {
 import { publishCanvasRealtimeEvent } from '@loora/db/canvas-realtime'
 import { canvasTransactionPruneBefore } from '@loora/db/canvas-transactions'
 import {
+  historyCutoffForPlan,
+  pruneExpiredHistoryForPlan,
   requireDesignFileRoomForPlan,
   requireOpenBranchRoomForPlan,
 } from '@loora/billing/enforce-plan-limits'
 import type { LimitsPlan } from '@loora/billing/plan-limits'
+import { requireAppAccess } from './access'
+
+/** Re-resolve plan on every capacity check so long-lived stdio sessions pick up upgrades. */
+async function livePlan(userId: string): Promise<LimitsPlan> {
+  const { mcpPlan } = await requireAppAccess(userId)
+  return mcpPlan
+}
 
 export const MAX_NAME_LENGTH = 200
 
@@ -331,8 +341,12 @@ export async function applyCanvasTransactions(
   return result
 }
 
-export async function createDesign(userId: string, name: string, plan: LimitsPlan) {
-  await requireDesignFileRoomForPlan(userId, plan)
+export async function createDesign(
+  userId: string,
+  name: string,
+  _plan?: LimitsPlan,
+) {
+  await requireDesignFileRoomForPlan(userId, await livePlan(userId))
   const id = newDesignId()
   const document = createCanvasDocument(name, id)
   const [created] = await db
@@ -398,7 +412,10 @@ export async function listVersions(
   designId: string,
   limit: number,
   draftId?: string | null,
+  _plan?: LimitsPlan,
 ) {
+  // Soft-filter only — never hard-prune on list (avoids Free-default data loss).
+  const cutoff = historyCutoffForPlan(await livePlan(userId))
   const rows = await db
     .select({
       id: designVersion.id,
@@ -415,6 +432,7 @@ export async function listVersions(
         eq(designVersion.designId, designId),
         eq(designVersion.userId, userId),
         draftId ? eq(designVersion.draftId, draftId) : isNull(designVersion.draftId),
+        cutoff ? gte(designVersion.createdAt, cutoff) : undefined,
       ),
     )
     .orderBy(desc(designVersion.createdAt), desc(designVersion.id))
@@ -449,9 +467,9 @@ export async function createDraft(
   userId: string,
   designId: string,
   name: string,
-  plan: LimitsPlan,
+  _plan?: LimitsPlan,
 ) {
-  await requireOpenBranchRoomForPlan(userId, designId, plan)
+  await requireOpenBranchRoomForPlan(userId, designId, await livePlan(userId))
   const main = await getCanvasTarget(userId, { designId })
   const [created] = await db
     .insert(designDraft)
@@ -692,6 +710,9 @@ export async function applyDraft(
       )
       .returning({ id: designDraft.id })
     if (!archived) throw new Error('The draft changed while applying')
+  })
+  void pruneExpiredHistoryForPlan(userId, await livePlan(userId)).catch((error) => {
+    console.error('[history] prune failed:', error)
   })
   return {
     applied: true as const,

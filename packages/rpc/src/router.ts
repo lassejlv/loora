@@ -1,21 +1,29 @@
 import {
   and,
   asc,
+  count,
+  countDistinct,
   desc,
   eq,
   gt,
+  gte,
+  ilike,
   inArray,
   isNotNull,
   isNull,
   lt,
   lte,
+  max,
   or,
+  sql,
+  sum,
 } from 'drizzle-orm'
 import { ORPCError, os } from '@orpc/server'
 import { z } from 'zod'
 import { db } from '@loora/db'
 import {
   asset,
+  billingEntitlement,
   canvasTransaction as canvasTransactionLog,
   design,
   designDraft,
@@ -25,6 +33,8 @@ import {
   oauthAccessToken,
   oauthApplication,
   oauthConsent,
+  publishLink,
+  session as authSession,
   user,
   userPreferences,
 } from '@loora/db/schema'
@@ -77,6 +87,7 @@ import {
   createPlanCheckout,
   getBillingStatus,
   refreshBillingStatus,
+  refreshEntitlement,
 } from '@loora/billing/billing'
 import {
   getMcpUsage,
@@ -84,8 +95,13 @@ import {
   resolveMcpUsagePlan,
 } from '@loora/billing/mcp-usage'
 import {
+  historyCutoffForCapacity,
+  pruneExpiredHistoryForUser,
   requireDesignFileRoom,
+  requireHistoryVersionAccessible,
   requireOpenBranchRoom,
+  requireStorageRoom,
+  resolveHistoryCapacity,
 } from '@loora/billing/enforce-plan-limits'
 import { PlanLimitError } from '@loora/billing/plan-limits'
 import { canUseApp, isPreviewAccessRequired } from '@loora/auth/preview-access'
@@ -192,6 +208,35 @@ async function ensureOpenBranchRoom(
   } catch (error) {
     planLimitOrpcError(error)
   }
+}
+
+async function ensureStorageRoom(
+  user: { id: string; isAdmin?: boolean | null },
+  incomingBytes: number,
+) {
+  try {
+    await requireStorageRoom(user, incomingBytes)
+  } catch (error) {
+    planLimitOrpcError(error)
+  }
+}
+
+async function ensureHistoryVersionAccessible(
+  user: { id: string; isAdmin?: boolean | null },
+  createdAt: Date,
+) {
+  try {
+    await requireHistoryVersionAccessible(user, createdAt)
+  } catch (error) {
+    planLimitOrpcError(error)
+  }
+}
+
+/** Best-effort prune of out-of-window versions after history writes/lists. */
+function scheduleHistoryPrune(user: { id: string; isAdmin?: boolean | null }) {
+  void pruneExpiredHistoryForUser(user).catch((error) => {
+    console.error('[history] prune failed:', error)
+  })
 }
 
 const requireSignedInUser = os.$context<ORPCContext>().middleware(async ({ context, next }) => {
@@ -1798,6 +1843,7 @@ const applyDraft = protectedProcedure
 
     })
 
+    scheduleHistoryPrune(context.user)
     return {
       applied: true as const,
       revision: input.expectedMainRevision + 1,
@@ -1845,6 +1891,10 @@ const listVersions = protectedProcedure
     }),
   )
   .handler(async ({ context, input }) => {
+    // Soft-filter only on list — hard prune runs on commits, never on reads,
+    // so a mis-resolved Free plan cannot destroy Pro history while browsing.
+    const { capacity } = await resolveHistoryCapacity(context.user)
+    const cutoff = historyCutoffForCapacity(capacity)
     const cursorDate = input.cursor ? new Date(input.cursor.at) : null
     const versions = await db
       .select({
@@ -1862,6 +1912,7 @@ const listVersions = protectedProcedure
           eq(designVersion.designId, input.designId),
           eq(designVersion.userId, context.user.id),
           draftTargetWhere(input.draftId),
+          cutoff ? gte(designVersion.createdAt, cutoff) : undefined,
           cursorDate
             ? or(
                 lt(designVersion.createdAt, cursorDate),
@@ -1905,6 +1956,9 @@ const compareVersion = protectedProcedure
       .limit(1)
 
     if (!current) throw new ORPCError('NOT_FOUND')
+    await ensureHistoryVersionAccessible(context.user, current.createdAt)
+    const { capacity } = await resolveHistoryCapacity(context.user)
+    const cutoff = historyCutoffForCapacity(capacity)
     const [previous] = await db
       .select({
         id: designVersion.id,
@@ -1919,6 +1973,7 @@ const compareVersion = protectedProcedure
           eq(designVersion.designId, input.designId),
           eq(designVersion.userId, context.user.id),
           draftTargetWhere(input.draftId),
+          cutoff ? gte(designVersion.createdAt, cutoff) : undefined,
           or(
             lt(designVersion.createdAt, current.createdAt),
             and(eq(designVersion.createdAt, current.createdAt), lt(designVersion.id, current.id)),
@@ -1968,10 +2023,15 @@ const importVersions = protectedProcedure
         throw new ORPCError('CONFLICT', { message: 'This draft is read-only.' })
       }
     }
+    const { capacity } = await resolveHistoryCapacity(context.user)
+    const cutoff = historyCutoffForCapacity(capacity)
     // Sequential inside one transaction: the bun-sql driver has no batch(), and a
     // single connection can't run these in parallel anyway.
+    let processed = 0
     await db.transaction(async (tx) => {
       for (const commit of sortCommitsOldestFirst(input.commits)) {
+        // Skip versions that already fall outside the plan retention window.
+        if (cutoff && commit.at < cutoff.getTime()) continue
         const { at, ...values } = commit
         await tx
           .insert(designVersion)
@@ -1983,9 +2043,11 @@ const importVersions = protectedProcedure
             createdAt: new Date(at),
           })
           .onConflictDoNothing({ target: [designVersion.id, designVersion.userId] })
+        processed += 1
       }
     })
-    return { processed: input.commits.length }
+    scheduleHistoryPrune(context.user)
+    return { processed }
   })
 
 const commitVersion = protectedProcedure
@@ -2050,6 +2112,7 @@ const commitVersion = protectedProcedure
       })
       .returning()
 
+    scheduleHistoryPrune(context.user)
     return {
       id: version.id,
       message: version.message,
@@ -2124,6 +2187,7 @@ const commitCanvasVersion = protectedProcedure
         ...changes,
       })
       .returning()
+    scheduleHistoryPrune(context.user)
     return {
       id: version.id,
       message: version.message,
@@ -2166,6 +2230,9 @@ const compareCanvasVersion = protectedProcedure
     ) {
       throw new ORPCError('NOT_FOUND')
     }
+    await ensureHistoryVersionAccessible(context.user, current.createdAt)
+    const { capacity } = await resolveHistoryCapacity(context.user)
+    const cutoff = historyCutoffForCapacity(capacity)
     const [previous] = await db
       .select({
         id: designVersion.id,
@@ -2180,6 +2247,7 @@ const compareCanvasVersion = protectedProcedure
           eq(designVersion.designId, input.designId),
           eq(designVersion.userId, context.user.id),
           draftTargetWhere(input.draftId),
+          cutoff ? gte(designVersion.createdAt, cutoff) : undefined,
           or(
             lt(designVersion.createdAt, current.createdAt),
             and(
@@ -2220,6 +2288,7 @@ const restoreCanvasVersion = protectedProcedure
       .select({
         canvasVersion: designVersion.canvasVersion,
         document: designVersion.canvasDocument,
+        createdAt: designVersion.createdAt,
       })
       .from(designVersion)
       .where(
@@ -2238,6 +2307,7 @@ const restoreCanvasVersion = protectedProcedure
     ) {
       throw new ORPCError('NOT_FOUND')
     }
+    await ensureHistoryVersionAccessible(context.user, version.createdAt)
     const document = parseCanvasDocument(version.document)
     const updated = input.draftId
       ? await db
@@ -2316,6 +2386,9 @@ const uploadAsset = protectedProcedure
     if (bytes.length > MAX_ASSET_BYTES) {
       throw new ORPCError('PAYLOAD_TOO_LARGE', { message: 'Assets are capped at 5MB.' })
     }
+    // Plan storage (Free 1 GB / Pro 100 GB) before writing to S3 so a rejected
+    // upload never leaves an orphan object.
+    await ensureStorageRoom(context.user, bytes.length)
     const id = `a${crypto.randomUUID().replaceAll('-', '')}`
 
     let storageKey: string | null = null
@@ -2721,19 +2794,476 @@ const getCurrentMcpUsage = previewProcedure.handler(async ({ context }) => {
   }
 })
 
-const listUsersWithUsage = adminProcedure.handler(async () => {
-  return db
-    .select({
-      id: user.id,
-      name: user.name,
-      email: user.email,
-      isAdmin: user.isAdmin,
-      previewAccess: user.previewAccess,
-      previewAccessRequestedAt: user.previewAccessRequestedAt,
-    })
-    .from(user)
-    .orderBy(asc(user.email))
+const DAY_MS = 24 * 60 * 60 * 1000
+
+function toCount(value: unknown) {
+  const n = typeof value === 'number' ? value : Number(value ?? 0)
+  return Number.isFinite(n) ? Math.max(0, Math.floor(n)) : 0
+}
+
+/** Escape LIKE wildcards so a search for `%` matches a literal percent sign. */
+function likeTerm(search: string) {
+  return `%${search.replace(/[\\%_]/g, (char) => `\\${char}`)}%`
+}
+
+const adminOverview = adminProcedure.handler(async () => {
+  const now = new Date()
+  const last7Days = new Date(now.getTime() - 7 * DAY_MS)
+  const last24Hours = new Date(now.getTime() - DAY_MS)
+
+  const [
+    [users],
+    [newUsers],
+    [designs],
+    [newDesigns],
+    [openBranches],
+    [assets],
+    [publishLinks],
+    [activeSessions],
+    [mcpClients],
+    [versions],
+  ] = await Promise.all([
+    db
+      .select({
+        total: count(),
+        admins: sum(sql<number>`case when ${user.isAdmin} then 1 else 0 end`),
+        previewGranted: sum(
+          sql<number>`case when ${user.previewAccess} then 1 else 0 end`,
+        ),
+        pending: sum(
+          sql<number>`case when ${user.previewAccessRequestedAt} is not null
+            and not ${user.previewAccess} then 1 else 0 end`,
+        ),
+      })
+      .from(user),
+    db.select({ n: count() }).from(user).where(gte(user.createdAt, last7Days)),
+    db.select({ n: count() }).from(design),
+    db
+      .select({ n: count() })
+      .from(design)
+      .where(gte(design.createdAt, last7Days)),
+    db
+      .select({ n: count() })
+      .from(designDraft)
+      .where(
+        or(eq(designDraft.status, 'active'), eq(designDraft.status, 'proposed')),
+      ),
+    db.select({ n: count(), bytes: sum(asset.size) }).from(asset),
+    db
+      .select({ n: count() })
+      .from(publishLink)
+      .where(gt(publishLink.expiresAt, now)),
+    db
+      .select({ n: countDistinct(authSession.userId) })
+      .from(authSession)
+      .where(
+        and(
+          gt(authSession.expiresAt, now),
+          gte(authSession.updatedAt, last24Hours),
+        ),
+      ),
+    db
+      .select({
+        clients: countDistinct(oauthAccessToken.clientId),
+        users: countDistinct(oauthAccessToken.userId),
+      })
+      .from(oauthAccessToken)
+      .where(isNotNull(oauthAccessToken.clientId)),
+    db
+      .select({ n: count() })
+      .from(designVersion)
+      .where(gte(designVersion.createdAt, last7Days)),
+  ])
+
+  return {
+    generatedAt: now.toISOString(),
+    users: {
+      total: toCount(users?.total),
+      newLast7Days: toCount(newUsers?.n),
+      admins: toCount(users?.admins),
+      previewGranted: toCount(users?.previewGranted),
+      pendingPreviewRequests: toCount(users?.pending),
+      activeLast24Hours: toCount(activeSessions?.n),
+    },
+    designs: {
+      total: toCount(designs?.n),
+      newLast7Days: toCount(newDesigns?.n),
+      openBranches: toCount(openBranches?.n),
+      livePublishLinks: toCount(publishLinks?.n),
+      versionsLast7Days: toCount(versions?.n),
+    },
+    storage: {
+      assets: toCount(assets?.n),
+      bytes: toCount(assets?.bytes),
+    },
+    mcp: {
+      connectedClients: toCount(mcpClients?.clients),
+      connectedUsers: toCount(mcpClients?.users),
+    },
+  }
 })
+
+const ADMIN_USER_FILTERS = ['all', 'pending', 'admins', 'paid'] as const
+
+/**
+ * One row per account with the usage the other admin actions act on. The
+ * aggregates are grouped queries merged in memory rather than correlated
+ * subqueries per row: the account table is small, and this keeps the shape
+ * readable while staying a fixed number of round-trips.
+ */
+const listUsersWithUsage = adminProcedure
+  .input(
+    z
+      .object({
+        search: z.string().trim().max(320).optional(),
+        filter: z.enum(ADMIN_USER_FILTERS).default('all'),
+        limit: z.number().int().min(1).max(500).default(200),
+      })
+      .default({ filter: 'all', limit: 200 }),
+  )
+  .handler(async ({ input }) => {
+    const search = input.search?.trim()
+    const conditions = [
+      search
+        ? or(
+            ilike(user.email, likeTerm(search)),
+            ilike(user.name, likeTerm(search)),
+          )
+        : undefined,
+      input.filter === 'admins' ? eq(user.isAdmin, true) : undefined,
+      input.filter === 'pending'
+        ? and(
+            isNotNull(user.previewAccessRequestedAt),
+            eq(user.previewAccess, false),
+          )
+        : undefined,
+    ].filter(Boolean)
+
+    const rows = await db
+      .select({
+        id: user.id,
+        name: user.name,
+        email: user.email,
+        isAdmin: user.isAdmin,
+        previewAccess: user.previewAccess,
+        previewAccessRequestedAt: user.previewAccessRequestedAt,
+        createdAt: user.createdAt,
+      })
+      .from(user)
+      .where(conditions.length ? and(...conditions) : undefined)
+      .orderBy(asc(user.email))
+      .limit(input.limit)
+
+    const ids = rows.map((row) => row.id)
+    if (ids.length === 0) return []
+
+    const [designRows, assetRows, branchRows, sessionRows, entitlementRows, mcpRows] =
+      await Promise.all([
+        db
+          .select({
+            userId: design.userId,
+            designs: count(),
+            lastDesignAt: max(design.updatedAt),
+          })
+          .from(design)
+          .where(inArray(design.userId, ids))
+          .groupBy(design.userId),
+        db
+          .select({ userId: asset.userId, assets: count(), bytes: sum(asset.size) })
+          .from(asset)
+          .where(inArray(asset.userId, ids))
+          .groupBy(asset.userId),
+        db
+          .select({ userId: designDraft.userId, openBranches: count() })
+          .from(designDraft)
+          .where(
+            and(
+              inArray(designDraft.userId, ids),
+              or(
+                eq(designDraft.status, 'active'),
+                eq(designDraft.status, 'proposed'),
+              ),
+            ),
+          )
+          .groupBy(designDraft.userId),
+        db
+          .select({ userId: authSession.userId, lastSeenAt: max(authSession.updatedAt) })
+          .from(authSession)
+          .where(inArray(authSession.userId, ids))
+          .groupBy(authSession.userId),
+        db
+          .select({
+            userId: billingEntitlement.userId,
+            plan: billingEntitlement.plan,
+            subscriptionStatus: billingEntitlement.subscriptionStatus,
+            accessGranted: billingEntitlement.accessGranted,
+            cancelAtPeriodEnd: billingEntitlement.cancelAtPeriodEnd,
+            currentPeriodEnd: billingEntitlement.currentPeriodEnd,
+          })
+          .from(billingEntitlement)
+          .where(inArray(billingEntitlement.userId, ids)),
+        db
+          .select({
+            userId: oauthAccessToken.userId,
+            clients: countDistinct(oauthAccessToken.clientId),
+          })
+          .from(oauthAccessToken)
+          .where(
+            and(
+              inArray(oauthAccessToken.userId, ids),
+              isNotNull(oauthAccessToken.clientId),
+            ),
+          )
+          .groupBy(oauthAccessToken.userId),
+      ])
+
+    const byUser = <T extends { userId: string }>(list: T[]) =>
+      new Map(list.map((row) => [row.userId, row]))
+    const designsBy = byUser(designRows)
+    const assetsBy = byUser(assetRows)
+    const branchesBy = byUser(branchRows)
+    const sessionsBy = byUser(sessionRows)
+    const entitlementsBy = byUser(entitlementRows)
+    // `oauth_access_token.user_id` is nullable (client-credentials grants).
+    const mcpBy = new Map(
+      mcpRows.flatMap((row) => (row.userId ? [[row.userId, row.clients] as const] : [])),
+    )
+
+    const users = rows.map((row) => {
+      const entitlement = entitlementsBy.get(row.id) ?? null
+      return {
+        ...row,
+        designs: toCount(designsBy.get(row.id)?.designs),
+        lastDesignAt: designsBy.get(row.id)?.lastDesignAt ?? null,
+        assets: toCount(assetsBy.get(row.id)?.assets),
+        storageBytes: toCount(assetsBy.get(row.id)?.bytes),
+        openBranches: toCount(branchesBy.get(row.id)?.openBranches),
+        lastSeenAt: sessionsBy.get(row.id)?.lastSeenAt ?? null,
+        mcpClients: toCount(mcpBy.get(row.id)),
+        plan: row.isAdmin ? 'admin' : (entitlement?.plan ?? null),
+        subscriptionStatus: entitlement?.subscriptionStatus ?? null,
+        billingAccess: row.isAdmin || (entitlement?.accessGranted ?? false),
+        cancelAtPeriodEnd: entitlement?.cancelAtPeriodEnd ?? false,
+        currentPeriodEnd: entitlement?.currentPeriodEnd ?? null,
+      }
+    })
+
+    // `paid` needs the joined entitlement, so it filters after the merge.
+    return input.filter === 'paid'
+      ? users.filter((row) => row.plan === 'pro' || row.plan === 'studio')
+      : users
+  })
+
+async function requireOtherUser(selfId: string, userId: string, action: string) {
+  if (userId === selfId) {
+    throw new ORPCError('FORBIDDEN', { message: `You cannot ${action} your own account.` })
+  }
+  const [target] = await db
+    .select({ id: user.id, email: user.email, isAdmin: user.isAdmin })
+    .from(user)
+    .where(eq(user.id, userId))
+    .limit(1)
+  if (!target) throw new ORPCError('NOT_FOUND')
+  return target
+}
+
+const setUserAdmin = adminProcedure
+  .input(
+    z.object({
+      userId: z.string().min(1).max(128),
+      isAdmin: z.boolean(),
+    }),
+  )
+  .handler(async ({ context, input }) => {
+    await requireOtherUser(context.user.id, input.userId, 'change admin access on')
+    const [updated] = await db
+      .update(user)
+      .set({
+        isAdmin: input.isAdmin,
+        // An admin bypasses the preview gate anyway; granting it too keeps the
+        // account usable after admin is later revoked.
+        previewAccess: input.isAdmin ? true : undefined,
+        previewAccessRequestedAt: input.isAdmin ? null : undefined,
+        updatedAt: new Date(),
+      })
+      .where(eq(user.id, input.userId))
+      .returning({
+        userId: user.id,
+        isAdmin: user.isAdmin,
+        previewAccess: user.previewAccess,
+      })
+    if (!updated) throw new ORPCError('NOT_FOUND')
+    return updated
+  })
+
+const approvePendingPreviewAccess = adminProcedure.handler(async () => {
+  const granted = await db
+    .update(user)
+    .set({ previewAccess: true, previewAccessRequestedAt: null, updatedAt: new Date() })
+    .where(
+      and(isNotNull(user.previewAccessRequestedAt), eq(user.previewAccess, false)),
+    )
+    .returning({ userId: user.id })
+  return { granted: granted.length }
+})
+
+const refreshUserBilling = adminProcedure
+  .input(z.object({ userId: z.string().min(1).max(128) }))
+  .handler(async ({ input }) => {
+    const [target] = await db
+      .select({ id: user.id })
+      .from(user)
+      .where(eq(user.id, input.userId))
+      .limit(1)
+    if (!target) throw new ORPCError('NOT_FOUND')
+
+    let entitlement: Awaited<ReturnType<typeof refreshEntitlement>> = null
+    try {
+      entitlement = await refreshEntitlement(input.userId)
+    } catch (error) {
+      throw new ORPCError('BAD_GATEWAY', {
+        message:
+          error instanceof Error && error.message
+            ? `Polar refresh failed: ${error.message}`
+            : 'Polar refresh failed.',
+      })
+    }
+    return {
+      plan: entitlement?.plan ?? null,
+      subscriptionStatus: entitlement?.subscriptionStatus ?? null,
+      accessGranted: entitlement?.accessGranted ?? false,
+      currentPeriodEnd: entitlement?.currentPeriodEnd ?? null,
+    }
+  })
+
+/** Sign an account out of every browser session. Their data is untouched. */
+const revokeUserSessions = adminProcedure
+  .input(z.object({ userId: z.string().min(1).max(128) }))
+  .handler(async ({ context, input }) => {
+    await requireOtherUser(context.user.id, input.userId, 'sign out')
+    const revoked = await db
+      .delete(authSession)
+      .where(eq(authSession.userId, input.userId))
+      .returning({ id: authSession.id })
+    return { revoked: revoked.length }
+  })
+
+/** Disconnect every MCP client authorized by an account. */
+const revokeUserMcpAccess = adminProcedure
+  .input(z.object({ userId: z.string().min(1).max(128) }))
+  .handler(async ({ input }) => {
+    const [tokens, consents] = await Promise.all([
+      db
+        .delete(oauthAccessToken)
+        .where(eq(oauthAccessToken.userId, input.userId))
+        .returning({ id: oauthAccessToken.id }),
+      db
+        .delete(oauthConsent)
+        .where(eq(oauthConsent.userId, input.userId))
+        .returning({ id: oauthConsent.id }),
+    ])
+    return { tokens: tokens.length, consents: consents.length }
+  })
+
+const listRecentDesigns = adminProcedure
+  .input(
+    z
+      .object({
+        search: z.string().trim().max(200).optional(),
+        limit: z.number().int().min(1).max(100).default(25),
+      })
+      .default({ limit: 25 }),
+  )
+  .handler(async ({ input }) => {
+    const search = input.search?.trim()
+    const rows = await db
+      .select({
+        id: design.id,
+        name: design.name,
+        userId: design.userId,
+        ownerName: user.name,
+        ownerEmail: user.email,
+        linkAccess: design.linkAccess,
+        revision: design.revision,
+        createdAt: design.createdAt,
+        updatedAt: design.updatedAt,
+      })
+      .from(design)
+      .innerJoin(user, eq(design.userId, user.id))
+      .where(
+        search
+          ? or(
+              ilike(design.name, likeTerm(search)),
+              ilike(user.email, likeTerm(search)),
+            )
+          : undefined,
+      )
+      .orderBy(desc(design.updatedAt))
+      .limit(input.limit)
+
+    if (rows.length === 0) return []
+
+    const now = new Date()
+    const ids = rows.map((row) => row.id)
+    const [publishRows, shareRows] = await Promise.all([
+      db
+        .select({ designId: publishLink.designId, links: count() })
+        .from(publishLink)
+        .where(and(inArray(publishLink.designId, ids), gt(publishLink.expiresAt, now)))
+        .groupBy(publishLink.designId),
+      db
+        .select({ designId: designShare.designId, shares: count() })
+        .from(designShare)
+        .where(inArray(designShare.designId, ids))
+        .groupBy(designShare.designId),
+    ])
+    const publishBy = new Map(publishRows.map((row) => [row.designId, row.links]))
+    const shareBy = new Map(shareRows.map((row) => [row.designId, row.shares]))
+
+    return rows.map((row) => ({
+      ...row,
+      livePublishLinks: toCount(publishBy.get(row.id)),
+      shares: toCount(shareBy.get(row.id)),
+    }))
+  })
+
+/**
+ * Takedown for a design that is public when it should not be: every live
+ * publish link is dropped and the editor link falls back to restricted. The
+ * document itself is left alone.
+ */
+const revokeDesignLinks = adminProcedure
+  .input(
+    z.object({
+      designId: z.string().min(1).max(128),
+      userId: z.string().min(1).max(128),
+    }),
+  )
+  .handler(async ({ input }) => {
+    const [target] = await db
+      .select({ id: design.id })
+      .from(design)
+      .where(and(eq(design.id, input.designId), eq(design.userId, input.userId)))
+      .limit(1)
+    if (!target) throw new ORPCError('NOT_FOUND')
+
+    const [links] = await Promise.all([
+      db
+        .delete(publishLink)
+        .where(
+          and(
+            eq(publishLink.designId, input.designId),
+            eq(publishLink.userId, input.userId),
+          ),
+        )
+        .returning({ id: publishLink.id }),
+      db
+        .update(design)
+        .set({ linkAccess: 'restricted', updatedAt: new Date() })
+        .where(and(eq(design.id, input.designId), eq(design.userId, input.userId))),
+    ])
+    return { revokedLinks: links.length }
+  })
 
 const setUserPreviewAccess = adminProcedure
   .input(
@@ -2907,8 +3437,16 @@ export const appRouter = {
     revoke: revokeMcpSession,
   },
   admin: {
+    overview: adminOverview,
     listUsers: listUsersWithUsage,
     setPreviewAccess: setUserPreviewAccess,
+    approvePendingPreviewAccess,
+    setAdmin: setUserAdmin,
+    refreshBilling: refreshUserBilling,
+    revokeSessions: revokeUserSessions,
+    revokeMcpAccess: revokeUserMcpAccess,
     deleteUser: deleteUserAccount,
+    listDesigns: listRecentDesigns,
+    revokeDesignLinks,
   },
 }

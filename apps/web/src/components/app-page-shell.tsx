@@ -15,11 +15,14 @@ export function AppPageShell({
   title,
   description,
   children,
+  wide = false,
 }: {
   active: AppSection
   title: string
   description: string
   children: ReactNode
+  /** Data-dense pages (admin tables) need more than the reading measure. */
+  wide?: boolean
 }) {
   const { data: session } = authClient.useSession()
   const [settingsOpen, setSettingsOpen] = useState(false)
@@ -72,7 +75,11 @@ export function AppPageShell({
 
         {/* Content sits flat on the canvas like the designs dashboard; the
             sections below bring their own surfaces where grouping helps. */}
-        <section className="mx-auto w-full max-w-3xl p-4 md:p-6">{children}</section>
+        <section
+          className={`mx-auto w-full p-4 md:p-6 ${wide ? 'max-w-6xl' : 'max-w-3xl'}`}
+        >
+          {children}
+        </section>
       </main>
 
       <AppSettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} />

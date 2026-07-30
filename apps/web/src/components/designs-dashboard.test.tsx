@@ -13,6 +13,8 @@ mock.module('#/lib/orpc-client', () => ({
   orpc: {
     design: { list, listShared, delete: deleteDesign },
     canvas: { create, rename },
+    // The dashboard renders the upgrade button, which reads billing status.
+    billing: { status: mock(async () => ({ required: false, plan: null })) },
     preferences: {
       get: getPreferences,
       save: mock(),

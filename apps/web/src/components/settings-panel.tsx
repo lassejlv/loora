@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { useQueryStates } from 'nuqs'
 import { LogOutIcon } from '#/components/icons'
 import {
@@ -12,223 +12,15 @@ import {
   AlertDialogTrigger,
 } from '#/components/ui/alert-dialog'
 import { Button } from '#/components/ui/button'
-import { Input } from '#/components/ui/input'
 import { Tabs, TabsList, TabsPanel, TabsTab } from '#/components/ui/tabs'
 import { authClient } from '@loora/auth/client'
 import { orpc } from '#/lib/orpc-client'
-import { PanelLoading, PanelShell } from '#/components/panel-shell'
+import { PanelShell } from '#/components/panel-shell'
 import { ShortcutsSettings } from '#/components/shortcuts-settings'
 import { clearWelcomeSeen } from '#/components/welcome-dialog'
 import { AppearanceSettings } from '#/components/appearance-settings'
 import { editorSearchParams, type SettingsTab } from '#/lib/url-state'
 import type { ShortcutConfig } from '#/lib/shortcuts'
-
-interface AdminUser {
-  id: string
-  name: string
-  email: string
-  isAdmin: boolean
-  previewAccess: boolean
-  previewAccessRequestedAt: Date | null
-}
-
-function AdminDeleteUserDialog({
-  account,
-  deleting,
-  onDelete,
-}: {
-  account: AdminUser
-  deleting: boolean
-  onDelete: (account: AdminUser, email: string) => Promise<void>
-}) {
-  const [open, setOpen] = useState(false)
-  const [email, setEmail] = useState('')
-  const confirmed = email === account.email
-
-  return (
-    <AlertDialog
-      open={open}
-      onOpenChange={(next) => {
-        setOpen(next)
-        if (!next) setEmail('')
-      }}
-    >
-      <AlertDialogTrigger
-        render={
-          <Button variant="destructive" size="xs" disabled={deleting}>
-            {deleting ? 'Deleting…' : 'Delete account'}
-          </Button>
-        }
-      />
-      <AlertDialogPopup>
-        <AlertDialogHeader>
-          <AlertDialogTitle>Delete {account.name}?</AlertDialogTitle>
-          <AlertDialogDescription>
-            This permanently deletes {account.email} and all of their designs, assets, and
-            integrations. Type their email to confirm. This cannot be undone.
-          </AlertDialogDescription>
-        </AlertDialogHeader>
-        <div className="px-4 pb-1.5">
-          <Input
-            autoComplete="off"
-            autoFocus
-            aria-label={`Type ${account.email} to confirm deletion`}
-            placeholder={account.email}
-            value={email}
-            onChange={(event) => setEmail(event.target.value)}
-          />
-        </div>
-        <AlertDialogFooter>
-          <AlertDialogClose render={<Button variant="outline" size="sm">Cancel</Button>} />
-          <Button
-            variant="destructive"
-            size="sm"
-            disabled={!confirmed || deleting}
-            onClick={() => {
-              void onDelete(account, email)
-                .then(() => {
-                  setOpen(false)
-                  setEmail('')
-                })
-                .catch(() => undefined)
-            }}
-          >
-            {deleting ? 'Deleting…' : 'Delete account'}
-          </Button>
-        </AlertDialogFooter>
-      </AlertDialogPopup>
-    </AlertDialog>
-  )
-}
-
-function AdminTab({ currentUserId }: { currentUserId: string }) {
-  const [users, setUsers] = useState<AdminUser[] | null>(null)
-  const [error, setError] = useState<string | null>(null)
-  const [savingAccess, setSavingAccess] = useState<string | null>(null)
-  const [deleting, setDeleting] = useState<string | null>(null)
-
-  useEffect(() => {
-    let cancelled = false
-    orpc.admin
-      .listUsers()
-      .then((data) => {
-        if (!cancelled) setUsers(data)
-      })
-      .catch(() => {
-        if (!cancelled) setError('Could not load users.')
-      })
-    return () => {
-      cancelled = true
-    }
-  }, [])
-
-  async function handlePreviewAccess(account: AdminUser) {
-    const granted = !account.previewAccess
-    setSavingAccess(account.id)
-    setError(null)
-    try {
-      const updated = await orpc.admin.setPreviewAccess({ userId: account.id, granted })
-      setUsers((current) =>
-        current?.map((user) =>
-          user.id === account.id
-            ? {
-                ...user,
-                previewAccess: updated.previewAccess,
-                previewAccessRequestedAt: updated.previewAccess
-                  ? null
-                  : user.previewAccessRequestedAt,
-              }
-            : user,
-        ) ?? null,
-      )
-    } catch {
-      setError(`Could not update preview access for ${account.email}.`)
-    } finally {
-      setSavingAccess(null)
-    }
-  }
-
-  async function handleDelete(account: AdminUser, email: string) {
-    setDeleting(account.id)
-    setError(null)
-    try {
-      await orpc.admin.deleteUser({ userId: account.id, email })
-      setUsers((current) => current?.filter((user) => user.id !== account.id) ?? null)
-    } catch (err) {
-      setError(err instanceof Error ? err.message : `Could not delete ${account.email}.`)
-      throw err
-    } finally {
-      setDeleting(null)
-    }
-  }
-
-  if (!users && !error) {
-    return <PanelLoading label="Loading users…" rows={4} />
-  }
-
-  return (
-    <div className="flex flex-col gap-4">
-      <div>
-        <h2 className="text-sm font-semibold">Admin</h2>
-        <p className="mt-1 text-xs text-muted-foreground">
-          Manage preview access.
-        </p>
-      </div>
-      {error ? <p className="text-xs text-destructive-foreground">{error}</p> : null}
-      <div className="divide-y divide-border rounded-lg border border-border">
-        {users?.map((account) => (
-          <div
-            key={account.id}
-            className="flex flex-col gap-3 p-3 sm:flex-row sm:items-center sm:justify-between"
-          >
-            <div className="min-w-0">
-              <p className="truncate text-sm font-medium">
-                {account.name}
-                {account.isAdmin ? (
-                  <span className="ml-2 text-xs font-semibold uppercase tracking-wide text-cx-accent">
-                    Admin
-                  </span>
-                ) : null}
-                {!account.isAdmin && account.previewAccessRequestedAt ? (
-                  <span className="ml-2 text-xs font-semibold uppercase tracking-wide text-cx-accent">
-                    Requested access
-                  </span>
-                ) : null}
-              </p>
-              <p className="truncate text-xs text-muted-foreground">{account.email}</p>
-            </div>
-            <div className="flex flex-col gap-2 sm:items-end">
-              {!account.isAdmin ? (
-                <Button
-                  size="xs"
-                  variant={account.previewAccess ? 'secondary' : 'outline'}
-                  disabled={savingAccess === account.id}
-                  onClick={() => handlePreviewAccess(account)}
-                >
-                  {savingAccess === account.id
-                    ? 'Saving…'
-                    : account.previewAccess
-                      ? 'Revoke preview access'
-                      : 'Grant preview access'}
-                </Button>
-              ) : null}
-              {!account.isAdmin && account.id !== currentUserId ? (
-                <AdminDeleteUserDialog
-                  account={account}
-                  deleting={deleting === account.id}
-                  onDelete={handleDelete}
-                />
-              ) : null}
-            </div>
-          </div>
-        ))}
-        {users?.length === 0 ? (
-          <p className="p-3 text-xs text-muted-foreground">No users found.</p>
-        ) : null}
-      </div>
-    </div>
-  )
-}
 
 function DeleteAccountSection() {
   const [deleting, setDeleting] = useState(false)
@@ -300,7 +92,6 @@ export function SettingsPanel({
   onShortcutConfigChange: (next: ShortcutConfig) => void
 }) {
   const { data: session } = authClient.useSession()
-  const isAdmin = session?.user.isAdmin === true
   const [{ settings }, setUrlState] = useQueryStates(editorSearchParams, {
     history: 'replace',
   })
@@ -320,12 +111,9 @@ export function SettingsPanel({
         }}
         className="flex flex-col gap-4"
       >
-        <TabsList
-          className={`grid w-full ${isAdmin ? 'grid-cols-3' : 'grid-cols-2'}`}
-        >
+        <TabsList className="grid w-full grid-cols-2">
           <TabsTab value="account">Account</TabsTab>
           <TabsTab value="shortcuts">Shortcuts</TabsTab>
-          {isAdmin ? <TabsTab value="admin">Admin</TabsTab> : null}
         </TabsList>
 
         <TabsPanel value="account" className="flex flex-col gap-4">
@@ -358,12 +146,6 @@ export function SettingsPanel({
             onChange={onShortcutConfigChange}
           />
         </TabsPanel>
-
-        {isAdmin && session?.user.id ? (
-          <TabsPanel value="admin">
-            <AdminTab currentUserId={session.user.id} />
-          </TabsPanel>
-        ) : null}
       </Tabs>
     </PanelShell>
   )

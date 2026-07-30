@@ -21,6 +21,7 @@ import { Route as ApiCanvasEventsRouteImport } from './routes/api.canvas-events'
 import { Route as ApiCanvasPresenceRouteImport } from './routes/api.canvas-presence'
 import { Route as ApiReadyRouteImport } from './routes/api.ready'
 import { Route as AppIndexRouteImport } from './routes/app.index'
+import { Route as AppAdminRouteImport } from './routes/app.admin'
 import { Route as AppAppearanceRouteImport } from './routes/app.appearance'
 import { Route as AppBillingRouteImport } from './routes/app.billing'
 import { Route as AppDesignRouteImport } from './routes/app.design'
@@ -97,6 +98,11 @@ const ApiReadyRoute = ApiReadyRouteImport.update({
 const AppIndexRoute = AppIndexRouteImport.update({
   id: '/app/',
   path: '/app/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AppAdminRoute = AppAdminRouteImport.update({
+  id: '/app/admin',
+  path: '/app/admin',
   getParentRoute: () => rootRouteImport,
 } as any)
 const AppAppearanceRoute = AppAppearanceRouteImport.update({
@@ -192,6 +198,7 @@ export interface FileRoutesByFullPath {
   '/api/canvas-events': typeof ApiCanvasEventsRoute
   '/api/canvas-presence': typeof ApiCanvasPresenceRoute
   '/api/ready': typeof ApiReadyRoute
+  '/app/admin': typeof AppAdminRoute
   '/app/appearance': typeof AppAppearanceRoute
   '/app/billing': typeof AppBillingRoute
   '/app/design': typeof AppDesignRoute
@@ -222,6 +229,7 @@ export interface FileRoutesByTo {
   '/api/canvas-events': typeof ApiCanvasEventsRoute
   '/api/canvas-presence': typeof ApiCanvasPresenceRoute
   '/api/ready': typeof ApiReadyRoute
+  '/app/admin': typeof AppAdminRoute
   '/app/appearance': typeof AppAppearanceRoute
   '/app/billing': typeof AppBillingRoute
   '/app/design': typeof AppDesignRoute
@@ -253,6 +261,7 @@ export interface FileRoutesById {
   '/api/canvas-events': typeof ApiCanvasEventsRoute
   '/api/canvas-presence': typeof ApiCanvasPresenceRoute
   '/api/ready': typeof ApiReadyRoute
+  '/app/admin': typeof AppAdminRoute
   '/app/appearance': typeof AppAppearanceRoute
   '/app/billing': typeof AppBillingRoute
   '/app/design': typeof AppDesignRoute
@@ -285,6 +294,7 @@ export interface FileRouteTypes {
     | '/api/canvas-events'
     | '/api/canvas-presence'
     | '/api/ready'
+    | '/app/admin'
     | '/app/appearance'
     | '/app/billing'
     | '/app/design'
@@ -315,6 +325,7 @@ export interface FileRouteTypes {
     | '/api/canvas-events'
     | '/api/canvas-presence'
     | '/api/ready'
+    | '/app/admin'
     | '/app/appearance'
     | '/app/billing'
     | '/app/design'
@@ -345,6 +356,7 @@ export interface FileRouteTypes {
     | '/api/canvas-events'
     | '/api/canvas-presence'
     | '/api/ready'
+    | '/app/admin'
     | '/app/appearance'
     | '/app/billing'
     | '/app/design'
@@ -376,6 +388,7 @@ export interface RootRouteChildren {
   ApiCanvasEventsRoute: typeof ApiCanvasEventsRoute
   ApiCanvasPresenceRoute: typeof ApiCanvasPresenceRoute
   ApiReadyRoute: typeof ApiReadyRoute
+  AppAdminRoute: typeof AppAdminRoute
   AppAppearanceRoute: typeof AppAppearanceRoute
   AppBillingRoute: typeof AppBillingRoute
   AppDesignRoute: typeof AppDesignRoute
@@ -478,6 +491,13 @@ declare module '@tanstack/react-router' {
       path: '/app'
       fullPath: '/app/'
       preLoaderRoute: typeof AppIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/app/admin': {
+      id: '/app/admin'
+      path: '/app/admin'
+      fullPath: '/app/admin'
+      preLoaderRoute: typeof AppAdminRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/app/appearance': {
@@ -620,6 +640,7 @@ const rootRouteChildren: RootRouteChildren = {
   ApiCanvasEventsRoute: ApiCanvasEventsRoute,
   ApiCanvasPresenceRoute: ApiCanvasPresenceRoute,
   ApiReadyRoute: ApiReadyRoute,
+  AppAdminRoute: AppAdminRoute,
   AppAppearanceRoute: AppAppearanceRoute,
   AppBillingRoute: AppBillingRoute,
   AppDesignRoute: AppDesignRoute,

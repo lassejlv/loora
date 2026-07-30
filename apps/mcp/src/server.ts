@@ -1113,7 +1113,7 @@ export function createLooraServer(
     tool(
       'listVersions',
       (args: { designId: string; draftId?: string; limit: number }) =>
-        listVersions(userId, args.designId, args.limit, args.draftId),
+        listVersions(userId, args.designId, args.limit, args.draftId, plan),
     ),
   )
 
