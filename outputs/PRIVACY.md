@@ -26,9 +26,9 @@ This policy covers:
 - Asset uploads and design storage
 - Publish pages and handoff links
 - The remote MCP authorization and resource server flows when you use them
-- Optional integrations you connect (Google sign-in, GitHub, Figma, ChatGPT)
+- Optional integrations you connect (Google sign-in, GitHub, ChatGPT)
 
-It does not govern third-party sites or services that have their own policies (for example Polar’s customer portal, GitHub, Figma, or OpenAI / ChatGPT).
+It does not govern third-party sites or services that have their own policies (for example Polar’s customer portal, GitHub, or OpenAI / ChatGPT).
 
 ## 3. Personal Data We Collect
 
@@ -57,7 +57,6 @@ It does not govern third-party sites or services that have their own policies (f
 - Google (when you sign in with Google): basic profile identifiers needed for authentication
 - Polar (billing): customer, subscription, order, meter, and refund-related billing state needed to grant access and credits
 - GitHub (when connected): account identifiers and encrypted tokens/installation metadata needed for repository features
-- Figma (when connected): account identifiers and encrypted tokens needed for import features
 - ChatGPT / Login with ChatGPT (when connected): session material needed to run models on your connected account
 - MCP OAuth clients you authorize: client registration and consent records
 
@@ -87,7 +86,7 @@ We do not sell personal data. We do not use personal data for third-party advert
 ### Essential / functional
 
 - Authentication and session cookies managed by Better Auth / the app session layer
-- Short-lived OAuth flow cookies for GitHub and Figma connection flows
+- Short-lived OAuth flow cookies for GitHub connection flows
 - Local storage / similar browser storage for editor state, theme, access caches, and similar functional preferences
 
 These are needed to sign in and run the product.
@@ -118,7 +117,7 @@ We share personal data with service providers that process it on our behalf or a
 | Analytics | Databuddy | Product analytics |
 | AI (Loora-managed) | Wafer | Model inference for included AI credits |
 | AI (user-connected) | OpenAI / ChatGPT | Inference on your connected ChatGPT account |
-| Integrations | GitHub, Figma | Optional repository / design import features |
+| Integrations | GitHub | Optional repository features |
 | Email / support | Your messages to support@loora.design | Support correspondence |
 
 Providers only receive what is needed for their function. Public publish/handoff links intentionally make the linked design content available to anyone who has the link.
@@ -129,7 +128,7 @@ We may also disclose data if required by law, to protect rights and safety, or i
 
 Some providers may process data in the EU/EEA and/or other countries.
 
-TODO(confirm): exact primary hosting and subprocessors’ processing regions for Railway, S3-compatible asset storage, Wafer, Databuddy, Polar, and Google/GitHub/Figma/OpenAI, and the transfer safeguards relied on (for example EU Standard Contractual Clauses or adequacy decisions).
+TODO(confirm): exact primary hosting and subprocessors’ processing regions for Railway, S3-compatible asset storage, Wafer, Databuddy, Polar, and Google/GitHub/OpenAI, and the transfer safeguards relied on (for example EU Standard Contractual Clauses or adequacy decisions).
 
 Where international transfers occur, we take steps appropriate to the provider relationship and applicable law. Contact us if you need current subprocessor transfer details.
 

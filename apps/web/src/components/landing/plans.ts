@@ -45,5 +45,5 @@ export const PLAN_INCLUDES = [
   { capability: 'Canvas editor', detail: 'Infinite canvas, components, tokens, breakpoints' },
   { capability: 'MCP server', detail: 'Drive the same document from Claude or Cursor' },
   { capability: 'Exports', detail: 'HTML/CSS, React/TSX, JSON, and PNG captures' },
-  { capability: 'Integrations', detail: 'Figma import and GitHub read access' },
+  { capability: 'Integrations', detail: 'GitHub read access' },
 ] as const

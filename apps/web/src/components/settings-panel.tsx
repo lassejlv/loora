@@ -17,13 +17,17 @@ import { Tabs, TabsList, TabsPanel, TabsTab } from '#/components/ui/tabs'
 import { authClient } from '@loora/auth/client'
 import { orpc } from '#/lib/orpc-client'
 import { GitHubAccount } from '#/components/github-account'
-import { FigmaAccount } from '#/components/figma-account'
 import { McpSessions } from '#/components/mcp-sessions'
 import { PanelLoading, PanelShell } from '#/components/panel-shell'
 import { ShortcutsSettings } from '#/components/shortcuts-settings'
 import { clearWelcomeSeen } from '#/components/welcome-dialog'
 import { editorSearchParams, type IntegrationTab, type SettingsTab } from '#/lib/url-state'
 import type { ShortcutConfig } from '#/lib/shortcuts'
+import {
+  getThemePreference,
+  setThemePreference,
+  type ThemePreference,
+} from '#/lib/theme'
 
 type BillingStatus = Awaited<ReturnType<typeof orpc.billing.status>>
 
@@ -374,6 +378,77 @@ function DeleteAccountSection() {
   )
 }
 
+const THEME_OPTIONS: {
+  value: ThemePreference
+  label: string
+  previewClassName: string
+}[] = [
+  {
+    value: 'light',
+    label: 'Light',
+    previewClassName: 'border-zinc-300 bg-zinc-100 before:bg-white',
+  },
+  {
+    value: 'dark',
+    label: 'Dark',
+    previewClassName: 'border-[#484641] bg-[#191918] before:bg-[#2a2926]',
+  },
+  {
+    value: 'system',
+    label: 'System',
+    previewClassName:
+      'border-zinc-400 bg-[linear-gradient(90deg,#f4f4f5_0_50%,#191918_50%)] before:bg-[linear-gradient(90deg,#fff_0_50%,#2a2926_50%)]',
+  },
+]
+
+function AppearanceSettings() {
+  const [theme, setTheme] = useState<ThemePreference>('light')
+
+  useEffect(() => setTheme(getThemePreference()), [])
+
+  return (
+    <div className="flex flex-col gap-2 border-t pt-4">
+      <div>
+        <h2 className="text-sm font-semibold">Appearance</h2>
+        <p className="mt-1 text-xs text-muted-foreground">
+          Choose how Loora’s workspace looks.
+        </p>
+      </div>
+      <div
+        className="grid grid-cols-3 gap-1"
+        role="group"
+        aria-label="Color theme"
+      >
+        {THEME_OPTIONS.map((option) => {
+          const selected = theme === option.value
+          return (
+            <button
+              key={option.value}
+              type="button"
+              aria-pressed={selected}
+              className={`flex min-w-0 flex-col items-center gap-1.5 rounded-md border px-2 py-2 text-xs font-medium outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring ${
+                selected
+                  ? 'border-ring bg-secondary text-foreground'
+                  : 'border-border bg-background/60 text-muted-foreground hover:bg-accent hover:text-foreground'
+              }`}
+              onClick={() => {
+                setTheme(option.value)
+                setThemePreference(option.value)
+              }}
+            >
+              <span
+                aria-hidden="true"
+                className={`relative h-8 w-full max-w-20 overflow-hidden rounded border ${option.previewClassName} before:absolute before:inset-x-1 before:bottom-1 before:h-2 before:rounded-sm`}
+              />
+              {option.label}
+            </button>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
 export function SettingsPanel({
   onClose,
   shortcutConfig,
@@ -460,6 +535,7 @@ export function SettingsPanel({
               Sign out
             </Button>
           </div>
+          <AppearanceSettings />
           <DeleteAccountSection />
         </TabsPanel>
 
@@ -480,19 +556,15 @@ export function SettingsPanel({
             }}
             className="flex flex-col gap-4"
           >
-            <TabsList className="grid w-full grid-cols-3">
+            <TabsList className="grid w-full grid-cols-2">
               <TabsTab value="mcp">MCP</TabsTab>
               <TabsTab value="github">GitHub</TabsTab>
-              <TabsTab value="figma">Figma</TabsTab>
             </TabsList>
             <TabsPanel value="mcp" id="integration-mcp">
               <McpSessions />
             </TabsPanel>
             <TabsPanel value="github" id="integration-github">
               <GitHubAccount />
-            </TabsPanel>
-            <TabsPanel value="figma" id="integration-figma">
-              <FigmaAccount />
             </TabsPanel>
           </Tabs>
         </TabsPanel>

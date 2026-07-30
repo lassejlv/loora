@@ -6,7 +6,7 @@ import { NuqsAdapter } from "nuqs/adapters/tanstack-router";
 import { useEffect } from "react";
 
 import appCss from "../styles.css?url";
-import { enforceLightTheme, THEME_INIT_SCRIPT } from "#/lib/theme";
+import { syncThemePreference, THEME_INIT_SCRIPT } from "#/lib/theme";
 
 export const Route = createRootRoute({
   head: () => ({
@@ -23,7 +23,7 @@ export const Route = createRootRoute({
       },
       {
         name: "theme-color",
-        content: "#2440e6",
+        content: "#fafafa",
       },
       {
         name: "application-name",
@@ -85,9 +85,9 @@ const DATABUDDY_CLIENT_ID =
   "c54c0e63-bc75-4058-b37a-75e3b5323ea2";
 
 function RootDocument({ children }: { children: React.ReactNode }) {
-  useEffect(() => enforceLightTheme(), []);
+  useEffect(() => syncThemePreference(), []);
   return (
-    <html lang="en">
+    <html lang="en" suppressHydrationWarning>
       <head>
         <HeadContent />
       </head>

@@ -369,22 +369,6 @@ export const githubAccount = pgTable('github_account', {
     .notNull(),
 })
 
-export const figmaAccount = pgTable('figma_account', {
-  userId: text('user_id')
-    .primaryKey()
-    .references(() => user.id, { onDelete: 'cascade' }),
-  figmaUserId: text('figma_user_id').notNull(),
-  accessToken: text('access_token').notNull(),
-  refreshToken: text('refresh_token'),
-  accessTokenExpiresAt: timestamp('access_token_expires_at'),
-  scope: text('scope').default('file_content:read').notNull(),
-  createdAt: timestamp('created_at').defaultNow().notNull(),
-  updatedAt: timestamp('updated_at')
-    .defaultNow()
-    .$onUpdate(() => new Date())
-    .notNull(),
-})
-
 export const githubInstallation = pgTable(
   'github_installation',
   {

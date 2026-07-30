@@ -1,4 +1,4 @@
-import { cleanup, render, screen, waitFor } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, mock, test } from 'bun:test'
 import { createContext, useContext, type ReactNode } from 'react'
 import { withNuqsTestingAdapter } from 'nuqs/adapters/testing'
@@ -85,9 +85,15 @@ function renderSettings(searchParams = '?settings=billing') {
 describe('SettingsPanel billing visibility', () => {
   beforeEach(() => {
     billingStatus.mockReset().mockResolvedValue(disabledBilling)
+    window.localStorage.removeItem('loora:theme')
+    document.documentElement.classList.remove('dark')
   })
 
-  afterEach(() => cleanup())
+  afterEach(() => {
+    cleanup()
+    window.localStorage.removeItem('loora:theme')
+    document.documentElement.classList.remove('dark')
+  })
 
   test('removes billing UI and falls back from a billing URL when billing is disabled', async () => {
     renderSettings()
@@ -113,5 +119,16 @@ describe('SettingsPanel billing visibility', () => {
     expect(await screen.findByRole('tab', { name: 'Shortcuts' })).toBeTruthy()
     expect(screen.queryByRole('tab', { name: 'Agent' })).toBeNull()
     expect(screen.getByRole('tab', { name: 'Integrations' })).toBeTruthy()
+  })
+
+  test('applies and persists the selected appearance', async () => {
+    renderSettings('?settings=account')
+
+    const dark = await screen.findByRole('button', { name: 'Dark' })
+    fireEvent.click(dark)
+
+    expect(dark.getAttribute('aria-pressed')).toBe('true')
+    expect(window.localStorage.getItem('loora:theme')).toBe('dark')
+    expect(document.documentElement.classList.contains('dark')).toBe(true)
   })
 })

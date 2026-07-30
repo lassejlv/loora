@@ -43,7 +43,7 @@ Pro includes everything in Free at production limits:
 - Infinite canvas editor with components, tokens, and breakpoints
 - MCP server for driving the same document from an external agent
 - HTML/CSS, React/TSX, JSON, and PNG exports
-- Figma import and GitHub read access
+- GitHub read access
 
 ## Billing
 

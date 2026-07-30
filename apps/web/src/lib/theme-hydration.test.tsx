@@ -27,7 +27,7 @@ const RootDocument = (
 ).shellComponent
 
 describe('theme hydration', () => {
-  it('clears stale dark mode before hydration without a warning', async () => {
+  it('restores dark mode before hydration without a warning', async () => {
     const markup = renderToString(
       <RootDocument>
         <main>Loora</main>
@@ -52,8 +52,8 @@ describe('theme hydration', () => {
         window.localStorage,
         document,
       )
-      expect(document.documentElement.classList.contains('dark')).toBe(false)
-      expect(window.localStorage.getItem('loora:theme')).toBeNull()
+      expect(document.documentElement.classList.contains('dark')).toBe(true)
+      expect(window.localStorage.getItem('loora:theme')).toBe('dark')
 
       await act(async () => {
         root = hydrateRoot(
@@ -70,7 +70,7 @@ describe('theme hydration', () => {
           message.includes("server rendered HTML didn't match the client properties"),
         ),
       ).toBe(false)
-      expect(document.documentElement.classList.contains('dark')).toBe(false)
+      expect(document.documentElement.classList.contains('dark')).toBe(true)
     } finally {
       root?.unmount()
       console.error = originalConsoleError

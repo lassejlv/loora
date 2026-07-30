@@ -23,7 +23,7 @@ Use `LOORA_BENCHMARK_TARGET=canvas` with
 - `apps/web` — the TanStack Start app (canvas, agent panel, routes)
 - `apps/mcp` — the remote MCP server (`mcp.loora.design`)
 - `packages/db` — Drizzle schema, Neon client, migrations
-- `packages/auth` — Better Auth, preview access, billing, GitHub & Figma integrations
+- `packages/auth` — Better Auth, preview access, billing, and GitHub integration
 - `packages/agent` — model catalog, prompts, tools, usage accounting, agent runtime
 - `packages/rpc` — the oRPC router, storage, handoff tokens, version history
 

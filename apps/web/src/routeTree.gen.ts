@@ -22,8 +22,6 @@ import { Route as AppDesignRouteImport } from './routes/app.design'
 import { Route as DesignIdRouteImport } from './routes/design.$id'
 import { Route as ApiAssetIdRouteImport } from './routes/api.asset.$id'
 import { Route as ApiAuthSplatRouteImport } from './routes/api.auth.$'
-import { Route as ApiFigmaCallbackRouteImport } from './routes/api.figma.callback'
-import { Route as ApiFigmaConnectRouteImport } from './routes/api.figma.connect'
 import { Route as ApiGithubCallbackRouteImport } from './routes/api.github.callback'
 import { Route as ApiGithubConnectRouteImport } from './routes/api.github.connect'
 import { Route as ApiGithubInstallRouteImport } from './routes/api.github.install'
@@ -100,16 +98,6 @@ const ApiAuthSplatRoute = ApiAuthSplatRouteImport.update({
   path: '/api/auth/$',
   getParentRoute: () => rootRouteImport,
 } as any)
-const ApiFigmaCallbackRoute = ApiFigmaCallbackRouteImport.update({
-  id: '/api/figma/callback',
-  path: '/api/figma/callback',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const ApiFigmaConnectRoute = ApiFigmaConnectRouteImport.update({
-  id: '/api/figma/connect',
-  path: '/api/figma/connect',
-  getParentRoute: () => rootRouteImport,
-} as any)
 const ApiGithubCallbackRoute = ApiGithubCallbackRouteImport.update({
   id: '/api/github/callback',
   path: '/api/github/callback',
@@ -170,8 +158,6 @@ export interface FileRoutesByFullPath {
   '/app/': typeof AppIndexRoute
   '/api/asset/$id': typeof ApiAssetIdRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
-  '/api/figma/callback': typeof ApiFigmaCallbackRoute
-  '/api/figma/connect': typeof ApiFigmaConnectRoute
   '/api/github/callback': typeof ApiGithubCallbackRoute
   '/api/github/connect': typeof ApiGithubConnectRoute
   '/api/github/install': typeof ApiGithubInstallRoute
@@ -196,8 +182,6 @@ export interface FileRoutesByTo {
   '/app': typeof AppIndexRoute
   '/api/asset/$id': typeof ApiAssetIdRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
-  '/api/figma/callback': typeof ApiFigmaCallbackRoute
-  '/api/figma/connect': typeof ApiFigmaConnectRoute
   '/api/github/callback': typeof ApiGithubCallbackRoute
   '/api/github/connect': typeof ApiGithubConnectRoute
   '/api/github/install': typeof ApiGithubInstallRoute
@@ -223,8 +207,6 @@ export interface FileRoutesById {
   '/app/': typeof AppIndexRoute
   '/api/asset/$id': typeof ApiAssetIdRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
-  '/api/figma/callback': typeof ApiFigmaCallbackRoute
-  '/api/figma/connect': typeof ApiFigmaConnectRoute
   '/api/github/callback': typeof ApiGithubCallbackRoute
   '/api/github/connect': typeof ApiGithubConnectRoute
   '/api/github/install': typeof ApiGithubInstallRoute
@@ -251,8 +233,6 @@ export interface FileRouteTypes {
     | '/app/'
     | '/api/asset/$id'
     | '/api/auth/$'
-    | '/api/figma/callback'
-    | '/api/figma/connect'
     | '/api/github/callback'
     | '/api/github/connect'
     | '/api/github/install'
@@ -277,8 +257,6 @@ export interface FileRouteTypes {
     | '/app'
     | '/api/asset/$id'
     | '/api/auth/$'
-    | '/api/figma/callback'
-    | '/api/figma/connect'
     | '/api/github/callback'
     | '/api/github/connect'
     | '/api/github/install'
@@ -303,8 +281,6 @@ export interface FileRouteTypes {
     | '/app/'
     | '/api/asset/$id'
     | '/api/auth/$'
-    | '/api/figma/callback'
-    | '/api/figma/connect'
     | '/api/github/callback'
     | '/api/github/connect'
     | '/api/github/install'
@@ -330,8 +306,6 @@ export interface RootRouteChildren {
   AppIndexRoute: typeof AppIndexRoute
   ApiAssetIdRoute: typeof ApiAssetIdRoute
   ApiAuthSplatRoute: typeof ApiAuthSplatRoute
-  ApiFigmaCallbackRoute: typeof ApiFigmaCallbackRoute
-  ApiFigmaConnectRoute: typeof ApiFigmaConnectRoute
   ApiGithubCallbackRoute: typeof ApiGithubCallbackRoute
   ApiGithubConnectRoute: typeof ApiGithubConnectRoute
   ApiGithubInstallRoute: typeof ApiGithubInstallRoute
@@ -435,20 +409,6 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiAuthSplatRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/api/figma/callback': {
-      id: '/api/figma/callback'
-      path: '/api/figma/callback'
-      fullPath: '/api/figma/callback'
-      preLoaderRoute: typeof ApiFigmaCallbackRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/api/figma/connect': {
-      id: '/api/figma/connect'
-      path: '/api/figma/connect'
-      fullPath: '/api/figma/connect'
-      preLoaderRoute: typeof ApiFigmaConnectRouteImport
-      parentRoute: typeof rootRouteImport
-    }
     '/api/github/callback': {
       id: '/api/github/callback'
       path: '/api/github/callback'
@@ -542,8 +502,6 @@ const rootRouteChildren: RootRouteChildren = {
   AppIndexRoute: AppIndexRoute,
   ApiAssetIdRoute: ApiAssetIdRoute,
   ApiAuthSplatRoute: ApiAuthSplatRoute,
-  ApiFigmaCallbackRoute: ApiFigmaCallbackRoute,
-  ApiFigmaConnectRoute: ApiFigmaConnectRoute,
   ApiGithubCallbackRoute: ApiGithubCallbackRoute,
   ApiGithubConnectRoute: ApiGithubConnectRoute,
   ApiGithubInstallRoute: ApiGithubInstallRoute,

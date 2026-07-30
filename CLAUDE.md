@@ -106,9 +106,9 @@ automatically.
 Published behavior comes from the declarative interaction runtime under a
 restrictive CSP; do not execute document-authored script.
 
-Figma import maps frames, auto-layout, text, paints, vectors, components, and
-instances directly to Canvas. Rasterize complete unsupported visual blocks instead
-of inventing a partially editable approximation.
+HTML/CSS import maps computed layout and visual properties directly to Canvas.
+Rasterize complete unsupported visual blocks instead of inventing a partially
+editable approximation.
 
 Keep the MCP / handoff tool vocabulary aligned via `@loora/agent/canvas-tools`:
 `createPage`, `insertNodes`, `patchNodes`, `moveNodes`, `deleteNodes`,

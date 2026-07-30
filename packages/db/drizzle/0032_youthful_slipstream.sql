@@ -1,0 +1,1 @@
+DROP TABLE "figma_account" CASCADE;

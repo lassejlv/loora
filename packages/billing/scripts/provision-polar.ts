@@ -50,8 +50,8 @@ const commonBenefits: BenefitSpec[] = [
   },
   {
     key: 'integrations',
-    description: 'Figma import and GitHub read access',
-    note: 'Import from Figma and connect GitHub repositories.',
+    description: 'GitHub read access',
+    note: 'Connect GitHub repositories for read-only context.',
   },
 ]
 

@@ -35,7 +35,6 @@ import {
   ExternalLinkIcon as HugeExternalLinkIcon,
   EyeIcon as HugeEyeIcon,
   EyeOffIcon as HugeEyeOffIcon,
-  FigmaIcon as HugeFigmaIcon,
   FileAddIcon as HugeFilePlusIcon,
   FileCodeIcon as HugeFileCodeIcon,
   FileImportIcon as HugeImportIcon,
@@ -187,7 +186,6 @@ export const EllipsisIcon = createIcon(HugeEllipsisIcon, 'EllipsisIcon')
 export const ExternalLinkIcon = createIcon(HugeExternalLinkIcon, 'ExternalLinkIcon')
 export const EyeIcon = createIcon(HugeEyeIcon, 'EyeIcon')
 export const EyeOffIcon = createIcon(HugeEyeOffIcon, 'EyeOffIcon')
-export const FigmaIcon = createIcon(HugeFigmaIcon, 'FigmaIcon')
 export const FileCode2Icon = createIcon(HugeFileCodeIcon, 'FileCode2Icon')
 export const FilePlus2Icon = createIcon(HugeFilePlusIcon, 'FilePlus2Icon')
 export const FolderIcon = createIcon(HugeFolderIcon, 'FolderIcon')

@@ -78,12 +78,11 @@ export const FEATURE_SECTIONS = [
   {
     id: 'import',
     title: 'Import',
-    summary: 'HTML/CSS snapshots and Figma frames as real nodes.',
+    summary: 'HTML/CSS snapshots as real nodes.',
     lead: 'Bring existing work in as structured nodes. Import is deliberately lossy and one-way: it converts a snapshot into validated canvas nodes rather than embedding markup you can no longer edit.',
     points: [
       'HTML and CSS snapshot conversion',
-      'Figma frames, auto-layout, text, paints, and vectors',
-      'Figma components and instances map to canvas components and instances',
+      'Computed layout, typography, color, border, and shadow styles',
       'Unsupported visual blocks are rasterized whole instead of half-approximated',
     ],
   },

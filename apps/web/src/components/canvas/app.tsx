@@ -9,7 +9,6 @@ import {
 import {
   CheckIcon,
   ChevronDownIcon,
-  FigmaIcon,
   HistoryIcon,
   ImageIcon,
   RefreshCwIcon,
@@ -29,10 +28,6 @@ import { createDesign, type DesignSummary } from '#/lib/designs'
 import { orpc } from '#/lib/orpc-client'
 import { Button } from '#/components/ui/button'
 import { Input } from '#/components/ui/input'
-import {
-  FigmaImportDialog,
-  type FigmaImportDestination,
-} from '#/components/figma-import-dialog'
 import {
   Dialog,
   DialogDescription,
@@ -55,7 +50,6 @@ function CanvasDocSwitcher({
   activeId,
   onSwitch,
   onNew,
-  onImport,
   onAssets,
   onHistory,
   onRename,
@@ -65,7 +59,6 @@ function CanvasDocSwitcher({
   activeId: string
   onSwitch: (id: string) => void
   onNew: () => void
-  onImport: () => void
   onAssets: () => void
   onHistory: () => void
   onRename: () => void
@@ -109,10 +102,6 @@ function CanvasDocSwitcher({
         <DropdownMenuItem onClick={onNew}>
           <FilePlus2Icon data-slot="icon" />
           New document
-        </DropdownMenuItem>
-        <DropdownMenuItem onClick={onImport}>
-          <FigmaIcon data-slot="icon" />
-          Import from Figma
         </DropdownMenuItem>
         <DropdownMenuItem onClick={onAssets}>
           <ImageIcon data-slot="icon" />
@@ -169,7 +158,6 @@ export function CanvasApp({
   const [loading, setLoading] = useState(!preview)
   const [progress, setProgress] = useState('Opening Canvas')
   const [error, setError] = useState<string | null>(null)
-  const [figmaOpen, setFigmaOpen] = useState(false)
   const [renameOpen, setRenameOpen] = useState(false)
   const [renameName, setRenameName] = useState('')
   const [deleteOpen, setDeleteOpen] = useState(false)
@@ -335,32 +323,6 @@ export function CanvasApp({
   const active = documents.find((document) => document.id === activeId)
   const activeBranch =
     branches.find((branch) => branch.id === activeDraftId) ?? null
-  const handleFigmaImport = async (
-    result: Awaited<ReturnType<typeof orpc.figma.import>>,
-    destination: FigmaImportDestination,
-  ) => {
-    if (destination === 'current') {
-      await controller.adoptSnapshot(result.design.document, result.design.revision)
-      setDocuments((current) =>
-        current.map((entry) =>
-          entry.id === result.design.id
-            ? {
-                ...entry,
-                name: result.design.name,
-                revision: result.design.revision,
-                updatedAt: result.design.updatedAt,
-              }
-            : entry,
-        ),
-      )
-      return
-    }
-    await controller.flush()
-    await navigate({
-      to: '/design/$id',
-      params: { id: result.design.id },
-    })
-  }
   const renameDesign = async () => {
     const name = renameName.trim()
     if (!name || activeDraftId) return
@@ -417,7 +379,6 @@ export function CanvasApp({
               activeId={activeId}
               onSwitch={switchDesign}
               onNew={() => void newDesign()}
-              onImport={() => setFigmaOpen(true)}
               onAssets={openAssets}
               onHistory={openHistory}
               onRename={() => {
@@ -437,23 +398,6 @@ export function CanvasApp({
             />
           </>
         )}
-      />
-      <FigmaImportDialog
-        open={figmaOpen}
-        onOpenChange={setFigmaOpen}
-        currentDocument={{
-          id: activeId,
-          name: active?.name ?? controller.engine.document.name,
-          draftId: activeDraftId,
-          revision: controller.revision,
-        }}
-        prepareCurrentImport={async () => {
-          await controller.flush()
-          return { revision: controller.revision }
-        }}
-        onImported={(result, destination) => {
-          void handleFigmaImport(result, destination)
-        }}
       />
       <Dialog open={renameOpen} onOpenChange={setRenameOpen}>
         <DialogPopup className="max-w-sm">

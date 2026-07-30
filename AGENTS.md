@@ -3,7 +3,7 @@
 Loora is an infinite-canvas design tool. Users arrange structured UI nodes on a
 canvas; remote MCP clients (and agent handoff consumers) mutate the same
 document through typed transactions. Designs have version history, isolated
-drafts/branches, one-way exports, and integrations (GitHub, Figma).
+drafts/branches, one-way exports, and GitHub integration.
 There is no in-app chat agent — bring your own agent via MCP or handoff.
 
 **Stack:** Bun workspaces monorepo · TanStack Start / React 19 · Drizzle + Neon
@@ -21,7 +21,7 @@ packages/canvas   Canvas model, engine, merge, React surface, import, export
 packages/db       Drizzle schema, Neon client, migrations (`@loora/db`)
 packages/rpc      oRPC `appRouter`, storage, history, handoff (`@loora/rpc`)
 packages/agent    Shared canvas tools + layout repair for MCP (`@loora/agent`)
-packages/auth     Better Auth, preview access, GitHub/Figma (`@loora/auth`)
+packages/auth     Better Auth, preview access, GitHub (`@loora/auth`)
 packages/billing  Polar plan access / entitlements (`@loora/billing`)
 ```
 
@@ -46,7 +46,7 @@ packages/billing  Polar plan access / entitlements (`@loora/billing`)
 | `/api/rpc/$` | oRPC |
 | `/api/auth/$` | Better Auth |
 | `/api/asset/$id`, handoff asset routes | Asset serving |
-| GitHub/Figma connect + callback routes | OAuth |
+| GitHub connect + callback routes | OAuth |
 
 Legacy `/?design=`, `/?d=`, `/app/design?id=`, and `?draft=` links redirect into the canonical editor route.
 
@@ -74,7 +74,7 @@ Shared canvas mutation vocabulary for MCP (and handoff consumers), not models or
 
 ### `packages/rpc` (`appRouter` namespaces)
 
-`auth` · `preferences` · `billing` · `design` · `canvas` · `draft` · `handoff` · `history` · `asset` · `github` · `figma` · `mcp` · `admin`
+`auth` · `preferences` · `billing` · `design` · `canvas` · `draft` · `handoff` · `history` · `asset` · `github` · `mcp` · `admin`
 
 Most product mutations go through oRPC. External agents use MCP or handoff — there is no `/api/chat` streaming path.
 
@@ -86,7 +86,7 @@ Remote MCP at `mcp.loora.design` (local default port `4100`). OAuth 2.1 resource
 
 - Schema: `packages/db/src/schema.ts`
 - Migrations: `packages/db/drizzle/` (commit SQL **and** `meta/` snapshots)
-- Notable tables: `design`, `designDraft`, `designVersion`, `canvasTransaction`, `asset`, auth/OAuth (incl. `oauth_*` MCP tables), `billingEntitlement`, GitHub/Figma bindings. Legacy publish tables remain for compatibility but have no product runtime.
+- Notable tables: `design`, `designDraft`, `designVersion`, `canvasTransaction`, `asset`, auth/OAuth (incl. `oauth_*` MCP tables), `billingEntitlement`, and GitHub bindings. Legacy publish tables remain for compatibility but have no product runtime.
 
 Legacy helpers remain in `@loora/db/canvas` and `@loora/db/drafts` for rollback and expiring-link compatibility.
 
@@ -154,9 +154,9 @@ Implementation: `packages/agent/src/canvas-tools.ts` (and MCP server wiring in `
 - Legacy designs without a Canvas document are unsupported in the editor; there is no automatic first-open conversion flow.
 - `apps/web/src/components/element-frame.tsx` is **legacy-only** (temporary public-link compatibility). Do not reuse its iframe/Babel/Tailwind/per-element React-root pipeline in the normal editor.
 
-### Figma
+### HTML/CSS import
 
-Figma import maps frames, auto-layout, text, paints, vectors, components, and instances to Canvas. HTML/CSS import computes a sandboxed DOM snapshot and converts supported layout and visual properties to structured nodes. Rasterize unsupported visual blocks entirely rather than inventing half-editable approximations.
+HTML/CSS import computes a sandboxed DOM snapshot and converts supported layout and visual properties to structured nodes. Rasterize unsupported visual blocks entirely rather than inventing half-editable approximations.
 
 ---
 

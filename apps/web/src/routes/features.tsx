@@ -4,7 +4,7 @@ import { usePalette } from '#/components/landing/palette'
 import { LandingShell } from '#/components/landing/site-shell'
 
 const DESCRIPTION =
-  'What Loora does: a normalized canvas document, typed transactions shared by the editor and your agent, MCP, branches, history, deterministic exports, HTML and Figma import, and GitHub read access.'
+  'What Loora does: a normalized canvas document, typed transactions shared by the editor and your agent, MCP, branches, history, deterministic exports, HTML/CSS import, and GitHub read access.'
 
 export const Route = createFileRoute('/features')({
   ssr: false,
