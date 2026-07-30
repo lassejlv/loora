@@ -12,22 +12,15 @@ describe('bootstrapEditorSearch', () => {
     expect(bootstrapEditorSearch('doc_1')).toEqual({ d: 'doc_1' })
   })
 
-  test('maps legacy integration deep-links', () => {
+  test('keeps retired billing and integration state out of the settings dialog', () => {
     window.history.replaceState({}, '', '/?settings=github')
-    expect(bootstrapEditorSearch('doc_1')).toEqual({
-      d: 'doc_1',
-      settings: 'integrations',
-      integration: 'github',
-    })
-  })
+    expect(bootstrapEditorSearch('doc_1')).toEqual({ d: 'doc_1' })
 
-  test('keeps the MCP integration deep-link', () => {
     window.history.replaceState({}, '', '/?settings=integrations&integration=mcp')
-    expect(bootstrapEditorSearch('doc_1')).toEqual({
-      d: 'doc_1',
-      settings: 'integrations',
-      integration: 'mcp',
-    })
+    expect(bootstrapEditorSearch('doc_1')).toEqual({ d: 'doc_1' })
+
+    window.history.replaceState({}, '', '/?settings=billing')
+    expect(bootstrapEditorSearch('doc_1')).toEqual({ d: 'doc_1' })
   })
 
   test('drops retired AI provider deep-links', () => {
@@ -38,10 +31,7 @@ describe('bootstrapEditorSearch', () => {
     expect(bootstrapEditorSearch('doc_1')).toEqual({ d: 'doc_1' })
 
     window.history.replaceState({}, '', '/?settings=integrations&integration=providers')
-    expect(bootstrapEditorSearch('doc_1')).toEqual({
-      d: 'doc_1',
-      settings: 'integrations',
-    })
+    expect(bootstrapEditorSearch('doc_1')).toEqual({ d: 'doc_1' })
   })
 
   test('seeds layers from localStorage when URL omits it', () => {

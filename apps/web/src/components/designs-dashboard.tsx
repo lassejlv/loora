@@ -8,14 +8,14 @@ import {
   Trash2Icon,
 } from '#/components/icons'
 import {
-  ChevronDownIcon,
-  ClockIcon,
   LayoutGridIcon,
-  LogOutIcon,
   SearchIcon,
-  SettingsIcon,
 } from '#/components/icons'
 import { authClient } from '@loora/auth/client'
+import {
+  AppAccountMenu,
+  AppNavigation,
+} from '#/components/app-navigation'
 import { DesignThumbnail } from '#/components/design-thumbnail'
 import { SettingsPanel } from '#/components/settings-panel'
 import { clearWelcomeSeen } from '#/components/welcome-dialog'
@@ -95,54 +95,6 @@ function FileActions({
         <DropdownMenuItem variant="destructive" onClick={onDelete}>
           <Trash2Icon data-slot="icon" />
           Delete
-        </DropdownMenuItem>
-      </DropdownMenuContent>
-    </DropdownMenu>
-  )
-}
-
-function AccountMenu({
-  name,
-  onSettings,
-  onSignOut,
-  compact = false,
-}: {
-  name: string
-  onSettings: () => void
-  onSignOut: () => void
-  compact?: boolean
-}) {
-  return (
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <button
-          type="button"
-          aria-label="Account"
-          className={cn(
-            'flex items-center gap-2 rounded-md text-start hover:bg-secondary',
-            compact ? 'p-1' : 'w-full px-1.5 py-1',
-          )}
-        >
-          <span className="flex size-5 shrink-0 items-center justify-center rounded-full bg-accent text-[10px] font-semibold">
-            {name.slice(0, 1).toUpperCase()}
-          </span>
-          {compact ? null : (
-            <>
-              <span className="min-w-0 flex-1 truncate text-xs font-medium">{name}</span>
-              <ChevronDownIcon className="size-3.5 shrink-0 text-muted-foreground" />
-            </>
-          )}
-        </button>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="start" className="w-52">
-        <DropdownMenuItem onClick={onSettings}>
-          <SettingsIcon data-slot="icon" />
-          Settings
-        </DropdownMenuItem>
-        <DropdownMenuSeparator />
-        <DropdownMenuItem onClick={onSignOut}>
-          <LogOutIcon data-slot="icon" />
-          Sign out
         </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
@@ -382,25 +334,12 @@ export function DesignsDashboard() {
           />
           <span className="text-xs font-semibold tracking-tight">loora</span>
         </div>
-        <nav className="flex flex-col gap-px px-1.5">
-          <span
-            aria-current="page"
-            className="flex items-center gap-1.5 rounded-sm bg-accent px-2 py-1 text-xs font-medium"
-          >
-            <ClockIcon className="size-3.5 text-muted-foreground" />
-            Recents
-          </span>
-          <button
-            type="button"
-            onClick={() => setSettingsOpen(true)}
-            className="flex items-center gap-1.5 rounded-sm px-2 py-1 text-start text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-          >
-            <SettingsIcon className="size-3.5" />
-            Settings
-          </button>
-        </nav>
+        <AppNavigation
+          active="recents"
+          onSettings={() => setSettingsOpen(true)}
+        />
         <div className="mt-auto border-t border-line p-2">
-          <AccountMenu
+          <AppAccountMenu
             name={accountName}
             onSettings={() => setSettingsOpen(true)}
             onSignOut={() => void signOut()}
@@ -411,7 +350,7 @@ export function DesignsDashboard() {
       <main className="flex min-w-0 flex-1 flex-col overflow-y-auto">
         <header className="sticky top-0 z-10 flex h-10 flex-wrap items-center gap-2 border-b border-line bg-surface px-3 md:px-4">
           <div className="md:hidden">
-            <AccountMenu
+            <AppAccountMenu
               compact
               name={accountName}
               onSettings={() => setSettingsOpen(true)}

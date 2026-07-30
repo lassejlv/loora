@@ -5,6 +5,7 @@ import { readHandoffToken } from './handoff-token'
 import type { CanvasElement } from '@loora/db/canvas'
 import { authorizeBilling } from '@loora/billing/billing'
 import { canUseApp } from '@loora/auth/preview-access'
+import { hasAcceptedCurrentLegal } from '@loora/auth/legal-consent'
 import {
   CANVAS_SCHEMA_VERSION,
   parseCanvasDocument,
@@ -35,16 +36,27 @@ export async function getHandoffDesign(token: string) {
       updatedAt: design.updatedAt,
       isAdmin: user.isAdmin,
       previewAccess: user.previewAccess,
+      acceptedTerms: user.acceptedTerms,
+      acceptedPrivacy: user.acceptedPrivacy,
+      termsAcceptedAt: user.termsAcceptedAt,
+      privacyAcceptedAt: user.privacyAcceptedAt,
+      termsVersion: user.termsVersion,
+      privacyVersion: user.privacyVersion,
     })
     .from(design)
     .innerJoin(user, eq(user.id, design.userId))
     .where(and(eq(design.id, claims.designId), eq(design.userId, claims.userId)))
     .limit(1)
 
-  if (!found || !canUseApp(found) || !(await authorizeBilling({
-    id: claims.userId,
-    isAdmin: found.isAdmin,
-  })).access) {
+  if (
+    !found ||
+    !hasAcceptedCurrentLegal(found) ||
+    !canUseApp(found) ||
+    !(await authorizeBilling({
+      id: claims.userId,
+      isAdmin: found.isAdmin,
+    })).access
+  ) {
     return null
   }
   let shapes = found.shapes
@@ -80,6 +92,12 @@ export async function getHandoffDesign(token: string) {
   const {
     isAdmin: _isAdmin,
     previewAccess: _previewAccess,
+    acceptedTerms: _acceptedTerms,
+    acceptedPrivacy: _acceptedPrivacy,
+    termsAcceptedAt: _termsAcceptedAt,
+    privacyAcceptedAt: _privacyAcceptedAt,
+    termsVersion: _termsVersion,
+    privacyVersion: _privacyVersion,
     shapes: _shapes,
     pages: _pages,
     canvasVersion: _canvasVersion,

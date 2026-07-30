@@ -16,20 +16,16 @@ import { Input } from '#/components/ui/input'
 import { Tabs, TabsList, TabsPanel, TabsTab } from '#/components/ui/tabs'
 import { authClient } from '@loora/auth/client'
 import { orpc } from '#/lib/orpc-client'
-import { GitHubAccount } from '#/components/github-account'
-import { McpSessions } from '#/components/mcp-sessions'
 import { PanelLoading, PanelShell } from '#/components/panel-shell'
 import { ShortcutsSettings } from '#/components/shortcuts-settings'
 import { clearWelcomeSeen } from '#/components/welcome-dialog'
-import { editorSearchParams, type IntegrationTab, type SettingsTab } from '#/lib/url-state'
+import { editorSearchParams, type SettingsTab } from '#/lib/url-state'
 import type { ShortcutConfig } from '#/lib/shortcuts'
 import {
   getThemePreference,
   setThemePreference,
   type ThemePreference,
 } from '#/lib/theme'
-
-type BillingStatus = Awaited<ReturnType<typeof orpc.billing.status>>
 
 interface AdminUser {
   id: string
@@ -38,86 +34,6 @@ interface AdminUser {
   isAdmin: boolean
   previewAccess: boolean
   previewAccessRequestedAt: Date | null
-}
-
-function BillingTab({
-  isAdmin,
-  billing,
-  loadError,
-}: {
-  isAdmin: boolean
-  billing: BillingStatus | null
-  loadError: boolean
-}) {
-  const [error, setError] = useState(loadError ? 'Could not load billing.' : '')
-  const [openingPortal, setOpeningPortal] = useState(false)
-
-  if (isAdmin) {
-    return (
-      <div className="flex flex-col gap-4">
-        <div>
-          <h2 className="text-sm font-semibold">Internal access</h2>
-          <p className="mt-1 text-xs text-muted-foreground">
-            Admin accounts bypass subscriptions and keep full editor access.
-          </p>
-        </div>
-      </div>
-    )
-  }
-  if (error) return <p className="text-xs text-destructive-foreground">{error}</p>
-  if (!billing) return <PanelLoading label="Loading billing…" />
-
-  const plan = billing.trial
-    ? 'Pro trial'
-    : billing.plan === 'studio'
-      ? 'Studio (legacy)'
-      : billing.plan === 'pro'
-        ? 'Pro'
-        : billing.plan === 'free' ? 'Free' : 'No plan'
-  return (
-    <div className="flex flex-col gap-5">
-      <div>
-        <h2 className="text-sm font-semibold">Billing</h2>
-        <p className="mt-1 text-xs text-muted-foreground">
-          Manage your Loora plan and capacity.
-        </p>
-      </div>
-      <div className="rounded-lg border border-border p-4">
-        <p className="text-xs text-muted-foreground">Current plan</p>
-        <p className="mt-1 text-lg font-semibold">{plan}</p>
-        {billing.trial ? (
-          <div className="mt-3 rounded-md bg-secondary px-3 py-2 text-xs">
-            <p>Your trial ends {new Date(billing.trial.endsAt).toLocaleDateString()}.</p>
-            <p className="mt-1 text-muted-foreground">
-              Full canvas, branches, exports, and the MCP server are included for the whole trial.
-            </p>
-          </div>
-        ) : null}
-        {billing.cancelAtPeriodEnd && billing.currentPeriodEnd ? (
-          <p className="mt-3 rounded-md bg-secondary px-3 py-2 text-xs">
-            Your plan ends {new Date(billing.currentPeriodEnd).toLocaleDateString()}. Access remains active until then.
-          </p>
-        ) : null}
-      </div>
-      <Button
-        variant="outline"
-        disabled={openingPortal || !billing.plan}
-        onClick={async () => {
-          setOpeningPortal(true)
-          setError('')
-          try {
-            await authClient.customer.portal()
-          } catch {
-            setError('Could not open the billing portal.')
-            setOpeningPortal(false)
-          }
-        }}
-      >
-        {openingPortal ? 'Opening portal…' : 'Manage billing'}
-      </Button>
-      {error ? <p className="text-xs text-destructive-foreground">{error}</p> : null}
-    </div>
-  )
 }
 
 function AdminDeleteUserDialog({
@@ -460,30 +376,10 @@ export function SettingsPanel({
 }) {
   const { data: session } = authClient.useSession()
   const isAdmin = session?.user.isAdmin === true
-  const [billing, setBilling] = useState<BillingStatus | null>(null)
-  const [billingLoadFailed, setBillingLoadFailed] = useState(false)
-  const [{ settings, integration }, setUrlState] = useQueryStates(editorSearchParams, {
+  const [{ settings }, setUrlState] = useQueryStates(editorSearchParams, {
     history: 'replace',
   })
-  const showBilling = billing?.required === true || billingLoadFailed
-  const tab: SettingsTab = settings === 'billing' && billing?.required === false
-    ? 'account'
-    : settings ?? 'account'
-  const integrationTab: IntegrationTab = integration ?? 'mcp'
-
-  useEffect(() => {
-    let cancelled = false
-    orpc.billing.status()
-      .then((status) => {
-        if (!cancelled) setBilling(status)
-      })
-      .catch(() => {
-        if (!cancelled) setBillingLoadFailed(true)
-      })
-    return () => {
-      cancelled = true
-    }
-  }, [])
+  const tab: SettingsTab = settings ?? 'account'
 
   async function signOut() {
     clearWelcomeSeen()
@@ -495,22 +391,14 @@ export function SettingsPanel({
       <Tabs
         value={tab}
         onValueChange={(value) => {
-          const next = value as SettingsTab
-          if (next === 'integrations') void setUrlState({ settings: next })
-          else void setUrlState({ settings: next, integration: null })
+          void setUrlState({ settings: value as SettingsTab })
         }}
         className="flex flex-col gap-4"
       >
         <TabsList
-          className={`grid w-full grid-cols-3 ${
-            isAdmin
-              ? showBilling ? 'sm:grid-cols-5' : 'sm:grid-cols-4'
-              : showBilling ? 'sm:grid-cols-4' : 'sm:grid-cols-3'
-          }`}
+          className={`grid w-full ${isAdmin ? 'grid-cols-3' : 'grid-cols-2'}`}
         >
           <TabsTab value="account">Account</TabsTab>
-          <TabsTab value="integrations">Integrations</TabsTab>
-          {showBilling ? <TabsTab value="billing">Billing</TabsTab> : null}
           <TabsTab value="shortcuts">Shortcuts</TabsTab>
           {isAdmin ? <TabsTab value="admin">Admin</TabsTab> : null}
         </TabsList>
@@ -538,42 +426,6 @@ export function SettingsPanel({
           <AppearanceSettings />
           <DeleteAccountSection />
         </TabsPanel>
-
-        <TabsPanel value="integrations" className="flex flex-col gap-4">
-          <div>
-            <h2 className="text-sm font-semibold">Integrations</h2>
-            <p className="mt-1 text-xs text-muted-foreground">
-              Connect external accounts and agents to Loora.
-            </p>
-          </div>
-          <Tabs
-            value={integrationTab}
-            onValueChange={(value) => {
-              void setUrlState({
-                settings: 'integrations',
-                integration: value as IntegrationTab,
-              })
-            }}
-            className="flex flex-col gap-4"
-          >
-            <TabsList className="grid w-full grid-cols-2">
-              <TabsTab value="mcp">MCP</TabsTab>
-              <TabsTab value="github">GitHub</TabsTab>
-            </TabsList>
-            <TabsPanel value="mcp" id="integration-mcp">
-              <McpSessions />
-            </TabsPanel>
-            <TabsPanel value="github" id="integration-github">
-              <GitHubAccount />
-            </TabsPanel>
-          </Tabs>
-        </TabsPanel>
-
-        {showBilling ? (
-          <TabsPanel value="billing">
-            <BillingTab isAdmin={isAdmin} billing={billing} loadError={billingLoadFailed} />
-          </TabsPanel>
-        ) : null}
 
         <TabsPanel value="shortcuts">
           <ShortcutsSettings

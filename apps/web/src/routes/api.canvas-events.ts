@@ -7,6 +7,10 @@ import {
   previewAccessRequiredResponse,
 } from '@loora/auth/preview-access'
 import {
+  hasAcceptedCurrentLegal,
+  legalConsentRequiredResponse,
+} from '@loora/auth/legal-consent'
+import {
   authorizeBilling,
   subscriptionRequiredResponse,
 } from '@loora/billing/billing'
@@ -61,6 +65,7 @@ async function ownsTarget(
 export async function canvasEventsResponse(request: Request) {
   const session = await requireSession(request)
   if (!session) return new Response('Unauthorized', { status: 401 })
+  if (!hasAcceptedCurrentLegal(session.user)) return legalConsentRequiredResponse()
   if (!canUseApp(session.user)) return previewAccessRequiredResponse()
   if (!(await authorizeBilling(session.user)).access) {
     return subscriptionRequiredResponse()

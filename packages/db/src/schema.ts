@@ -28,6 +28,12 @@ export const user = pgTable('user', {
   previewAccess: boolean('preview_access').default(false).notNull(),
   previewAccessRequestedAt: timestamp('preview_access_requested_at'),
   usageMultiplier: integer('usage_multiplier').default(1).notNull(),
+  acceptedTerms: boolean('accepted_terms').default(false).notNull(),
+  acceptedPrivacy: boolean('accepted_privacy').default(false).notNull(),
+  termsAcceptedAt: timestamp('terms_accepted_at'),
+  privacyAcceptedAt: timestamp('privacy_accepted_at'),
+  termsVersion: text('terms_version'),
+  privacyVersion: text('privacy_version'),
   image: text('image'),
   createdAt: timestamp('created_at').defaultNow().notNull(),
   updatedAt: timestamp('updated_at')

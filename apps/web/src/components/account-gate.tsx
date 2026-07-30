@@ -4,6 +4,7 @@ import { CanvasApp } from '#/components/canvas/app'
 import { AuthScreen } from '#/components/auth-screen'
 import { PreviewAccessScreen } from '#/components/preview-access-screen'
 import { SubscriptionScreen } from '#/components/subscription-screen'
+import { LegalConsentScreen } from '#/components/legal-consent-screen'
 import {
   WelcomeDialog,
   hasSeenWelcome,
@@ -55,16 +56,18 @@ export function AccountGate({ children }: { children: ReactNode }) {
   }
 
   return (
-    <PreviewAccessScreen
-      userId={session.user.id}
-      preview={<CanvasApp preview />}
-    >
-      <SubscriptionScreen
+    <LegalConsentScreen preview={<CanvasApp preview />}>
+      <PreviewAccessScreen
         userId={session.user.id}
         preview={<CanvasApp preview />}
       >
-        {children}
-      </SubscriptionScreen>
-    </PreviewAccessScreen>
+        <SubscriptionScreen
+          userId={session.user.id}
+          preview={<CanvasApp preview />}
+        >
+          {children}
+        </SubscriptionScreen>
+      </PreviewAccessScreen>
+    </LegalConsentScreen>
   )
 }

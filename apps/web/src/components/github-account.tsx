@@ -38,7 +38,7 @@ export function GitHubAccount() {
 
   useEffect(() => {
     void load()
-    // Clear only the one-shot OAuth result flag; keep settings/integration URL state.
+    // Clear only the one-shot OAuth result flag; keep the selected integration.
     const url = new URL(window.location.href)
     if (url.searchParams.has('github')) {
       url.searchParams.delete('github')

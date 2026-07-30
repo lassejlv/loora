@@ -66,6 +66,11 @@ import {
   refreshBillingStatus,
 } from '@loora/billing/billing'
 import { canUseApp, isPreviewAccessRequired } from '@loora/auth/preview-access'
+import {
+  CURRENT_PRIVACY_VERSION,
+  CURRENT_TERMS_VERSION,
+  hasAcceptedCurrentLegal,
+} from '@loora/auth/legal-consent'
 import { sortCommitsOldestFirst, toHistoryPage } from './history'
 import {
   disconnectGitHub,
@@ -121,6 +126,11 @@ const draftTargetWhere = (draftId: string | null | undefined) =>
 
 const requireUser = os.$context<ORPCContext>().middleware(async ({ context, next }) => {
   if (!context.session) throw new ORPCError('UNAUTHORIZED')
+  if (!hasAcceptedCurrentLegal(context.session.user)) {
+    throw new ORPCError('FORBIDDEN', {
+      message: 'The current Terms of Service and Privacy Policy must be accepted.',
+    })
+  }
   if (!canUseApp(context.session.user)) {
     throw new ORPCError('FORBIDDEN', { message: 'Preview access is required.' })
   }
@@ -139,8 +149,25 @@ const requireSignedInUser = os.$context<ORPCContext>().middleware(async ({ conte
 
 const signedInProcedure = os.$context<ORPCContext>().use(requireSignedInUser)
 
+const requireConsentedUser = os.$context<ORPCContext>().middleware(async ({ context, next }) => {
+  if (!context.session) throw new ORPCError('UNAUTHORIZED')
+  if (!hasAcceptedCurrentLegal(context.session.user)) {
+    throw new ORPCError('FORBIDDEN', {
+      message: 'The current Terms of Service and Privacy Policy must be accepted.',
+    })
+  }
+  return next({ context: { user: context.session.user } })
+})
+
+const consentedProcedure = os.$context<ORPCContext>().use(requireConsentedUser)
+
 const requirePreviewUser = os.$context<ORPCContext>().middleware(async ({ context, next }) => {
   if (!context.session) throw new ORPCError('UNAUTHORIZED')
+  if (!hasAcceptedCurrentLegal(context.session.user)) {
+    throw new ORPCError('FORBIDDEN', {
+      message: 'The current Terms of Service and Privacy Policy must be accepted.',
+    })
+  }
   if (!canUseApp(context.session.user)) {
     throw new ORPCError('FORBIDDEN', { message: 'Preview access is required.' })
   }
@@ -151,6 +178,11 @@ const previewProcedure = os.$context<ORPCContext>().use(requirePreviewUser)
 
 const requireAdmin = os.$context<ORPCContext>().middleware(async ({ context, next }) => {
   if (!context.session) throw new ORPCError('UNAUTHORIZED')
+  if (!hasAcceptedCurrentLegal(context.session.user)) {
+    throw new ORPCError('FORBIDDEN', {
+      message: 'The current Terms of Service and Privacy Policy must be accepted.',
+    })
+  }
   if (!context.session.user.isAdmin) throw new ORPCError('FORBIDDEN')
   return next({ context: { user: context.session.user } })
 })
@@ -2153,7 +2185,7 @@ const disconnectGithub = protectedProcedure.handler(async ({ context }) => {
   }
 })
 
-const listMcpSessions = signedInProcedure.handler(async ({ context }) => {
+const listMcpSessions = consentedProcedure.handler(async ({ context }) => {
   const rows = await db
     .select({
       clientId: oauthAccessToken.clientId,
@@ -2176,7 +2208,7 @@ const listMcpSessions = signedInProcedure.handler(async ({ context }) => {
   return summarizeMcpSessions(rows)
 })
 
-const revokeMcpSession = signedInProcedure
+const revokeMcpSession = consentedProcedure
   .input(z.object({ clientId: z.string().min(1).max(256) }))
   .handler(async ({ context, input }) => {
     const [tokens, consents] = await Promise.all([
@@ -2205,7 +2237,60 @@ const revokeMcpSession = signedInProcedure
 
 const getAuthConfig = os.handler(() => ({ googleOAuthEnabled, githubEnabled }))
 
-const getPreviewAccess = signedInProcedure.handler(async ({ context }) => {
+const getLegalConsent = signedInProcedure.handler(async ({ context }) => {
+  const [account] = await db
+    .select({
+      acceptedTerms: user.acceptedTerms,
+      acceptedPrivacy: user.acceptedPrivacy,
+      termsAcceptedAt: user.termsAcceptedAt,
+      privacyAcceptedAt: user.privacyAcceptedAt,
+      termsVersion: user.termsVersion,
+      privacyVersion: user.privacyVersion,
+    })
+    .from(user)
+    .where(eq(user.id, context.user.id))
+    .limit(1)
+
+  if (!account) throw new ORPCError('UNAUTHORIZED')
+  return {
+    accepted: hasAcceptedCurrentLegal(account),
+    termsVersion: CURRENT_TERMS_VERSION,
+    privacyVersion: CURRENT_PRIVACY_VERSION,
+  }
+})
+
+const acceptLegal = signedInProcedure
+  .input(
+    z.object({
+      acceptedTerms: z.literal(true),
+      acceptedPrivacy: z.literal(true),
+    }),
+  )
+  .handler(async ({ context }) => {
+    const acceptedAt = new Date()
+    const [account] = await db
+      .update(user)
+      .set({
+        acceptedTerms: true,
+        acceptedPrivacy: true,
+        termsAcceptedAt: acceptedAt,
+        privacyAcceptedAt: acceptedAt,
+        termsVersion: CURRENT_TERMS_VERSION,
+        privacyVersion: CURRENT_PRIVACY_VERSION,
+        updatedAt: acceptedAt,
+      })
+      .where(eq(user.id, context.user.id))
+      .returning({ id: user.id })
+
+    if (!account) throw new ORPCError('UNAUTHORIZED')
+    return {
+      accepted: true,
+      termsVersion: CURRENT_TERMS_VERSION,
+      privacyVersion: CURRENT_PRIVACY_VERSION,
+    }
+  })
+
+const getPreviewAccess = consentedProcedure.handler(async ({ context }) => {
   const [account] = await db
     .select({
       isAdmin: user.isAdmin,
@@ -2225,7 +2310,7 @@ const getPreviewAccess = signedInProcedure.handler(async ({ context }) => {
   }
 })
 
-const requestPreviewAccess = signedInProcedure.handler(async ({ context }) => {
+const requestPreviewAccess = consentedProcedure.handler(async ({ context }) => {
   if (!isPreviewAccessRequired() || canUseApp(context.user)) {
     return { requested: false, granted: true }
   }
@@ -2258,7 +2343,7 @@ async function deleteUserAccountData(userId: string) {
   await db.delete(user).where(eq(user.id, userId))
 }
 
-const deleteAccount = signedInProcedure.handler(async ({ context }) => {
+const deleteAccount = consentedProcedure.handler(async ({ context }) => {
   await deleteUserAccountData(context.user.id)
   return { deleted: true }
 })
@@ -2389,6 +2474,8 @@ const savePreferences = protectedProcedure
 export const appRouter = {
   auth: {
     config: getAuthConfig,
+    legalConsent: getLegalConsent,
+    acceptLegal,
     previewAccess: getPreviewAccess,
     requestPreviewAccess,
     deleteAccount,

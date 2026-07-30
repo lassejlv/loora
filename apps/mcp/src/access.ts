@@ -2,6 +2,7 @@ import { eq } from 'drizzle-orm'
 import { db } from '@loora/db'
 import { user } from '@loora/db/schema'
 import { canUseApp } from '@loora/auth/preview-access'
+import { hasAcceptedCurrentLegal } from '@loora/auth/legal-consent'
 import { authorizeBilling } from '@loora/billing/billing'
 import type { McpUsagePlan } from '@loora/billing/mcp-usage'
 
@@ -13,6 +14,9 @@ export class AccessDeniedError extends Error {}
 export async function requireAppAccess(userId: string) {
   const [account] = await db.select().from(user).where(eq(user.id, userId)).limit(1)
   if (!account) throw new AccessDeniedError('Unknown user.')
+  if (!hasAcceptedCurrentLegal(account)) {
+    throw new AccessDeniedError('The current Terms of Service and Privacy Policy must be accepted.')
+  }
   if (!canUseApp(account)) throw new AccessDeniedError('Preview access is required.')
   const billing = await authorizeBilling(account)
   if (!billing.access) {

@@ -2,7 +2,9 @@ import { useEffect, useState } from 'react'
 import { authClient } from '@loora/auth/client'
 import { orpc } from '#/lib/orpc-client'
 import { Button } from '#/components/ui/button'
+import { Checkbox } from '#/components/ui/checkbox'
 import { Input } from '#/components/ui/input'
+import { Label } from '#/components/ui/label'
 import {
   Dialog,
   DialogDescription,
@@ -12,17 +14,23 @@ import {
   DialogTitle,
 } from '#/components/ui/dialog'
 import { Tabs, TabsList, TabsPanel, TabsTab } from '#/components/ui/tabs'
+import {
+  clearPendingLegalConsent,
+  markPendingLegalConsent,
+} from '#/lib/pending-legal-consent'
 
 export function AuthScreen() {
   const [mode, setMode] = useState<'sign-in' | 'sign-up'>('sign-in')
   const [name, setName] = useState('')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
+  const [acceptedLegal, setAcceptedLegal] = useState(false)
   const [pending, setPending] = useState(false)
   const [error, setError] = useState('')
   const [googleOAuthEnabled, setGoogleOAuthEnabled] = useState(false)
 
   useEffect(() => {
+    clearPendingLegalConsent()
     let cancelled = false
     orpc.auth
       .config()
@@ -73,7 +81,13 @@ export function AuthScreen() {
                     const result =
                       mode === 'sign-in'
                         ? await authClient.signIn.email({ email, password })
-                        : await authClient.signUp.email({ name, email, password })
+                        : await authClient.signUp.email({
+                            name,
+                            email,
+                            password,
+                            acceptedTerms: acceptedLegal,
+                            acceptedPrivacy: acceptedLegal,
+                          })
 
                     if (result.error) setError(result.error.message ?? 'Authentication failed')
                     setPending(false)
@@ -111,8 +125,42 @@ export function AuthScreen() {
                     onChange={(event) => setPassword(event.target.value)}
                     required
                   />
+                  {mode === 'sign-up' && (
+                    <Label className="items-start gap-2 py-1 text-xs leading-5">
+                      <Checkbox
+                        aria-label="Accept Terms of Service and Privacy Policy"
+                        checked={acceptedLegal}
+                        onCheckedChange={(checked) => setAcceptedLegal(checked === true)}
+                      />
+                      <span>
+                        I accept the{' '}
+                        <a
+                          className="underline underline-offset-2"
+                          href="/terms"
+                          rel="noreferrer"
+                          target="_blank"
+                        >
+                          Terms of Service
+                        </a>{' '}
+                        and acknowledge the{' '}
+                        <a
+                          className="underline underline-offset-2"
+                          href="/privacy"
+                          rel="noreferrer"
+                          target="_blank"
+                        >
+                          Privacy Policy
+                        </a>
+                        .
+                      </span>
+                    </Label>
+                  )}
                   {error && <p className="text-sm text-destructive-foreground">{error}</p>}
-                  <Button className="mt-1 rounded-lg" disabled={pending} type="submit">
+                  <Button
+                    className="mt-1 rounded-lg"
+                    disabled={pending || (mode === 'sign-up' && !acceptedLegal)}
+                    type="submit"
+                  >
                     {pending ? 'Working…' : mode === 'sign-in' ? 'Login' : 'Create account'}
                   </Button>
                 </form>
@@ -125,13 +173,14 @@ export function AuthScreen() {
                     </div>
                     <Button
                       className="w-full"
-                      disabled={pending}
+                      disabled={pending || (mode === 'sign-up' && !acceptedLegal)}
                       type="button"
                       variant="outline"
                       onClick={async () => {
                         setPending(true)
                         setError('')
                         try {
+                          if (mode === 'sign-up') markPendingLegalConsent()
                           const result = await authClient.signIn.social({
                             provider: 'google',
                             callbackURL: '/',

@@ -1,15 +1,13 @@
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, mock, test } from 'bun:test'
 import { createContext, useContext, type ReactNode } from 'react'
 import { withNuqsTestingAdapter } from 'nuqs/adapters/testing'
-
-const billingStatus = mock()
 
 const TabsContext = createContext('')
 
 mock.module('#/lib/orpc-client', () => ({
   orpc: {
-    billing: { status: billingStatus },
+    auth: { deleteAccount: mock() },
   },
 }))
 mock.module('@loora/auth/client', () => ({
@@ -25,7 +23,6 @@ mock.module('@loora/auth/client', () => ({
       },
     }),
     signOut: mock(),
-    customer: { portal: mock() },
   },
 }))
 mock.module('#/components/ui/tabs', () => ({
@@ -64,27 +61,15 @@ mock.module('#/components/ui/alert-dialog', () => ({
 
 const { SettingsPanel } = await import('./settings-panel')
 
-const disabledBilling = {
-  required: false,
-  access: true,
-  plan: null,
-  currentPeriodEnd: null,
-  cancelAtPeriodEnd: false,
-  trial: null,
-  stale: false,
-  source: 'disabled' as const,
-}
-
-function renderSettings(searchParams = '?settings=billing') {
+function renderSettings(searchParams = '?settings=account') {
   return render(
     <SettingsPanel shortcutConfig={{} as never} onShortcutConfigChange={() => {}} />,
     { wrapper: withNuqsTestingAdapter({ searchParams }) },
   )
 }
 
-describe('SettingsPanel billing visibility', () => {
+describe('SettingsPanel', () => {
   beforeEach(() => {
-    billingStatus.mockReset().mockResolvedValue(disabledBilling)
     window.localStorage.removeItem('loora:theme')
     document.documentElement.classList.remove('dark')
   })
@@ -95,30 +80,19 @@ describe('SettingsPanel billing visibility', () => {
     document.documentElement.classList.remove('dark')
   })
 
-  test('removes billing UI and falls back from a billing URL when billing is disabled', async () => {
+  test('keeps billing and integrations out of the dialog', async () => {
     renderSettings()
 
     expect(await screen.findByText('Signed in to loora.')).toBeTruthy()
     expect(screen.queryByRole('tab', { name: 'Billing' })).toBeNull()
-    expect(screen.queryByText(/Manage the plan/)).toBeNull()
+    expect(screen.queryByRole('tab', { name: 'Integrations' })).toBeNull()
   })
 
-  test('shows the billing tab when billing is required', async () => {
-    billingStatus.mockResolvedValue({ ...disabledBilling, required: true, source: 'cache' as const })
-    renderSettings('?settings=shortcuts')
-
-    await waitFor(() => expect(screen.getByRole('tab', { name: 'Billing' })).toBeTruthy())
-  })
-
-  // Children of the integrations panel are deliberately left unmocked: this file
-  // renders before their own suites, and `mock.module` is process-global, so a
-  // stub here would leak into `mcp-sessions.test.tsx` and friends.
   test('offers no agent tab', async () => {
     renderSettings('?settings=shortcuts')
 
     expect(await screen.findByRole('tab', { name: 'Shortcuts' })).toBeTruthy()
     expect(screen.queryByRole('tab', { name: 'Agent' })).toBeNull()
-    expect(screen.getByRole('tab', { name: 'Integrations' })).toBeTruthy()
   })
 
   test('applies and persists the selected appearance', async () => {

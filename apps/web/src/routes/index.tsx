@@ -17,7 +17,28 @@ export const Route = createFileRoute('/')({
         : typeof params.d === 'string'
           ? params.d
           : null
-    if (!id) return
+    if (!id) {
+      const settings = typeof params.settings === 'string' ? params.settings : null
+      if (settings === 'billing') {
+        throw redirect({ to: '/app/billing' })
+      }
+      const legacyIntegration =
+        settings === 'github' || settings === 'mcp'
+          ? settings
+          : settings === 'integrations' &&
+              (params.integration === 'github' || params.integration === 'mcp')
+            ? params.integration
+            : null
+      if (settings === 'integrations' || legacyIntegration) {
+        throw redirect({
+          to: '/app/integrations',
+          search: legacyIntegration
+            ? { integration: legacyIntegration }
+            : {},
+        })
+      }
+      return
+    }
     const draft = typeof params.draft === 'string' ? params.draft : null
     if (draft) {
       throw redirect({

@@ -28,6 +28,7 @@ import {
   CommandIcon as HugeCommandIcon,
   ComponentIcon as HugeComponentIcon,
   Copy01Icon as HugeCopyIcon,
+  CreditCardIcon as HugeCreditCardIcon,
   Cursor01Icon as HugeMousePointerIcon,
   Delete02Icon as HugeTrashIcon,
   Download01Icon as HugeDownloadIcon,
@@ -181,6 +182,7 @@ export const CodeXmlIcon = createIcon(HugeCodeXmlIcon, 'CodeXmlIcon')
 export const CommandIcon = createIcon(HugeCommandIcon, 'CommandIcon')
 export const ComponentIcon = createIcon(HugeComponentIcon, 'ComponentIcon')
 export const CopyIcon = createIcon(HugeCopyIcon, 'CopyIcon')
+export const CreditCardIcon = createIcon(HugeCreditCardIcon, 'CreditCardIcon')
 export const DownloadIcon = createIcon(HugeDownloadIcon, 'DownloadIcon')
 export const EllipsisIcon = createIcon(HugeEllipsisIcon, 'EllipsisIcon')
 export const ExternalLinkIcon = createIcon(HugeExternalLinkIcon, 'ExternalLinkIcon')

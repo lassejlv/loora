@@ -5,19 +5,16 @@ import {
   parseAsStringLiteral,
 } from 'nuqs'
 
-export const SETTINGS_TABS = ['account', 'integrations', 'billing', 'shortcuts', 'admin'] as const
+export const SETTINGS_TABS = ['account', 'shortcuts', 'admin'] as const
 export type SettingsTab = (typeof SETTINGS_TABS)[number]
 
 export const INTEGRATION_TABS = ['github', 'mcp'] as const
 export type IntegrationTab = (typeof INTEGRATION_TABS)[number]
 
-const INTEGRATION_SETTINGS = new Set<string>(INTEGRATION_TABS)
-
 export const editorSearchParams = {
   d: parseAsString,
   draft: parseAsString,
   settings: parseAsStringLiteral(SETTINGS_TABS),
-  integration: parseAsStringLiteral(INTEGRATION_TABS),
   layers: parseAsBoolean.withDefault(false),
   assets: parseAsBoolean.withDefault(false),
   history: parseAsBoolean.withDefault(false),
@@ -27,6 +24,16 @@ export const editorSearchParams = {
 export const editorValidateSearch = createStandardSchemaV1(editorSearchParams, {
   partialOutput: true,
 })
+
+export const integrationsSearchParams = {
+  integration: parseAsStringLiteral(INTEGRATION_TABS),
+  github: parseAsString,
+}
+
+export const integrationsValidateSearch = createStandardSchemaV1(
+  integrationsSearchParams,
+  { partialOutput: true },
+)
 
 /**
  * `/design/$id` keys the open document from the path. The deep-link keys below
@@ -58,7 +65,6 @@ export type EditorSearchParams = {
   d: string | null
   draft: string | null
   settings: SettingsTab | null
-  integration: IntegrationTab | null
   layers: boolean
   assets: boolean
   history: boolean
@@ -69,7 +75,6 @@ export type EditorSearchParams = {
 export function bootstrapEditorSearch(activeId: string): Partial<{
   d: string
   settings: SettingsTab
-  integration: IntegrationTab
   layers: boolean
 }> {
   if (typeof window === 'undefined') return {}
@@ -77,21 +82,11 @@ export function bootstrapEditorSearch(activeId: string): Partial<{
   const patch: Partial<{
     d: string
     settings: SettingsTab
-    integration: IntegrationTab
     layers: boolean
   }> = {}
 
   const settingsRaw = raw.get('settings')
-  if (settingsRaw && INTEGRATION_SETTINGS.has(settingsRaw)) {
-    patch.settings = 'integrations'
-    patch.integration = settingsRaw as IntegrationTab
-  } else if (settingsRaw === 'integrations') {
-    patch.settings = 'integrations'
-    const integrationRaw = raw.get('integration')
-    if (integrationRaw && INTEGRATION_SETTINGS.has(integrationRaw)) {
-      patch.integration = integrationRaw as IntegrationTab
-    }
-  } else if (settingsRaw && (SETTINGS_TABS as readonly string[]).includes(settingsRaw)) {
+  if (settingsRaw && (SETTINGS_TABS as readonly string[]).includes(settingsRaw)) {
     patch.settings = settingsRaw as SettingsTab
   }
 

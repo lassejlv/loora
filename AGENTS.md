@@ -41,6 +41,8 @@ packages/billing  Polar plan access / entitlements (`@loora/billing`)
 |-------|-------|
 | `/` | Public landing |
 | `/app` | Design file browser (via `AccountGate`) |
+| `/app/billing` | Plan and subscription management |
+| `/app/integrations` | MCP sessions and connected external accounts |
 | `/design/$id` | Editor on Main. Route supplies `designId` and remounts on change — the editor never picks a document itself. |
 | `/design/$id/b/$branchId` | Editor on an active branch. |
 | `/api/rpc/$` | oRPC |

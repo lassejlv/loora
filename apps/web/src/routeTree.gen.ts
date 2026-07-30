@@ -14,11 +14,15 @@ import { Route as FeaturesRouteImport } from './routes/features'
 import { Route as McpRouteImport } from './routes/mcp'
 import { Route as McpConsentRouteImport } from './routes/mcp-consent'
 import { Route as PricingRouteImport } from './routes/pricing'
+import { Route as PrivacyRouteImport } from './routes/privacy'
+import { Route as TermsRouteImport } from './routes/terms'
 import { Route as DotwellKnownOauthAuthorizationServerRouteImport } from './routes/[.]well-known.oauth-authorization-server'
 import { Route as ApiCanvasEventsRouteImport } from './routes/api.canvas-events'
 import { Route as ApiReadyRouteImport } from './routes/api.ready'
 import { Route as AppIndexRouteImport } from './routes/app.index'
+import { Route as AppBillingRouteImport } from './routes/app.billing'
 import { Route as AppDesignRouteImport } from './routes/app.design'
+import { Route as AppIntegrationsRouteImport } from './routes/app.integrations'
 import { Route as DesignIdRouteImport } from './routes/design.$id'
 import { Route as ApiAssetIdRouteImport } from './routes/api.asset.$id'
 import { Route as ApiAuthSplatRouteImport } from './routes/api.auth.$'
@@ -57,6 +61,16 @@ const PricingRoute = PricingRouteImport.update({
   path: '/pricing',
   getParentRoute: () => rootRouteImport,
 } as any)
+const PrivacyRoute = PrivacyRouteImport.update({
+  id: '/privacy',
+  path: '/privacy',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const TermsRoute = TermsRouteImport.update({
+  id: '/terms',
+  path: '/terms',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const DotwellKnownOauthAuthorizationServerRoute =
   DotwellKnownOauthAuthorizationServerRouteImport.update({
     id: '/.well-known/oauth-authorization-server',
@@ -78,9 +92,19 @@ const AppIndexRoute = AppIndexRouteImport.update({
   path: '/app/',
   getParentRoute: () => rootRouteImport,
 } as any)
+const AppBillingRoute = AppBillingRouteImport.update({
+  id: '/app/billing',
+  path: '/app/billing',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const AppDesignRoute = AppDesignRouteImport.update({
   id: '/app/design',
   path: '/app/design',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AppIntegrationsRoute = AppIntegrationsRouteImport.update({
+  id: '/app/integrations',
+  path: '/app/integrations',
   getParentRoute: () => rootRouteImport,
 } as any)
 const DesignIdRoute = DesignIdRouteImport.update({
@@ -150,10 +174,14 @@ export interface FileRoutesByFullPath {
   '/mcp': typeof McpRoute
   '/mcp-consent': typeof McpConsentRoute
   '/pricing': typeof PricingRoute
+  '/privacy': typeof PrivacyRoute
+  '/terms': typeof TermsRoute
   '/.well-known/oauth-authorization-server': typeof DotwellKnownOauthAuthorizationServerRoute
   '/api/canvas-events': typeof ApiCanvasEventsRoute
   '/api/ready': typeof ApiReadyRoute
+  '/app/billing': typeof AppBillingRoute
   '/app/design': typeof AppDesignRoute
+  '/app/integrations': typeof AppIntegrationsRoute
   '/design/$id': typeof DesignIdRoute
   '/app/': typeof AppIndexRoute
   '/api/asset/$id': typeof ApiAssetIdRoute
@@ -174,10 +202,14 @@ export interface FileRoutesByTo {
   '/mcp': typeof McpRoute
   '/mcp-consent': typeof McpConsentRoute
   '/pricing': typeof PricingRoute
+  '/privacy': typeof PrivacyRoute
+  '/terms': typeof TermsRoute
   '/.well-known/oauth-authorization-server': typeof DotwellKnownOauthAuthorizationServerRoute
   '/api/canvas-events': typeof ApiCanvasEventsRoute
   '/api/ready': typeof ApiReadyRoute
+  '/app/billing': typeof AppBillingRoute
   '/app/design': typeof AppDesignRoute
+  '/app/integrations': typeof AppIntegrationsRoute
   '/design/$id': typeof DesignIdRoute
   '/app': typeof AppIndexRoute
   '/api/asset/$id': typeof ApiAssetIdRoute
@@ -199,10 +231,14 @@ export interface FileRoutesById {
   '/mcp': typeof McpRoute
   '/mcp-consent': typeof McpConsentRoute
   '/pricing': typeof PricingRoute
+  '/privacy': typeof PrivacyRoute
+  '/terms': typeof TermsRoute
   '/.well-known/oauth-authorization-server': typeof DotwellKnownOauthAuthorizationServerRoute
   '/api/canvas-events': typeof ApiCanvasEventsRoute
   '/api/ready': typeof ApiReadyRoute
+  '/app/billing': typeof AppBillingRoute
   '/app/design': typeof AppDesignRoute
+  '/app/integrations': typeof AppIntegrationsRoute
   '/design/$id': typeof DesignIdRoute
   '/app/': typeof AppIndexRoute
   '/api/asset/$id': typeof ApiAssetIdRoute
@@ -225,10 +261,14 @@ export interface FileRouteTypes {
     | '/mcp'
     | '/mcp-consent'
     | '/pricing'
+    | '/privacy'
+    | '/terms'
     | '/.well-known/oauth-authorization-server'
     | '/api/canvas-events'
     | '/api/ready'
+    | '/app/billing'
     | '/app/design'
+    | '/app/integrations'
     | '/design/$id'
     | '/app/'
     | '/api/asset/$id'
@@ -249,10 +289,14 @@ export interface FileRouteTypes {
     | '/mcp'
     | '/mcp-consent'
     | '/pricing'
+    | '/privacy'
+    | '/terms'
     | '/.well-known/oauth-authorization-server'
     | '/api/canvas-events'
     | '/api/ready'
+    | '/app/billing'
     | '/app/design'
+    | '/app/integrations'
     | '/design/$id'
     | '/app'
     | '/api/asset/$id'
@@ -273,10 +317,14 @@ export interface FileRouteTypes {
     | '/mcp'
     | '/mcp-consent'
     | '/pricing'
+    | '/privacy'
+    | '/terms'
     | '/.well-known/oauth-authorization-server'
     | '/api/canvas-events'
     | '/api/ready'
+    | '/app/billing'
     | '/app/design'
+    | '/app/integrations'
     | '/design/$id'
     | '/app/'
     | '/api/asset/$id'
@@ -298,10 +346,14 @@ export interface RootRouteChildren {
   McpRoute: typeof McpRoute
   McpConsentRoute: typeof McpConsentRoute
   PricingRoute: typeof PricingRoute
+  PrivacyRoute: typeof PrivacyRoute
+  TermsRoute: typeof TermsRoute
   DotwellKnownOauthAuthorizationServerRoute: typeof DotwellKnownOauthAuthorizationServerRoute
   ApiCanvasEventsRoute: typeof ApiCanvasEventsRoute
   ApiReadyRoute: typeof ApiReadyRoute
+  AppBillingRoute: typeof AppBillingRoute
   AppDesignRoute: typeof AppDesignRoute
+  AppIntegrationsRoute: typeof AppIntegrationsRoute
   DesignIdRoute: typeof DesignIdRoute
   AppIndexRoute: typeof AppIndexRoute
   ApiAssetIdRoute: typeof ApiAssetIdRoute
@@ -353,6 +405,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof PricingRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/privacy': {
+      id: '/privacy'
+      path: '/privacy'
+      fullPath: '/privacy'
+      preLoaderRoute: typeof PrivacyRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/terms': {
+      id: '/terms'
+      path: '/terms'
+      fullPath: '/terms'
+      preLoaderRoute: typeof TermsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/.well-known/oauth-authorization-server': {
       id: '/.well-known/oauth-authorization-server'
       path: '/.well-known/oauth-authorization-server'
@@ -381,11 +447,25 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppIndexRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/app/billing': {
+      id: '/app/billing'
+      path: '/app/billing'
+      fullPath: '/app/billing'
+      preLoaderRoute: typeof AppBillingRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/app/design': {
       id: '/app/design'
       path: '/app/design'
       fullPath: '/app/design'
       preLoaderRoute: typeof AppDesignRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/app/integrations': {
+      id: '/app/integrations'
+      path: '/app/integrations'
+      fullPath: '/app/integrations'
+      preLoaderRoute: typeof AppIntegrationsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/design/$id': {
@@ -493,11 +573,15 @@ const rootRouteChildren: RootRouteChildren = {
   McpRoute: McpRoute,
   McpConsentRoute: McpConsentRoute,
   PricingRoute: PricingRoute,
+  PrivacyRoute: PrivacyRoute,
+  TermsRoute: TermsRoute,
   DotwellKnownOauthAuthorizationServerRoute:
     DotwellKnownOauthAuthorizationServerRoute,
   ApiCanvasEventsRoute: ApiCanvasEventsRoute,
   ApiReadyRoute: ApiReadyRoute,
+  AppBillingRoute: AppBillingRoute,
   AppDesignRoute: AppDesignRoute,
+  AppIntegrationsRoute: AppIntegrationsRoute,
   DesignIdRoute: DesignIdRoute,
   AppIndexRoute: AppIndexRoute,
   ApiAssetIdRoute: ApiAssetIdRoute,

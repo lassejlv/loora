@@ -86,7 +86,8 @@ describe('DesignsDashboard', () => {
   test('lists files most recently edited first and links each to its canvas', async () => {
     render(<DesignsDashboard />)
 
-    const links = await screen.findAllByRole('link')
+    await screen.findByText('Ideal pine')
+    const links = screen.getAllByRole('link', { name: /^Open / })
     expect(links.map((link) => link.getAttribute('aria-label'))).toEqual([
       'Open Ideal pine',
       'Open Portfolio Design',
