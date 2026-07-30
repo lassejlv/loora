@@ -246,6 +246,13 @@
       "when": 1785377203380,
       "tag": "0034_mature_peter_parker",
       "breakpoints": true
+    },
+    {
+      "idx": 35,
+      "version": "7",
+      "when": 1785421061785,
+      "tag": "0035_panoramic_mister_fear",
+      "breakpoints": true
     }
   ]
 }

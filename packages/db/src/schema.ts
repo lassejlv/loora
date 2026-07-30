@@ -289,39 +289,8 @@ export const canvasTransaction = pgTable(
   ],
 )
 
-export const canvasAgentActivity = pgTable(
-  'canvas_agent_activity',
-  {
-    id: text('id').notNull(),
-    designId: text('design_id').notNull(),
-    userId: text('user_id').notNull(),
-    targetKey: text('target_key').notNull(),
-    label: text('label').notNull(),
-    nodeIds: jsonb('node_ids').$type<string[]>().default([]).notNull(),
-    phase: text('phase')
-      .$type<'working' | 'settled'>()
-      .default('working')
-      .notNull(),
-    startedAt: timestamp('started_at').defaultNow().notNull(),
-    updatedAt: timestamp('updated_at').defaultNow().notNull(),
-    expiresAt: timestamp('expires_at').notNull(),
-  },
-  (table) => [
-    primaryKey({ columns: [table.id, table.userId] }),
-    foreignKey({
-      columns: [table.designId, table.userId],
-      foreignColumns: [design.id, design.userId],
-      name: 'canvas_agent_activity_design_fk',
-    }).onDelete('cascade'),
-    index('canvas_agent_activity_target_idx').on(
-      table.userId,
-      table.designId,
-      table.targetKey,
-      table.expiresAt,
-    ),
-    index('canvas_agent_activity_expires_idx').on(table.expiresAt),
-  ],
-)
+/* Agent activity used to be a table here. It is ephemeral presence, not
+   history, so it lives in Redis with a TTL — see `canvas-realtime.ts`. */
 
 export const designChat = pgTable(
   'design_chat',

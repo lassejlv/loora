@@ -9,6 +9,7 @@ import {
   AlignStartHorizontalIcon as HugeAlignStartHorizontalIcon,
   AlignStartVerticalIcon as HugeAlignStartVerticalIcon,
   AlignVerticalCenterIcon as HugeAlignCenterVerticalIcon,
+  BotIcon as HugeBotIcon,
   BracesIcon as HugeBracesIcon,
   BringToFrontIcon as HugeBringToFrontIcon,
   Cancel01Icon as HugeXIcon,
@@ -157,6 +158,7 @@ export const AlignStartVerticalIcon = createIcon(
   HugeAlignStartVerticalIcon,
   'AlignStartVerticalIcon',
 )
+export const BotIcon = createIcon(HugeBotIcon, 'BotIcon')
 export const BracesIcon = createIcon(HugeBracesIcon, 'BracesIcon')
 export const BringToFrontIcon = createIcon(HugeBringToFrontIcon, 'BringToFrontIcon')
 export const CheckIcon = createIcon(HugeCheckIcon, 'CheckIcon')

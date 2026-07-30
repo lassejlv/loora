@@ -916,16 +916,26 @@ export class CanvasSyncController {
       ? { ...activity, nodeIds: [...activity.nodeIds] }
       : null
     if (activity) {
-      const fallbackTtl =
-        activity.phase === 'settled' ? 2_600 : 30_000
-      const expiresAt =
-        activity.expiresAt ?? activity.updatedAt + fallbackTtl
-      this.#activityTimer = setTimeout(() => {
-        this.#activityTimer = null
-        this.#setAgentActivity(null)
-      }, Math.max(0, expiresAt - Date.now()))
+      // Both timestamps come from the server, so their difference is the real
+      // lifetime even when this machine's clock disagrees. `expiresAt` is
+      // trusted only when it lands inside that window.
+      const fallbackTtl = activity.phase === 'settled' ? 8_000 : 30_000
+      const ttl = activity.expiresAt
+        ? Math.max(0, activity.expiresAt - activity.updatedAt)
+        : fallbackTtl
+      const remaining = activity.expiresAt ? activity.expiresAt - Date.now() : 0
+      this.#activityTimer = setTimeout(
+        () => {
+          this.#activityTimer = null
+          this.#setAgentActivity(null)
+        },
+        remaining > 0 && remaining <= ttl ? remaining : ttl,
+      )
     }
-    this.#emit()
+    // Agent activity rides the presence channel: it now changes on every tool
+    // call, and waking every panel in the editor for that is the same mistake
+    // cursors used to make.
+    this.#emitPresence()
   }
 
   #online = () => {

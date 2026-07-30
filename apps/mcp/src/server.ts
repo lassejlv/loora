@@ -60,6 +60,7 @@ import {
   reopenDraft,
   proposeDraft,
 } from './designs'
+import { trackAgentActivity } from './agent-activity'
 import { renderCanvasScreenshot } from './screenshot'
 import {
   McpUsageLimitError,
@@ -211,19 +212,28 @@ export function createLooraServer(
 ) {
   const server = new McpServer({ name: 'loora', version: '0.3.0' })
 
-  function tool<Args>(run: (args: Args) => Promise<unknown>) {
+  /**
+   * Every design-scoped call announces itself before it runs and settles when
+   * it returns, so the editor shows one continuous agent for a whole run
+   * instead of a marker that appears only while a write is in flight.
+   */
+  function tool<Args>(name: string, run: (args: Args) => Promise<unknown>) {
     return async (args: Args) => {
       let currentUsage: McpIncludedUsage | undefined
+      const activity = trackAgentActivity(userId, name, args)
       try {
         currentUsage = await usage.reserve()
         return json(await run(args), currentUsage)
       } catch (error) {
         return fail(error, currentUsage)
+      } finally {
+        activity?.end()
       }
     }
   }
 
   function pngTool<Args>(
+    name: string,
     run: (args: Args) => Promise<{
       png: Uint8Array
       metadata: unknown
@@ -231,6 +241,7 @@ export function createLooraServer(
   ) {
     return async (args: Args) => {
       let currentUsage: McpIncludedUsage | undefined
+      const activity = trackAgentActivity(userId, name, args)
       try {
         currentUsage = await usage.reserve()
         const result = await run(args)
@@ -250,6 +261,8 @@ export function createLooraServer(
         }
       } catch (error) {
         return fail(error, currentUsage)
+      } finally {
+        activity?.end()
       }
     }
   }
@@ -278,7 +291,7 @@ export function createLooraServer(
         'Start here. List the signed-in user’s structured Loora designs and canonical editor URLs.',
       annotations: { readOnlyHint: true },
     },
-    tool(async (_args: unknown) =>
+    tool('listDesigns', async (_args: unknown) =>
       (await listDesigns(userId)).map((design) => ({
         ...design,
         openUrl: appUrl(design.id),
@@ -297,7 +310,7 @@ export function createLooraServer(
       },
       annotations: { readOnlyHint: true },
     },
-    tool(
+    tool('getDesignContext',
       async (args: {
         designId: string
         draftId?: string
@@ -362,7 +375,7 @@ export function createLooraServer(
       },
       annotations: { readOnlyHint: true },
     },
-    tool(
+    tool('readTree',
       async (args: {
         designId: string
         draftId?: string
@@ -390,7 +403,7 @@ export function createLooraServer(
       inputSchema: { ...targetShape, ref: readNodeInputSchema.shape.ref },
       annotations: { readOnlyHint: true },
     },
-    tool(
+    tool('readNode',
       async (args: {
         designId: string
         draftId?: string
@@ -416,7 +429,7 @@ export function createLooraServer(
       },
       annotations: { readOnlyHint: true },
     },
-    tool(
+    tool('searchNodes',
       async (args: {
         designId: string
         draftId?: string
@@ -439,7 +452,7 @@ export function createLooraServer(
         'Create an editable responsive Page with typed local state and nested structured nodes in one engine transaction. Event interactions can set, toggle, or increment state, switch any named visual theme, and react through conditional state-change rules. Model normal Tailwind layouts with flex/grid, gap, padding, fill, and hug; use absolute positioning only intentionally.',
       inputSchema: { ...targetShape, ...createPageInputSchema.shape },
     },
-    tool(
+    tool('createPage',
       async (args: z.infer<typeof createPageInputSchema> & {
         designId: string
         draftId?: string
@@ -466,7 +479,7 @@ export function createLooraServer(
         'Insert nested structured nodes through the Canvas engine. Think in Tailwind layout terms, then express them as validated layout/style fields. Temporary refs are mapped to permanent ids; source code is export-only.',
       inputSchema: { ...targetShape, ...insertNodesInputSchema.shape },
     },
-    tool(
+    tool('insertNodes',
       async (args: z.infer<typeof insertNodesInputSchema> & {
         designId: string
         draftId?: string
@@ -502,7 +515,7 @@ export function createLooraServer(
         'Patch structured layout, visual, text, responsive, variant, typed Page/component state, and declarative event interaction fields atomically through the Canvas engine. Events may switch any named visual theme; runtime state and the selected runtime theme stay ephemeral.',
       inputSchema: { ...targetShape, ...patchNodesInputSchema.shape },
     },
-    tool(
+    tool('patchNodes',
       async (args: z.infer<typeof patchNodesInputSchema> & {
         designId: string
         draftId?: string
@@ -532,7 +545,7 @@ export function createLooraServer(
       description: 'Move or reorder source nodes atomically.',
       inputSchema: { ...targetShape, ...moveNodesInputSchema.shape },
     },
-    tool(
+    tool('moveNodes',
       async (args: z.infer<typeof moveNodesInputSchema> & {
         designId: string
         draftId?: string
@@ -579,7 +592,7 @@ export function createLooraServer(
       },
       annotations: { destructiveHint: true },
     },
-    tool(
+    tool('deleteNodes',
       async (args: z.infer<typeof deleteNodesInputSchema> & {
         designId: string
         draftId?: string
@@ -621,7 +634,7 @@ export function createLooraServer(
         'Create an off-canvas reusable component definition with optional instance-local typed state and declarative event interactions, including scoped named-theme switching.',
       inputSchema: { ...targetShape, ...createComponentInputSchema.shape },
     },
-    tool(
+    tool('createComponent',
       async (args: z.infer<typeof createComponentInputSchema> & {
         designId: string
         draftId?: string
@@ -647,7 +660,7 @@ export function createLooraServer(
       description: 'Create an instance of an existing component.',
       inputSchema: { ...targetShape, ...createInstanceInputSchema.shape },
     },
-    tool(
+    tool('createInstance',
       async (args: z.infer<typeof createInstanceInputSchema> & {
         designId: string
         draftId?: string
@@ -699,7 +712,7 @@ export function createLooraServer(
         'Create or update named visual themes and structured design tokens. Put per-theme token values in modes keyed by theme id, then use set-theme event actions to switch them at runtime.',
       inputSchema: { ...targetShape, ...setTokensInputSchema.shape },
     },
-    tool(
+    tool('setTokens',
       async (args: z.infer<typeof setTokensInputSchema> & {
         designId: string
         draftId?: string
@@ -734,7 +747,7 @@ export function createLooraServer(
       },
       annotations: { readOnlyHint: true },
     },
-    tool(
+    tool('exportCode',
       async (args: {
         designId: string
         draftId?: string
@@ -792,7 +805,7 @@ export function createLooraServer(
       },
       annotations: { readOnlyHint: true, openWorldHint: false },
     },
-    pngTool(
+    pngTool('getScreenshot',
       async (args: {
         designId: string
         draftId?: string
@@ -843,7 +856,7 @@ export function createLooraServer(
       inputSchema: { ...targetShape, ...viewNodeInputSchema.shape },
       annotations: { readOnlyHint: true },
     },
-    tool(
+    tool('viewNode',
       async (args: z.infer<typeof viewNodeInputSchema> & {
         designId: string
         draftId?: string
@@ -870,7 +883,7 @@ export function createLooraServer(
       inputSchema: { ...targetShape, ...viewPageInputSchema.shape },
       annotations: { readOnlyHint: true },
     },
-    tool(
+    tool('viewPage',
       async (args: z.infer<typeof viewPageInputSchema> & {
         designId: string
         draftId?: string
@@ -899,7 +912,7 @@ export function createLooraServer(
       inputSchema: { ...targetShape, ...viewCanvasInputSchema.shape },
       annotations: { readOnlyHint: true },
     },
-    tool(
+    tool('viewCanvas',
       async (args: z.infer<typeof viewCanvasInputSchema> & {
         designId: string
         draftId?: string
@@ -925,7 +938,9 @@ export function createLooraServer(
         name: z.string().trim().min(1).max(MAX_NAME_LENGTH),
       },
     },
-    tool(async ({ name }: { name: string }) => createDesign(userId, name)),
+    tool('createDesign', async ({ name }: { name: string }) =>
+      createDesign(userId, name),
+    ),
   )
 
   server.registerTool(
@@ -937,7 +952,7 @@ export function createLooraServer(
         name: z.string().trim().min(1).max(MAX_NAME_LENGTH),
       },
     },
-    tool((args: { designId: string; name: string }) =>
+    tool('renameDesign', (args: { designId: string; name: string }) =>
       renameDesign(userId, args.designId, args.name),
     ),
   )
@@ -949,9 +964,12 @@ export function createLooraServer(
       inputSchema: { designId, confirmed: z.literal(true) },
       annotations: { destructiveHint: true },
     },
-    tool(async ({ designId }: { designId: string; confirmed: true }) => ({
-      deleted: await deleteDesign(userId, designId),
-    })),
+    tool(
+      'deleteDesign',
+      async ({ designId }: { designId: string; confirmed: true }) => ({
+        deleted: await deleteDesign(userId, designId),
+      }),
+    ),
   )
 
   server.registerTool(
@@ -960,7 +978,9 @@ export function createLooraServer(
       description: 'List branches. Branch state is separate from the canvas package.',
       inputSchema: { designId },
     },
-    tool(({ designId }: { designId: string }) => listDrafts(userId, designId)),
+    tool('listBranches', ({ designId }: { designId: string }) =>
+      listDrafts(userId, designId),
+    ),
   )
 
   server.registerTool(
@@ -972,7 +992,7 @@ export function createLooraServer(
         name: z.string().trim().min(1).max(MAX_NAME_LENGTH),
       },
     },
-    tool((args: { designId: string; name: string }) =>
+    tool('createBranch', (args: { designId: string; name: string }) =>
       createDraft(userId, args.designId, args.name),
     ),
   )
@@ -987,8 +1007,10 @@ export function createLooraServer(
         description: z.string().trim().max(2_000).default(''),
       },
     },
-    tool((args: { designId: string; draftId: string; description: string }) =>
-      proposeDraft(userId, args.designId, args.draftId, args.description),
+    tool(
+      'proposeBranch',
+      (args: { designId: string; draftId: string; description: string }) =>
+        proposeDraft(userId, args.designId, args.draftId, args.description),
     ),
   )
 
@@ -998,7 +1020,7 @@ export function createLooraServer(
       description: 'Return a proposed branch to editable status.',
       inputSchema: { designId, draftId },
     },
-    tool((args: { designId: string; draftId: string }) =>
+    tool('reopenBranch', (args: { designId: string; draftId: string }) =>
       reopenDraft(userId, args.designId, args.draftId),
     ),
   )
@@ -1009,7 +1031,7 @@ export function createLooraServer(
       description: 'Compare a branch with Main using field-level semantic merge.',
       inputSchema: { designId, draftId },
     },
-    tool((args: { designId: string; draftId: string }) =>
+    tool('compareBranch', (args: { designId: string; draftId: string }) =>
       compareDraft(userId, args.designId, args.draftId),
     ),
   )
@@ -1029,7 +1051,7 @@ export function createLooraServer(
           .default({}),
       },
     },
-    tool(
+    tool('applyBranch',
       (args: {
         designId: string
         draftId: string
@@ -1055,8 +1077,10 @@ export function createLooraServer(
       inputSchema: { designId, draftId, confirmed: z.literal(true) },
       annotations: { destructiveHint: true },
     },
-    tool((args: { designId: string; draftId: string; confirmed: true }) =>
-      closeDraft(userId, args.designId, args.draftId),
+    tool(
+      'closeBranch',
+      (args: { designId: string; draftId: string; confirmed: true }) =>
+        closeDraft(userId, args.designId, args.draftId),
     ),
   )
 
@@ -1069,15 +1093,17 @@ export function createLooraServer(
         limit: z.number().int().min(1).max(50).default(20),
       },
     },
-    tool((args: { designId: string; draftId?: string; limit: number }) =>
-      listVersions(userId, args.designId, args.limit, args.draftId),
+    tool(
+      'listVersions',
+      (args: { designId: string; draftId?: string; limit: number }) =>
+        listVersions(userId, args.designId, args.limit, args.draftId),
     ),
   )
 
   server.registerTool(
     'listAssets',
     { description: 'List the signed-in user’s uploaded image assets.' },
-    tool(async (_args: unknown) => listAssets(userId)),
+    tool('listAssets', async (_args: unknown) => listAssets(userId)),
   )
 
   return server

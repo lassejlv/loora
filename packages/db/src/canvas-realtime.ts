@@ -258,6 +258,86 @@ function presenceKey(userId: string, target: CanvasRealtimeTarget) {
   return `${canvasRealtimeChannel(userId, target)}:presence`
 }
 
+function agentActivityKey(userId: string, target: CanvasRealtimeTarget) {
+  return `${canvasRealtimeChannel(userId, target)}:agent`
+}
+
+/** A tool call is running. Long enough to cover a slow render. */
+export const AGENT_ACTIVITY_WORKING_TTL_MS = 30_000
+/** The gap between two tool calls, so the badge does not blink per call. */
+export const AGENT_ACTIVITY_SETTLED_TTL_MS = 8_000
+
+/**
+ * What an external agent is doing right now. This is ephemeral state, so it
+ * lives in Redis with a TTL rather than in Postgres: a tool call pays one
+ * pipelined round trip instead of three statements, and an agent that died
+ * mid-run stops being drawn on its own.
+ */
+export async function publishCanvasAgentActivity(
+  userId: string,
+  target: CanvasRealtimeTarget,
+  current: CanvasRealtimeActivity | null,
+) {
+  const url = redisUrl()
+  if (!url) return false
+  const key = agentActivityKey(userId, target)
+  try {
+    const client = await connectedPublisher(url)
+    const write = current
+      ? client.send('SET', [
+          key,
+          JSON.stringify(current),
+          'PX',
+          String(
+            Math.max(1_000, Math.round(current.expiresAt - current.updatedAt)),
+          ),
+        ])
+      : client.send('DEL', [key])
+    await Promise.all([
+      write,
+      client.publish(
+        canvasRealtimeChannel(userId, target),
+        JSON.stringify({
+          type: 'agent.activity',
+          activity: current,
+          sentAt: Date.now(),
+        }),
+      ),
+    ])
+    return true
+  } catch {
+    publisher?.close()
+    publisher = null
+    return false
+  }
+}
+
+/** For a tab that opens while an agent is already working. */
+export async function readCanvasAgentActivity(
+  userId: string,
+  target: CanvasRealtimeTarget,
+): Promise<CanvasRealtimeActivity | null> {
+  const url = redisUrl()
+  if (!url) return null
+  let value: unknown
+  try {
+    const client = await connectedPublisher(url)
+    value = await client.get(agentActivityKey(userId, target))
+  } catch {
+    publisher?.close()
+    publisher = null
+    return null
+  }
+  if (typeof value !== 'string') return null
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(value)
+  } catch {
+    return null
+  }
+  return activity(parsed) && parsed.expiresAt > Date.now() ? parsed : null
+}
+
 function fresh(peer: CanvasPresencePeer, now: number) {
   return now - peer.updatedAt < PRESENCE_TTL_MS
 }

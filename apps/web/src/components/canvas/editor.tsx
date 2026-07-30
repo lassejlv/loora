@@ -1,11 +1,9 @@
 import {
   useEffect,
-  useLayoutEffect,
   useMemo,
   useRef,
   useState,
   useSyncExternalStore,
-  type CSSProperties,
   type ElementType,
   type ReactNode,
   type RefObject,
@@ -47,7 +45,6 @@ import {
   type CanvasDropPlacement,
   type CanvasSurfaceControls,
   useCanvasDocument,
-  useCanvasDomRegistry,
   useCanvasHistory,
   useCanvasReadOnly,
   useCanvasSelection,
@@ -91,6 +88,7 @@ import {
   CanvasCollaboratorPresence,
   type PresenceCamera,
 } from './presence'
+import { CanvasAgentAvatar, CanvasAgentOverlay } from './agent-presence'
 import { CanvasExport } from './export-panel'
 import { CanvasHistory } from './history'
 import { HtmlImportDialog } from './html-import-dialog'
@@ -774,7 +772,7 @@ function CanvasShell({
           />
         </CanvasContextMenu>
 
-        <CanvasAgentPresence controller={controller} />
+        <CanvasAgentOverlay controller={controller} />
 
         <CanvasCollaboratorPresence
           controller={controller}
@@ -893,11 +891,12 @@ function CanvasShell({
               <CanvasSyncIndicator controller={controller} />
             )}
           </div>
-          {topBarEnd ? (
-            <div className="ms-auto flex shrink-0 items-center gap-2">
-              {topBarEnd}
-            </div>
-          ) : null}
+          {/* The right cluster: the agent sits with the human collaborators,
+              because to everyone in the document it is one of them. */}
+          <div className="ms-auto flex min-w-0 shrink-0 items-center gap-2">
+            <CanvasAgentAvatar controller={controller} />
+            {topBarEnd}
+          </div>
         </header>
 
         <div className="flex min-h-0 flex-1">
@@ -992,167 +991,6 @@ function CanvasSyncIndicator({ controller }: { controller: CanvasEditorControlle
     >
       {label}
     </p>
-  )
-}
-
-const AGENT_DOT_OPACITIES = [
-  0.9, 0.75, 0.12, 0.2, 0.35, 0.52, 0.7, 0.88, 1, 0.86, 0.68, 0.45,
-  1, 0.82, 0.16, 0.3, 0.48, 0.68, 0.9, 1, 0.86, 0.7, 0.5, 0.32,
-]
-
-function CanvasAgentPresence({
-  controller,
-}: {
-  controller: CanvasEditorController
-}) {
-  const registry = useCanvasDomRegistry()
-  const overlayRef = useRef<HTMLDivElement>(null)
-  const indicatorRef = useRef<HTMLDivElement>(null)
-  const outlineRef = useRef<HTMLDivElement>(null)
-  const activity = useSyncExternalStore(
-    controller.subscribe,
-    () => controller.agentActivity ?? null,
-    () => null,
-  )
-  const remoteChange = useSyncExternalStore(
-    controller.subscribe,
-    () => controller.remoteChange ?? null,
-    () => null,
-  )
-
-  useLayoutEffect(() => {
-    if (
-      !remoteChange ||
-      window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
-    ) {
-      return
-    }
-    const ids = new Set(remoteChange.nodeIds)
-    const elements = [
-      ...new Set(
-        registry
-          .entries()
-          .filter((entry) => ids.has(entry.ref.nodeId))
-          .map((entry) => entry.element),
-      ),
-    ].slice(0, 40)
-    const animations = elements.flatMap((element, index) => {
-      if (!element.isConnected || typeof element.animate !== 'function') return []
-      const styles = window.getComputedStyle(element)
-      return [
-        element.animate(
-          [
-            { opacity: 0, filter: 'blur(2px)' },
-            { opacity: styles.opacity, filter: styles.filter },
-          ],
-          {
-            duration: 520,
-            delay: Math.min(index * 38, 280),
-            easing: 'cubic-bezier(0.22, 1, 0.36, 1)',
-            fill: 'backwards',
-          },
-        ),
-      ]
-    })
-    return () => {
-      for (const animation of animations) animation.cancel()
-    }
-  }, [registry, remoteChange])
-
-  useEffect(() => {
-    if (!activity) return
-    let frame = 0
-    const updatePosition = () => {
-      const overlay = overlayRef.current
-      const indicator = indicatorRef.current
-      const outline = outlineRef.current
-      if (!overlay || !indicator || !outline) return
-      const host = overlay.getBoundingClientRect()
-      const wanted = new Set(activity.nodeIds)
-      const target = registry
-        .entries()
-        .find(
-          (entry) =>
-            wanted.has(entry.ref.nodeId) &&
-            entry.element.getClientRects().length > 0,
-        )
-      const rect = target?.element.getBoundingClientRect()
-      const indicatorWidth = 112
-      const indicatorHeight = 22
-      const minY = 44
-      const rawX = rect
-        ? rect.left - host.left + 5
-        : host.width / 2 - indicatorWidth / 2
-      const rawY = rect
-        ? rect.top - host.top - indicatorHeight
-        : minY + 14
-      const x = Math.max(
-        10,
-        Math.min(host.width - indicatorWidth - 10, rawX),
-      )
-      const y = Math.max(
-        minY,
-        Math.min(host.height - indicatorHeight - 10, rawY),
-      )
-      indicator.style.transform = `translate3d(${Math.round(x)}px, ${Math.round(y)}px, 0)`
-      indicator.style.opacity = '1'
-
-      const visible =
-        rect &&
-        rect.right > host.left &&
-        rect.left < host.right &&
-        rect.bottom > host.top + minY &&
-        rect.top < host.bottom
-      if (visible && rect) {
-        outline.hidden = false
-        outline.style.transform =
-          `translate3d(${Math.round(rect.left - host.left)}px, ${Math.round(rect.top - host.top)}px, 0)`
-        outline.style.width = `${Math.round(rect.width)}px`
-        outline.style.height = `${Math.round(rect.height)}px`
-      } else {
-        outline.hidden = true
-      }
-      frame = window.requestAnimationFrame(updatePosition)
-    }
-    frame = window.requestAnimationFrame(updatePosition)
-    return () => window.cancelAnimationFrame(frame)
-  }, [activity, registry])
-
-  if (!activity) return null
-  return (
-    <div
-      ref={overlayRef}
-      className="pointer-events-none absolute inset-0 z-10 overflow-hidden"
-      role="status"
-      aria-live="polite"
-      aria-label={activity.label}
-    >
-      <div
-        ref={outlineRef}
-        className="cx-agent-target"
-        aria-hidden="true"
-        hidden
-      />
-      <div
-        ref={indicatorRef}
-        className="cx-agent-dots"
-        data-phase={activity.phase}
-        aria-hidden="true"
-      >
-        {AGENT_DOT_OPACITIES.map((opacity, index) => (
-          <span
-            key={index}
-            className="cx-agent-dot"
-            style={
-              {
-                '--cx-agent-dot-opacity': opacity,
-                '--cx-agent-dot-delay': `${index * -54}ms`,
-              } as CSSProperties
-            }
-          />
-        ))}
-      </div>
-    </div>
   )
 }
 

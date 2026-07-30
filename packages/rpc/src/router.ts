@@ -58,8 +58,10 @@ import {
   resolveDesignAccess,
   type DesignRole,
 } from '@loora/db/design-access'
-import { getCanvasAgentActivity } from '@loora/db/canvas-agent-activity'
-import { publishCanvasRealtimeEvent } from '@loora/db/canvas-realtime'
+import {
+  publishCanvasRealtimeEvent,
+  readCanvasAgentActivity,
+} from '@loora/db/canvas-realtime'
 import { canvasTransactionPruneBefore } from '@loora/db/canvas-transactions'
 import { parseShortcutConfig, shortcutConfigSchema } from './shortcuts'
 import { googleOAuthEnabled, type getSession } from '@loora/auth'
@@ -836,7 +838,7 @@ const getCanvas = consentedProcedure
               .then((rows) => rows[0])
     const [target, activity] = await Promise.all([
       targetPromise,
-      getCanvasAgentActivity(access.ownerUserId, input),
+      readCanvasAgentActivity(access.ownerUserId, input),
     ])
     if (!target) throw new ORPCError('NOT_FOUND')
     if (target.version !== CANVAS_SCHEMA_VERSION) {
