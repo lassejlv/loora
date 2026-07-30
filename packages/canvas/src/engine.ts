@@ -3,6 +3,7 @@ import {
   type CanvasDocument,
   type CanvasNode,
   type CanvasStyle,
+  type CanvasStylePatch,
   type CanvasLayout,
   type CanvasRuntimeSchema,
   type CanvasTheme,
@@ -529,7 +530,7 @@ function mergeLayout(layout: CanvasLayout, patch: Partial<CanvasLayout> | undefi
   return next
 }
 
-function mergeStyle(style: CanvasStyle, patch: Partial<CanvasStyle> | undefined) {
+function mergeStyle(style: CanvasStyle, patch: CanvasStylePatch | undefined) {
   if (!patch) return style
   const next = {
     ...style,
@@ -567,7 +568,12 @@ function patchNode(
       : node.responsive,
   } as CanvasNode
   if (patch.metadata) {
-    next.metadata = { ...(node.metadata ?? {}), ...patch.metadata }
+    // Honouring `replace` here is what makes a metadata patch invertible: the
+    // inverse restores the previous object wholesale instead of merging the
+    // keys the forward patch introduced back into it.
+    next.metadata = replaceFields.has('metadata')
+      ? patch.metadata
+      : { ...(node.metadata ?? {}), ...patch.metadata }
   } else if (node.metadata !== undefined) {
     next.metadata = node.metadata
   } else {
@@ -819,7 +825,7 @@ function canValidateIncrementally(
       !operation.replace?.length &&
       !operation.unset?.length &&
       !!document.nodes[operation.id] &&
-      validateCommonNodeMutationPatch(document, operation.patch),
+      validateCommonNodeMutationPatch(document, operation.patch, operation.id),
   )
 }
 

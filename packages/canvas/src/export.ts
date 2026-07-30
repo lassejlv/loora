@@ -72,6 +72,45 @@ function escapeCssString(value: string) {
     .join('')
 }
 
+const genericFontFamilies = new Set([
+  'serif',
+  'sans-serif',
+  'monospace',
+  'cursive',
+  'fantasy',
+  'system-ui',
+  'ui-serif',
+  'ui-sans-serif',
+  'ui-monospace',
+  'ui-rounded',
+  'math',
+  'emoji',
+  'fangsong',
+  'inherit',
+  'initial',
+  'revert',
+  'unset',
+])
+
+/**
+ * A family is a list, not a single name. Quoting the whole string collapsed
+ * `"Helvetica Neue", Arial, sans-serif` — what an HTML import records — into one
+ * unusable family, so each entry is quoted on its own and generic keywords are
+ * left bare.
+ */
+function fontFamilyValue(family: string) {
+  const families = family
+    .split(',')
+    .map((part) => part.trim())
+    .filter(Boolean)
+    .map((part) => {
+      if (/^"[^"]*"$/.test(part) || /^'[^']*'$/.test(part)) return part
+      if (genericFontFamilies.has(part.toLowerCase())) return part
+      return `"${part.replaceAll('"', '').replaceAll("'", '')}"`
+    })
+  return families.length > 0 ? families.join(', ') : JSON.stringify(family)
+}
+
 function colorValue(_document: CanvasDocument, color: CanvasColor) {
   if (typeof color === 'string') return color
   return `var(--loora-token-${color.token.replace(/[^a-zA-Z0-9_-]/g, '-')})`
@@ -165,12 +204,13 @@ function styleDeclarations(document: CanvasDocument, node: CanvasNode) {
   if (style.typography) {
     const typography = style.typography
     declarations.push(
-      `font-family:${JSON.stringify(typography.family)}`,
+      `font-family:${fontFamilyValue(typography.family)}`,
       `font-size:${typography.size}px`,
       `font-weight:${typography.weight}`,
       `line-height:${typography.lineHeight}`,
       `letter-spacing:${typography.letterSpacing}px`,
       `text-align:${typography.align}`,
+      `white-space:${typography.wrap === false ? 'nowrap' : 'pre-wrap'}`,
       `text-decoration:${typography.decoration ?? 'none'}`,
       `text-transform:${typography.transform ?? 'none'}`,
     )
@@ -291,6 +331,10 @@ function textMarkup(document: CanvasDocument, node: Extract<CanvasNode, { type: 
       const styles: string[] = []
       if (run.color) styles.push(`color:${colorValue(document, run.color)}`)
       for (const [key, value] of Object.entries(run.typography ?? {})) {
+        if (key === 'wrap') {
+          styles.push(`white-space:${value === false ? 'nowrap' : 'pre-wrap'}`)
+          continue
+        }
         const cssKey = key.replace(/[A-Z]/g, (character) => `-${character.toLowerCase()}`)
         styles.push(`${cssKey}:${typeof value === 'number' && key !== 'weight' && key !== 'lineHeight' ? `${value}px` : value}`)
       }
@@ -445,9 +489,12 @@ function cssForNode(
   selectorPrefix = '',
 ) {
   const selector = `${selectorPrefix}.${className(instance ? `${instance.id}-${node.id}` : node.id)}`
+  // The base rule carries every override that is not behind a media query —
+  // the breakpoints at zero width. Reading the raw node here dropped the
+  // default (mobile) breakpoint from exports entirely.
   const patched = applyInstancePatches(
     document,
-    node,
+    resolveNodeAtWidth(document, node, 0),
     instance,
     variant,
   )
@@ -460,8 +507,11 @@ function cssForNode(
     node.type === 'page'
       ? `${selector}{position:relative;left:0;top:0;width:100%;height:auto;min-height:${node.viewport.minHeight}px}`
       : ''
-  const responsive = document.breakpoints
+  // Ascending, because these rules share a specificity and later ones win.
+  // Document order is not guaranteed to be ascending.
+  const responsive = [...document.breakpoints]
     .filter((breakpoint) => breakpoint.minWidth > 0 && node.responsive[breakpoint.id])
+    .sort((left, right) => left.minWidth - right.minWidth)
     .map((breakpoint) => {
       const resolved = resolveNodeAtWidth(document, node, breakpoint.minWidth)
       const responsive = applyInstancePatches(

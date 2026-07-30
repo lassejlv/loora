@@ -36,7 +36,6 @@ Pro includes everything in Free at production limits:
 - Branches: fork, compare, and merge
 - In-app agent access
 - Image generation
-- A team workspace for up to 5 users
 
 ## On both plans
 

@@ -91,6 +91,7 @@ export interface CanvasTypography {
   lineHeight: number
   letterSpacing: number
   align: 'left' | 'center' | 'right' | 'justify'
+  wrap?: boolean
   decoration?: 'none' | 'underline' | 'line-through'
   transform?: 'none' | 'uppercase' | 'lowercase' | 'capitalize'
 }
@@ -159,13 +160,21 @@ export interface CanvasInteraction {
   actions: CanvasAction[]
 }
 
+/**
+ * Typography is merged field by field when a patch is applied, so an override
+ * only has to carry what it changes.
+ */
+export type CanvasStylePatch = Partial<Omit<CanvasStyle, 'typography'>> & {
+  typography?: Partial<CanvasTypography>
+}
+
 export interface NodePatch {
   name?: string
   hidden?: boolean
   locked?: boolean
   rotation?: number
   layout?: Partial<CanvasLayout>
-  style?: Partial<CanvasStyle>
+  style?: CanvasStylePatch
   semanticTag?: SemanticTag
   text?: string
   runs?: TextRun[]
@@ -543,6 +552,7 @@ export function createTextNode(
         lineHeight: 1.4,
         letterSpacing: 0,
         align: 'left',
+        wrap: true,
       },
     }),
     responsive: {},
@@ -590,7 +600,7 @@ function mergeLayout(layout: CanvasLayout, patch: Partial<CanvasLayout> | undefi
   }
 }
 
-function mergeStyle(style: CanvasStyle, patch: Partial<CanvasStyle> | undefined): CanvasStyle {
+function mergeStyle(style: CanvasStyle, patch: CanvasStylePatch | undefined): CanvasStyle {
   if (!patch) return style
   return {
     ...style,
@@ -947,6 +957,7 @@ function validTypography(value: unknown, partial = false) {
     'lineHeight',
     'letterSpacing',
     'align',
+    'wrap',
     'decoration',
     'transform',
   ])
@@ -968,6 +979,7 @@ function validTypography(value: unknown, partial = false) {
   ) {
     return false
   }
+  if (value.wrap !== undefined && typeof value.wrap !== 'boolean') return false
   if (
     value.decoration !== undefined &&
     !['none', 'underline', 'line-through'].includes(String(value.decoration))
@@ -1055,7 +1067,7 @@ function validStylePatch(
   }
   if (
     value.typography !== undefined &&
-    !validTypography(value.typography)
+    !validTypography(value.typography, partial)
   ) {
     return false
   }
@@ -1263,7 +1275,11 @@ const patchKeys = new Set([
   'variant',
 ])
 
-function validNodePatch(value: unknown, document: CanvasDocument) {
+function validNodePatch(
+  value: unknown,
+  document: CanvasDocument,
+  states?: Record<StateId, CanvasStateDefinition>,
+) {
   if (!isRecord(value) || Object.keys(value).some((key) => !patchKeys.has(key))) {
     return false
   }
@@ -1330,7 +1346,7 @@ function validNodePatch(value: unknown, document: CanvasDocument) {
   }
   if (
     value.interactions !== undefined &&
-    !validInteractions(value.interactions, document)
+    !validInteractions(value.interactions, document, states)
   ) {
     return false
   }
@@ -1353,9 +1369,15 @@ const fastMutationKeys = new Set([
   'order',
 ])
 
+/**
+ * `nodeId` scopes interaction validation to the state definitions that node can
+ * actually see. Without it a patch may declare an action against a state that
+ * does not exist, and the caller skipping full validation would keep it.
+ */
 export function validateCommonNodeMutationPatch(
   document: CanvasDocument,
   value: unknown,
+  nodeId?: NodeId,
 ) {
   if (
     !isRecord(value) ||
@@ -1369,7 +1391,11 @@ export function validateCommonNodeMutationPatch(
     order,
     ...nodePatch
   } = value
-  if (!validNodePatch(nodePatch, document)) return false
+  const states =
+    nodeId === undefined
+      ? undefined
+      : stateDefinitionsForNode(document, nodeId)
+  if (!validNodePatch(nodePatch, document, states)) return false
   if (order !== undefined && !finite(order)) return false
   if (
     metadata !== undefined &&
@@ -1388,7 +1414,7 @@ export function validateCommonNodeMutationPatch(
       Object.entries(responsive).some(
         ([breakpointId, patch]) =>
           !breakpointIds.has(breakpointId) ||
-          !validNodePatch(patch, document),
+          !validNodePatch(patch, document, states),
       )
     ) {
       return false

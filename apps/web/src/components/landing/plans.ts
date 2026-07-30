@@ -30,7 +30,6 @@ export const PLANS = [
       'Branches: fork, compare, merge',
       'In-app agent access',
       'Image generation',
-      'Team workspace, up to 5 users',
     ],
     cta: 'Go Pro',
     featured: true,

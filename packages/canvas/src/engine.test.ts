@@ -87,6 +87,59 @@ describe('Canvas transactions', () => {
     ).toBeUndefined()
   })
 
+  it('restores node metadata exactly when a merging patch is undone', () => {
+    const engine = engineFixture()
+    engine.apply({
+      id: 'seed-metadata',
+      label: 'Seed metadata',
+      operations: [
+        { type: 'node.patch', id: 'hero', patch: { metadata: { origin: 'html' } } },
+      ],
+    })
+    engine.apply({
+      id: 'add-metadata',
+      label: 'Add metadata',
+      operations: [
+        { type: 'node.patch', id: 'hero', patch: { metadata: { note: 'temp' } } },
+      ],
+    })
+    expect(engine.getNode('hero')?.metadata).toEqual({
+      origin: 'html',
+      note: 'temp',
+    })
+
+    engine.undo()
+    expect(engine.getNode('hero')?.metadata).toEqual({ origin: 'html' })
+  })
+
+  it('rejects a fast-path patch whose interaction names an undeclared state', () => {
+    const engine = engineFixture()
+    const before = structuredClone(engine.document)
+    expect(() =>
+      engine.apply({
+        id: 'unknown-state',
+        label: 'Toggle nothing',
+        operations: [
+          {
+            type: 'node.patch',
+            id: 'hero',
+            patch: {
+              interactions: [
+                {
+                  trigger: 'click',
+                  actions: [
+                    { type: 'set-state', stateId: 'missing', value: true },
+                  ],
+                },
+              ],
+            },
+          },
+        ],
+      }),
+    ).toThrow()
+    expect(engine.document).toEqual(before)
+  })
+
   it('updates named themes and their token modes atomically', () => {
     const engine = engineFixture()
     const before = structuredClone(engine.document)

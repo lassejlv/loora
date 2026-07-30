@@ -197,6 +197,21 @@ describe('CanvasDocument', () => {
     expect(resolveNodeAtWidth(document, document.nodes.hero, 1600).layout.gap).toBe(24)
   })
 
+  it('accepts a partial typography override while still requiring a complete node style', () => {
+    const document = documentFixture()
+    document.nodes.headline.responsive = {
+      mobile: { style: { typography: { size: 32 } } },
+    }
+    expect(validateDocument(document).ok).toBe(true)
+
+    document.nodes.headline.style.typography = { size: 32 } as never
+    expect(
+      validateDocument(document).issues.some(
+        (issue) => issue.path === 'nodes.headline.style',
+      ),
+    ).toBe(true)
+  })
+
   it('rejects CSS and interaction injection at the model boundary', () => {
     const document = documentFixture()
     document.nodes.hero.style.fills = [

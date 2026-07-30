@@ -62,6 +62,7 @@ const typographySchema = z.object({
   lineHeight: z.number().positive().max(20),
   letterSpacing: z.number().finite().min(-100).max(1_000),
   align: z.enum(['left', 'center', 'right', 'justify']),
+  wrap: z.boolean().optional(),
   decoration: z.enum(['none', 'underline', 'line-through']).optional(),
   transform: z.enum(['none', 'uppercase', 'lowercase', 'capitalize']).optional(),
 })

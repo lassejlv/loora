@@ -117,11 +117,6 @@ const proBenefits: BenefitSpec[] = [
     description: 'Image generation',
     note: 'Generate images without per-generation billing.',
   },
-  {
-    key: 'workspace_5_users',
-    description: 'Team workspace, up to 5 users',
-    note: 'One workspace for up to five users.',
-  },
 ]
 
 const freeDescription = [
@@ -144,7 +139,6 @@ const proDescription = [
   '- Branches: fork, compare, merge',
   '- In-app agent access',
   '- Image generation',
-  '- Team workspace for up to 5 users',
 ].join('\n')
 
 async function items<T>(iterator: AsyncIterable<{ result: { items: T[] } }>) {

@@ -86,6 +86,42 @@ describe('Canvas exports', () => {
     expect(tailwind).not.toContain('<style')
   })
 
+  it('exports zero-width overrides in the base rule and orders media queries by width', () => {
+    const document = fixture()
+    document.breakpoints = [
+      { id: 'desktop', name: 'Desktop', minWidth: 1200, previewWidth: 1440 },
+      { id: 'mobile', name: 'Mobile', minWidth: 0, previewWidth: 390 },
+      { id: 'tablet', name: 'Tablet', minWidth: 768, previewWidth: 768 },
+    ]
+    document.nodes.headline.responsive = {
+      mobile: { style: { typography: { size: 32 } } },
+      tablet: { style: { typography: { size: 40 } } },
+      desktop: { style: { typography: { size: 48 } } },
+    }
+    const { css } = compileCanvas(document)
+    const base = css
+      .split('\n')
+      .find((rule) => rule.startsWith('.loora-headline{'))
+
+    expect(base).toContain('font-size:32px')
+    expect(css.match(/@media\(min-width:\d+px\)/g)).toEqual([
+      '@media(min-width:768px)',
+      '@media(min-width:1200px)',
+    ])
+    expect(css.indexOf('font-size:40px')).toBeLessThan(
+      css.indexOf('font-size:48px'),
+    )
+  })
+
+  it('exports a font stack as separate families', () => {
+    const document = fixture()
+    document.nodes.headline.style.typography!.family =
+      '"Helvetica Neue", Arial, sans-serif'
+    expect(compileCanvas(document).css).toContain(
+      'font-family:"Helvetica Neue", "Arial", sans-serif',
+    )
+  })
+
   it('exports declarative actions and active theme token values', () => {
     const document = fixture()
     document.themes.dark = { id: 'dark', name: 'Dark' }

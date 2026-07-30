@@ -202,11 +202,11 @@ describe('HTML snapshot import', () => {
     })
     expect(
       nodes.some(
-        (node) => node.metadata.importedHtmlTag === 'x-paper-html',
+        (node) => node.metadata?.importedHtmlTag === 'x-paper-html',
       ),
     ).toBe(false)
     expect(
-      nodes.find((node) => node.metadata.importedHtmlTag === 'a'),
+      nodes.find((node) => node.metadata?.importedHtmlTag === 'a'),
     ).toMatchObject({
       parentId: result.pageId,
       layout: {
@@ -217,6 +217,232 @@ describe('HTML snapshot import', () => {
         radius: 8,
         fills: [{ type: 'solid', color: 'rgb(94, 69, 144)' }],
       },
+    })
+  })
+
+  it('preserves captured positions when flex auto margins cannot be represented', () => {
+    const result = convertHtmlSnapshotToCanvas({
+      id: 'paper-pricing-card',
+      name: 'Pricing card',
+      width: 480,
+      height: 640,
+      root: {
+        tag: 'body',
+        attributes: {},
+        style: { display: 'block' },
+        rect: { x: 0, y: 0, width: 480, height: 640 },
+        children: [{
+          tag: 'div',
+          attributes: { 'aria-label': 'Pro plan' },
+          style: {
+            display: 'flex',
+            flexDirection: 'column',
+            paddingTop: '20px',
+            paddingRight: '20px',
+            paddingBottom: '20px',
+            paddingLeft: '20px',
+          },
+          rect: { x: 20, y: 20, width: 440, height: 600 },
+          children: [{
+            tag: 'h2',
+            text: 'Pro',
+            attributes: {},
+            style: {
+              display: 'block',
+              marginTop: '0px',
+              color: 'rgb(30, 61, 234)',
+              fontSize: '15px',
+            },
+            rect: { x: 40, y: 40, width: 28, height: 20 },
+            children: [],
+          }, {
+            tag: 'p',
+            attributes: {},
+            style: {
+              display: 'block',
+              marginTop: 'auto',
+            },
+            rect: { x: 40, y: 554, width: 400, height: 42 },
+            children: [{
+              tag: 'a',
+              attributes: { href: 'https://loora.design/app' },
+              style: {
+                display: 'inline-block',
+                whiteSpace: 'nowrap',
+                paddingTop: '4px',
+                paddingRight: '10px',
+                paddingBottom: '4px',
+                paddingLeft: '10px',
+                backgroundColor: 'rgb(30, 61, 234)',
+              },
+              rect: { x: 40, y: 554, width: 84, height: 34 },
+              children: [{
+                tag: '#text',
+                text: 'Go Pro',
+                attributes: {},
+                style: {
+                  display: 'inline',
+                  whiteSpace: 'nowrap',
+                  color: 'rgb(255, 255, 255)',
+                  fontSize: '13px',
+                  lineHeight: '18px',
+                },
+                rect: { x: 50, y: 562, width: 64, height: 18 },
+                children: [],
+              }],
+            }],
+          }],
+        }],
+      },
+    })
+
+    const nodes = Object.values(result.document.nodes)
+    const card = nodes.find((node) => node.name === 'Pro plan')
+    const ctaRow = nodes.find(
+      (node) => node.metadata?.importedHtmlTag === 'p',
+    )
+
+    expect(card?.layout.mode).toBe('flex')
+    expect(ctaRow?.layout).toMatchObject({
+      position: 'absolute',
+      x: 20,
+      y: 534,
+    })
+  })
+
+  it('preserves no-wrap text used by inline Paper Snapshot buttons', () => {
+    const result = convertHtmlSnapshotToCanvas({
+      id: 'paper-nowrap-button',
+      name: 'No-wrap button',
+      width: 160,
+      height: 80,
+      root: {
+        tag: 'body',
+        attributes: {},
+        style: { display: 'block' },
+        rect: { x: 0, y: 0, width: 160, height: 80 },
+        children: [{
+          tag: 'a',
+          attributes: { href: 'https://loora.design/app' },
+          style: {
+            display: 'inline-block',
+            whiteSpace: 'nowrap',
+            paddingTop: '4px',
+            paddingRight: '10px',
+            paddingBottom: '4px',
+            paddingLeft: '10px',
+            backgroundColor: 'rgb(30, 61, 234)',
+          },
+          rect: { x: 20, y: 20, width: 84, height: 34 },
+          children: [{
+            tag: '#text',
+            text: 'Go Pro',
+            attributes: {},
+            style: {
+              display: 'inline',
+              whiteSpace: 'nowrap',
+              color: 'rgb(255, 255, 255)',
+              fontSize: '13px',
+              lineHeight: '18px',
+            },
+            rect: { x: 30, y: 28, width: 64, height: 18 },
+            children: [],
+          }],
+        }],
+      },
+    })
+
+    const ctaLabel = Object.values(result.document.nodes).find(
+      (node) => node.type === 'text' && node.text === 'Go Pro',
+    )
+    expect(ctaLabel?.style.typography).toMatchObject({
+      wrap: false,
+    })
+  })
+
+  it('does not turn an invisible CSS border into a solid Canvas stroke', () => {
+    const result = convertHtmlSnapshotToCanvas({
+      id: 'paper-invisible-border',
+      name: 'Invisible border',
+      width: 320,
+      height: 200,
+      root: {
+        tag: 'body',
+        attributes: {},
+        style: { display: 'block' },
+        rect: { x: 0, y: 0, width: 320, height: 200 },
+        children: [{
+          tag: 'div',
+          attributes: { 'aria-label': 'Borderless row' },
+          style: {
+            display: 'block',
+            borderTopWidth: '3px',
+            borderRightWidth: '3px',
+            borderBottomWidth: '3px',
+            borderLeftWidth: '3px',
+            borderTopColor: 'rgb(57, 56, 52)',
+            borderRightColor: 'rgb(57, 56, 52)',
+            borderBottomColor: 'rgb(57, 56, 52)',
+            borderLeftColor: 'rgb(57, 56, 52)',
+            borderTopStyle: 'none',
+            borderRightStyle: 'none',
+            borderBottomStyle: 'none',
+            borderLeftStyle: 'none',
+          },
+          rect: { x: 20, y: 20, width: 280, height: 60 },
+          children: [],
+        }],
+      },
+    })
+
+    const row = Object.values(result.document.nodes).find(
+      (node) => node.name === 'Borderless row',
+    )
+    expect(row?.style.stroke).toBeUndefined()
+  })
+
+  it('inherits presentation attributes for editable SVG paths', () => {
+    const result = convertHtmlSnapshotToCanvas({
+      id: 'paper-svg',
+      name: 'SVG icon',
+      width: 64,
+      height: 64,
+      root: {
+        tag: 'body',
+        attributes: {},
+        style: { display: 'block' },
+        rect: { x: 0, y: 0, width: 64, height: 64 },
+        children: [{
+          tag: 'svg',
+          attributes: {
+            viewBox: '0 0 24 24',
+            fill: 'none',
+            stroke: 'rgb(255, 255, 255)',
+            'stroke-width': '2',
+          },
+          style: { display: 'block' },
+          rect: { x: 20, y: 20, width: 24, height: 24 },
+          children: [{
+            tag: 'path',
+            attributes: { d: 'M5 12h14m-6-6 6 6-6 6' },
+            style: { display: 'block' },
+            rect: { x: 25, y: 26, width: 14, height: 12 },
+            children: [],
+          }],
+        }],
+      },
+    })
+
+    const vector = Object.values(result.document.nodes).find(
+      (node) => node.type === 'vector',
+    )
+    expect(vector).toMatchObject({
+      type: 'vector',
+      paths: [{
+        d: 'M5 12h14m-6-6 6 6-6 6',
+        stroke: 'rgb(255, 255, 255)',
+        strokeWidth: 2,
+      }],
     })
   })
 })

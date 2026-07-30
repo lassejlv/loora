@@ -549,6 +549,7 @@ function nodeCss(
     css.lineHeight = style.typography.lineHeight
     css.letterSpacing = style.typography.letterSpacing
     css.textAlign = style.typography.align
+    css.whiteSpace = style.typography.wrap === false ? 'nowrap' : 'pre-wrap'
     css.textDecoration = style.typography.decoration
     css.textTransform = style.typography.transform
   }
@@ -866,7 +867,8 @@ function RawCanvasNodeRenderer({
           ...common.style,
           userSelect: editingText ? 'text' : 'none',
           cursor: editingText ? 'text' : undefined,
-          whiteSpace: 'pre-wrap',
+          whiteSpace:
+            node.style.typography?.wrap === false ? 'nowrap' : 'pre-wrap',
           outline: 'none',
         }}
       >

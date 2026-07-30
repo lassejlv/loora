@@ -182,22 +182,36 @@ function radius(style: Record<string, string>): CanvasStyle['radius'] {
 }
 
 function stroke(style: Record<string, string>): CanvasStyle['stroke'] {
-  const widths = [
-    numberStyle(style, 'borderTopWidth'),
-    numberStyle(style, 'borderRightWidth'),
-    numberStyle(style, 'borderBottomWidth'),
-    numberStyle(style, 'borderLeftWidth'),
-  ]
-  const width = Math.max(...widths)
-  const color = style.borderTopColor
-  if (width <= 0 || isTransparent(color)) return undefined
-  const borderStyle = style.borderTopStyle
+  const sides = ['Top', 'Right', 'Bottom', 'Left'] as const
+  const borders = sides.map((side) => ({
+    width: numberStyle(style, `border${side}Width`),
+    color: style[`border${side}Color`],
+    style: style[`border${side}Style`],
+  }))
+  const first = borders[0]!
+  if (
+    first.width <= 0 ||
+    isTransparent(first.color) ||
+    !['solid', 'dashed', 'dotted'].includes(first.style)
+  ) {
+    return undefined
+  }
+  if (
+    !borders.every(
+      (border) =>
+        border.width === first.width &&
+        border.color === first.color &&
+        border.style === first.style,
+    )
+  ) {
+    return undefined
+  }
   return {
-    width,
-    color,
+    width: first.width,
+    color: first.color!,
     style:
-      borderStyle === 'dashed' || borderStyle === 'dotted'
-        ? borderStyle
+      first.style === 'dashed' || first.style === 'dotted'
+        ? first.style
         : 'solid',
   }
 }
@@ -328,6 +342,7 @@ function textStyle(style: Record<string, string>) {
       lineHeight: textLineHeight(style, fontSize),
       letterSpacing: numberStyle(style, 'letterSpacing'),
       align: textAlign(style.textAlign),
+      wrap: style.whiteSpace !== 'nowrap' && style.whiteSpace !== 'pre',
       decoration: textDecoration(
         style.textDecorationLine || style.textDecoration,
       ),
@@ -378,6 +393,21 @@ function interactions(snapshot: HtmlCanvasSnapshot): CanvasInteraction[] {
   }]
 }
 
+function hasUnrepresentableFlowSpacing(style: Record<string, string>) {
+  return [
+    style.marginTop,
+    style.marginRight,
+    style.marginBottom,
+    style.marginLeft,
+  ].some((value) => {
+    const normalized = value?.trim().toLowerCase()
+    if (!normalized) return false
+    if (normalized === 'auto') return true
+    const amount = Number.parseFloat(normalized)
+    return Number.isFinite(amount) && Math.abs(amount) > 0.001
+  })
+}
+
 function nodeLayout(
   snapshot: HtmlCanvasSnapshot,
   parentRect: HtmlCanvasRect,
@@ -387,7 +417,8 @@ function nodeLayout(
   const isFlow =
     parentMode !== 'absolute' &&
     snapshot.style.position !== 'absolute' &&
-    snapshot.style.position !== 'fixed'
+    snapshot.style.position !== 'fixed' &&
+    !hasUnrepresentableFlowSpacing(snapshot.style)
   return defaultLayout(
     positiveDimension(snapshot.rect.width),
     positiveDimension(snapshot.rect.height),
@@ -436,24 +467,47 @@ function vectorNode(
 ): VectorNode | null {
   if (snapshot.tag !== 'svg') return null
   const paths: VectorNode['paths'] = []
-  const visit = (node: HtmlCanvasSnapshot) => {
+  const visit = (
+    node: HtmlCanvasSnapshot,
+    inherited: {
+      fill?: string
+      stroke?: string
+      strokeWidth?: number
+    },
+  ) => {
+    const fill =
+      node.attributes.fill ||
+      node.style.fill ||
+      inherited.fill
+    const stroke =
+      node.attributes.stroke ||
+      node.style.stroke ||
+      inherited.stroke
+    const ownStrokeWidth = Number.parseFloat(
+      node.attributes['stroke-width'] ?? node.style.strokeWidth ?? '',
+    )
+    const strokeWidth = Number.isFinite(ownStrokeWidth)
+      ? ownStrokeWidth
+      : inherited.strokeWidth
     if (node.tag === 'path' && node.attributes.d) {
       paths.push({
         d: node.attributes.d,
-        ...(node.attributes.fill && node.attributes.fill !== 'none'
-          ? { fill: node.attributes.fill }
+        ...(fill && fill !== 'none'
+          ? { fill }
           : {}),
-        ...(node.attributes.stroke && node.attributes.stroke !== 'none'
-          ? { stroke: node.attributes.stroke }
+        ...(stroke && stroke !== 'none'
+          ? { stroke }
           : {}),
-        ...(Number.isFinite(Number.parseFloat(node.attributes['stroke-width'] ?? ''))
-          ? { strokeWidth: Number.parseFloat(node.attributes['stroke-width']!) }
+        ...(strokeWidth !== undefined
+          ? { strokeWidth }
           : {}),
       })
     }
-    node.children.forEach(visit)
+    node.children.forEach((child) =>
+      visit(child, { fill, stroke, strokeWidth }),
+    )
   }
-  visit(snapshot)
+  visit(snapshot, {})
   if (paths.length === 0) return null
   const frame = createFrameNode(
     snapshot.attributes['aria-label'] || 'Vector',
@@ -662,10 +716,13 @@ export function convertHtmlSnapshotToCanvas(
   document.nodes[page.id] = page
   const warnings: string[] = []
   const rootMode = mode(input.root.style)
-  const children =
+  const sourceChildren =
     input.root.tag === 'body' || input.root.tag === 'html'
       ? input.root.children
       : [input.root]
+  const children = sourceChildren.flatMap((child) =>
+    child.tag === 'x-paper-html' ? child.children : [child],
+  )
   children.forEach((child, index) => {
     if (Object.keys(document.nodes).length >= MAX_HTML_IMPORT_NODES) {
       throw new Error(

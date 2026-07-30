@@ -73,6 +73,9 @@ const styleProperties = [
   'mix-blend-mode',
   'transform',
   'object-fit',
+  'fill',
+  'stroke',
+  'stroke-width',
   'font-family',
   'font-size',
   'font-weight',
@@ -82,6 +85,7 @@ const styleProperties = [
   'text-decoration',
   'text-decoration-line',
   'text-transform',
+  'white-space',
   'flex-direction',
   'flex-wrap',
   'gap',
@@ -94,6 +98,10 @@ const styleProperties = [
   'padding-right',
   'padding-bottom',
   'padding-left',
+  'margin-top',
+  'margin-right',
+  'margin-bottom',
+  'margin-left',
   'border-top-width',
   'border-right-width',
   'border-bottom-width',
@@ -173,7 +181,7 @@ export function buildHtmlImportDocument(html: string, css = '') {
   const styles = parsed.createElement('style')
   styles.dataset.looraHtmlImport = 'true'
   const safeCss = css.replace(/<\/style/gi, '<\\/style')
-  styles.textContent = `html,body{margin:0;min-height:100%;box-sizing:border-box}*,*::before,*::after{box-sizing:inherit}${safeCss}`
+  styles.textContent = `html,body{margin:0;min-height:100%;box-sizing:border-box}*,*::before,*::after{box-sizing:inherit}x-paper-html{display:inline-block}${safeCss}`
   parsed.head.appendChild(styles)
   return `<!doctype html>${parsed.documentElement.outerHTML}`
 }
