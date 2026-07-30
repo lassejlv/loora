@@ -48,6 +48,11 @@ export function withRequestTimingHeaders(
   })
 }
 
+function isRequestTimingLogEnabled() {
+  const value = process.env.LOG_REQUEST_TIMING?.trim().toLowerCase()
+  return value === '1' || value === 'true'
+}
+
 export function logRequestTiming(input: {
   service: 'web' | 'mcp'
   requestId: string
@@ -57,6 +62,8 @@ export function logRequestTiming(input: {
   durationMs: number
   phases?: Record<string, number>
 }) {
+  if (!isRequestTimingLogEnabled()) return
+
   console.info(
     JSON.stringify({
       event: 'api.request',

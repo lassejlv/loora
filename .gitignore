@@ -12,3 +12,4 @@ dist-ssr
 .remember
 __unconfig*
 todos.json
+outputs

@@ -1,9 +1,17 @@
-import { describe, expect, it } from 'bun:test'
+import { afterEach, describe, expect, it, spyOn } from 'bun:test'
 import {
+  logRequestTiming,
   requestIdFromHeaders,
   serverTimingHeader,
   withRequestTimingHeaders,
 } from './request-timing'
+
+const originalLogRequestTiming = process.env.LOG_REQUEST_TIMING
+
+afterEach(() => {
+  if (originalLogRequestTiming == null) delete process.env.LOG_REQUEST_TIMING
+  else process.env.LOG_REQUEST_TIMING = originalLogRequestTiming
+})
 
 describe('request timing', () => {
   it('keeps safe upstream request ids and replaces unsafe ones', () => {
@@ -35,5 +43,44 @@ describe('request timing', () => {
     expect(response.headers.get('x-request-id')).toBe('request-1')
     expect(response.headers.get('server-timing')).toBe('total;dur=8.9')
     expect(await response.text()).toBe('ok')
+  })
+
+  it('skips console request logs unless LOG_REQUEST_TIMING is enabled', () => {
+    const info = spyOn(console, 'info').mockImplementation(() => {})
+
+    delete process.env.LOG_REQUEST_TIMING
+    logRequestTiming({
+      service: 'web',
+      requestId: 'request-1',
+      method: 'POST',
+      path: '/api/rpc/design.list',
+      status: 200,
+      durationMs: 12.3,
+    })
+    expect(info).not.toHaveBeenCalled()
+
+    process.env.LOG_REQUEST_TIMING = 'true'
+    logRequestTiming({
+      service: 'web',
+      requestId: 'request-1',
+      method: 'POST',
+      path: '/api/rpc/design.list',
+      status: 200,
+      durationMs: 12.3,
+      phases: { session: 1.23, handler: 10.45 },
+    })
+    expect(info).toHaveBeenCalledTimes(1)
+    expect(JSON.parse(String(info.mock.calls[0]?.[0]))).toEqual({
+      event: 'api.request',
+      service: 'web',
+      requestId: 'request-1',
+      method: 'POST',
+      path: '/api/rpc/design.list',
+      status: 200,
+      durationMs: 12.3,
+      phases: { session: 1.2, handler: 10.5 },
+    })
+
+    info.mockRestore()
   })
 })
