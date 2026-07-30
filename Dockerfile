@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1
 
-FROM oven/bun:1.3.14 AS deps
+FROM oven/bun:canary AS deps
 WORKDIR /app
 
 # Workspace manifests only, so dependency layers cache until a package.json,
@@ -12,10 +12,11 @@ COPY packages/db/package.json packages/db/
 COPY packages/auth/package.json packages/auth/
 COPY packages/billing/package.json packages/billing/
 COPY packages/agent/package.json packages/agent/
+COPY packages/canvas/package.json packages/canvas/
 COPY packages/rpc/package.json packages/rpc/
 RUN bun install --frozen-lockfile
 
-FROM oven/bun:1.3.14 AS build
+FROM oven/bun:canary AS build
 WORKDIR /app
 
 COPY --from=deps /app ./
@@ -32,7 +33,7 @@ RUN echo "VITE_DATABUDDY_CLIENT_ID length: ${#VITE_DATABUDDY_CLIENT_ID}"
 
 RUN bun run --cwd apps/web build --logLevel warn
 
-FROM oven/bun:1.3.14-slim AS runtime
+FROM oven/bun:canary-slim AS runtime
 WORKDIR /app
 
 ENV NODE_ENV=production
@@ -48,12 +49,14 @@ COPY --from=deps /app/packages/db/node_modules ./packages/db/node_modules
 COPY --from=deps /app/packages/auth/node_modules ./packages/auth/node_modules
 COPY --from=deps /app/packages/billing/node_modules ./packages/billing/node_modules
 COPY --from=deps /app/packages/agent/node_modules ./packages/agent/node_modules
+COPY --from=deps /app/packages/canvas/node_modules ./packages/canvas/node_modules
 COPY --from=deps /app/packages/rpc/node_modules ./packages/rpc/node_modules
 COPY package.json bun.lock bunfig.toml ./
 COPY apps/web/package.json apps/web/
 COPY packages/auth/package.json packages/auth/
 COPY packages/billing/package.json packages/billing/
 COPY packages/agent/package.json packages/agent/
+COPY packages/canvas ./packages/canvas
 COPY packages/rpc/package.json packages/rpc/
 COPY packages/db ./packages/db
 COPY --from=build /app/apps/web/.output ./apps/web/.output

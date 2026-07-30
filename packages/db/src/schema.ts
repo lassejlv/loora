@@ -11,11 +11,12 @@ import {
   primaryKey,
   text,
   timestamp,
+  uniqueIndex,
 } from 'drizzle-orm/pg-core'
-import type { UIMessage } from 'ai'
+import type { CanvasDocument } from '@loora/canvas/model'
+import type { CanvasTransaction } from '@loora/canvas/engine'
 import type { CanvasElement, CanvasPage } from './canvas'
 import type { DraftStatus } from './drafts'
-import type { PullRequestStatus } from './pull-requests'
 import type { ShortcutConfig } from './shortcuts'
 import { EMPTY_SHORTCUT_CONFIG } from './shortcuts'
 
@@ -28,6 +29,12 @@ export const user = pgTable('user', {
   previewAccess: boolean('preview_access').default(false).notNull(),
   previewAccessRequestedAt: timestamp('preview_access_requested_at'),
   usageMultiplier: integer('usage_multiplier').default(1).notNull(),
+  acceptedTerms: boolean('accepted_terms').default(false).notNull(),
+  acceptedPrivacy: boolean('accepted_privacy').default(false).notNull(),
+  termsAcceptedAt: timestamp('terms_accepted_at'),
+  privacyAcceptedAt: timestamp('privacy_accepted_at'),
+  termsVersion: text('terms_version'),
+  privacyVersion: text('privacy_version'),
   image: text('image'),
   createdAt: timestamp('created_at').defaultNow().notNull(),
   updatedAt: timestamp('updated_at')
@@ -107,7 +114,18 @@ export const design = pgTable(
     name: text('name').notNull(),
     shapes: jsonb('shapes').$type<CanvasElement[]>().default([]).notNull(),
     pages: jsonb('pages').$type<CanvasPage[]>().default([]).notNull(),
+    canvasVersion: integer('canvas_version').default(1).notNull(),
+    canvasDocument: jsonb('canvas_document').$type<CanvasDocument>(),
+    canvasMigrationLeaseId: text('canvas_migration_lease_id'),
+    canvasMigrationLeaseExpiresAt: timestamp('canvas_migration_lease_expires_at'),
     revision: integer('revision').default(0).notNull(),
+    // What the editor URL grants on its own. 'restricted' means the link is a
+    // pointer and nothing more: only the owner and the people in design_share
+    // can open it.
+    linkAccess: text('link_access')
+      .$type<'restricted' | 'view' | 'edit'>()
+      .default('restricted')
+      .notNull(),
     createdAt: timestamp('created_at').defaultNow().notNull(),
     updatedAt: timestamp('updated_at')
       .defaultNow()
@@ -117,6 +135,45 @@ export const design = pgTable(
   (table) => [
     primaryKey({ columns: [table.id, table.userId] }),
     index('design_user_id_idx').on(table.userId),
+  ],
+)
+
+// People the owner has invited to a design, by email. The grant is keyed by
+// email rather than user id so an invitation can be issued before that person
+// has an account; `userId` is filled in the first time they open the design and
+// is what every later lookup uses.
+export const designShare = pgTable(
+  'design_share',
+  {
+    id: text('id').primaryKey(),
+    designId: text('design_id').notNull(),
+    ownerUserId: text('owner_user_id').notNull(),
+    email: text('email').notNull(),
+    role: text('role').$type<'view' | 'edit'>().notNull(),
+    invitedByUserId: text('invited_by_user_id')
+      .notNull()
+      .references(() => user.id, { onDelete: 'cascade' }),
+    userId: text('user_id').references(() => user.id, { onDelete: 'set null' }),
+    acceptedAt: timestamp('accepted_at'),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+    updatedAt: timestamp('updated_at')
+      .defaultNow()
+      .$onUpdate(() => new Date())
+      .notNull(),
+  },
+  (table) => [
+    foreignKey({
+      columns: [table.designId, table.ownerUserId],
+      foreignColumns: [design.id, design.userId],
+      name: 'design_share_design_fk',
+    }).onDelete('cascade'),
+    uniqueIndex('design_share_design_email_idx').on(
+      table.designId,
+      table.ownerUserId,
+      table.email,
+    ),
+    index('design_share_email_idx').on(table.email),
+    index('design_share_user_idx').on(table.userId),
   ],
 )
 
@@ -133,6 +190,10 @@ export const designDraft = pgTable(
     shapes: jsonb('shapes').$type<CanvasElement[]>().notNull(),
     basePages: jsonb('base_pages').$type<CanvasPage[]>().default([]).notNull(),
     pages: jsonb('pages').$type<CanvasPage[]>().default([]).notNull(),
+    canvasVersion: integer('canvas_version').default(1).notNull(),
+    baseCanvasVersion: integer('base_canvas_version').default(1).notNull(),
+    baseCanvasDocument: jsonb('base_canvas_document').$type<CanvasDocument>(),
+    canvasDocument: jsonb('canvas_document').$type<CanvasDocument>(),
     baseRevision: integer('base_revision').notNull(),
     revision: integer('revision').default(0).notNull(),
     appliedVersionId: text('applied_version_id'),
@@ -166,6 +227,8 @@ export const designVersion = pgTable(
     message: text('message').notNull(),
     shapes: jsonb('shapes').$type<CanvasElement[]>().notNull(),
     pages: jsonb('pages').$type<CanvasPage[]>().default([]).notNull(),
+    canvasVersion: integer('canvas_version').default(1).notNull(),
+    canvasDocument: jsonb('canvas_document').$type<CanvasDocument>(),
     added: integer('added').notNull(),
     removed: integer('removed').notNull(),
     changed: integer('changed').notNull(),
@@ -192,6 +255,74 @@ export const designVersion = pgTable(
   ],
 )
 
+export const canvasTransaction = pgTable(
+  'canvas_transaction',
+  {
+    designId: text('design_id').notNull(),
+    // The owner, because that is what the design is keyed by. Who actually made
+    // the edit is `authorUserId` — on a shared design those differ.
+    userId: text('user_id').notNull(),
+    authorUserId: text('author_user_id'),
+    targetKey: text('target_key').notNull(),
+    transactionId: text('transaction_id').notNull(),
+    baseRevision: integer('base_revision').notNull(),
+    revision: integer('revision').notNull(),
+    transaction: jsonb('transaction').$type<CanvasTransaction>().notNull(),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+  },
+  (table) => [
+    primaryKey({
+      columns: [table.userId, table.designId, table.targetKey, table.transactionId],
+    }),
+    foreignKey({
+      columns: [table.designId, table.userId],
+      foreignColumns: [design.id, design.userId],
+      name: 'canvas_transaction_design_fk',
+    }).onDelete('cascade'),
+    index('canvas_transaction_target_revision_idx').on(
+      table.userId,
+      table.designId,
+      table.targetKey,
+      table.revision,
+    ),
+    index('canvas_transaction_created_idx').on(table.createdAt),
+  ],
+)
+
+export const canvasAgentActivity = pgTable(
+  'canvas_agent_activity',
+  {
+    id: text('id').notNull(),
+    designId: text('design_id').notNull(),
+    userId: text('user_id').notNull(),
+    targetKey: text('target_key').notNull(),
+    label: text('label').notNull(),
+    nodeIds: jsonb('node_ids').$type<string[]>().default([]).notNull(),
+    phase: text('phase')
+      .$type<'working' | 'settled'>()
+      .default('working')
+      .notNull(),
+    startedAt: timestamp('started_at').defaultNow().notNull(),
+    updatedAt: timestamp('updated_at').defaultNow().notNull(),
+    expiresAt: timestamp('expires_at').notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.id, table.userId] }),
+    foreignKey({
+      columns: [table.designId, table.userId],
+      foreignColumns: [design.id, design.userId],
+      name: 'canvas_agent_activity_design_fk',
+    }).onDelete('cascade'),
+    index('canvas_agent_activity_target_idx').on(
+      table.userId,
+      table.designId,
+      table.targetKey,
+      table.expiresAt,
+    ),
+    index('canvas_agent_activity_expires_idx').on(table.expiresAt),
+  ],
+)
+
 export const designChat = pgTable(
   'design_chat',
   {
@@ -200,7 +331,7 @@ export const designChat = pgTable(
     draftId: text('draft_id'),
     userId: text('user_id').notNull(),
     title: text('title').default('New chat').notNull(),
-    messages: jsonb('messages').$type<UIMessage[]>().default([]).notNull(),
+    messages: jsonb('messages').$type<unknown[]>().default([]).notNull(),
     githubRepositoryId: text('github_repository_id'),
     githubRepositoryFullName: text('github_repository_full_name'),
     createdAt: timestamp('created_at').defaultNow().notNull(),
@@ -227,62 +358,6 @@ export const designChat = pgTable(
       table.draftId,
       table.updatedAt,
     ),
-  ],
-)
-
-// A branch opened for review. The row id doubles as the review URL's
-// capability token (same trade as publish_link), so anyone holding the link
-// can read the diff and comment without a Loora account.
-export const designPullRequest = pgTable(
-  'design_pull_request',
-  {
-    id: text('id').primaryKey(),
-    designId: text('design_id').notNull(),
-    draftId: text('draft_id').notNull(),
-    userId: text('user_id').notNull(),
-    title: text('title').notNull(),
-    body: text('body').default('').notNull(),
-    status: text('status').$type<PullRequestStatus>().default('open').notNull(),
-    mergedAt: timestamp('merged_at'),
-    closedAt: timestamp('closed_at'),
-    createdAt: timestamp('created_at').defaultNow().notNull(),
-    updatedAt: timestamp('updated_at')
-      .defaultNow()
-      .$onUpdate(() => new Date())
-      .notNull(),
-  },
-  (table) => [
-    foreignKey({
-      columns: [table.designId, table.userId],
-      foreignColumns: [design.id, design.userId],
-      name: 'design_pull_request_design_fk',
-    }).onDelete('cascade'),
-    foreignKey({
-      columns: [table.draftId, table.userId],
-      foreignColumns: [designDraft.id, designDraft.userId],
-      name: 'design_pull_request_draft_fk',
-    }).onDelete('cascade'),
-    index('design_pull_request_draft_idx').on(table.userId, table.designId, table.draftId),
-  ],
-)
-
-// Review thread. Guests have no account, so identity is the name they typed;
-// authorUserId is set only when a signed-in Loora user posts.
-export const designPullRequestComment = pgTable(
-  'design_pull_request_comment',
-  {
-    id: text('id').primaryKey(),
-    pullRequestId: text('pull_request_id')
-      .notNull()
-      .references(() => designPullRequest.id, { onDelete: 'cascade' }),
-    authorUserId: text('author_user_id').references(() => user.id, { onDelete: 'set null' }),
-    authorName: text('author_name').notNull(),
-    isOwner: boolean('is_owner').default(false).notNull(),
-    body: text('body').notNull(),
-    createdAt: timestamp('created_at').defaultNow().notNull(),
-  },
-  (table) => [
-    index('design_pull_request_comment_idx').on(table.pullRequestId, table.createdAt),
   ],
 )
 
@@ -343,22 +418,6 @@ export const githubAccount = pgTable('github_account', {
   accessTokenExpiresAt: timestamp('access_token_expires_at'),
   refreshToken: text('refresh_token'),
   refreshTokenExpiresAt: timestamp('refresh_token_expires_at'),
-  createdAt: timestamp('created_at').defaultNow().notNull(),
-  updatedAt: timestamp('updated_at')
-    .defaultNow()
-    .$onUpdate(() => new Date())
-    .notNull(),
-})
-
-export const figmaAccount = pgTable('figma_account', {
-  userId: text('user_id')
-    .primaryKey()
-    .references(() => user.id, { onDelete: 'cascade' }),
-  figmaUserId: text('figma_user_id').notNull(),
-  accessToken: text('access_token').notNull(),
-  refreshToken: text('refresh_token'),
-  accessTokenExpiresAt: timestamp('access_token_expires_at'),
-  scope: text('scope').default('file_content:read').notNull(),
   createdAt: timestamp('created_at').defaultNow().notNull(),
   updatedAt: timestamp('updated_at')
     .defaultNow()

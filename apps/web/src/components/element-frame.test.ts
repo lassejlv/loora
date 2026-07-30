@@ -5,6 +5,7 @@ import {
   compileForFrame,
   hasEntryCall,
   inlineAssetUrls,
+  CAPTURE_STYLE_PROPERTIES,
   REACT_GLOBALS_PRELUDE,
   stripModuleSyntax,
   type BabelLike,
@@ -19,7 +20,7 @@ describe('stripModuleSyntax', () => {
 
   it('removes default and namespace imports', () => {
     const out = stripModuleSyntax(
-      `import React from 'react'\nimport * as icons from 'lucide-react'\nconst x = 1`,
+      `import React from 'react'\nimport * as icons from '@hugeicons/react'\nconst x = 1`,
     )
     expect(out).not.toContain('import')
     expect(out).toContain('const x = 1')
@@ -263,6 +264,33 @@ describe('buildElementDoc', () => {
     expect(doc).toContain('htmlToImage.toPng')
   })
 
+  it('bounds capture styles and returns the final browser error', () => {
+    expect(CAPTURE_STYLE_PROPERTIES.length).toBeGreaterThan(100)
+    expect(CAPTURE_STYLE_PROPERTIES.length).toBeLessThan(250)
+    expect(new Set(CAPTURE_STYLE_PROPERTIES).size).toBe(
+      CAPTURE_STYLE_PROPERTIES.length,
+    )
+    expect(CAPTURE_STYLE_PROPERTIES).toContain('background-image')
+    expect(CAPTURE_STYLE_PROPERTIES).toContain('grid-template-columns')
+    expect(CAPTURE_STYLE_PROPERTIES).toContain('mix-blend-mode')
+    expect(CAPTURE_STYLE_PROPERTIES).toContain('transform')
+    expect(doc).toContain('includeStyleProperties: captureStyleProperties')
+    expect(doc).toContain('error: captureError || null')
+    expect(doc).toContain('retry without fonts failed')
+  })
+
+  it('scales large captures before the browser decodes the SVG', () => {
+    expect(doc).toContain('var maxDimension = typeof msg.maxDimension')
+    expect(doc).toContain('var captureScale = Math.min')
+    expect(doc).toContain("transform: 'scale(' + captureScale + ')'")
+    expect(doc).toContain('options.width = scaledCaptureWidth')
+    expect(doc).toContain('options.height = scaledCaptureHeight')
+  })
+
+  it('passes preloaded fonts into the capture sandbox', () => {
+    expect(doc).toContain('fontEmbedCSS: msg.fontEmbedCSS')
+  })
+
   it('tracks runtime changes and marks animated captures as volatile', () => {
     expect(doc).toContain("type: 'loora:dirty'")
     expect(doc).toContain('new MutationObserver(__markDirty)')
@@ -323,7 +351,7 @@ describe('buildElementDoc', () => {
   it('captures at device pixel ratio and flags skipped fonts', () => {
     expect(doc).toContain('pixelRatio')
     expect(doc).toContain('fontsSkipped')
-    expect(doc).toContain('skipFonts: true')
+    expect(doc).toContain('skipFonts: !!skipFonts')
   })
 })
 

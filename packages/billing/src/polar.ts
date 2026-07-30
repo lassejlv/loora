@@ -6,11 +6,12 @@ export interface PolarConfig {
   server: PolarServer
   accessToken: string
   webhookSecret: string
+  freeProductId: string
   proProductId: string
-  studioProductId: string
-  topUpProductId: string
+  proYearlyProductId: string
+  studioProductId: string | null
+  mcpMeterId: string
   accessBenefitId: string
-  aiMeterId: string
   origin: string
 }
 
@@ -28,11 +29,11 @@ export function resolvePolarConfig(
     'POLAR_SERVER',
     'POLAR_ACCESS_TOKEN',
     'POLAR_WEBHOOK_SECRET',
+    'POLAR_FREE_PRODUCT_ID',
     'POLAR_PRO_PRODUCT_ID',
-    'POLAR_STUDIO_PRODUCT_ID',
-    'POLAR_TOP_UP_PRODUCT_ID',
+    'POLAR_PRO_YEARLY_PRODUCT_ID',
+    'POLAR_MCP_METER_ID',
     'POLAR_ACCESS_BENEFIT_ID',
-    'POLAR_AI_METER_ID',
     'BETTER_AUTH_URL',
   ] as const
   const values = Object.fromEntries(names.map((name) => [name, env[name]?.trim()])) as Record<
@@ -62,11 +63,12 @@ export function resolvePolarConfig(
       server: values.POLAR_SERVER,
       accessToken: values.POLAR_ACCESS_TOKEN!,
       webhookSecret: values.POLAR_WEBHOOK_SECRET!,
+      freeProductId: values.POLAR_FREE_PRODUCT_ID!,
       proProductId: values.POLAR_PRO_PRODUCT_ID!,
-      studioProductId: values.POLAR_STUDIO_PRODUCT_ID!,
-      topUpProductId: values.POLAR_TOP_UP_PRODUCT_ID!,
+      proYearlyProductId: values.POLAR_PRO_YEARLY_PRODUCT_ID!,
+      studioProductId: env.POLAR_STUDIO_PRODUCT_ID?.trim() || null,
+      mcpMeterId: values.POLAR_MCP_METER_ID!,
       accessBenefitId: values.POLAR_ACCESS_BENEFIT_ID!,
-      aiMeterId: values.POLAR_AI_METER_ID!,
       origin,
     },
   }

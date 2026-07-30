@@ -58,7 +58,7 @@ export function ContextMenuPopup({
       >
         <ContextMenuPrimitive.Popup
           className={cn(
-            "relative flex not-[class*='w-']:min-w-32 origin-(--transform-origin) rounded-lg border bg-popover not-dark:bg-clip-padding shadow-lg/5 outline-none before:pointer-events-none before:absolute before:inset-0 before:rounded-[calc(var(--radius-lg)-1px)] before:shadow-[0_1px_--theme(--color-black/4%)] focus:outline-none dark:before:shadow-[0_-1px_--theme(--color-white/6%)]",
+            "relative flex not-[class*='w-']:min-w-28 origin-(--transform-origin) rounded-md border bg-popover shadow-[0_12px_32px_-24px_rgba(30,29,26,0.45)] outline-none focus:outline-none",
             className,
           )}
           data-slot="context-menu-popup"
@@ -82,8 +82,8 @@ export function ContextMenuGroup(
 }
 
 const contextMenuItemIconClass =
-  // Match Button: size descendant SVGs (lucide) and [data-slot=icon] wrappers (animated icons).
-  "[&_[data-slot=icon]:not([class*='size-'])]:size-4.5 sm:[&_[data-slot=icon]:not([class*='size-'])]:size-4 [&_svg:not([class*='opacity-'])]:opacity-80 [&_svg:not([class*='size-'])]:size-4.5 sm:[&_svg:not([class*='size-'])]:size-4 [&_svg]:pointer-events-none [&_svg]:-mx-0.5 [&_svg]:shrink-0";
+  // Match Button: size descendant SVG icons and explicit icon slots.
+  "[&_[data-slot=icon]:not([class*='size-'])]:size-4 sm:[&_[data-slot=icon]:not([class*='size-'])]:size-3.5 [&_svg:not([class*='opacity-'])]:opacity-72 [&_svg:not([class*='size-'])]:size-4 sm:[&_svg:not([class*='size-'])]:size-3 [&_svg]:pointer-events-none [&_svg]:shrink-0";
 
 export function ContextMenuItem({
   className,
@@ -97,7 +97,7 @@ export function ContextMenuItem({
   return (
     <ContextMenuPrimitive.Item
       className={cn(
-        "flex min-h-8 cursor-default select-none items-center gap-2 rounded-sm px-2 py-1 text-base text-foreground outline-none data-disabled:pointer-events-none data-highlighted:bg-accent data-inset:ps-8 data-[variant=destructive]:text-destructive-foreground data-highlighted:text-accent-foreground data-disabled:opacity-64 sm:min-h-7 sm:text-sm",
+        "flex min-h-7 cursor-default select-none items-center gap-1.5 rounded-sm px-2 py-1 text-sm text-foreground outline-none data-disabled:pointer-events-none data-highlighted:bg-accent data-inset:ps-7 data-[variant=destructive]:text-destructive-foreground data-highlighted:text-accent-foreground data-disabled:opacity-56 sm:min-h-5.5 sm:text-xs",
         contextMenuItemIconClass,
         className,
       )}
@@ -122,7 +122,7 @@ export function ContextMenuLinkItem({
   return (
     <ContextMenuPrimitive.LinkItem
       className={cn(
-        "flex min-h-8 cursor-default select-none items-center gap-2 rounded-sm px-2 py-1 text-base text-foreground outline-none data-disabled:pointer-events-none data-highlighted:bg-accent data-inset:ps-8 data-[variant=destructive]:text-destructive-foreground data-highlighted:text-accent-foreground data-disabled:opacity-64 sm:min-h-7 sm:text-sm",
+        "flex min-h-7 cursor-default select-none items-center gap-1.5 rounded-sm px-2 py-1 text-sm text-foreground outline-none data-disabled:pointer-events-none data-highlighted:bg-accent data-inset:ps-7 data-[variant=destructive]:text-destructive-foreground data-highlighted:text-accent-foreground data-disabled:opacity-56 sm:min-h-5.5 sm:text-xs",
         contextMenuItemIconClass,
         className,
       )}
@@ -148,7 +148,7 @@ export function ContextMenuCheckboxItem({
     <ContextMenuPrimitive.CheckboxItem
       checked={checked}
       className={cn(
-        "grid min-h-8 in-data-[side=none]:min-w-[calc(var(--anchor-width)+1.25rem)] cursor-default items-center gap-2 rounded-sm py-1 ps-2 text-base text-foreground outline-none data-disabled:pointer-events-none data-highlighted:bg-accent data-highlighted:text-accent-foreground data-disabled:opacity-64 sm:min-h-7 sm:text-sm [&_svg:not([class*='size-'])]:size-4.5 sm:[&_svg:not([class*='size-'])]:size-4 [&_svg]:pointer-events-none [&_svg]:shrink-0",
+        "grid min-h-7 in-data-[side=none]:min-w-[calc(var(--anchor-width)+1rem)] cursor-default items-center gap-1.5 rounded-sm py-1 ps-2 text-sm text-foreground outline-none data-disabled:pointer-events-none data-highlighted:bg-accent data-highlighted:text-accent-foreground data-disabled:opacity-56 sm:min-h-5.5 sm:text-xs [&_svg:not([class*='size-'])]:size-4 sm:[&_svg:not([class*='size-'])]:size-3 [&_svg]:pointer-events-none [&_svg]:shrink-0",
         variant === "switch"
           ? "grid-cols-[1fr_auto] gap-4 pe-1.5"
           : "grid-cols-[.75rem_1fr] pe-4",
@@ -211,7 +211,7 @@ export function ContextMenuRadioItem({
   return (
     <ContextMenuPrimitive.RadioItem
       className={cn(
-        "grid min-h-8 in-data-[side=none]:min-w-[calc(var(--anchor-width)+1.25rem)] cursor-default grid-cols-[.75rem_1fr] items-center gap-2 rounded-sm py-1 ps-2 pe-4 text-base text-foreground outline-none data-disabled:pointer-events-none data-highlighted:bg-accent data-highlighted:text-accent-foreground data-disabled:opacity-64 sm:min-h-7 sm:text-sm [&_svg:not([class*='size-'])]:size-4.5 sm:[&_svg:not([class*='size-'])]:size-4 [&_svg]:pointer-events-none [&_svg]:shrink-0",
+        "grid min-h-7 in-data-[side=none]:min-w-[calc(var(--anchor-width)+1rem)] cursor-default grid-cols-[.75rem_1fr] items-center gap-1.5 rounded-sm py-1 ps-2 pe-3 text-sm text-foreground outline-none data-disabled:pointer-events-none data-highlighted:bg-accent data-highlighted:text-accent-foreground data-disabled:opacity-56 sm:min-h-5.5 sm:text-xs [&_svg:not([class*='size-'])]:size-4 sm:[&_svg:not([class*='size-'])]:size-3 [&_svg]:pointer-events-none [&_svg]:shrink-0",
         className,
       )}
       data-slot="context-menu-radio-item"
@@ -248,7 +248,7 @@ export function ContextMenuGroupLabel({
   return (
     <ContextMenuPrimitive.GroupLabel
       className={cn(
-        "px-2 py-1.5 font-medium text-muted-foreground text-xs data-inset:ps-9 sm:data-inset:ps-8",
+        "px-2 py-1 font-medium text-xs text-muted-foreground data-inset:ps-8 sm:data-inset:ps-6",
         className,
       )}
       data-inset={inset}
@@ -306,7 +306,7 @@ export function ContextMenuSubTrigger({
   return (
     <ContextMenuPrimitive.SubmenuTrigger
       className={cn(
-        "flex min-h-8 items-center gap-2 rounded-sm px-2 py-1 text-base text-foreground outline-none data-disabled:pointer-events-none data-highlighted:bg-accent data-popup-open:bg-accent data-inset:ps-8 data-highlighted:text-accent-foreground data-popup-open:text-accent-foreground data-disabled:opacity-64 sm:min-h-7 sm:text-sm",
+        "flex min-h-7 items-center gap-1.5 rounded-sm px-2 py-1 text-sm text-foreground outline-none data-disabled:pointer-events-none data-highlighted:bg-accent data-popup-open:bg-accent data-inset:ps-7 data-highlighted:text-accent-foreground data-popup-open:text-accent-foreground data-disabled:opacity-56 sm:min-h-5.5 sm:text-xs",
         contextMenuItemIconClass,
         className,
       )}

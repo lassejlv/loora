@@ -6,6 +6,10 @@ import { asset } from '@loora/db/schema'
 import { requireSession } from '@loora/auth'
 import { authorizeBilling, subscriptionRequiredResponse } from '@loora/billing/billing'
 import { canUseApp, previewAccessRequiredResponse } from '@loora/auth/preview-access'
+import {
+  hasAcceptedCurrentLegal,
+  legalConsentRequiredResponse,
+} from '@loora/auth/legal-consent'
 import { s3 } from '@loora/rpc/storage'
 
 export const Route = createFileRoute('/api/asset/$id')({
@@ -14,6 +18,7 @@ export const Route = createFileRoute('/api/asset/$id')({
       GET: async ({ request, params }) => {
         const session = await requireSession(request)
         if (!session) return new Response('Unauthorized', { status: 401 })
+        if (!hasAcceptedCurrentLegal(session.user)) return legalConsentRequiredResponse()
         if (!canUseApp(session.user)) return previewAccessRequiredResponse()
         if (!(await authorizeBilling(session.user)).access) return subscriptionRequiredResponse()
 

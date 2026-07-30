@@ -11,6 +11,8 @@
       "@loora/db/*": ["./packages/db/src/*"],
       "@loora/auth": ["./packages/auth/src/auth.ts"],
       "@loora/auth/*": ["./packages/auth/src/*"],
+      "@loora/canvas": ["./packages/canvas/src/index.ts"],
+      "@loora/canvas/*": ["./packages/canvas/src/*"],
       "@loora/agent/*": ["./packages/agent/src/*"],
       "@loora/rpc": ["./packages/rpc/src/router.ts"],
       "@loora/rpc/*": ["./packages/rpc/src/*"]

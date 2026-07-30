@@ -2,7 +2,7 @@
 
 import { Toast } from "@base-ui/react/toast";
 import { CircleCheckIcon } from "#/components/icons";
-import { CircleAlertIcon, InfoIcon, TriangleAlertIcon } from "lucide-react";
+import { CircleAlertIcon, InfoIcon, TriangleAlertIcon } from "#/components/icons";
 import type React from "react";
 import { cn } from "#/lib/utils.ts";
 import { buttonVariants } from "#/components/ui/button.tsx";

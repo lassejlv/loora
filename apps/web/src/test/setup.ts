@@ -21,6 +21,9 @@ const browserGlobals = [
   'NodeFilter',
   'ShadowRoot',
   'Event',
+  // Base UI dispatches custom events during mount; Bun's own CustomEvent is
+  // from another realm and JSDOM rejects it.
+  'CustomEvent',
   'MouseEvent',
   'PointerEvent',
   'KeyboardEvent',

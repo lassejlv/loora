@@ -1,22 +1,17 @@
-import { and, eq, isNull, lte, or } from 'drizzle-orm'
+import { eq, isNull, lte, or } from 'drizzle-orm'
 import type { CustomerState } from '@polar-sh/sdk/models/components/customerstate.js'
 import { db } from '@loora/db'
-import { aiGenerationLease, billingEntitlement, user } from '@loora/db/schema'
+import { billingEntitlement, user } from '@loora/db/schema'
 import {
   cachedEntitlementGrantsAccess,
-  entitlementCapabilities,
+  entitlementIsTrial,
   normalizeCustomerState,
-  remainingCredits,
   type BillingPlan,
 } from './billing-policy'
 import { getPolarClient, getPolarRuntime } from './polar'
-import { flushPendingPolarUsage } from './billing-usage'
-import { getTopUpCreditStatus } from './credit-top-ups'
 
 const CACHE_MAX_AGE_MS = 5 * 60 * 1000
 const REFRESH_RATE_LIMIT_MS = 10 * 1000
-const LEASE_MS = 6 * 60 * 1000
-const MAX_CONCURRENT_GENERATIONS = 3
 const refreshedAt = new Map<string, number>()
 
 export interface BillingStatus {
@@ -29,18 +24,11 @@ export interface BillingStatus {
     active: true
     endsAt: string
   } | null
-  credits: {
-    remaining: number
-    credited: number
-    consumed: number
-    includedRemaining: number
-    topUpRemaining: number
-    topUpPurchased: number
-    resetsAt: string | null
-  } | null
   stale: boolean
   source: 'polar' | 'cache' | 'admin' | 'disabled'
 }
+
+export type CheckoutPlan = 'free' | 'pro'
 
 export function subscriptionRequiredResponse() {
   return Response.json(
@@ -144,8 +132,6 @@ export async function authorizeBilling(user: BillingUser) {
   if (!required) {
     return {
       access: true,
-      managedAiAccess: true,
-      topUpAccess: true,
       trial: false,
       source: 'disabled' as const,
       entitlement: null,
@@ -154,53 +140,38 @@ export async function authorizeBilling(user: BillingUser) {
   if (user.isAdmin === true) {
     return {
       access: true,
-      managedAiAccess: true,
-      topUpAccess: true,
       trial: false,
       source: 'admin' as const,
       entitlement: null,
     }
   }
   const entitlement = await getCachedEntitlement(user.id)
-  const capabilities = entitlementCapabilities(entitlement)
   return {
     access: cachedEntitlementGrantsAccess(entitlement),
-    ...capabilities,
+    trial: entitlementIsTrial(entitlement),
     source: 'cache' as const,
     entitlement,
   }
 }
 
-async function statusFromEntitlement(
-  userId: string,
+function statusFromEntitlement(
   entitlement: typeof billingEntitlement.$inferSelect | null,
   source: BillingStatus['source'],
   stale: boolean,
-): Promise<BillingStatus> {
-  const capabilities = entitlementCapabilities(entitlement)
-  const topUp = capabilities.topUpAccess
-    ? await getTopUpCreditStatus(userId)
-    : { granted: 0, refunded: 0, consumed: 0, remaining: 0 }
-  const includedRemaining = remainingCredits(entitlement?.meterBalance ?? 0)
+): BillingStatus {
+  const trialActive = entitlementIsTrial(entitlement)
   return {
     required: true,
     access: cachedEntitlementGrantsAccess(entitlement),
-    plan: entitlement?.plan === 'pro' || entitlement?.plan === 'studio' ? entitlement.plan : null,
+    plan: entitlement?.plan === 'free' ||
+      entitlement?.plan === 'pro' ||
+      entitlement?.plan === 'studio'
+      ? entitlement.plan
+      : null,
     currentPeriodEnd: entitlement?.currentPeriodEnd?.toISOString() ?? null,
     cancelAtPeriodEnd: entitlement?.cancelAtPeriodEnd ?? false,
-    trial: capabilities.trial && entitlement?.trialEnd
+    trial: trialActive && entitlement?.trialEnd
       ? { active: true, endsAt: entitlement.trialEnd.toISOString() }
-      : null,
-    credits: entitlement?.plan && capabilities.managedAiAccess
-      ? {
-          remaining: includedRemaining + topUp.remaining,
-          credited: entitlement.creditedUnits + topUp.granted - topUp.refunded,
-          consumed: entitlement.consumedUnits,
-          includedRemaining,
-          topUpRemaining: topUp.remaining,
-          topUpPurchased: topUp.granted - topUp.refunded,
-          resetsAt: entitlement.currentPeriodEnd?.toISOString() ?? null,
-        }
       : null,
     stale,
     source,
@@ -217,7 +188,6 @@ export async function getBillingStatus(user: BillingUser, force = false): Promis
       currentPeriodEnd: null,
       cancelAtPeriodEnd: false,
       trial: null,
-      credits: null,
       stale: false,
       source: 'disabled',
     }
@@ -230,49 +200,47 @@ export async function getBillingStatus(user: BillingUser, force = false): Promis
       currentPeriodEnd: null,
       cancelAtPeriodEnd: false,
       trial: null,
-      credits: null,
       stale: false,
       source: 'admin',
     }
   }
 
-  let cached = await getCachedEntitlement(user.id)
+  const cached = await getCachedEntitlement(user.id)
   const stale = !cached || Date.now() - cached.syncedAt.getTime() > CACHE_MAX_AGE_MS
   if (force || stale) {
     try {
       const refreshed = await refreshEntitlement(user.id)
-      return statusFromEntitlement(user.id, refreshed, 'polar', false)
+      return statusFromEntitlement(refreshed, 'polar', false)
     } catch (error) {
       if ((error as { statusCode?: number }).statusCode === 404) {
-        return statusFromEntitlement(user.id, await clearEntitlement(user.id), 'polar', false)
+        return statusFromEntitlement(await clearEntitlement(user.id), 'polar', false)
       }
       if (!cached) throw new Error('BILLING_TEMPORARILY_UNAVAILABLE')
     }
   }
-  return statusFromEntitlement(user.id, cached, 'cache', stale)
+  return statusFromEntitlement(cached, 'cache', stale)
 }
 
 export async function createPlanCheckout(
   user: { id: string; email: string },
-  plan: BillingPlan,
+  plan: CheckoutPlan,
 ) {
   const { config } = getPolarRuntime()
   if (!config) throw new Error('Polar is not configured')
-  const proTrial = plan === 'pro'
   const checkout = await getPolarClient().checkouts.create({
-    products: [proTrial ? config.proProductId : config.studioProductId],
+    products: plan === 'free'
+      ? [config.freeProductId]
+      : [config.proProductId, config.proYearlyProductId],
     externalCustomerId: user.id,
     customerEmail: user.email,
-    allowTrial: proTrial,
-    trialInterval: proTrial ? 'day' : undefined,
-    trialIntervalCount: proTrial ? 3 : undefined,
+    allowTrial: false,
     metadata: {
       loora_kind: 'subscription',
       loora_plan: plan,
       loora_user_id: user.id,
     },
-    successUrl: `${config.origin}/?checkout=success&checkout_id={CHECKOUT_ID}`,
-    returnUrl: config.origin,
+    successUrl: `${config.origin}/app?checkout=success&checkout_id={CHECKOUT_ID}`,
+    returnUrl: `${config.origin}/app`,
   })
   return { url: checkout.url }
 }
@@ -281,38 +249,5 @@ export async function refreshBillingStatus(user: BillingUser) {
   const last = refreshedAt.get(user.id) ?? 0
   if (Date.now() - last < REFRESH_RATE_LIMIT_MS) return getBillingStatus(user)
   refreshedAt.set(user.id, Date.now())
-  await flushPendingPolarUsage(user.id)
   return getBillingStatus(user, true)
-}
-
-export async function acquireGenerationLease(userId: string) {
-  const now = new Date()
-  const token = crypto.randomUUID()
-  await db.delete(aiGenerationLease).where(and(
-    eq(aiGenerationLease.userId, userId),
-    lte(aiGenerationLease.expiresAt, now),
-  ))
-  // Capped concurrency instead of a single mutex so parallel chats can each
-  // run a generation. The count+insert pair is not atomic; a race can briefly
-  // exceed the cap by one, which spend-wise is the same as the old lease
-  // being released a request earlier — acceptable.
-  const active = await db
-    .select({ token: aiGenerationLease.token })
-    .from(aiGenerationLease)
-    .where(eq(aiGenerationLease.userId, userId))
-  if (active.length >= MAX_CONCURRENT_GENERATIONS) return null
-  const [lease] = await db
-    .insert(aiGenerationLease)
-    .values({ userId, token, acquiredAt: now, expiresAt: new Date(now.getTime() + LEASE_MS) })
-    .onConflictDoNothing()
-    .returning({ token: aiGenerationLease.token })
-  return lease?.token ?? null
-}
-
-export async function releaseGenerationLease(userId: string, token: string) {
-  const deleted = await db
-    .delete(aiGenerationLease)
-    .where(and(eq(aiGenerationLease.userId, userId), eq(aiGenerationLease.token, token)))
-    .returning({ token: aiGenerationLease.token })
-  return deleted.length > 0
 }

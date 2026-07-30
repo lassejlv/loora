@@ -25,11 +25,237 @@ const VENDOR_SCRIPTS = [
   '/vendor/html-to-image.js',
 ] as const
 
-// Families available inside every frame (and offered by the style editor's
-// font row). The css2 endpoint is one stylesheet; actual font FILES only
-// download when a family is used, so listing several here is near-free.
-export const FONTS_URL =
-  'https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&family=Spline+Sans+Mono:wght@400;500&family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@400;500;600;700&family=Playfair+Display:wght@400;600;700&family=Lora:wght@400;500;600&display=swap'
+// html-to-image otherwise copies every computed property onto every cloned
+// element. Chromium exposes hundreds of properties, which can turn a normal
+// legacy page into a multi-megabyte SVG data URL that the browser cannot
+// decode. Keep the visual properties that affect a static canvas capture.
+export const CAPTURE_STYLE_PROPERTIES = [
+  '-webkit-background-clip',
+  '-webkit-box-reflect',
+  '-webkit-line-clamp',
+  '-webkit-mask-clip',
+  '-webkit-mask-composite',
+  '-webkit-mask-image',
+  '-webkit-mask-origin',
+  '-webkit-mask-position',
+  '-webkit-mask-repeat',
+  '-webkit-mask-size',
+  '-webkit-text-fill-color',
+  '-webkit-text-stroke-color',
+  '-webkit-text-stroke-width',
+  'align-content',
+  'align-items',
+  'align-self',
+  'animation-delay',
+  'animation-direction',
+  'animation-duration',
+  'animation-fill-mode',
+  'animation-iteration-count',
+  'animation-name',
+  'animation-play-state',
+  'animation-timing-function',
+  'appearance',
+  'aspect-ratio',
+  'backdrop-filter',
+  'backface-visibility',
+  'background-attachment',
+  'background-blend-mode',
+  'background-clip',
+  'background-color',
+  'background-image',
+  'background-origin',
+  'background-position',
+  'background-repeat',
+  'background-size',
+  'border-bottom-color',
+  'border-bottom-left-radius',
+  'border-bottom-right-radius',
+  'border-bottom-style',
+  'border-bottom-width',
+  'border-collapse',
+  'border-left-color',
+  'border-left-style',
+  'border-left-width',
+  'border-right-color',
+  'border-right-style',
+  'border-right-width',
+  'border-spacing',
+  'border-top-color',
+  'border-top-left-radius',
+  'border-top-right-radius',
+  'border-top-style',
+  'border-top-width',
+  'bottom',
+  'box-decoration-break',
+  'box-shadow',
+  'box-sizing',
+  'break-after',
+  'break-before',
+  'break-inside',
+  'caption-side',
+  'clear',
+  'clip',
+  'clip-path',
+  'color',
+  'color-scheme',
+  'column-count',
+  'column-fill',
+  'column-gap',
+  'column-rule-color',
+  'column-rule-style',
+  'column-rule-width',
+  'column-span',
+  'column-width',
+  'contain',
+  'contain-intrinsic-size',
+  'content',
+  'content-visibility',
+  'direction',
+  'display',
+  'fill',
+  'fill-opacity',
+  'fill-rule',
+  'filter',
+  'flex-basis',
+  'flex-direction',
+  'flex-grow',
+  'flex-shrink',
+  'flex-wrap',
+  'float',
+  'font-family',
+  'font-feature-settings',
+  'font-kerning',
+  'font-optical-sizing',
+  'font-size',
+  'font-stretch',
+  'font-style',
+  'font-variant',
+  'font-variation-settings',
+  'font-weight',
+  'grid-auto-columns',
+  'grid-auto-flow',
+  'grid-auto-rows',
+  'grid-column-end',
+  'grid-column-start',
+  'grid-row-end',
+  'grid-row-start',
+  'grid-template-areas',
+  'grid-template-columns',
+  'grid-template-rows',
+  'height',
+  'hyphens',
+  'image-rendering',
+  'isolation',
+  'justify-content',
+  'justify-items',
+  'justify-self',
+  'left',
+  'letter-spacing',
+  'line-break',
+  'line-height',
+  'list-style-image',
+  'list-style-position',
+  'list-style-type',
+  'margin-bottom',
+  'margin-left',
+  'margin-right',
+  'margin-top',
+  'mask-border',
+  'mask-clip',
+  'mask-composite',
+  'mask-image',
+  'mask-mode',
+  'mask-origin',
+  'mask-position',
+  'mask-repeat',
+  'mask-size',
+  'max-height',
+  'max-width',
+  'min-height',
+  'min-width',
+  'mix-blend-mode',
+  'object-fit',
+  'object-position',
+  'opacity',
+  'order',
+  'outline-color',
+  'outline-offset',
+  'outline-style',
+  'outline-width',
+  'overflow-wrap',
+  'overflow-x',
+  'overflow-y',
+  'padding-bottom',
+  'padding-left',
+  'padding-right',
+  'padding-top',
+  'paint-order',
+  'perspective',
+  'perspective-origin',
+  'place-content',
+  'place-items',
+  'place-self',
+  'position',
+  'right',
+  'rotate',
+  'row-gap',
+  'scale',
+  'shape-image-threshold',
+  'shape-margin',
+  'shape-outside',
+  'stroke',
+  'stroke-dasharray',
+  'stroke-dashoffset',
+  'stroke-linecap',
+  'stroke-linejoin',
+  'stroke-miterlimit',
+  'stroke-opacity',
+  'stroke-width',
+  'table-layout',
+  'tab-size',
+  'text-align',
+  'text-align-last',
+  'text-decoration-color',
+  'text-decoration-line',
+  'text-decoration-style',
+  'text-decoration-thickness',
+  'text-emphasis-color',
+  'text-emphasis-position',
+  'text-emphasis-style',
+  'text-indent',
+  'text-overflow',
+  'text-rendering',
+  'text-shadow',
+  'text-transform',
+  'text-underline-offset',
+  'text-underline-position',
+  'top',
+  'transform',
+  'transform-box',
+  'transform-origin',
+  'transform-style',
+  'transition-delay',
+  'transition-duration',
+  'transition-property',
+  'transition-timing-function',
+  'translate',
+  'unicode-bidi',
+  'vertical-align',
+  'visibility',
+  'white-space',
+  'width',
+  'word-break',
+  'word-spacing',
+  'writing-mode',
+  'z-index',
+] as const
+
+// Families available inside every legacy frame (and offered by the style
+// editor's font row). Regenerate with scripts/vendor-fonts.py.
+// Data-URL variant: element frames are sandboxed without allow-same-origin, so
+// their font fetches carry Origin: null and a plain same-origin woff2 would be
+// refused by CORS.
+export const FRAME_FONTS_URL = '/vendor/fonts-sandbox.css'
 
 /**
  * Strip ES module import/export so Babel's classic preset can run.
@@ -419,7 +645,7 @@ export function buildElementDoc(): string {
 <html>
 <head>
 <meta charset="utf-8" />
-<link rel="stylesheet" href="${FONTS_URL}" crossorigin="anonymous" />
+<link rel="stylesheet" href="${FRAME_FONTS_URL}" />
 ${VENDOR_SCRIPTS.map((src) => `<script src="${src}"><\/script>`).join('\n')}
 <style>html,body{margin:0;height:100%;background:transparent}#root{height:100%}body{font-family:Archivo,system-ui,sans-serif}</style>
 </head>
@@ -928,11 +1154,12 @@ window.addEventListener('message', function (e) {
     var volatile = !!(document.getAnimations && document.getAnimations().some(function (animation) {
       return animation.playState === 'running' || animation.playState === 'pending'
     }))
-    var reply = function (png, fontsSkipped) {
+    var reply = function (png, fontsSkipped, captureError) {
       parent.postMessage({
         type: 'loora:capture-result',
         token: msg.token,
         png: png,
+        error: captureError || null,
         revision: captureRevision,
         volatile: volatile,
         fontsSkipped: !!fontsSkipped,
@@ -940,18 +1167,72 @@ window.addEventListener('message', function (e) {
       if (__revision === captureRevision) __dirty = false
       else __postDirty()
     }
-    if (!window.htmlToImage) return reply(null)
+    var captureErrorMessage = function (error) {
+      return String((error && error.message) || error || 'Unknown browser capture error').slice(0, 500)
+    }
+    if (!window.htmlToImage) {
+      return reply(null, false, 'The legacy image capture runtime did not load')
+    }
     // Capture at device resolution (capped at 2x) so the agent judges text
-    // and detail from a sharp image. Cross-origin stylesheets (fonts) can
-    // make font embedding throw; retry without fonts before giving up, and
-    // flag the reply so the degraded fidelity is visible downstream.
-    var pixelRatio = Math.min(window.devicePixelRatio || 1, 2)
-    htmlToImage.toPng(document.body, { pixelRatio: pixelRatio }).then(
-      function (png) { reply(png, false) },
-      function () {
-        htmlToImage.toPng(document.body, { pixelRatio: pixelRatio, skipFonts: true }).then(
-          function (png) { reply(png, true) },
-          function () { reply(null, false) }
+    // and detail from a sharp image. A bounded style list keeps the cloned SVG
+    // below browser data-URI limits. Cross-origin stylesheets (fonts) can make
+    // font embedding throw, so retry without fonts before giving up.
+    var pixelRatio = typeof msg.pixelRatio === 'number' && msg.pixelRatio > 0
+      ? msg.pixelRatio
+      : Math.min(window.devicePixelRatio || 1, 2)
+    var captureWidth = Math.max(
+      1,
+      document.body.scrollWidth,
+      document.documentElement.scrollWidth
+    )
+    var captureHeight = Math.max(
+      1,
+      document.body.scrollHeight,
+      document.documentElement.scrollHeight
+    )
+    var maxDimension = typeof msg.maxDimension === 'number' && msg.maxDimension > 0
+      ? msg.maxDimension
+      : Math.max(captureWidth, captureHeight)
+    var captureScale = Math.min(
+      1,
+      maxDimension / Math.max(captureWidth, captureHeight)
+    )
+    var scaledCaptureWidth = Math.max(1, Math.round(captureWidth * captureScale))
+    var scaledCaptureHeight = Math.max(1, Math.round(captureHeight * captureScale))
+    var captureStyleProperties = ${JSON.stringify(CAPTURE_STYLE_PROPERTIES)}
+    var captureOptions = function (skipFonts) {
+      var options = {
+        pixelRatio: pixelRatio,
+        includeStyleProperties: captureStyleProperties,
+        fontEmbedCSS: msg.fontEmbedCSS,
+        skipFonts: !!skipFonts,
+      }
+      if (captureScale < 1) {
+        options.width = scaledCaptureWidth
+        options.height = scaledCaptureHeight
+        options.canvasWidth = scaledCaptureWidth
+        options.canvasHeight = scaledCaptureHeight
+        options.style = {
+          width: captureWidth + 'px',
+          height: captureHeight + 'px',
+          transform: 'scale(' + captureScale + ')',
+          transformOrigin: 'top left',
+        }
+      }
+      return options
+    }
+    htmlToImage.toPng(document.body, captureOptions(false)).then(
+      function (png) { reply(png, false, null) },
+      function (firstCaptureError) {
+        htmlToImage.toPng(document.body, captureOptions(true)).then(
+          function (png) { reply(png, true, null) },
+          function (retryCaptureError) {
+            var captureError =
+              'PNG capture failed: ' + captureErrorMessage(firstCaptureError) +
+              '; retry without fonts failed: ' + captureErrorMessage(retryCaptureError)
+            console.error(captureError)
+            reply(null, false, captureError)
+          }
         )
       }
     )
@@ -1287,7 +1568,8 @@ export function ElementFrame({
 // Ask a mounted element iframe for a PNG of itself. Resolves null when the
 // frame is missing, still booting, or slow to respond.
 export interface ElementCapture {
-  png: string
+  png: string | null
+  error: string | null
   revision: number
   volatile: boolean
   // True when font embedding failed and the capture rendered without webfonts.
@@ -1354,7 +1636,15 @@ export function measureElement(
   })
 }
 
-export function captureElement(elementId: string, timeoutMs = 1500): Promise<ElementCapture | null> {
+export function captureElement(
+  elementId: string,
+  timeoutMs = 1500,
+  options: {
+    pixelRatio?: number
+    maxDimension?: number
+    fontEmbedCSS?: string
+  } = {},
+): Promise<ElementCapture | null> {
   const iframe = document.querySelector<HTMLIFrameElement>(
     `iframe[data-element-frame="${CSS.escape(elementId)}"]`,
   )
@@ -1370,6 +1660,7 @@ export function captureElement(elementId: string, timeoutMs = 1500): Promise<Ele
         type?: string
         token?: string
         png?: string | null
+        error?: string | null
         revision?: number
         volatile?: boolean
         fontsSkipped?: boolean
@@ -1377,17 +1668,31 @@ export function captureElement(elementId: string, timeoutMs = 1500): Promise<Ele
       if (e.source !== iframe.contentWindow || msg?.type !== 'loora:capture-result' || msg.token !== token) return
       window.clearTimeout(timer)
       window.removeEventListener('message', onMessage)
-      if (typeof msg.png !== 'string') return resolve(null)
       const revision = typeof msg.revision === 'number' ? msg.revision : getElementCaptureRevision(elementId)
       noteFrameRevision(elementId, revision)
       resolve({
-        png: msg.png,
+        png: typeof msg.png === 'string' ? msg.png : null,
+        error:
+          typeof msg.error === 'string' && msg.error.trim()
+            ? msg.error.slice(0, 500)
+            : typeof msg.png === 'string'
+              ? null
+              : 'The browser returned no PNG data',
         revision,
         volatile: msg.volatile === true,
         fontsSkipped: msg.fontsSkipped === true,
       })
     }
     window.addEventListener('message', onMessage)
-    iframe.contentWindow!.postMessage({ type: 'loora:capture', token }, '*')
+    iframe.contentWindow!.postMessage(
+      {
+        type: 'loora:capture',
+        token,
+        pixelRatio: options.pixelRatio,
+        maxDimension: options.maxDimension,
+        fontEmbedCSS: options.fontEmbedCSS,
+      },
+      '*',
+    )
   })
 }

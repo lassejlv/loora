@@ -1,4 +1,5 @@
 import { betterAuth } from 'better-auth'
+import { APIError } from 'better-auth/api'
 import { drizzleAdapter } from 'better-auth/adapters/drizzle'
 import { mcp, oAuthDiscoveryMetadata } from 'better-auth/plugins'
 import { tanstackStartCookies } from 'better-auth/tanstack-start'
@@ -6,11 +7,11 @@ import { polar, portal, webhooks } from '@polar-sh/better-auth'
 import { db } from '@loora/db'
 import * as schema from '@loora/db/schema'
 import { applyCustomerStateWebhook } from '@loora/billing/billing'
-import {
-  applyPaidTopUpOrder,
-  applyRefundedTopUpOrder,
-} from '@loora/billing/credit-top-ups'
 import { getPolarClient, getPolarRuntime } from '@loora/billing/polar'
+import {
+  CURRENT_PRIVACY_VERSION,
+  CURRENT_TERMS_VERSION,
+} from './legal-consent'
 
 const googleClientId = process.env.GOOGLE_CLIENT_ID?.trim()
 const googleClientSecret = process.env.GOOGLE_CLIENT_SECRET?.trim()
@@ -54,6 +55,63 @@ export const auth = betterAuth({
         defaultValue: 1,
         input: false,
       },
+      acceptedTerms: {
+        type: 'boolean',
+        required: false,
+        defaultValue: false,
+      },
+      acceptedPrivacy: {
+        type: 'boolean',
+        required: false,
+        defaultValue: false,
+      },
+      termsAcceptedAt: {
+        type: 'date',
+        required: false,
+        input: false,
+      },
+      privacyAcceptedAt: {
+        type: 'date',
+        required: false,
+        input: false,
+      },
+      termsVersion: {
+        type: 'string',
+        required: false,
+        input: false,
+      },
+      privacyVersion: {
+        type: 'string',
+        required: false,
+        input: false,
+      },
+    },
+  },
+  databaseHooks: {
+    user: {
+      create: {
+        before: async (newUser, context) => {
+          if (context?.path !== '/sign-up/email') return { data: newUser }
+          if (newUser.acceptedTerms !== true || newUser.acceptedPrivacy !== true) {
+            throw new APIError('BAD_REQUEST', {
+              message: 'You must accept the Terms of Service and Privacy Policy.',
+            })
+          }
+
+          const acceptedAt = new Date()
+          return {
+            data: {
+              ...newUser,
+              acceptedTerms: true,
+              acceptedPrivacy: true,
+              termsAcceptedAt: acceptedAt,
+              privacyAcceptedAt: acceptedAt,
+              termsVersion: CURRENT_TERMS_VERSION,
+              privacyVersion: CURRENT_PRIVACY_VERSION,
+            },
+          }
+        },
+      },
     },
   },
   emailAndPassword: {
@@ -71,12 +129,6 @@ export const auth = betterAuth({
                 secret: polarRuntime.config.webhookSecret,
                 onCustomerStateChanged: async (payload) => {
                   await applyCustomerStateWebhook(payload.data, payload.timestamp)
-                },
-                onOrderPaid: async (payload) => {
-                  await applyPaidTopUpOrder(payload.data, payload.timestamp)
-                },
-                onOrderRefunded: async (payload) => {
-                  await applyRefundedTopUpOrder(payload.data, payload.timestamp)
                 },
               }),
             ],

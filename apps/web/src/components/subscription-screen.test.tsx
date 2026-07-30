@@ -22,7 +22,6 @@ const noPlan = {
   currentPeriodEnd: null,
   cancelAtPeriodEnd: false,
   trial: null,
-  credits: null,
   stale: false,
   source: 'polar' as const,
 }
@@ -43,23 +42,24 @@ describe('SubscriptionScreen', () => {
     window.localStorage.clear()
     status.mockReset().mockResolvedValue(noPlan)
     refresh.mockReset().mockResolvedValue(noPlan)
-    checkout.mockReset().mockResolvedValue({ url: 'https://polar.sh/checkout/pro-trial' })
+    checkout.mockReset().mockResolvedValue({ url: 'https://polar.sh/checkout/free' })
     signOut.mockReset().mockResolvedValue(undefined)
   })
 
   afterEach(() => cleanup())
 
-  test('keeps the editor inert and offers both plan checkouts', async () => {
+  test('keeps the editor inert and offers Free and Pro', async () => {
     const redirect = mock()
     renderScreen(redirect)
 
+    expect(await screen.findByText('$0')).toBeTruthy()
     expect(await screen.findByText('$20')).toBeTruthy()
-    expect(screen.getByText('$49')).toBeTruthy()
-    expect(screen.getByText('3-day free trial')).toBeTruthy()
+    expect(screen.getByText('No card required')).toBeTruthy()
+    expect(screen.getByText('$200 / year')).toBeTruthy()
     expect(screen.queryByText('Real editor')).toBeNull()
-    fireEvent.click(screen.getByRole('button', { name: 'Start free trial' }))
-    await waitFor(() => expect(checkout).toHaveBeenCalledWith({ plan: 'pro' }))
-    expect(redirect).toHaveBeenCalledWith('https://polar.sh/checkout/pro-trial')
+    fireEvent.click(screen.getByRole('button', { name: 'Start free' }))
+    await waitFor(() => expect(checkout).toHaveBeenCalledWith({ plan: 'free' }))
+    expect(redirect).toHaveBeenCalledWith('https://polar.sh/checkout/free')
   })
 
   test('shows the loading shimmer, not the plan picker, while the first check runs', () => {
@@ -72,7 +72,7 @@ describe('SubscriptionScreen', () => {
   })
 
   test('mounts the real editor for an active subscription', async () => {
-    status.mockResolvedValue({ ...noPlan, access: true, plan: 'pro' })
+    status.mockResolvedValue({ ...noPlan, access: true, plan: 'free' })
     renderScreen()
     expect(await screen.findByText('Real editor')).toBeTruthy()
     expect(screen.queryByText('Choose your Loora plan')).toBeNull()
@@ -98,7 +98,7 @@ describe('SubscriptionScreen', () => {
 
   test('refreshes after checkout and clears checkout query parameters', async () => {
     window.history.replaceState({}, '', '/?checkout=success&checkout_id=checkout-1')
-    refresh.mockResolvedValue({ ...noPlan, access: true, plan: 'studio' })
+    refresh.mockResolvedValue({ ...noPlan, access: true, plan: 'pro' })
     renderScreen()
     expect(await screen.findByText('Real editor')).toBeTruthy()
     expect(refresh).toHaveBeenCalledTimes(1)

@@ -12,58 +12,31 @@ describe('bootstrapEditorSearch', () => {
     expect(bootstrapEditorSearch('doc_1')).toEqual({ d: 'doc_1' })
   })
 
-  test('maps legacy integration deep-links', () => {
+  test('keeps retired billing and integration state out of the settings dialog', () => {
     window.history.replaceState({}, '', '/?settings=github')
-    expect(bootstrapEditorSearch('doc_1')).toEqual({
-      d: 'doc_1',
-      settings: 'integrations',
-      integration: 'github',
-    })
+    expect(bootstrapEditorSearch('doc_1')).toEqual({ d: 'doc_1' })
+
+    window.history.replaceState({}, '', '/?settings=integrations&integration=mcp')
+    expect(bootstrapEditorSearch('doc_1')).toEqual({ d: 'doc_1' })
+
+    window.history.replaceState({}, '', '/?settings=billing')
+    expect(bootstrapEditorSearch('doc_1')).toEqual({ d: 'doc_1' })
   })
 
-  test('maps old provider deep-links into the combined provider tab', () => {
-    window.history.replaceState(
-      {},
-      '',
-      '/?settings=integrations&integration=openrouter',
-    )
-    expect(bootstrapEditorSearch('doc_1')).toEqual({
-      d: 'doc_1',
-      settings: 'integrations',
-      integration: 'providers',
-    })
-
+  test('drops retired AI provider deep-links', () => {
     window.history.replaceState({}, '', '/?settings=chatgpt')
-    expect(bootstrapEditorSearch('doc_1')).toEqual({
-      d: 'doc_1',
-      settings: 'integrations',
-      integration: 'providers',
-    })
-  })
+    expect(bootstrapEditorSearch('doc_1')).toEqual({ d: 'doc_1' })
 
-  test('opens billing on topup success', () => {
-    window.history.replaceState({}, '', '/?topup=success')
-    expect(bootstrapEditorSearch('doc_1')).toEqual({
-      d: 'doc_1',
-      settings: 'billing',
-    })
-  })
-
-  test('supports the agent settings deep-link', () => {
     window.history.replaceState({}, '', '/?settings=agent')
-    expect(bootstrapEditorSearch('doc_1')).toEqual({
-      d: 'doc_1',
-      settings: 'agent',
-    })
+    expect(bootstrapEditorSearch('doc_1')).toEqual({ d: 'doc_1' })
+
+    window.history.replaceState({}, '', '/?settings=integrations&integration=providers')
+    expect(bootstrapEditorSearch('doc_1')).toEqual({ d: 'doc_1' })
   })
 
-  test('seeds agent/layers from localStorage when URL omits them', () => {
-    window.localStorage.setItem('loora:agent', '0')
+  test('seeds layers from localStorage when URL omits it', () => {
     window.localStorage.setItem('loora:layers', '1')
     window.history.replaceState({}, '', '/?d=doc_1')
-    expect(bootstrapEditorSearch('doc_1')).toEqual({
-      agent: false,
-      layers: true,
-    })
+    expect(bootstrapEditorSearch('doc_1')).toEqual({ layers: true })
   })
 })

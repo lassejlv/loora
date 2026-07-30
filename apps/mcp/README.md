@@ -16,18 +16,36 @@ opencode, etc. connect without any pre-registered client).
 3. Client registers dynamically, sends the user through
    `/api/auth/mcp/authorize` — unauthenticated users land on the app root to
    sign in and the flow resumes — and exchanges the code for a token.
-4. Tokens live in the shared database; this server validates them with
-   `auth.api.getMcpSession` and then applies the same gates as the oRPC
-   `protectedProcedure` (preview access + active plan).
+4. Tokens live in the web app's auth database. This server validates them
+   through Better Auth's remote MCP client and then applies the same gates as
+   the oRPC `protectedProcedure` (legal consent + preview access + active
+   plan). The MCP process does not initialize the web app's Polar auth plugin.
 
 ## Env
 
-Same `.env` as the web app (`DATABASE_URL`, `BETTER_AUTH_SECRET`,
-`BETTER_AUTH_URL`), plus:
+Required:
 
+- `DATABASE_URL` — shared application database
+- `BETTER_AUTH_URL` — public web app origin; MCP verifies tokens through
+  `${BETTER_AUTH_URL}/api/auth`
 - `MCP_PUBLIC_URL` — public origin of this server, e.g. `https://mcp.loora.design`
+
+Optional:
+
+- `LOORA_APP_URL` — canonical web app origin used in returned editor links
 - `PORT` — defaults to 4100
 - `LOORA_MCP_USER` — stdio mode only: email or id of the acting user
+- `PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH` — optional local Chromium override;
+  the Railway image installs Chromium at `/usr/bin/chromium`
+- `MCP_SCREENSHOT_CONCURRENCY` — concurrent Chromium captures, defaults to `2`
+- `MCP_SCREENSHOT_QUEUE_LIMIT` — queued captures before returning busy,
+  defaults to `8`
+- `MCP_SCREENSHOT_QUEUE_TIMEOUT_MS` — maximum queue wait, defaults to `20000`
+
+Polar is not required for the process to start. Set
+`REQUIRE_POLAR_BILLING=false` to run tools without plan checks or MCP usage
+metering. When billing is required, authenticated tool calls remain fail-closed
+if Polar metering is unavailable.
 
 Optionally set `MCP_RESOURCE_URL=https://mcp.loora.design/mcp` for the web app
 so Better Auth's own protected-resource metadata names the right resource.
@@ -63,21 +81,26 @@ Local stdio (no OAuth):
 
 Separate Railway service off the same repo, config `apps/mcp/railway.json`
 (builds `apps/mcp/Dockerfile`). Point mcp.loora.design at it. Migrations stay
-with the web service.
+with the web service. Set the same `REDIS_URL` on both the web and MCP
+services so Canvas changes and agent activity reach open editors immediately.
 
-## Draft targets
+## Agent workflow
 
-Element and history tools accept an optional `draftId`; omitting it keeps the
-backward-compatible Main behavior. Draft lifecycle tools are:
+1. `listDesigns`, then `getDesignContext`.
+2. Build through `createPage`, `insertNodes`, `patchNodes`, components, tokens,
+   and the other structured mutation tools. These all commit validated Canvas
+   transactions through the same engine as the web editor.
+3. Call `getScreenshot` after meaningful edits. It returns real `image/png`
+   MCP content for a Page or NodeRef; outbound document URLs are blocked and
+   owned image assets are inlined.
+4. Call `exportCode` with `tailwind`, `jsx`, or `html` when implementation code
+   is needed. Tailwind output is JSX with literal utilities and no hidden
+   generated stylesheet.
 
-- `list_drafts`, `create_draft`
-- `propose_draft`, `reopen_draft`, `close_draft`
-- `compare_draft`, `apply_draft`
+Canvas source remains structured. HTML, JSX, and Tailwind are one-way exports,
+not editable code blobs inside the document.
 
-`compare_draft` returns the current Main and draft revisions plus whole-element
-and layer-order conflicts. Pass those revisions and one `main` or `draft`
-choice for every conflict to `apply_draft`.
-
-Main and draft element writes use revision-checked retries. That preserves
-unrelated browser or MCP changes and returns the resolved target revision.
-Proposed, applied, and closed drafts are read-only.
+Most target tools accept an optional `draftId`; omit it for Main. Branch
+lifecycle tools are `listBranches`, `createBranch`, `proposeBranch`,
+`reopenBranch`, `compareBranch`, `applyBranch`, and `closeBranch`. Proposed,
+applied, and closed branches are read-only.

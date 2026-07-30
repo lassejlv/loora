@@ -1,184 +1,1036 @@
-// Tool surface of the Loora MCP server, bound to one user id. Elements are
-// boxes of HTML or JSX code (see @loora/db/canvas). Element writes use
-// revision-checked retries so concurrent changes on the same target are
-// reconciled instead of silently replacing a stale shape array.
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { z } from 'zod'
-import type { CanvasElement } from '@loora/db/canvas'
 import {
-  MAX_CODE_LENGTH,
+  compileJsxComponent,
+  compileStandaloneHtml,
+  compileTailwindComponent,
+} from '@loora/canvas/export'
+import {
+  canvasId,
+  createInstanceNode,
+  defaultLayout,
+  defaultStyle,
+  orderedChildren,
+  type CanvasDocument,
+  type CanvasNode,
+  type NodeRef,
+} from '@loora/canvas/model'
+import {
+  createComponentInputSchema,
+  createComponentTransaction,
+  createInstanceInputSchema,
+  createPageInputSchema,
+  createPageTransaction,
+  deleteNodesInputSchema,
+  insertDescriptorOperations,
+  insertNodesInputSchema,
+  moveNodesInputSchema,
+  normalizeDeletionNodeIds,
+  patchNodesInputSchema,
+  patchOperationsForChanges,
+  readCanvasNodeRef,
+  readNodeInputSchema,
+  readTreeInputSchema,
+  searchCanvasNodes,
+  searchNodesInputSchema,
+  semanticTree,
+  setTokensInputSchema,
+  sourceContainerForRef,
+  tokenOperations,
+  viewCanvasInputSchema,
+  viewNodeInputSchema,
+  viewPageInputSchema,
+} from '@loora/agent/canvas-tools'
+import {
   MAX_NAME_LENGTH,
+  CanvasUnavailableError,
+  applyCanvasTransactions,
   applyDraft,
   closeDraft,
   compareDraft,
-  createDraft,
   createDesign,
+  createDraft,
   deleteDesign,
-  getDesign,
+  getCanvasTarget,
   listAssets,
-  listDrafts,
   listDesigns,
+  listDrafts,
   listVersions,
-  mutateShapes,
-  newElementId,
   renameDesign,
   reopenDraft,
   proposeDraft,
-  searchElements,
-  summarizeElement,
 } from './designs'
+import { renderCanvasScreenshot } from './screenshot'
+import {
+  McpUsageLimitError,
+  McpUsageUnavailableError,
+  type McpIncludedUsage,
+} from '@loora/billing/mcp-usage'
 
-function json(data: unknown) {
-  return { content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }] }
+export interface McpUsageController {
+  current: () => Promise<McpIncludedUsage>
+  reserve: () => Promise<McpIncludedUsage>
 }
 
-function fail(error: unknown) {
+function usageMeta(usage?: McpIncludedUsage) {
+  return usage ? { _meta: { 'loora/usage': usage } } : {}
+}
+
+function json(data: unknown, usage?: McpIncludedUsage) {
+  return {
+    content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }],
+    ...usageMeta(usage),
+  }
+}
+
+function fail(error: unknown, usage?: McpIncludedUsage) {
+  if (error instanceof McpUsageLimitError) {
+    return {
+      content: [
+        {
+          type: 'text' as const,
+          text: JSON.stringify(
+            {
+              error: error.message,
+              code: 'MCP_USAGE_LIMIT_REACHED',
+              usage: error.usage,
+            },
+            null,
+            2,
+          ),
+        },
+      ],
+      isError: true,
+      ...usageMeta(error.usage),
+    }
+  }
+  if (error instanceof McpUsageUnavailableError) {
+    return {
+      content: [{
+        type: 'text' as const,
+        text: JSON.stringify({
+          error: error.message,
+          code: 'MCP_USAGE_UNAVAILABLE',
+        }),
+      }],
+      isError: true,
+      ...usageMeta(usage),
+    }
+  }
+  if (error instanceof CanvasUnavailableError) {
+    return {
+      content: [
+        {
+          type: 'text' as const,
+          text: JSON.stringify(
+            {
+              error: error.message,
+              code: error.code,
+              designId: error.designId,
+            },
+            null,
+            2,
+          ),
+        },
+      ],
+      isError: true,
+      ...usageMeta(usage),
+    }
+  }
   const message = error instanceof Error ? error.message : String(error)
-  return { content: [{ type: 'text' as const, text: message }], isError: true }
+  return {
+    content: [{ type: 'text' as const, text: message }],
+    isError: true,
+    ...usageMeta(usage),
+  }
 }
 
 const designId = z.string().min(1).max(128).describe('Design id')
-const draftId = z.string().min(1).max(128).describe('Draft id')
-const elementCode = z
-  .string()
-  .max(MAX_CODE_LENGTH)
-  .describe(
-    'Element code: plain HTML/CSS/JS, or JSX/TSX defining `function App`. Rendered in an iframe with React and Tailwind available. No import/export statements.',
+const draftId = z.string().min(1).max(128).describe('Branch id')
+const targetShape = {
+  designId,
+  draftId: draftId.optional().describe('Branch target; omit for Main'),
+}
+
+export function appUrl(
+  design: string,
+  branch?: string,
+  extra: Record<string, string | undefined> = {},
+) {
+  const origin = (process.env.LOORA_APP_URL?.trim() || 'https://loora.design').replace(/\/+$/, '')
+  const path = branch
+    ? `/design/${encodeURIComponent(design)}/b/${encodeURIComponent(branch)}`
+    : `/design/${encodeURIComponent(design)}`
+  const url = new URL(path, `${origin}/`)
+  for (const [key, value] of Object.entries(extra)) {
+    if (value) url.searchParams.set(key, value)
+  }
+  return url.toString()
+}
+
+export function exportCanvasCode(
+  document: CanvasDocument,
+  input: {
+    format: 'tailwind' | 'html' | 'jsx'
+    pageId?: string
+    ref?: NodeRef
+    width: number
+  },
+) {
+  if (input.pageId && input.ref) {
+    throw new Error('Choose either pageId or ref, not both')
+  }
+  if (input.ref) readCanvasNodeRef(document, input.ref, input.width)
+  const defaultPage = orderedChildren(document, null).find(
+    (node) => node.type === 'page' && !node.hidden,
   )
+  const pageId =
+    input.ref
+      ? undefined
+      : input.pageId ??
+        (defaultPage?.type === 'page' ? defaultPage.id : undefined)
+  if (!input.ref && !pageId) {
+    throw new Error('The Canvas has no visible Page to export')
+  }
+  const nodeId = input.ref
+    ? input.ref.instancePath[0] ?? input.ref.nodeId
+    : undefined
+  const options = { pageId, nodeId, width: input.width }
+  const code =
+    input.format === 'tailwind'
+      ? compileTailwindComponent(document, options)
+      : input.format === 'jsx'
+        ? compileJsxComponent(document, options)
+        : compileStandaloneHtml(document, options)
+  return { code, pageId, nodeId }
+}
 
-export function createLooraServer(userId: string) {
-  const server = new McpServer({ name: 'loora', version: '0.1.0' })
+export function createLooraServer(
+  userId: string,
+  usage: McpUsageController,
+) {
+  const server = new McpServer({ name: 'loora', version: '0.3.0' })
 
-  // Every handler goes through this so a thrown Error becomes a tool error
-  // the client can read instead of a crashed request.
   function tool<Args>(run: (args: Args) => Promise<unknown>) {
     return async (args: Args) => {
+      let currentUsage: McpIncludedUsage | undefined
       try {
-        return json(await run(args))
+        currentUsage = await usage.reserve()
+        return json(await run(args), currentUsage)
       } catch (error) {
-        return fail(error)
+        return fail(error, currentUsage)
+      }
+    }
+  }
+
+  function pngTool<Args>(
+    run: (args: Args) => Promise<{
+      png: Uint8Array
+      metadata: unknown
+    }>,
+  ) {
+    return async (args: Args) => {
+      let currentUsage: McpIncludedUsage | undefined
+      try {
+        currentUsage = await usage.reserve()
+        const result = await run(args)
+        return {
+          content: [
+            {
+              type: 'text' as const,
+              text: JSON.stringify(result.metadata, null, 2),
+            },
+            {
+              type: 'image' as const,
+              data: Buffer.from(result.png).toString('base64'),
+              mimeType: 'image/png',
+            },
+          ],
+          ...usageMeta(currentUsage),
+        }
+      } catch (error) {
+        return fail(error, currentUsage)
       }
     }
   }
 
   server.registerTool(
-    'list_designs',
-    { description: 'List the designs (canvas documents) of the signed-in Loora user.' },
-    tool(async (_args: unknown) => listDesigns(userId)),
-  )
-
-  server.registerTool(
-    'get_design',
+    'getUsage',
     {
       description:
-        'Read one design. Returns element summaries (geometry, code length, first code line) by default; set includeCode to get full element code.',
-      inputSchema: {
-        id: designId,
-        draftId: draftId.optional().describe('Draft target; omit for Main'),
-        includeCode: z.boolean().default(false).describe('Include full code of every element'),
-      },
+        'Read MCP tool calls used, included, remaining, and the weekly reset time. This status check does not consume usage.',
+      annotations: { readOnlyHint: true },
     },
-    tool(async ({ id, draftId, includeCode }: { id: string; draftId?: string; includeCode: boolean }) => {
-      const found = await getDesign(userId, id, draftId)
-      return {
-        id: found.id,
-        name: found.name,
-        draftId: found.draftId,
-        draftName: found.draftName,
-        status: found.status,
-        revision: found.revision,
-        updatedAt: found.updatedAt.toISOString(),
-        elements: includeCode ? found.shapes : found.shapes.map(summarizeElement),
+    async () => {
+      try {
+        const current = await usage.current()
+        return json(current, current)
+      } catch (error) {
+        return fail(error)
       }
-    }),
+    },
   )
 
   server.registerTool(
-    'create_design',
+    'listDesigns',
     {
-      description: 'Create a new empty design.',
-      inputSchema: { name: z.string().trim().min(1).max(MAX_NAME_LENGTH) },
+      description:
+        'Start here. List the signed-in user’s structured Loora designs and canonical editor URLs.',
+      annotations: { readOnlyHint: true },
+    },
+    tool(async (_args: unknown) =>
+      (await listDesigns(userId)).map((design) => ({
+        ...design,
+        openUrl: appUrl(design.id),
+      })),
+    ),
+  )
+
+  server.registerTool(
+    'getDesignContext',
+    {
+      description:
+        'Read the target, revision, responsive settings, tokens, Pages, components, and a compact tree in one call. Use this before editing.',
+      inputSchema: {
+        ...targetShape,
+        depth: z.number().int().min(1).max(10).default(4),
+      },
+      annotations: { readOnlyHint: true },
+    },
+    tool(
+      async (args: {
+        designId: string
+        draftId?: string
+        depth: number
+      }) => {
+        const found = await getCanvasTarget(userId, args)
+        const roots = orderedChildren(found.document, null)
+        return {
+          target: {
+            designId: args.designId,
+            designName: found.name,
+            draftId: found.draftId,
+            draftName: found.draftName,
+            status: found.status,
+          },
+          revision: found.revision,
+          updatedAt: found.updatedAt.toISOString(),
+          openUrl: appUrl(args.designId, args.draftId),
+          breakpoints: found.document.breakpoints,
+          activeThemeId: found.document.activeThemeId,
+          themes: Object.values(found.document.themes),
+          tokens: Object.values(found.document.tokens),
+          pages: roots
+            .filter((node) => node.type === 'page')
+            .map((page) => ({
+              id: page.id,
+              name: page.name,
+              hidden: page.hidden,
+              x: page.layout.x,
+              y: page.layout.y,
+              width:
+                page.layout.width.unit === 'px'
+                  ? page.layout.width.value
+                  : page.viewport.width,
+              minHeight: page.viewport.minHeight,
+              states: page.states ?? {},
+            })),
+          components: roots
+            .filter((node) => node.type === 'component')
+            .map((component) => ({
+              id: component.id,
+              name: component.name,
+              variants: component.variants,
+              defaultVariant: component.defaultVariant,
+              states: component.states ?? {},
+            })),
+          tree: semanticTree(found.document, null, args.depth),
+        }
+      },
+    ),
+  )
+
+  server.registerTool(
+    'readTree',
+    {
+      description:
+        'Read a compact semantic Canvas tree. Use NodeRefs from this result for precise edits.',
+      inputSchema: {
+        ...targetShape,
+        root: readTreeInputSchema.shape.root,
+        depth: readTreeInputSchema.shape.depth,
+      },
+      annotations: { readOnlyHint: true },
+    },
+    tool(
+      async (args: {
+        designId: string
+        draftId?: string
+        root?: { nodeId: string; instancePath: string[] }
+        depth: number
+      }) => {
+        const found = await getCanvasTarget(userId, args)
+        return {
+          target: { designId: args.designId, draftId: args.draftId ?? null },
+          revision: found.revision,
+          tree: semanticTree(
+            found.document,
+            args.root ?? null,
+            args.depth,
+          ),
+        }
+      },
+    ),
+  )
+
+  server.registerTool(
+    'readNode',
+    {
+      description: 'Read one complete structured source node and an optional instance override.',
+      inputSchema: { ...targetShape, ref: readNodeInputSchema.shape.ref },
+      annotations: { readOnlyHint: true },
+    },
+    tool(
+      async (args: {
+        designId: string
+        draftId?: string
+        ref: { nodeId: string; instancePath: string[] }
+      }) => {
+        const found = await getCanvasTarget(userId, args)
+        return {
+          ...readCanvasNodeRef(found.document, args.ref),
+          revision: found.revision,
+        }
+      },
+    ),
+  )
+
+  server.registerTool(
+    'searchNodes',
+    {
+      description: 'Search node names and text content in a structured design.',
+      inputSchema: {
+        ...targetShape,
+        query: searchNodesInputSchema.shape.query,
+        types: searchNodesInputSchema.shape.types,
+      },
+      annotations: { readOnlyHint: true },
+    },
+    tool(
+      async (args: {
+        designId: string
+        draftId?: string
+        query: string
+        types?: Array<CanvasNode['type']>
+      }) => {
+        const found = await getCanvasTarget(userId, args)
+        return {
+          matches: searchCanvasNodes(found.document, args.query, args.types),
+          revision: found.revision,
+        }
+      },
+    ),
+  )
+
+  server.registerTool(
+    'createPage',
+    {
+      description:
+        'Create an editable responsive Page with typed local state and nested structured nodes in one engine transaction. Event interactions can set, toggle, or increment state, switch any named visual theme, and react through conditional state-change rules. Model normal Tailwind layouts with flex/grid, gap, padding, fill, and hug; use absolute positioning only intentionally.',
+      inputSchema: { ...targetShape, ...createPageInputSchema.shape },
+    },
+    tool(
+      async (args: z.infer<typeof createPageInputSchema> & {
+        designId: string
+        draftId?: string
+      }) => {
+        const found = await getCanvasTarget(userId, args)
+        const created = createPageTransaction(found.document, args)
+        const result = await applyCanvasTransactions(userId, args, [
+          created.transaction,
+        ])
+        return {
+          pageId: created.pageId,
+          refs: created.refs,
+          revision: result.revision,
+          changedNodeIds: result.changedNodeIds,
+        }
+      },
+    ),
+  )
+
+  server.registerTool(
+    'insertNodes',
+    {
+      description:
+        'Insert nested structured nodes through the Canvas engine. Think in Tailwind layout terms, then express them as validated layout/style fields. Temporary refs are mapped to permanent ids; source code is export-only.',
+      inputSchema: { ...targetShape, ...insertNodesInputSchema.shape },
+    },
+    tool(
+      async (args: z.infer<typeof insertNodesInputSchema> & {
+        designId: string
+        draftId?: string
+      }) => {
+        const found = await getCanvasTarget(userId, args)
+        const parent = sourceContainerForRef(found.document, args.parent)
+        const built = insertDescriptorOperations(
+          found.document,
+          parent.id,
+          args.nodes,
+        )
+        const result = await applyCanvasTransactions(userId, args, [
+          {
+            id: canvasId('tx'),
+            label: 'MCP inserted nodes',
+            operations: built.operations,
+          },
+        ])
+        return {
+          refs: built.refs,
+          nodeIds: built.nodeIds,
+          revision: result.revision,
+          changedNodeIds: result.changedNodeIds,
+        }
+      },
+    ),
+  )
+
+  server.registerTool(
+    'patchNodes',
+    {
+      description:
+        'Patch structured layout, visual, text, responsive, variant, typed Page/component state, and declarative event interaction fields atomically through the Canvas engine. Events may switch any named visual theme; runtime state and the selected runtime theme stay ephemeral.',
+      inputSchema: { ...targetShape, ...patchNodesInputSchema.shape },
+    },
+    tool(
+      async (args: z.infer<typeof patchNodesInputSchema> & {
+        designId: string
+        draftId?: string
+      }) => {
+        const found = await getCanvasTarget(userId, args)
+        const result = await applyCanvasTransactions(userId, args, [
+          {
+            id: canvasId('tx'),
+            label: 'MCP updated nodes',
+            operations: patchOperationsForChanges(
+              found.document,
+              args.changes,
+            ),
+          },
+        ])
+        return {
+          revision: result.revision,
+          changedNodeIds: result.changedNodeIds,
+        }
+      },
+    ),
+  )
+
+  server.registerTool(
+    'moveNodes',
+    {
+      description: 'Move or reorder source nodes atomically.',
+      inputSchema: { ...targetShape, ...moveNodesInputSchema.shape },
+    },
+    tool(
+      async (args: z.infer<typeof moveNodesInputSchema> & {
+        designId: string
+        draftId?: string
+      }) => {
+        const found = await getCanvasTarget(userId, args)
+        const offsets = new Map<string, number>()
+        const operations = args.changes.map((change) => {
+          const node = found.document.nodes[change.nodeId]
+          if (!node) throw new Error(`Node "${change.nodeId}" not found`)
+          if (node.locked) throw new Error(`Node "${node.name}" is locked`)
+          const key = change.parentId ?? '$root'
+          const offset = offsets.get(key) ?? 0
+          offsets.set(key, offset + 1)
+          return {
+            type: 'node.move' as const,
+            id: change.nodeId,
+            parentId: change.parentId,
+            order:
+              change.order ??
+              (orderedChildren(found.document, change.parentId).at(-1)?.order ?? 0) +
+                (offset + 1) * 1024,
+          }
+        })
+        const result = await applyCanvasTransactions(userId, args, [
+          { id: canvasId('tx'), label: 'MCP moved nodes', operations },
+        ])
+        return {
+          revision: result.revision,
+          changedNodeIds: result.changedNodeIds,
+        }
+      },
+    ),
+  )
+
+  server.registerTool(
+    'deleteNodes',
+    {
+      description:
+        'Delete source nodes and descendants. Set confirmed only after the user approves this destructive action.',
+      inputSchema: {
+        ...targetShape,
+        ...deleteNodesInputSchema.shape,
+        confirmed: z.literal(true),
+      },
+      annotations: { destructiveHint: true },
+    },
+    tool(
+      async (args: z.infer<typeof deleteNodesInputSchema> & {
+        designId: string
+        draftId?: string
+        confirmed: true
+      }) => {
+        const found = await getCanvasTarget(userId, args)
+        const nodeIds = normalizeDeletionNodeIds(
+          found.document,
+          args.nodeIds,
+        )
+        for (const id of nodeIds) {
+          const node = found.document.nodes[id]
+          if (!node) throw new Error(`Node "${id}" not found`)
+          if (node.locked) throw new Error(`Node "${node.name}" is locked`)
+        }
+        const result = await applyCanvasTransactions(userId, args, [
+          {
+            id: canvasId('tx'),
+            label: 'MCP deleted nodes',
+            operations: nodeIds.map((id) => ({
+              type: 'node.delete' as const,
+              id,
+            })),
+          },
+        ])
+        return {
+          deletedNodeIds: nodeIds,
+          revision: result.revision,
+          changedNodeIds: result.changedNodeIds,
+        }
+      },
+    ),
+  )
+
+  server.registerTool(
+    'createComponent',
+    {
+      description:
+        'Create an off-canvas reusable component definition with optional instance-local typed state and declarative event interactions, including scoped named-theme switching.',
+      inputSchema: { ...targetShape, ...createComponentInputSchema.shape },
+    },
+    tool(
+      async (args: z.infer<typeof createComponentInputSchema> & {
+        designId: string
+        draftId?: string
+      }) => {
+        const found = await getCanvasTarget(userId, args)
+        const created = createComponentTransaction(found.document, args)
+        const result = await applyCanvasTransactions(userId, args, [
+          created.transaction,
+        ])
+        return {
+          componentId: created.componentId,
+          refs: created.refs,
+          revision: result.revision,
+          changedNodeIds: result.changedNodeIds,
+        }
+      },
+    ),
+  )
+
+  server.registerTool(
+    'createInstance',
+    {
+      description: 'Create an instance of an existing component.',
+      inputSchema: { ...targetShape, ...createInstanceInputSchema.shape },
+    },
+    tool(
+      async (args: z.infer<typeof createInstanceInputSchema> & {
+        designId: string
+        draftId?: string
+      }) => {
+        const found = await getCanvasTarget(userId, args)
+        const parent = sourceContainerForRef(found.document, args.parent)
+        const component = found.document.nodes[args.componentId]
+        if (component?.type !== 'component') throw new Error('Component does not exist')
+        const variant = args.variant ?? component.defaultVariant
+        const node: CanvasNode = createInstanceNode(
+          component.id,
+          args.name ?? `${component.name} instance`,
+          {
+            parentId: parent.id,
+            order:
+              (orderedChildren(found.document, parent.id).at(-1)?.order ?? 0) +
+              1024,
+            layout: {
+              ...defaultLayout(320, 200, {
+                position: parent.layout.mode === 'absolute' ? 'absolute' : 'flow',
+              }),
+              ...args.layout,
+            },
+            style: { ...defaultStyle(), ...args.style },
+            ...(variant ? { variant } : {}),
+            overrides: {},
+          },
+        )
+        const result = await applyCanvasTransactions(userId, args, [
+          {
+            id: canvasId('tx'),
+            label: `MCP created ${component.name} instance`,
+            operations: [{ type: 'node.insert', node }],
+          },
+        ])
+        return {
+          instanceId: node.id,
+          revision: result.revision,
+          changedNodeIds: result.changedNodeIds,
+        }
+      },
+    ),
+  )
+
+  server.registerTool(
+    'setTokens',
+    {
+      description:
+        'Create or update named visual themes and structured design tokens. Put per-theme token values in modes keyed by theme id, then use set-theme event actions to switch them at runtime.',
+      inputSchema: { ...targetShape, ...setTokensInputSchema.shape },
+    },
+    tool(
+      async (args: z.infer<typeof setTokensInputSchema> & {
+        designId: string
+        draftId?: string
+      }) => {
+        const result = await applyCanvasTransactions(userId, args, [
+          {
+            id: canvasId('tx'),
+            label: 'MCP updated tokens',
+            operations: tokenOperations(args.tokens, args.themes),
+          },
+        ])
+        return {
+          themeIds: args.themes.map((theme) => theme.id),
+          tokenIds: args.tokens.map((token) => token.id),
+          revision: result.revision,
+        }
+      },
+    ),
+  )
+
+  server.registerTool(
+    'exportCode',
+    {
+      description:
+        'Generate implementation-ready code for one Page or node. Tailwind returns readable JSX with literal utilities; HTML and JSX are also available. Export is one-way—continue editing through structured Canvas tools.',
+      inputSchema: {
+        ...targetShape,
+        format: z.enum(['tailwind', 'html', 'jsx']).default('tailwind'),
+        pageId: z.string().min(1).max(128).optional(),
+        ref: readNodeInputSchema.shape.ref.optional(),
+        width: z.number().finite().min(200).max(3_840).default(1_440),
+      },
+      annotations: { readOnlyHint: true },
+    },
+    tool(
+      async (args: {
+        designId: string
+        draftId?: string
+        format: 'tailwind' | 'html' | 'jsx'
+        pageId?: string
+        ref?: { nodeId: string; instancePath: string[] }
+        width: number
+      }) => {
+        const found = await getCanvasTarget(userId, args)
+        const { code, pageId, nodeId } = exportCanvasCode(
+          found.document,
+          args,
+        )
+        if (Buffer.byteLength(code, 'utf8') > 2_000_000) {
+          throw new Error(
+            'The generated code is too large for one MCP response. Export a Page or node instead.',
+          )
+        }
+        const extension = args.format === 'html' ? 'html' : 'tsx'
+        return {
+          format: args.format,
+          code,
+          extension,
+          mediaType:
+            args.format === 'html'
+              ? 'text/html'
+              : 'text/typescript',
+          revision: found.revision,
+          target: {
+            pageId: pageId ?? null,
+            ref: args.ref ?? null,
+            exportedRootNodeId: nodeId ?? pageId,
+          },
+          openUrl: appUrl(args.designId, args.draftId, {
+            page: pageId,
+            node: args.ref?.nodeId,
+            instancePath: args.ref?.instancePath.join('/'),
+          }),
+        }
+      },
+    ),
+  )
+
+  server.registerTool(
+    'getScreenshot',
+    {
+      description:
+        'Render a real PNG of one Page or NodeRef with the same DOM/CSS export engine. Call this after meaningful edits to verify the visual result.',
+      inputSchema: {
+        ...targetShape,
+        pageId: z.string().min(1).max(128).optional(),
+        ref: readNodeInputSchema.shape.ref.optional(),
+        width: z.number().finite().min(200).max(3_840).default(1_440),
+        pixelRatio: z.number().finite().min(1).max(2).default(1),
+      },
+      annotations: { readOnlyHint: true, openWorldHint: false },
+    },
+    pngTool(
+      async (args: {
+        designId: string
+        draftId?: string
+        pageId?: string
+        ref?: { nodeId: string; instancePath: string[] }
+        width: number
+        pixelRatio: number
+      }) => {
+        if (args.pageId && args.ref) {
+          throw new Error('Choose either pageId or ref, not both')
+        }
+        const found = await getCanvasTarget(userId, args)
+        const screenshot = await renderCanvasScreenshot(
+          userId,
+          found.document,
+          args,
+        )
+        return {
+          png: screenshot.png,
+          metadata: {
+            mimeType: 'image/png',
+            width: screenshot.width,
+            height: screenshot.height,
+            revision: found.revision,
+            target: {
+              designId: args.designId,
+              draftId: args.draftId ?? null,
+              pageId: screenshot.pageId,
+              ref: screenshot.ref,
+            },
+            skippedImages: screenshot.skippedImages,
+            openUrl: appUrl(args.designId, args.draftId, {
+              page: screenshot.pageId ?? undefined,
+              node: screenshot.ref?.nodeId,
+              instancePath: screenshot.ref?.instancePath.join('/'),
+            }),
+          },
+        }
+      },
+    ),
+  )
+
+  server.registerTool(
+    'viewNode',
+    {
+      description:
+        'Return a canonical open-in-Loora URL and semantic details for one node. Use getScreenshot when image pixels are needed.',
+      inputSchema: { ...targetShape, ...viewNodeInputSchema.shape },
+      annotations: { readOnlyHint: true },
+    },
+    tool(
+      async (args: z.infer<typeof viewNodeInputSchema> & {
+        designId: string
+        draftId?: string
+      }) => {
+        const found = await getCanvasTarget(userId, args)
+        const node = readCanvasNodeRef(found.document, args.ref)
+        return {
+          node,
+          revision: found.revision,
+          openUrl: appUrl(args.designId, args.draftId, {
+            node: args.ref.nodeId,
+            instancePath: args.ref.instancePath.join('/'),
+          }),
+        }
+      },
+    ),
+  )
+
+  server.registerTool(
+    'viewPage',
+    {
+      description:
+        'Return a canonical open-in-Loora URL and semantic tree for one Page. Use getScreenshot when image pixels are needed.',
+      inputSchema: { ...targetShape, ...viewPageInputSchema.shape },
+      annotations: { readOnlyHint: true },
+    },
+    tool(
+      async (args: z.infer<typeof viewPageInputSchema> & {
+        designId: string
+        draftId?: string
+      }) => {
+        const found = await getCanvasTarget(userId, args)
+        if (found.document.nodes[args.pageId]?.type !== 'page') {
+          throw new Error(`Page "${args.pageId}" not found`)
+        }
+        return {
+          tree: semanticTree(found.document, args.pageId, 20),
+          revision: found.revision,
+          openUrl: appUrl(args.designId, args.draftId, {
+            page: args.pageId,
+            width: args.width ? String(args.width) : undefined,
+          }),
+        }
+      },
+    ),
+  )
+
+  server.registerTool(
+    'viewCanvas',
+    {
+      description:
+        'Return a canonical open-in-Loora URL and Page summary. Use getScreenshot to inspect pixels.',
+      inputSchema: { ...targetShape, ...viewCanvasInputSchema.shape },
+      annotations: { readOnlyHint: true },
+    },
+    tool(
+      async (args: z.infer<typeof viewCanvasInputSchema> & {
+        designId: string
+        draftId?: string
+      }) => {
+        const found = await getCanvasTarget(userId, args)
+        return {
+          name: found.name,
+          revision: found.revision,
+          pages: orderedChildren(found.document, null)
+            .filter((node) => node.type === 'page')
+            .map((page) => ({ id: page.id, name: page.name })),
+          openUrl: appUrl(args.designId, args.draftId),
+        }
+      },
+    ),
+  )
+
+  server.registerTool(
+    'createDesign',
+    {
+      description: 'Create a new empty Canvas design.',
+      inputSchema: {
+        name: z.string().trim().min(1).max(MAX_NAME_LENGTH),
+      },
     },
     tool(async ({ name }: { name: string }) => createDesign(userId, name)),
   )
 
   server.registerTool(
-    'list_drafts',
+    'renameDesign',
     {
-      description: 'List active, proposed, applied, and closed drafts for a design.',
-      inputSchema: { designId },
-    },
-    tool(async ({ designId }: { designId: string }) => listDrafts(userId, designId)),
-  )
-
-  server.registerTool(
-    'create_draft',
-    {
-      description: 'Create an isolated draft from the current Main canvas.',
+      description: 'Rename a design.',
       inputSchema: {
         designId,
         name: z.string().trim().min(1).max(MAX_NAME_LENGTH),
       },
     },
-    tool(async ({ designId, name }: { designId: string; name: string }) =>
-      createDraft(userId, designId, name),
+    tool((args: { designId: string; name: string }) =>
+      renameDesign(userId, args.designId, args.name),
     ),
   )
 
   server.registerTool(
-    'propose_draft',
+    'deleteDesign',
     {
-      description: 'Freeze an active draft as a change proposal for review.',
+      description: 'Permanently delete a design after explicit confirmation.',
+      inputSchema: { designId, confirmed: z.literal(true) },
+      annotations: { destructiveHint: true },
+    },
+    tool(async ({ designId }: { designId: string; confirmed: true }) => ({
+      deleted: await deleteDesign(userId, designId),
+    })),
+  )
+
+  server.registerTool(
+    'listBranches',
+    {
+      description: 'List branches. Branch state is separate from the canvas package.',
+      inputSchema: { designId },
+    },
+    tool(({ designId }: { designId: string }) => listDrafts(userId, designId)),
+  )
+
+  server.registerTool(
+    'createBranch',
+    {
+      description: 'Create an isolated app-level branch from current Main.',
+      inputSchema: {
+        designId,
+        name: z.string().trim().min(1).max(MAX_NAME_LENGTH),
+      },
+    },
+    tool((args: { designId: string; name: string }) =>
+      createDraft(userId, args.designId, args.name),
+    ),
+  )
+
+  server.registerTool(
+    'proposeBranch',
+    {
+      description: 'Freeze an active branch for review.',
       inputSchema: {
         designId,
         draftId,
         description: z.string().trim().max(2_000).default(''),
       },
     },
-    tool(
-      async (args: { designId: string; draftId: string; description: string }) =>
-        proposeDraft(userId, args.designId, args.draftId, args.description),
+    tool((args: { designId: string; draftId: string; description: string }) =>
+      proposeDraft(userId, args.designId, args.draftId, args.description),
     ),
   )
 
   server.registerTool(
-    'reopen_draft',
+    'reopenBranch',
     {
-      description: 'Return a proposed draft to editable active status.',
+      description: 'Return a proposed branch to editable status.',
       inputSchema: { designId, draftId },
     },
-    tool(async (args: { designId: string; draftId: string }) =>
+    tool((args: { designId: string; draftId: string }) =>
       reopenDraft(userId, args.designId, args.draftId),
     ),
   )
 
   server.registerTool(
-    'compare_draft',
+    'compareBranch',
     {
-      description:
-        'Compare a draft with current Main. Returns revisions, change counts, and merge conflicts.',
+      description: 'Compare a branch with Main using field-level semantic merge.',
       inputSchema: { designId, draftId },
     },
-    tool(async (args: { designId: string; draftId: string }) =>
+    tool((args: { designId: string; draftId: string }) =>
       compareDraft(userId, args.designId, args.draftId),
     ),
   )
 
   server.registerTool(
-    'apply_draft',
+    'applyBranch',
     {
       description:
-        'Apply a reviewed draft to Main atomically. Every reported conflict needs a main or draft resolution.',
+        'Apply a branch to Main. Supply a main or draft choice for every reported conflict.',
       inputSchema: {
         designId,
         draftId,
         expectedMainRevision: z.number().int().nonnegative(),
         expectedDraftRevision: z.number().int().nonnegative(),
-        resolutions: z.record(z.string(), z.enum(['main', 'draft'])).default({}),
+        resolutions: z
+          .record(z.string(), z.enum(['main', 'draft']))
+          .default({}),
       },
     },
     tool(
-      async (args: {
+      (args: {
         designId: string
         draftId: string
         expectedMainRevision: number
@@ -197,222 +1049,34 @@ export function createLooraServer(userId: string) {
   )
 
   server.registerTool(
-    'close_draft',
+    'closeBranch',
     {
-      description: 'Close an active or proposed draft without applying it.',
-      inputSchema: { designId, draftId },
+      description: 'Close an active or proposed branch without applying it.',
+      inputSchema: { designId, draftId, confirmed: z.literal(true) },
+      annotations: { destructiveHint: true },
     },
-    tool(async (args: { designId: string; draftId: string }) =>
+    tool((args: { designId: string; draftId: string; confirmed: true }) =>
       closeDraft(userId, args.designId, args.draftId),
     ),
   )
 
   server.registerTool(
-    'rename_design',
+    'listVersions',
     {
-      description: 'Rename a design.',
-      inputSchema: { id: designId, name: z.string().trim().min(1).max(MAX_NAME_LENGTH) },
-    },
-    tool(async ({ id, name }: { id: string; name: string }) => renameDesign(userId, id, name)),
-  )
-
-  server.registerTool(
-    'delete_design',
-    {
-      description: 'Permanently delete a design and its version history. Cannot be undone.',
-      inputSchema: { id: designId },
-    },
-    tool(async ({ id }: { id: string }) => ({ deleted: await deleteDesign(userId, id) })),
-  )
-
-  server.registerTool(
-    'read_element',
-    {
-      description: 'Read one canvas element including its full code.',
+      description: 'List version history for Main or one branch.',
       inputSchema: {
-        designId,
-        draftId: draftId.optional().describe('Draft target; omit for Main'),
-        elementId: z.string().min(1).max(128),
-      },
-    },
-    tool(async (args: { designId: string; draftId?: string; elementId: string }) => {
-      const found = await getDesign(userId, args.designId, args.draftId)
-      const element = found.shapes.find((shape) => shape.id === args.elementId)
-      if (!element) {
-        throw new Error(`Element "${args.elementId}" not found in design "${args.designId}"`)
-      }
-      return element
-    }),
-  )
-
-  server.registerTool(
-    'create_element',
-    {
-      description:
-        'Add a code element to a design canvas. x/y are canvas coordinates, w/h the box size in pixels.',
-      inputSchema: {
-        designId,
-        draftId: draftId.optional().describe('Draft target; omit for Main'),
-        name: z.string().trim().min(1).max(MAX_NAME_LENGTH),
-        x: z.number(),
-        y: z.number(),
-        w: z.number().positive(),
-        h: z.number().positive(),
-        code: elementCode,
-      },
-    },
-    tool(
-      async (args: {
-        designId: string
-        draftId?: string
-        name: string
-        x: number
-        y: number
-        w: number
-        h: number
-        code: string
-      }) => {
-        const element: CanvasElement = {
-          id: newElementId(),
-          name: args.name,
-          x: args.x,
-          y: args.y,
-          w: args.w,
-          h: args.h,
-          code: args.code,
-        }
-        const result = await mutateShapes(
-          userId,
-          args.designId,
-          args.draftId,
-          (shapes) => [...shapes, element],
-        )
-        return {
-          created: element.id,
-          target: { designId: args.designId, draftId: args.draftId ?? null },
-          revision: result.revision,
-        }
-      },
-    ),
-  )
-
-  server.registerTool(
-    'update_element',
-    {
-      description:
-        'Update fields of an existing element. Only the provided fields change; omitted ones keep their value.',
-      inputSchema: {
-        designId,
-        draftId: draftId.optional().describe('Draft target; omit for Main'),
-        elementId: z.string().min(1).max(128),
-        name: z.string().trim().min(1).max(MAX_NAME_LENGTH).optional(),
-        x: z.number().optional(),
-        y: z.number().optional(),
-        w: z.number().positive().optional(),
-        h: z.number().positive().optional(),
-        code: elementCode.optional(),
-      },
-    },
-    tool(
-      async (args: {
-        designId: string
-        draftId?: string
-        elementId: string
-        name?: string
-        x?: number
-        y?: number
-        w?: number
-        h?: number
-        code?: string
-      }) => {
-        const {
-          designId: _designId,
-          draftId: _draftId,
-          elementId: _elementId,
-          ...patch
-        } = args
-        const result = await mutateShapes(userId, args.designId, args.draftId, (shapes) => {
-          const index = shapes.findIndex((shape) => shape.id === args.elementId)
-          if (index === -1) {
-            throw new Error(`Element "${args.elementId}" not found in design "${args.designId}"`)
-          }
-          const next = [...shapes]
-          next[index] = {
-            ...next[index],
-            ...Object.fromEntries(Object.entries(patch).filter(([, value]) => value !== undefined)),
-          }
-          return next
-        })
-        return {
-          updated: args.elementId,
-          target: { designId: args.designId, draftId: args.draftId ?? null },
-          revision: result.revision,
-        }
-      },
-    ),
-  )
-
-  server.registerTool(
-    'delete_element',
-    {
-      description: 'Remove an element from a design canvas.',
-      inputSchema: {
-        designId,
-        draftId: draftId.optional().describe('Draft target; omit for Main'),
-        elementId: z.string().min(1).max(128),
-      },
-    },
-    tool(async (args: { designId: string; draftId?: string; elementId: string }) => {
-      const result = await mutateShapes(userId, args.designId, args.draftId, (shapes) => {
-        const next = shapes.filter((shape) => shape.id !== args.elementId)
-        if (next.length === shapes.length) {
-          throw new Error(`Element "${args.elementId}" not found in design "${args.designId}"`)
-        }
-        return next
-      })
-      return {
-        deleted: args.elementId,
-        target: { designId: args.designId, draftId: args.draftId ?? null },
-        revision: result.revision,
-      }
-    }),
-  )
-
-  server.registerTool(
-    'search_design',
-    {
-      description:
-        'Search element code in a design (case-insensitive substring, up to 50 matching lines).',
-      inputSchema: {
-        designId,
-        draftId: draftId.optional().describe('Draft target; omit for Main'),
-        query: z.string().min(1).max(200),
-      },
-    },
-    tool(async (args: { designId: string; draftId?: string; query: string }) => {
-      const found = await getDesign(userId, args.designId, args.draftId)
-      return searchElements(found.shapes, args.query)
-    }),
-  )
-
-  server.registerTool(
-    'list_versions',
-    {
-      description: 'List version history commits of a design (newest first).',
-      inputSchema: {
-        designId,
-        draftId: draftId.optional().describe('Draft target; omit for Main'),
+        ...targetShape,
         limit: z.number().int().min(1).max(50).default(20),
       },
     },
-    tool(async (args: { designId: string; draftId?: string; limit: number }) =>
+    tool((args: { designId: string; draftId?: string; limit: number }) =>
       listVersions(userId, args.designId, args.limit, args.draftId),
     ),
   )
 
   server.registerTool(
-    'list_assets',
-    { description: 'List the uploaded image assets of the signed-in Loora user.' },
+    'listAssets',
+    { description: 'List the signed-in user’s uploaded image assets.' },
     tool(async (_args: unknown) => listAssets(userId)),
   )
 

@@ -78,9 +78,13 @@ export function EditorCommandMenu({
                         >
                           <Icon className="mr-2 size-4 shrink-0 text-muted-foreground" />
                           <span>{command.label}</span>
-                          {command.active ? <CheckIcon className="ml-auto size-3.5" /> : null}
+                          {command.active ? (
+                            <CheckIcon className="ml-auto size-3.5" />
+                          ) : null}
                           {command.shortcut ? (
-                            <CommandShortcut className={command.active ? 'ml-2' : undefined}>
+                            <CommandShortcut
+                              className={command.active ? 'ml-2' : undefined}
+                            >
                               {command.shortcut}
                             </CommandShortcut>
                           ) : null}

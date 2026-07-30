@@ -6,7 +6,8 @@ import { NuqsAdapter } from "nuqs/adapters/tanstack-router";
 import { useEffect } from "react";
 
 import appCss from "../styles.css?url";
-import { THEME_INIT_SCRIPT, watchSystemTheme } from "#/lib/theme";
+import { syncThemePreference, THEME_INIT_SCRIPT } from "#/lib/theme";
+import { syncUiScale, UI_SCALE_INIT_SCRIPT } from "#/lib/ui-scale";
 
 export const Route = createRootRoute({
   head: () => ({
@@ -23,7 +24,7 @@ export const Route = createRootRoute({
       },
       {
         name: "theme-color",
-        content: "#2440e6",
+        content: "#fafafa",
       },
       {
         name: "application-name",
@@ -70,6 +71,9 @@ export const Route = createRootRoute({
       {
         children: THEME_INIT_SCRIPT,
       },
+      {
+        children: UI_SCALE_INIT_SCRIPT,
+      },
     ],
   }),
   shellComponent: RootDocument,
@@ -85,10 +89,8 @@ const DATABUDDY_CLIENT_ID =
   "c54c0e63-bc75-4058-b37a-75e3b5323ea2";
 
 function RootDocument({ children }: { children: React.ReactNode }) {
-  useEffect(() => watchSystemTheme(), []);
-  // THEME_INIT_SCRIPT puts `.dark` on <html> before hydration, so the DOM always
-  // carries an attribute the server markup never had. Without suppression React 19
-  // reports a hydration mismatch on every dark-mode load.
+  useEffect(() => syncThemePreference(), []);
+  useEffect(() => syncUiScale(), []);
   return (
     <html lang="en" suppressHydrationWarning>
       <head>

@@ -1,7 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { nanoid } from 'nanoid'
 import { Button } from '#/components/ui/button'
-import { Input } from '#/components/ui/input'
 import {
   BUILTIN_META,
   DEFAULT_SHORTCUTS,
@@ -12,8 +10,6 @@ import {
   formatChord,
   resolveBuiltIn,
   type BuiltInShortcutId,
-  type CustomShortcut,
-  type KeyChord,
   type ShortcutConfig,
 } from '#/lib/shortcuts'
 import { cn } from '#/lib/utils'
@@ -27,16 +23,8 @@ export function ShortcutsSettings({
 }) {
   const [draft, setDraft] = useState(config)
   const [recording, setRecording] = useState<
-    | { kind: 'builtIn'; id: BuiltInShortcutId }
-    | { kind: 'custom'; id: string }
-    | { kind: 'newCustom' }
-    | null
+    { kind: 'builtIn'; id: BuiltInShortcutId } | null
   >(null)
-  const [newCustom, setNewCustom] = useState<{
-    name: string
-    prompt: string
-    chord: KeyChord | null
-  }>({ name: '', prompt: '', chord: null })
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   useEffect(() => {
@@ -74,35 +62,17 @@ export function ShortcutsSettings({
       const chord = eventToChord(e)
       if (!chord) return
 
-      if (target.kind === 'builtIn') {
-        setDraft((current) => {
-          const next = {
-            ...current,
-            overrides: { ...current.overrides, [target.id]: chord },
-          }
-          if (detectConflicts(next).length === 0) {
-            if (saveTimer.current) clearTimeout(saveTimer.current)
-            saveTimer.current = setTimeout(() => onChange(next), 300)
-          }
-          return next
-        })
-      } else if (target.kind === 'custom') {
-        setDraft((current) => {
-          const next = {
-            ...current,
-            custom: current.custom.map((item) =>
-              item.id === target.id ? { ...item, chord } : item,
-            ),
-          }
-          if (detectConflicts(next).length === 0) {
-            if (saveTimer.current) clearTimeout(saveTimer.current)
-            saveTimer.current = setTimeout(() => onChange(next), 300)
-          }
-          return next
-        })
-      } else {
-        setNewCustom((current) => ({ ...current, chord }))
-      }
+      setDraft((current) => {
+        const next = {
+          ...current,
+          overrides: { ...current.overrides, [target.id]: chord },
+        }
+        if (detectConflicts(next).length === 0) {
+          if (saveTimer.current) clearTimeout(saveTimer.current)
+          saveTimer.current = setTimeout(() => onChange(next), 300)
+        }
+        return next
+      })
       setRecording(null)
     }
     window.addEventListener('keydown', onKeyDown, true)
@@ -125,33 +95,16 @@ export function ShortcutsSettings({
   }
 
   const resetAll = () => {
-    commit({ overrides: {}, custom: draft.custom })
-  }
-
-  const addCustom = () => {
-    if (!newCustom.name.trim() || !newCustom.prompt.trim() || !newCustom.chord) return
-    const entry: CustomShortcut = {
-      id: `sc_${nanoid(8)}`,
-      name: newCustom.name.trim(),
-      chord: newCustom.chord,
-      action: { type: 'agentPrompt', prompt: newCustom.prompt.trim() },
-    }
-    commit({ ...draft, custom: [...draft.custom, entry] })
-    setNewCustom({ name: '', prompt: '', chord: null })
-  }
-
-  const removeCustom = (id: string) => {
-    commit({ ...draft, custom: draft.custom.filter((item) => item.id !== id) })
+    commit({ overrides: {}, custom: [] })
   }
 
   return (
-    <div className="flex flex-col gap-6">
+    <div className="flex flex-col gap-4">
       <div className="flex items-start justify-between gap-3">
         <div>
           <h2 className="text-sm font-semibold">Keyboard shortcuts</h2>
           <p className="mt-1 text-xs text-muted-foreground">
-            Remap editor actions or add custom shortcuts that send a prompt to the agent.
-            Space-hold hand tool and code-editor ⌘Enter stay fixed.
+            Remap editor actions. Space-hold hand tool stays fixed.
           </p>
         </div>
         <Button type="button" size="sm" variant="outline" onClick={resetAll}>
@@ -236,105 +189,7 @@ export function ShortcutsSettings({
         )
       })}
 
-      <section className="flex flex-col gap-3">
-        <div>
-          <h3 className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-            Custom agent prompts
-          </h3>
-          <p className="mt-1 text-xs text-muted-foreground">
-            Bind a key chord to send a saved message to the agent.
-          </p>
-        </div>
-
-        {draft.custom.length > 0 && (
-          <ul className="divide-y rounded-lg border">
-            {draft.custom.map((item) => {
-              const isRecording =
-                recording?.kind === 'custom' && recording.id === item.id
-              return (
-                <li key={item.id} className="flex flex-col gap-2 px-3 py-2">
-                  <div className="flex items-center gap-2">
-                    <span className="min-w-0 flex-1 truncate text-sm font-medium">
-                      {item.name}
-                    </span>
-                    <button
-                      type="button"
-                      className={cn(
-                        'rounded-md border px-2 py-1 font-mono text-xs',
-                        isRecording
-                          ? 'border-cx-accent bg-cx-accent/10 text-cx-accent'
-                          : 'bg-secondary/60 hover:bg-secondary',
-                      )}
-                      onClick={() => setRecording({ kind: 'custom', id: item.id })}
-                    >
-                      {isRecording ? 'Press keys…' : formatChord(item.chord)}
-                    </button>
-                    <Button
-                      type="button"
-                      size="xs"
-                      variant="ghost"
-                      onClick={() => removeCustom(item.id)}
-                    >
-                      Remove
-                    </Button>
-                  </div>
-                  <p className="line-clamp-2 text-xs text-muted-foreground">
-                    {item.action.prompt}
-                  </p>
-                </li>
-              )
-            })}
-          </ul>
-        )}
-
-        <div className="flex flex-col gap-2 rounded-lg border p-3">
-          <Input
-            size="sm"
-            placeholder="Name"
-            value={newCustom.name}
-            onChange={(e) => setNewCustom((c) => ({ ...c, name: e.target.value }))}
-          />
-          <textarea
-            className="min-h-20 w-full resize-y rounded-md border bg-transparent px-2.5 py-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
-            placeholder="Agent prompt to send…"
-            value={newCustom.prompt}
-            onChange={(e) => setNewCustom((c) => ({ ...c, prompt: e.target.value }))}
-          />
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              className={cn(
-                'rounded-md border px-2 py-1 font-mono text-xs',
-                recording?.kind === 'newCustom'
-                  ? 'border-cx-accent bg-cx-accent/10 text-cx-accent'
-                  : 'bg-secondary/60 hover:bg-secondary',
-              )}
-              onClick={() => setRecording({ kind: 'newCustom' })}
-            >
-              {recording?.kind === 'newCustom'
-                ? 'Press keys…'
-                : newCustom.chord
-                  ? formatChord(newCustom.chord)
-                  : 'Record shortcut'}
-            </button>
-            <Button
-              type="button"
-              size="sm"
-              disabled={
-                !newCustom.name.trim() ||
-                !newCustom.prompt.trim() ||
-                !newCustom.chord ||
-                draft.custom.length >= 50
-              }
-              onClick={addCustom}
-            >
-              Add shortcut
-            </Button>
-          </div>
-        </div>
-      </section>
-
-      <p className="text-[11px] text-muted-foreground">
+      <p className="text-xs text-muted-foreground">
         Defaults include {Object.keys(DEFAULT_SHORTCUTS).length} actions
         {chordsOf(DEFAULT_SHORTCUTS['tool.select']).length
           ? ` (e.g. Select is ${formatChord(DEFAULT_SHORTCUTS['tool.select'])})`

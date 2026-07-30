@@ -10,44 +10,67 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
-import { Route as LandingRouteImport } from './routes/landing'
+import { Route as FeaturesRouteImport } from './routes/features'
+import { Route as McpRouteImport } from './routes/mcp'
 import { Route as McpConsentRouteImport } from './routes/mcp-consent'
+import { Route as PricingRouteImport } from './routes/pricing'
+import { Route as PrivacyRouteImport } from './routes/privacy'
+import { Route as TermsRouteImport } from './routes/terms'
 import { Route as DotwellKnownOauthAuthorizationServerRouteImport } from './routes/[.]well-known.oauth-authorization-server'
-import { Route as ApiChatRouteImport } from './routes/api.chat'
-import { Route as BlockpageDesignIdRouteImport } from './routes/blockpage.$designId'
-import { Route as PLinkIdRouteImport } from './routes/p.$linkId'
-import { Route as PrPrIdRouteImport } from './routes/pr.$prId'
+import { Route as ApiCanvasEventsRouteImport } from './routes/api.canvas-events'
+import { Route as ApiCanvasPresenceRouteImport } from './routes/api.canvas-presence'
+import { Route as ApiReadyRouteImport } from './routes/api.ready'
+import { Route as AppIndexRouteImport } from './routes/app.index'
+import { Route as AppAppearanceRouteImport } from './routes/app.appearance'
+import { Route as AppBillingRouteImport } from './routes/app.billing'
+import { Route as AppDesignRouteImport } from './routes/app.design'
+import { Route as AppIntegrationsRouteImport } from './routes/app.integrations'
+import { Route as DesignIdRouteImport } from './routes/design.$id'
 import { Route as ApiAssetIdRouteImport } from './routes/api.asset.$id'
 import { Route as ApiAuthSplatRouteImport } from './routes/api.auth.$'
-import { Route as ApiChatgptSplatRouteImport } from './routes/api.chatgpt.$'
-import { Route as ApiFigmaCallbackRouteImport } from './routes/api.figma.callback'
-import { Route as ApiFigmaConnectRouteImport } from './routes/api.figma.connect'
 import { Route as ApiGithubCallbackRouteImport } from './routes/api.github.callback'
 import { Route as ApiGithubConnectRouteImport } from './routes/api.github.connect'
 import { Route as ApiGithubInstallRouteImport } from './routes/api.github.install'
 import { Route as ApiGithubSetupRouteImport } from './routes/api.github.setup'
 import { Route as ApiGithubWebhookRouteImport } from './routes/api.github.webhook'
 import { Route as ApiHandoffTokenRouteImport } from './routes/api.handoff.$token'
-import { Route as ApiPLinkIdRouteImport } from './routes/api.p.$linkId'
-import { Route as ApiPrPrIdRouteImport } from './routes/api.pr.$prId'
 import { Route as ApiRpcSplatRouteImport } from './routes/api.rpc.$'
+import { Route as DesignIdBBranchIdRouteImport } from './routes/design.$id_.b.$branchId'
 import { Route as ApiHandoffTokenAssetIdRouteImport } from './routes/api.handoff.$token.asset.$id'
-import { Route as ApiPLinkIdAssetIdRouteImport } from './routes/api.p.$linkId.asset.$id'
-import { Route as ApiPrPrIdAssetIdRouteImport } from './routes/api.pr.$prId.asset.$id'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
-const LandingRoute = LandingRouteImport.update({
-  id: '/landing',
-  path: '/landing',
+const FeaturesRoute = FeaturesRouteImport.update({
+  id: '/features',
+  path: '/features',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const McpRoute = McpRouteImport.update({
+  id: '/mcp',
+  path: '/mcp',
   getParentRoute: () => rootRouteImport,
 } as any)
 const McpConsentRoute = McpConsentRouteImport.update({
   id: '/mcp-consent',
   path: '/mcp-consent',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const PricingRoute = PricingRouteImport.update({
+  id: '/pricing',
+  path: '/pricing',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const PrivacyRoute = PrivacyRouteImport.update({
+  id: '/privacy',
+  path: '/privacy',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const TermsRoute = TermsRouteImport.update({
+  id: '/terms',
+  path: '/terms',
   getParentRoute: () => rootRouteImport,
 } as any)
 const DotwellKnownOauthAuthorizationServerRoute =
@@ -56,24 +79,49 @@ const DotwellKnownOauthAuthorizationServerRoute =
     path: '/.well-known/oauth-authorization-server',
     getParentRoute: () => rootRouteImport,
   } as any)
-const ApiChatRoute = ApiChatRouteImport.update({
-  id: '/api/chat',
-  path: '/api/chat',
+const ApiCanvasEventsRoute = ApiCanvasEventsRouteImport.update({
+  id: '/api/canvas-events',
+  path: '/api/canvas-events',
   getParentRoute: () => rootRouteImport,
 } as any)
-const BlockpageDesignIdRoute = BlockpageDesignIdRouteImport.update({
-  id: '/blockpage/$designId',
-  path: '/blockpage/$designId',
+const ApiCanvasPresenceRoute = ApiCanvasPresenceRouteImport.update({
+  id: '/api/canvas-presence',
+  path: '/api/canvas-presence',
   getParentRoute: () => rootRouteImport,
 } as any)
-const PLinkIdRoute = PLinkIdRouteImport.update({
-  id: '/p/$linkId',
-  path: '/p/$linkId',
+const ApiReadyRoute = ApiReadyRouteImport.update({
+  id: '/api/ready',
+  path: '/api/ready',
   getParentRoute: () => rootRouteImport,
 } as any)
-const PrPrIdRoute = PrPrIdRouteImport.update({
-  id: '/pr/$prId',
-  path: '/pr/$prId',
+const AppIndexRoute = AppIndexRouteImport.update({
+  id: '/app/',
+  path: '/app/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AppAppearanceRoute = AppAppearanceRouteImport.update({
+  id: '/app/appearance',
+  path: '/app/appearance',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AppBillingRoute = AppBillingRouteImport.update({
+  id: '/app/billing',
+  path: '/app/billing',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AppDesignRoute = AppDesignRouteImport.update({
+  id: '/app/design',
+  path: '/app/design',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AppIntegrationsRoute = AppIntegrationsRouteImport.update({
+  id: '/app/integrations',
+  path: '/app/integrations',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const DesignIdRoute = DesignIdRouteImport.update({
+  id: '/design/$id',
+  path: '/design/$id',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ApiAssetIdRoute = ApiAssetIdRouteImport.update({
@@ -84,21 +132,6 @@ const ApiAssetIdRoute = ApiAssetIdRouteImport.update({
 const ApiAuthSplatRoute = ApiAuthSplatRouteImport.update({
   id: '/api/auth/$',
   path: '/api/auth/$',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const ApiChatgptSplatRoute = ApiChatgptSplatRouteImport.update({
-  id: '/api/chatgpt/$',
-  path: '/api/chatgpt/$',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const ApiFigmaCallbackRoute = ApiFigmaCallbackRouteImport.update({
-  id: '/api/figma/callback',
-  path: '/api/figma/callback',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const ApiFigmaConnectRoute = ApiFigmaConnectRouteImport.update({
-  id: '/api/figma/connect',
-  path: '/api/figma/connect',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ApiGithubCallbackRoute = ApiGithubCallbackRouteImport.update({
@@ -131,19 +164,14 @@ const ApiHandoffTokenRoute = ApiHandoffTokenRouteImport.update({
   path: '/api/handoff/$token',
   getParentRoute: () => rootRouteImport,
 } as any)
-const ApiPLinkIdRoute = ApiPLinkIdRouteImport.update({
-  id: '/api/p/$linkId',
-  path: '/api/p/$linkId',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const ApiPrPrIdRoute = ApiPrPrIdRouteImport.update({
-  id: '/api/pr/$prId',
-  path: '/api/pr/$prId',
-  getParentRoute: () => rootRouteImport,
-} as any)
 const ApiRpcSplatRoute = ApiRpcSplatRouteImport.update({
   id: '/api/rpc/$',
   path: '/api/rpc/$',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const DesignIdBBranchIdRoute = DesignIdBBranchIdRouteImport.update({
+  id: '/design/$id_/b/$branchId',
+  path: '/design/$id/b/$branchId',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ApiHandoffTokenAssetIdRoute = ApiHandoffTokenAssetIdRouteImport.update({
@@ -151,206 +179,219 @@ const ApiHandoffTokenAssetIdRoute = ApiHandoffTokenAssetIdRouteImport.update({
   path: '/asset/$id',
   getParentRoute: () => ApiHandoffTokenRoute,
 } as any)
-const ApiPLinkIdAssetIdRoute = ApiPLinkIdAssetIdRouteImport.update({
-  id: '/asset/$id',
-  path: '/asset/$id',
-  getParentRoute: () => ApiPLinkIdRoute,
-} as any)
-const ApiPrPrIdAssetIdRoute = ApiPrPrIdAssetIdRouteImport.update({
-  id: '/asset/$id',
-  path: '/asset/$id',
-  getParentRoute: () => ApiPrPrIdRoute,
-} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
-  '/landing': typeof LandingRoute
+  '/features': typeof FeaturesRoute
+  '/mcp': typeof McpRoute
   '/mcp-consent': typeof McpConsentRoute
+  '/pricing': typeof PricingRoute
+  '/privacy': typeof PrivacyRoute
+  '/terms': typeof TermsRoute
   '/.well-known/oauth-authorization-server': typeof DotwellKnownOauthAuthorizationServerRoute
-  '/api/chat': typeof ApiChatRoute
-  '/blockpage/$designId': typeof BlockpageDesignIdRoute
-  '/p/$linkId': typeof PLinkIdRoute
-  '/pr/$prId': typeof PrPrIdRoute
+  '/api/canvas-events': typeof ApiCanvasEventsRoute
+  '/api/canvas-presence': typeof ApiCanvasPresenceRoute
+  '/api/ready': typeof ApiReadyRoute
+  '/app/appearance': typeof AppAppearanceRoute
+  '/app/billing': typeof AppBillingRoute
+  '/app/design': typeof AppDesignRoute
+  '/app/integrations': typeof AppIntegrationsRoute
+  '/design/$id': typeof DesignIdRoute
+  '/app/': typeof AppIndexRoute
   '/api/asset/$id': typeof ApiAssetIdRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
-  '/api/chatgpt/$': typeof ApiChatgptSplatRoute
-  '/api/figma/callback': typeof ApiFigmaCallbackRoute
-  '/api/figma/connect': typeof ApiFigmaConnectRoute
   '/api/github/callback': typeof ApiGithubCallbackRoute
   '/api/github/connect': typeof ApiGithubConnectRoute
   '/api/github/install': typeof ApiGithubInstallRoute
   '/api/github/setup': typeof ApiGithubSetupRoute
   '/api/github/webhook': typeof ApiGithubWebhookRoute
   '/api/handoff/$token': typeof ApiHandoffTokenRouteWithChildren
-  '/api/p/$linkId': typeof ApiPLinkIdRouteWithChildren
-  '/api/pr/$prId': typeof ApiPrPrIdRouteWithChildren
   '/api/rpc/$': typeof ApiRpcSplatRoute
+  '/design/$id/b/$branchId': typeof DesignIdBBranchIdRoute
   '/api/handoff/$token/asset/$id': typeof ApiHandoffTokenAssetIdRoute
-  '/api/p/$linkId/asset/$id': typeof ApiPLinkIdAssetIdRoute
-  '/api/pr/$prId/asset/$id': typeof ApiPrPrIdAssetIdRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
-  '/landing': typeof LandingRoute
+  '/features': typeof FeaturesRoute
+  '/mcp': typeof McpRoute
   '/mcp-consent': typeof McpConsentRoute
+  '/pricing': typeof PricingRoute
+  '/privacy': typeof PrivacyRoute
+  '/terms': typeof TermsRoute
   '/.well-known/oauth-authorization-server': typeof DotwellKnownOauthAuthorizationServerRoute
-  '/api/chat': typeof ApiChatRoute
-  '/blockpage/$designId': typeof BlockpageDesignIdRoute
-  '/p/$linkId': typeof PLinkIdRoute
-  '/pr/$prId': typeof PrPrIdRoute
+  '/api/canvas-events': typeof ApiCanvasEventsRoute
+  '/api/canvas-presence': typeof ApiCanvasPresenceRoute
+  '/api/ready': typeof ApiReadyRoute
+  '/app/appearance': typeof AppAppearanceRoute
+  '/app/billing': typeof AppBillingRoute
+  '/app/design': typeof AppDesignRoute
+  '/app/integrations': typeof AppIntegrationsRoute
+  '/design/$id': typeof DesignIdRoute
+  '/app': typeof AppIndexRoute
   '/api/asset/$id': typeof ApiAssetIdRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
-  '/api/chatgpt/$': typeof ApiChatgptSplatRoute
-  '/api/figma/callback': typeof ApiFigmaCallbackRoute
-  '/api/figma/connect': typeof ApiFigmaConnectRoute
   '/api/github/callback': typeof ApiGithubCallbackRoute
   '/api/github/connect': typeof ApiGithubConnectRoute
   '/api/github/install': typeof ApiGithubInstallRoute
   '/api/github/setup': typeof ApiGithubSetupRoute
   '/api/github/webhook': typeof ApiGithubWebhookRoute
   '/api/handoff/$token': typeof ApiHandoffTokenRouteWithChildren
-  '/api/p/$linkId': typeof ApiPLinkIdRouteWithChildren
-  '/api/pr/$prId': typeof ApiPrPrIdRouteWithChildren
   '/api/rpc/$': typeof ApiRpcSplatRoute
+  '/design/$id/b/$branchId': typeof DesignIdBBranchIdRoute
   '/api/handoff/$token/asset/$id': typeof ApiHandoffTokenAssetIdRoute
-  '/api/p/$linkId/asset/$id': typeof ApiPLinkIdAssetIdRoute
-  '/api/pr/$prId/asset/$id': typeof ApiPrPrIdAssetIdRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
-  '/landing': typeof LandingRoute
+  '/features': typeof FeaturesRoute
+  '/mcp': typeof McpRoute
   '/mcp-consent': typeof McpConsentRoute
+  '/pricing': typeof PricingRoute
+  '/privacy': typeof PrivacyRoute
+  '/terms': typeof TermsRoute
   '/.well-known/oauth-authorization-server': typeof DotwellKnownOauthAuthorizationServerRoute
-  '/api/chat': typeof ApiChatRoute
-  '/blockpage/$designId': typeof BlockpageDesignIdRoute
-  '/p/$linkId': typeof PLinkIdRoute
-  '/pr/$prId': typeof PrPrIdRoute
+  '/api/canvas-events': typeof ApiCanvasEventsRoute
+  '/api/canvas-presence': typeof ApiCanvasPresenceRoute
+  '/api/ready': typeof ApiReadyRoute
+  '/app/appearance': typeof AppAppearanceRoute
+  '/app/billing': typeof AppBillingRoute
+  '/app/design': typeof AppDesignRoute
+  '/app/integrations': typeof AppIntegrationsRoute
+  '/design/$id': typeof DesignIdRoute
+  '/app/': typeof AppIndexRoute
   '/api/asset/$id': typeof ApiAssetIdRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
-  '/api/chatgpt/$': typeof ApiChatgptSplatRoute
-  '/api/figma/callback': typeof ApiFigmaCallbackRoute
-  '/api/figma/connect': typeof ApiFigmaConnectRoute
   '/api/github/callback': typeof ApiGithubCallbackRoute
   '/api/github/connect': typeof ApiGithubConnectRoute
   '/api/github/install': typeof ApiGithubInstallRoute
   '/api/github/setup': typeof ApiGithubSetupRoute
   '/api/github/webhook': typeof ApiGithubWebhookRoute
   '/api/handoff/$token': typeof ApiHandoffTokenRouteWithChildren
-  '/api/p/$linkId': typeof ApiPLinkIdRouteWithChildren
-  '/api/pr/$prId': typeof ApiPrPrIdRouteWithChildren
   '/api/rpc/$': typeof ApiRpcSplatRoute
+  '/design/$id_/b/$branchId': typeof DesignIdBBranchIdRoute
   '/api/handoff/$token/asset/$id': typeof ApiHandoffTokenAssetIdRoute
-  '/api/p/$linkId/asset/$id': typeof ApiPLinkIdAssetIdRoute
-  '/api/pr/$prId/asset/$id': typeof ApiPrPrIdAssetIdRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | '/'
-    | '/landing'
+    | '/features'
+    | '/mcp'
     | '/mcp-consent'
+    | '/pricing'
+    | '/privacy'
+    | '/terms'
     | '/.well-known/oauth-authorization-server'
-    | '/api/chat'
-    | '/blockpage/$designId'
-    | '/p/$linkId'
-    | '/pr/$prId'
+    | '/api/canvas-events'
+    | '/api/canvas-presence'
+    | '/api/ready'
+    | '/app/appearance'
+    | '/app/billing'
+    | '/app/design'
+    | '/app/integrations'
+    | '/design/$id'
+    | '/app/'
     | '/api/asset/$id'
     | '/api/auth/$'
-    | '/api/chatgpt/$'
-    | '/api/figma/callback'
-    | '/api/figma/connect'
     | '/api/github/callback'
     | '/api/github/connect'
     | '/api/github/install'
     | '/api/github/setup'
     | '/api/github/webhook'
     | '/api/handoff/$token'
-    | '/api/p/$linkId'
-    | '/api/pr/$prId'
     | '/api/rpc/$'
+    | '/design/$id/b/$branchId'
     | '/api/handoff/$token/asset/$id'
-    | '/api/p/$linkId/asset/$id'
-    | '/api/pr/$prId/asset/$id'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
-    | '/landing'
+    | '/features'
+    | '/mcp'
     | '/mcp-consent'
+    | '/pricing'
+    | '/privacy'
+    | '/terms'
     | '/.well-known/oauth-authorization-server'
-    | '/api/chat'
-    | '/blockpage/$designId'
-    | '/p/$linkId'
-    | '/pr/$prId'
+    | '/api/canvas-events'
+    | '/api/canvas-presence'
+    | '/api/ready'
+    | '/app/appearance'
+    | '/app/billing'
+    | '/app/design'
+    | '/app/integrations'
+    | '/design/$id'
+    | '/app'
     | '/api/asset/$id'
     | '/api/auth/$'
-    | '/api/chatgpt/$'
-    | '/api/figma/callback'
-    | '/api/figma/connect'
     | '/api/github/callback'
     | '/api/github/connect'
     | '/api/github/install'
     | '/api/github/setup'
     | '/api/github/webhook'
     | '/api/handoff/$token'
-    | '/api/p/$linkId'
-    | '/api/pr/$prId'
     | '/api/rpc/$'
+    | '/design/$id/b/$branchId'
     | '/api/handoff/$token/asset/$id'
-    | '/api/p/$linkId/asset/$id'
-    | '/api/pr/$prId/asset/$id'
   id:
     | '__root__'
     | '/'
-    | '/landing'
+    | '/features'
+    | '/mcp'
     | '/mcp-consent'
+    | '/pricing'
+    | '/privacy'
+    | '/terms'
     | '/.well-known/oauth-authorization-server'
-    | '/api/chat'
-    | '/blockpage/$designId'
-    | '/p/$linkId'
-    | '/pr/$prId'
+    | '/api/canvas-events'
+    | '/api/canvas-presence'
+    | '/api/ready'
+    | '/app/appearance'
+    | '/app/billing'
+    | '/app/design'
+    | '/app/integrations'
+    | '/design/$id'
+    | '/app/'
     | '/api/asset/$id'
     | '/api/auth/$'
-    | '/api/chatgpt/$'
-    | '/api/figma/callback'
-    | '/api/figma/connect'
     | '/api/github/callback'
     | '/api/github/connect'
     | '/api/github/install'
     | '/api/github/setup'
     | '/api/github/webhook'
     | '/api/handoff/$token'
-    | '/api/p/$linkId'
-    | '/api/pr/$prId'
     | '/api/rpc/$'
+    | '/design/$id_/b/$branchId'
     | '/api/handoff/$token/asset/$id'
-    | '/api/p/$linkId/asset/$id'
-    | '/api/pr/$prId/asset/$id'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
-  LandingRoute: typeof LandingRoute
+  FeaturesRoute: typeof FeaturesRoute
+  McpRoute: typeof McpRoute
   McpConsentRoute: typeof McpConsentRoute
+  PricingRoute: typeof PricingRoute
+  PrivacyRoute: typeof PrivacyRoute
+  TermsRoute: typeof TermsRoute
   DotwellKnownOauthAuthorizationServerRoute: typeof DotwellKnownOauthAuthorizationServerRoute
-  ApiChatRoute: typeof ApiChatRoute
-  BlockpageDesignIdRoute: typeof BlockpageDesignIdRoute
-  PLinkIdRoute: typeof PLinkIdRoute
-  PrPrIdRoute: typeof PrPrIdRoute
+  ApiCanvasEventsRoute: typeof ApiCanvasEventsRoute
+  ApiCanvasPresenceRoute: typeof ApiCanvasPresenceRoute
+  ApiReadyRoute: typeof ApiReadyRoute
+  AppAppearanceRoute: typeof AppAppearanceRoute
+  AppBillingRoute: typeof AppBillingRoute
+  AppDesignRoute: typeof AppDesignRoute
+  AppIntegrationsRoute: typeof AppIntegrationsRoute
+  DesignIdRoute: typeof DesignIdRoute
+  AppIndexRoute: typeof AppIndexRoute
   ApiAssetIdRoute: typeof ApiAssetIdRoute
   ApiAuthSplatRoute: typeof ApiAuthSplatRoute
-  ApiChatgptSplatRoute: typeof ApiChatgptSplatRoute
-  ApiFigmaCallbackRoute: typeof ApiFigmaCallbackRoute
-  ApiFigmaConnectRoute: typeof ApiFigmaConnectRoute
   ApiGithubCallbackRoute: typeof ApiGithubCallbackRoute
   ApiGithubConnectRoute: typeof ApiGithubConnectRoute
   ApiGithubInstallRoute: typeof ApiGithubInstallRoute
   ApiGithubSetupRoute: typeof ApiGithubSetupRoute
   ApiGithubWebhookRoute: typeof ApiGithubWebhookRoute
   ApiHandoffTokenRoute: typeof ApiHandoffTokenRouteWithChildren
-  ApiPLinkIdRoute: typeof ApiPLinkIdRouteWithChildren
-  ApiPrPrIdRoute: typeof ApiPrPrIdRouteWithChildren
   ApiRpcSplatRoute: typeof ApiRpcSplatRoute
+  DesignIdBBranchIdRoute: typeof DesignIdBBranchIdRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -362,11 +403,18 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/landing': {
-      id: '/landing'
-      path: '/landing'
-      fullPath: '/landing'
-      preLoaderRoute: typeof LandingRouteImport
+    '/features': {
+      id: '/features'
+      path: '/features'
+      fullPath: '/features'
+      preLoaderRoute: typeof FeaturesRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/mcp': {
+      id: '/mcp'
+      path: '/mcp'
+      fullPath: '/mcp'
+      preLoaderRoute: typeof McpRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/mcp-consent': {
@@ -376,6 +424,27 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof McpConsentRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/pricing': {
+      id: '/pricing'
+      path: '/pricing'
+      fullPath: '/pricing'
+      preLoaderRoute: typeof PricingRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/privacy': {
+      id: '/privacy'
+      path: '/privacy'
+      fullPath: '/privacy'
+      preLoaderRoute: typeof PrivacyRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/terms': {
+      id: '/terms'
+      path: '/terms'
+      fullPath: '/terms'
+      preLoaderRoute: typeof TermsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/.well-known/oauth-authorization-server': {
       id: '/.well-known/oauth-authorization-server'
       path: '/.well-known/oauth-authorization-server'
@@ -383,32 +452,67 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof DotwellKnownOauthAuthorizationServerRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/api/chat': {
-      id: '/api/chat'
-      path: '/api/chat'
-      fullPath: '/api/chat'
-      preLoaderRoute: typeof ApiChatRouteImport
+    '/api/canvas-events': {
+      id: '/api/canvas-events'
+      path: '/api/canvas-events'
+      fullPath: '/api/canvas-events'
+      preLoaderRoute: typeof ApiCanvasEventsRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/blockpage/$designId': {
-      id: '/blockpage/$designId'
-      path: '/blockpage/$designId'
-      fullPath: '/blockpage/$designId'
-      preLoaderRoute: typeof BlockpageDesignIdRouteImport
+    '/api/canvas-presence': {
+      id: '/api/canvas-presence'
+      path: '/api/canvas-presence'
+      fullPath: '/api/canvas-presence'
+      preLoaderRoute: typeof ApiCanvasPresenceRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/p/$linkId': {
-      id: '/p/$linkId'
-      path: '/p/$linkId'
-      fullPath: '/p/$linkId'
-      preLoaderRoute: typeof PLinkIdRouteImport
+    '/api/ready': {
+      id: '/api/ready'
+      path: '/api/ready'
+      fullPath: '/api/ready'
+      preLoaderRoute: typeof ApiReadyRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/pr/$prId': {
-      id: '/pr/$prId'
-      path: '/pr/$prId'
-      fullPath: '/pr/$prId'
-      preLoaderRoute: typeof PrPrIdRouteImport
+    '/app/': {
+      id: '/app/'
+      path: '/app'
+      fullPath: '/app/'
+      preLoaderRoute: typeof AppIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/app/appearance': {
+      id: '/app/appearance'
+      path: '/app/appearance'
+      fullPath: '/app/appearance'
+      preLoaderRoute: typeof AppAppearanceRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/app/billing': {
+      id: '/app/billing'
+      path: '/app/billing'
+      fullPath: '/app/billing'
+      preLoaderRoute: typeof AppBillingRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/app/design': {
+      id: '/app/design'
+      path: '/app/design'
+      fullPath: '/app/design'
+      preLoaderRoute: typeof AppDesignRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/app/integrations': {
+      id: '/app/integrations'
+      path: '/app/integrations'
+      fullPath: '/app/integrations'
+      preLoaderRoute: typeof AppIntegrationsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/design/$id': {
+      id: '/design/$id'
+      path: '/design/$id'
+      fullPath: '/design/$id'
+      preLoaderRoute: typeof DesignIdRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/api/asset/$id': {
@@ -423,27 +527,6 @@ declare module '@tanstack/react-router' {
       path: '/api/auth/$'
       fullPath: '/api/auth/$'
       preLoaderRoute: typeof ApiAuthSplatRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/api/chatgpt/$': {
-      id: '/api/chatgpt/$'
-      path: '/api/chatgpt/$'
-      fullPath: '/api/chatgpt/$'
-      preLoaderRoute: typeof ApiChatgptSplatRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/api/figma/callback': {
-      id: '/api/figma/callback'
-      path: '/api/figma/callback'
-      fullPath: '/api/figma/callback'
-      preLoaderRoute: typeof ApiFigmaCallbackRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/api/figma/connect': {
-      id: '/api/figma/connect'
-      path: '/api/figma/connect'
-      fullPath: '/api/figma/connect'
-      preLoaderRoute: typeof ApiFigmaConnectRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/api/github/callback': {
@@ -488,25 +571,18 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiHandoffTokenRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/api/p/$linkId': {
-      id: '/api/p/$linkId'
-      path: '/api/p/$linkId'
-      fullPath: '/api/p/$linkId'
-      preLoaderRoute: typeof ApiPLinkIdRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/api/pr/$prId': {
-      id: '/api/pr/$prId'
-      path: '/api/pr/$prId'
-      fullPath: '/api/pr/$prId'
-      preLoaderRoute: typeof ApiPrPrIdRouteImport
-      parentRoute: typeof rootRouteImport
-    }
     '/api/rpc/$': {
       id: '/api/rpc/$'
       path: '/api/rpc/$'
       fullPath: '/api/rpc/$'
       preLoaderRoute: typeof ApiRpcSplatRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/design/$id_/b/$branchId': {
+      id: '/design/$id_/b/$branchId'
+      path: '/design/$id/b/$branchId'
+      fullPath: '/design/$id/b/$branchId'
+      preLoaderRoute: typeof DesignIdBBranchIdRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/api/handoff/$token/asset/$id': {
@@ -515,20 +591,6 @@ declare module '@tanstack/react-router' {
       fullPath: '/api/handoff/$token/asset/$id'
       preLoaderRoute: typeof ApiHandoffTokenAssetIdRouteImport
       parentRoute: typeof ApiHandoffTokenRoute
-    }
-    '/api/p/$linkId/asset/$id': {
-      id: '/api/p/$linkId/asset/$id'
-      path: '/asset/$id'
-      fullPath: '/api/p/$linkId/asset/$id'
-      preLoaderRoute: typeof ApiPLinkIdAssetIdRouteImport
-      parentRoute: typeof ApiPLinkIdRoute
-    }
-    '/api/pr/$prId/asset/$id': {
-      id: '/api/pr/$prId/asset/$id'
-      path: '/asset/$id'
-      fullPath: '/api/pr/$prId/asset/$id'
-      preLoaderRoute: typeof ApiPrPrIdAssetIdRouteImport
-      parentRoute: typeof ApiPrPrIdRoute
     }
   }
 }
@@ -545,54 +607,35 @@ const ApiHandoffTokenRouteWithChildren = ApiHandoffTokenRoute._addFileChildren(
   ApiHandoffTokenRouteChildren,
 )
 
-interface ApiPLinkIdRouteChildren {
-  ApiPLinkIdAssetIdRoute: typeof ApiPLinkIdAssetIdRoute
-}
-
-const ApiPLinkIdRouteChildren: ApiPLinkIdRouteChildren = {
-  ApiPLinkIdAssetIdRoute: ApiPLinkIdAssetIdRoute,
-}
-
-const ApiPLinkIdRouteWithChildren = ApiPLinkIdRoute._addFileChildren(
-  ApiPLinkIdRouteChildren,
-)
-
-interface ApiPrPrIdRouteChildren {
-  ApiPrPrIdAssetIdRoute: typeof ApiPrPrIdAssetIdRoute
-}
-
-const ApiPrPrIdRouteChildren: ApiPrPrIdRouteChildren = {
-  ApiPrPrIdAssetIdRoute: ApiPrPrIdAssetIdRoute,
-}
-
-const ApiPrPrIdRouteWithChildren = ApiPrPrIdRoute._addFileChildren(
-  ApiPrPrIdRouteChildren,
-)
-
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
-  LandingRoute: LandingRoute,
+  FeaturesRoute: FeaturesRoute,
+  McpRoute: McpRoute,
   McpConsentRoute: McpConsentRoute,
+  PricingRoute: PricingRoute,
+  PrivacyRoute: PrivacyRoute,
+  TermsRoute: TermsRoute,
   DotwellKnownOauthAuthorizationServerRoute:
     DotwellKnownOauthAuthorizationServerRoute,
-  ApiChatRoute: ApiChatRoute,
-  BlockpageDesignIdRoute: BlockpageDesignIdRoute,
-  PLinkIdRoute: PLinkIdRoute,
-  PrPrIdRoute: PrPrIdRoute,
+  ApiCanvasEventsRoute: ApiCanvasEventsRoute,
+  ApiCanvasPresenceRoute: ApiCanvasPresenceRoute,
+  ApiReadyRoute: ApiReadyRoute,
+  AppAppearanceRoute: AppAppearanceRoute,
+  AppBillingRoute: AppBillingRoute,
+  AppDesignRoute: AppDesignRoute,
+  AppIntegrationsRoute: AppIntegrationsRoute,
+  DesignIdRoute: DesignIdRoute,
+  AppIndexRoute: AppIndexRoute,
   ApiAssetIdRoute: ApiAssetIdRoute,
   ApiAuthSplatRoute: ApiAuthSplatRoute,
-  ApiChatgptSplatRoute: ApiChatgptSplatRoute,
-  ApiFigmaCallbackRoute: ApiFigmaCallbackRoute,
-  ApiFigmaConnectRoute: ApiFigmaConnectRoute,
   ApiGithubCallbackRoute: ApiGithubCallbackRoute,
   ApiGithubConnectRoute: ApiGithubConnectRoute,
   ApiGithubInstallRoute: ApiGithubInstallRoute,
   ApiGithubSetupRoute: ApiGithubSetupRoute,
   ApiGithubWebhookRoute: ApiGithubWebhookRoute,
   ApiHandoffTokenRoute: ApiHandoffTokenRouteWithChildren,
-  ApiPLinkIdRoute: ApiPLinkIdRouteWithChildren,
-  ApiPrPrIdRoute: ApiPrPrIdRouteWithChildren,
   ApiRpcSplatRoute: ApiRpcSplatRoute,
+  DesignIdBBranchIdRoute: DesignIdBBranchIdRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

@@ -1,12 +1,11 @@
 import type {
   BuiltInShortcutId,
-  CustomShortcut,
   KeyChord,
   ShortcutConfig,
 } from '@loora/db/shortcuts'
 import { EMPTY_SHORTCUT_CONFIG } from '@loora/db/shortcuts'
 
-export type { BuiltInShortcutId, CustomShortcut, KeyChord, ShortcutConfig }
+export type { BuiltInShortcutId, KeyChord, ShortcutConfig }
 export { EMPTY_SHORTCUT_CONFIG }
 
 export const SHORTCUT_STORAGE_KEY = 'loora:shortcuts'
@@ -48,11 +47,8 @@ export const BUILTIN_META: Record<
   nudgeRight: { label: 'Nudge right', group: 'arrange' },
   nudgeUp: { label: 'Nudge up', group: 'arrange' },
   nudgeDown: { label: 'Nudge down', group: 'arrange' },
-  toggleAgent: { label: 'Toggle agent panel', group: 'panels' },
-  toggleLayers: { label: 'Toggle layers', group: 'panels' },
   toggleAssets: { label: 'Toggle assets', group: 'panels' },
   toggleHistory: { label: 'Toggle history', group: 'panels' },
-  toggleCode: { label: 'Toggle code editor', group: 'panels' },
   openCommandMenu: { label: 'Open command menu', group: 'panels' },
   openSettings: { label: 'Open settings', group: 'panels' },
 }
@@ -112,32 +108,29 @@ export const DEFAULT_SHORTCUTS: Record<BuiltInShortcutId, KeyChord | KeyChord[]>
   nudgeRight: key('arrowright'),
   nudgeUp: key('arrowup'),
   nudgeDown: key('arrowdown'),
-  toggleAgent: key('b', { meta: true }),
-  toggleLayers: key('l', { meta: true }),
   toggleAssets: key('k', { meta: true, shift: true }),
   toggleHistory: key('y', { meta: true }),
-  toggleCode: key('e', { meta: true }),
   openCommandMenu: key('k', { meta: true }),
   openSettings: key(',', { meta: true }),
 }
 
 export function normalizeConfig(input: unknown): ShortcutConfig {
-  if (!input || typeof input !== 'object') return { ...EMPTY_SHORTCUT_CONFIG, custom: [] }
+  if (!input || typeof input !== 'object') return { ...EMPTY_SHORTCUT_CONFIG }
   const raw = input as Partial<ShortcutConfig>
   return {
     overrides: raw.overrides && typeof raw.overrides === 'object' ? { ...raw.overrides } : {},
-    custom: Array.isArray(raw.custom) ? raw.custom : [],
+    custom: Array.isArray(raw.custom) ? [...raw.custom] : [],
   }
 }
 
 export function loadCachedShortcuts(): ShortcutConfig {
-  if (typeof window === 'undefined') return { overrides: {}, custom: [] }
+  if (typeof window === 'undefined') return { ...EMPTY_SHORTCUT_CONFIG }
   try {
     const raw = window.localStorage.getItem(SHORTCUT_STORAGE_KEY)
-    if (!raw) return { overrides: {}, custom: [] }
+    if (!raw) return { ...EMPTY_SHORTCUT_CONFIG }
     return normalizeConfig(JSON.parse(raw))
   } catch {
-    return { overrides: {}, custom: [] }
+    return { ...EMPTY_SHORTCUT_CONFIG }
   }
 }
 
@@ -189,24 +182,15 @@ export function matchChord(e: KeyboardEvent, chord: KeyChord): boolean {
   return eventKey === chord.key.toLowerCase()
 }
 
-export type MatchedShortcut =
-  | { kind: 'builtIn'; id: BuiltInShortcutId }
-  | { kind: 'custom'; id: string; prompt: string; name: string }
-
-/** First matching binding wins (built-ins in registry order, then custom). */
+/** First matching binding wins, in registry order. */
 export function matchShortcut(
   e: KeyboardEvent,
   config: ShortcutConfig,
-): MatchedShortcut | null {
+): BuiltInShortcutId | null {
   for (const id of Object.keys(DEFAULT_SHORTCUTS) as BuiltInShortcutId[]) {
     const chords = resolveBuiltIn(id, config)
     if (!chords) continue
-    if (chords.some((chord) => matchChord(e, chord))) return { kind: 'builtIn', id }
-  }
-  for (const custom of config.custom) {
-    if (matchChord(e, custom.chord)) {
-      return { kind: 'custom', id: custom.id, prompt: custom.action.prompt, name: custom.name }
-    }
+    if (chords.some((chord) => matchChord(e, chord))) return id
   }
   return null
 }
@@ -308,9 +292,6 @@ export function detectConflicts(config: ShortcutConfig): ShortcutConflict[] {
     const chords = resolveBuiltIn(id, config)
     if (!chords) continue
     for (const chord of chords) add(chord, BUILTIN_META[id].label)
-  }
-  for (const custom of config.custom) {
-    add(custom.chord, custom.name || 'Custom')
   }
 
   const conflicts: ShortcutConflict[] = []

@@ -6,11 +6,24 @@ import {
   isPreviewProtectedAuthPath,
   previewAccessRequiredResponse,
 } from '@loora/auth/preview-access'
+import {
+  hasAcceptedCurrentLegal,
+  isLegalProtectedAuthPath,
+  legalConsentRequiredResponse,
+} from '@loora/auth/legal-consent'
 import { requireMcpConsent } from '@loora/auth/mcp-consent'
 
 async function handle(request: Request) {
-  if (isPreviewProtectedAuthPath(new URL(request.url).pathname)) {
+  const pathname = new URL(request.url).pathname
+  if (isLegalProtectedAuthPath(pathname) || isPreviewProtectedAuthPath(pathname)) {
     const session = await getSession(request)
+    if (
+      session &&
+      isLegalProtectedAuthPath(pathname) &&
+      !hasAcceptedCurrentLegal(session.user)
+    ) {
+      return legalConsentRequiredResponse()
+    }
     if (session && !canUseApp(session.user)) return previewAccessRequiredResponse()
   }
   return auth.handler(requireMcpConsent(request))

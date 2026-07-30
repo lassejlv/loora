@@ -1,37 +1,13 @@
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, mock, test } from 'bun:test'
 import { createContext, useContext, type ReactNode } from 'react'
 import { withNuqsTestingAdapter } from 'nuqs/adapters/testing'
-
-const billingStatus = mock()
-const listPublished = mock()
-const publishedEgress = mock()
-const openRouterStatus = mock()
-const connectOpenRouter = mock()
-const disconnectOpenRouter = mock()
-const aiProviderStatus = mock()
-const connectAiProvider = mock()
-const disconnectAiProvider = mock()
 
 const TabsContext = createContext('')
 
 mock.module('#/lib/orpc-client', () => ({
   orpc: {
-    billing: { status: billingStatus },
-    publish: {
-      listAll: listPublished,
-      egress: publishedEgress,
-    },
-    openrouter: {
-      status: openRouterStatus,
-      connect: connectOpenRouter,
-      disconnect: disconnectOpenRouter,
-    },
-    aiProvider: {
-      status: aiProviderStatus,
-      connect: connectAiProvider,
-      disconnect: disconnectAiProvider,
-    },
+    auth: { deleteAccount: mock() },
   },
 }))
 mock.module('@loora/auth/client', () => ({
@@ -47,7 +23,6 @@ mock.module('@loora/auth/client', () => ({
       },
     }),
     signOut: mock(),
-    customer: { portal: mock() },
   },
 }))
 mock.module('#/components/ui/tabs', () => ({
@@ -62,8 +37,36 @@ mock.module('#/components/ui/tabs', () => ({
     useContext(TabsContext) === value ? <div>{children}</div> : null
   ),
 }))
+// `mock.module` is process-global, so this stub is what every later test file
+// in the run sees too — the canvas panels render their header buttons through
+// PanelShell. Keep the shape of the real thing: title, actions, close, body.
 mock.module('#/components/panel-shell', () => ({
-  PanelShell: ({ children }: { children: ReactNode }) => <div>{children}</div>,
+  PanelShell: ({
+    title,
+    actions,
+    onClose,
+    children,
+  }: {
+    title: string
+    actions?: ReactNode
+    onClose?: () => void
+    children: ReactNode
+  }) => (
+    <div>
+      <h2>{title}</h2>
+      {actions}
+      {onClose ? (
+        <button type="button" aria-label={`Close ${title}`} onClick={onClose} />
+      ) : null}
+      {children}
+    </div>
+  ),
+  PanelEmpty: ({ title, description }: { title?: string; description?: ReactNode }) => (
+    <div>
+      {title}
+      {description}
+    </div>
+  ),
   PanelLoading: ({ label }: { label: string }) => <div>{label}</div>,
 }))
 mock.module('#/components/shortcuts-settings', () => ({
@@ -79,137 +82,55 @@ mock.module('#/components/ui/alert-dialog', () => ({
   AlertDialogPopup: ({ children }: { children: ReactNode }) => <div>{children}</div>,
   AlertDialogTitle: ({ children }: { children: ReactNode }) => <div>{children}</div>,
 }))
-// mock.module is process-global, so a partial stub here would strip the rest of
-// theme.ts for every other test file in the run — spread the real module.
-const themeModule = await import('#/lib/theme')
-mock.module('#/lib/theme', () => ({
-  ...themeModule,
-  getThemePreference: () => 'system',
-  setThemePreference: mock(),
-}))
+// theme.ts is deliberately NOT mocked. mock.module is process-global, so
+// stubbing it here would hand every other test file in the run the stub — which
+// is exactly how theme.test.ts started reading the wrong default. The real
+// module tolerates a missing `localStorage`, so it is safe to let it run.
 
 const { SettingsPanel } = await import('./settings-panel')
 
-const disabledBilling = {
-  required: false,
-  access: true,
-  plan: null,
-  currentPeriodEnd: null,
-  cancelAtPeriodEnd: false,
-  trial: null,
-  credits: null,
-  stale: false,
-  source: 'disabled' as const,
-}
-
-function renderSettings(searchParams = '?settings=billing') {
+function renderSettings(searchParams = '?settings=account') {
   return render(
-    <SettingsPanel
-      shortcutConfig={{} as never}
-      onShortcutConfigChange={() => {}}
-      agentSystemPrompt=""
-      onSaveAgentSystemPrompt={async () => {}}
-    />,
+    <SettingsPanel shortcutConfig={{} as never} onShortcutConfigChange={() => {}} />,
     { wrapper: withNuqsTestingAdapter({ searchParams }) },
   )
 }
 
-describe('SettingsPanel billing visibility', () => {
+describe('SettingsPanel', () => {
   beforeEach(() => {
-    billingStatus.mockReset().mockResolvedValue(disabledBilling)
-    listPublished.mockReset().mockResolvedValue([])
-    publishedEgress.mockReset().mockResolvedValue({
-      usedBytes: 0,
-      limitBytes: 1,
-      windowDays: 30,
-      unlimited: true,
-    })
-    openRouterStatus.mockReset().mockResolvedValue({
-      connected: false,
-      label: null,
-      updatedAt: null,
-    })
-    connectOpenRouter.mockReset().mockResolvedValue({
-      connected: true,
-      label: 'Loora key',
-    })
-    disconnectOpenRouter.mockReset().mockResolvedValue({ disconnected: true })
-    aiProviderStatus.mockReset().mockResolvedValue({
-      connected: false,
-      updatedAt: null,
-    })
-    connectAiProvider.mockReset().mockResolvedValue({ connected: true })
-    disconnectAiProvider.mockReset().mockResolvedValue({ disconnected: true })
+    window.localStorage.removeItem('loora:theme')
+    document.documentElement.classList.remove('dark')
   })
 
-  afterEach(() => cleanup())
+  afterEach(() => {
+    cleanup()
+    window.localStorage.removeItem('loora:theme')
+    document.documentElement.classList.remove('dark')
+  })
 
-  test('removes billing UI and falls back from a billing URL when billing is disabled', async () => {
+  test('keeps billing and integrations out of the dialog', async () => {
     renderSettings()
 
     expect(await screen.findByText('Signed in to loora.')).toBeTruthy()
     expect(screen.queryByRole('tab', { name: 'Billing' })).toBeNull()
-    expect(screen.queryByText('Manage your plan and monthly AI credits.')).toBeNull()
+    expect(screen.queryByRole('tab', { name: 'Integrations' })).toBeNull()
   })
 
-  test('shows the billing tab when billing is required', async () => {
-    billingStatus.mockResolvedValue({ ...disabledBilling, required: true, source: 'cache' as const })
+  test('offers no agent tab', async () => {
     renderSettings('?settings=shortcuts')
 
-    await waitFor(() => expect(screen.getByRole('tab', { name: 'Billing' })).toBeTruthy())
+    expect(await screen.findByRole('tab', { name: 'Shortcuts' })).toBeTruthy()
+    expect(screen.queryByRole('tab', { name: 'Agent' })).toBeNull()
   })
 
-  test('keeps every AI provider under one integration tab', async () => {
-    renderSettings('?settings=integrations&integration=providers')
+  test('applies and persists the selected appearance', async () => {
+    renderSettings('?settings=account')
 
-    expect(await screen.findByRole('tab', { name: 'AI providers' })).toBeTruthy()
-    expect(screen.queryByRole('tab', { name: 'ChatGPT' })).toBeNull()
-    expect(screen.queryByRole('tab', { name: 'OpenRouter' })).toBeNull()
-    expect(await screen.findByText('Google Gemini')).toBeTruthy()
-    expect(await screen.findByText('OpenAI')).toBeTruthy()
-    expect(await screen.findByText('Anthropic')).toBeTruthy()
-  })
+    const dark = await screen.findByRole('button', { name: 'Dark' })
+    fireEvent.click(dark)
 
-  test('connects OpenRouter with a masked custom API key', async () => {
-    openRouterStatus
-      .mockResolvedValueOnce({ connected: false, label: null, updatedAt: null })
-      .mockResolvedValue({
-        connected: true,
-        label: 'Loora key',
-        updatedAt: new Date(),
-      })
-    renderSettings('?settings=integrations&integration=providers')
-
-    const input = await screen.findByPlaceholderText('sk-or-v1-…')
-    expect((input as HTMLInputElement).type).toBe('password')
-    fireEvent.change(input, { target: { value: 'sk-or-v1-user-secret' } })
-    fireEvent.click(screen.getByRole('button', { name: 'Connect OpenRouter' }))
-
-    await waitFor(() =>
-      expect(connectOpenRouter).toHaveBeenCalledWith({
-        apiKey: 'sk-or-v1-user-secret',
-      }),
-    )
-    expect(await screen.findByText(/OpenRouter Auto is available/)).toBeTruthy()
-  })
-
-  test('connects Google Gemini with a masked custom API key', async () => {
-    aiProviderStatus
-      .mockResolvedValueOnce({ connected: false, updatedAt: null })
-      .mockResolvedValue({ connected: true, updatedAt: new Date() })
-    renderSettings('?settings=integrations&integration=providers')
-
-    const input = await screen.findByPlaceholderText('AIza…')
-    expect((input as HTMLInputElement).type).toBe('password')
-    fireEvent.change(input, { target: { value: 'AIza-user-secret' } })
-    fireEvent.click(screen.getByRole('button', { name: 'Connect Google Gemini' }))
-
-    await waitFor(() =>
-      expect(connectAiProvider).toHaveBeenCalledWith({
-        provider: 'google',
-        apiKey: 'AIza-user-secret',
-      }),
-    )
-    expect(await screen.findByText(/Gemini 3.5 Flash.*agent model picker/)).toBeTruthy()
+    expect(dark.getAttribute('aria-pressed')).toBe('true')
+    expect(window.localStorage.getItem('loora:theme')).toBe('dark')
+    expect(document.documentElement.classList.contains('dark')).toBe(true)
   })
 })

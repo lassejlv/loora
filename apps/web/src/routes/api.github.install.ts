@@ -3,6 +3,10 @@ import { createFileRoute } from '@tanstack/react-router'
 import { requireSession } from '@loora/auth'
 import { authorizeBilling, subscriptionRequiredResponse } from '@loora/billing/billing'
 import { canUseApp, previewAccessRequiredResponse } from '@loora/auth/preview-access'
+import {
+  hasAcceptedCurrentLegal,
+  legalConsentRequiredResponse,
+} from '@loora/auth/legal-consent'
 import { createGitHubInstallFlow, getGitHubStatus } from '@loora/auth/github'
 
 export const Route = createFileRoute('/api/github/install')({
@@ -11,6 +15,7 @@ export const Route = createFileRoute('/api/github/install')({
       GET: async ({ request }) => {
         const session = await requireSession(request)
         if (!session) return Response.json({ error: 'Unauthorized' }, { status: 401 })
+        if (!hasAcceptedCurrentLegal(session.user)) return legalConsentRequiredResponse()
         if (!canUseApp(session.user)) return previewAccessRequiredResponse()
         if (!(await authorizeBilling(session.user)).access) return subscriptionRequiredResponse()
 
@@ -26,7 +31,10 @@ export const Route = createFileRoute('/api/github/install')({
           })
         } catch {
           return Response.redirect(
-            new URL('/?settings=integrations&integration=github&github=failed', request.url),
+            new URL(
+              '/app/integrations?integration=github&github=failed',
+              request.url,
+            ),
             302,
           )
         }

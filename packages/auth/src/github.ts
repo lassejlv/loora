@@ -2,7 +2,6 @@ import { timingSafeEqual } from 'node:crypto'
 import { and, eq, inArray, isNull } from 'drizzle-orm'
 import { db } from '@loora/db'
 import {
-  designChat,
   designGithubRepository,
   githubAccount,
   githubInstallation,
@@ -771,24 +770,7 @@ export async function getGitHubRepositoryContextByName(
 export async function getGitHubRepositoryContext(
   userId: string,
   designId: string,
-  chatId?: string,
 ): Promise<GitHubRepositoryContext | null> {
-  let chatRepositoryId: string | null = null
-  if (chatId) {
-    const [chat] = await db
-      .select({
-        designId: designChat.designId,
-        githubRepositoryId: designChat.githubRepositoryId,
-      })
-      .from(designChat)
-      .where(and(eq(designChat.userId, userId), eq(designChat.id, chatId)))
-      .limit(1)
-    if (!chat || chat.designId !== designId) {
-      throw new GitHubIntegrationError('This chat does not belong to the design.', 'ACCESS_DENIED')
-    }
-    chatRepositoryId = chat.githubRepositoryId
-  }
-
   const [binding] = await db
     .select()
     .from(designGithubRepository)
@@ -800,20 +782,7 @@ export async function getGitHubRepositoryContext(
     )
     .limit(1)
   if (!binding) {
-    if (chatRepositoryId) {
-      throw new GitHubIntegrationError(
-        'This chat repository is no longer connected. Select it again or start a new chat.',
-        'ACCESS_DENIED',
-      )
-    }
     return null
-  }
-
-  if (chatId && chatRepositoryId !== binding.repositoryId) {
-    throw new GitHubIntegrationError(
-      'This chat belongs to a different repository. Start a new chat.',
-      'ACCESS_DENIED',
-    )
   }
 
   const repositories = await listGitHubRepositories(userId)

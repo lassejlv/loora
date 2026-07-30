@@ -4,6 +4,10 @@ import { requireSession } from '@loora/auth'
 import { authorizeBilling, subscriptionRequiredResponse } from '@loora/billing/billing'
 import { canUseApp, previewAccessRequiredResponse } from '@loora/auth/preview-access'
 import {
+  hasAcceptedCurrentLegal,
+  legalConsentRequiredResponse,
+} from '@loora/auth/legal-consent'
+import {
   clearGitHubFlowCookie,
   exchangeGitHubCode,
   getGitHubUser,
@@ -16,7 +20,7 @@ import {
 function redirect(request: Request, result: string, cookie?: string) {
   const headers: Record<string, string> = {
     Location: new URL(
-      `/?settings=integrations&integration=github&github=${result}`,
+      `/app/integrations?integration=github&github=${result}`,
       request.url,
     ).toString(),
   }
@@ -30,6 +34,7 @@ export const Route = createFileRoute('/api/github/callback')({
       GET: async ({ request }) => {
         const session = await requireSession(request)
         if (!session) return Response.json({ error: 'Unauthorized' }, { status: 401 })
+        if (!hasAcceptedCurrentLegal(session.user)) return legalConsentRequiredResponse()
         if (!canUseApp(session.user)) return previewAccessRequiredResponse()
         if (!(await authorizeBilling(session.user)).access) return subscriptionRequiredResponse()
 

@@ -5,12 +5,20 @@
     "dockerfilePath": "apps/mcp/Dockerfile",
     "watchPatterns": [
       "apps/mcp/**",
+      "packages/agent/**",
+      "packages/canvas/**",
       "packages/db/**",
       "packages/auth/**",
+      "packages/billing/**",
+      "packages/rpc/**",
       "package.json",
       "bun.lock",
       "bunfig.toml",
       "apps/mcp/Dockerfile"
     ]
+  },
+  "deploy": {
+    "restartPolicyType": "ON_FAILURE",
+    "restartPolicyMaxRetries": 5
   }
 }

@@ -31,16 +31,16 @@ export function clearWelcomeSeen() {
 
 const BEATS = [
   {
-    title: 'Describe, don’t draw first',
-    body: 'Tell the agent what you want. It places real HTML and React on the board.',
+    title: 'Design on an infinite canvas',
+    body: 'Every element is structured, responsive UI you can select, group, and nudge.',
   },
   {
-    title: 'Arrange like a design tool',
-    body: 'Select, group, nudge, and peek at code when you want control.',
+    title: 'Connect your own agent',
+    body: 'Point Claude or Cursor at the Loora MCP server and it edits the same document you do.',
   },
   {
-    title: 'Point and revise',
-    body: 'Comment on a spot or keep chatting — the canvas stays the source of truth.',
+    title: 'Branch, merge, and ship',
+    body: 'Fork a design, compare any two points, then export from Main.',
   },
 ] as const
 
@@ -51,7 +51,7 @@ function WelcomeHero() {
   return (
     <div
       aria-hidden="true"
-      className="relative h-40 w-full shrink-0 overflow-hidden border-b border-border bg-cx-canvas sm:h-44"
+      className="relative h-36 w-full shrink-0 overflow-hidden border-b border-border bg-cx-canvas sm:h-40"
     >
       <div
         className="absolute inset-0"
@@ -108,7 +108,7 @@ function WelcomeHero() {
 
       {/* Comment pin */}
       <motion.div
-        className="absolute right-[14%] top-[3.25rem] flex size-6 items-center justify-center rounded-full border border-border bg-background text-[10px] font-medium text-muted-foreground shadow-sm"
+        className="absolute right-[14%] top-[3.25rem] flex size-6 items-center justify-center rounded-full border border-border bg-background text-xs font-medium text-muted-foreground shadow-sm"
         initial={reduceMotion ? false : { opacity: 0, scale: 0.85 }}
         animate={{ opacity: 1, scale: 1 }}
         transition={{ duration: 0.3, delay: reduceMotion ? 0 : 0.16, ease: [0.22, 1, 0.36, 1] }}
@@ -139,16 +139,16 @@ export function WelcomeDialog({
       >
         <WelcomeHero />
 
-        <DialogHeader className="gap-3 pt-5">
-          <DialogTitle className="text-2xl font-semibold tracking-tight">
+        <DialogHeader className="gap-2.5 pt-4">
+          <DialogTitle className="text-xl font-semibold tracking-tight">
             loora<span className="text-cx-accent">.</span>
           </DialogTitle>
-          <p className="text-base font-medium leading-snug text-muted-foreground">
+          <p className="text-sm font-medium leading-snug text-muted-foreground">
             The design harness.
           </p>
           <DialogDescription className="text-sm leading-relaxed">
-            Put an agent on an infinite canvas. It builds real UI in place — you steer, arrange, and
-            ship from the board.
+            An infinite canvas of real, structured UI — open to your own agent over MCP. Design in
+            the browser, drive it from your editor, ship from the board.
           </DialogDescription>
         </DialogHeader>
 
@@ -161,7 +161,7 @@ export function WelcomeDialog({
               animate={enter.animate}
               transition={{ ...transition, delay: reduceMotion ? 0 : 0.03 * index }}
             >
-              <span className="w-5 shrink-0 pt-0.5 font-mono text-[11px] tabular-nums text-muted-foreground">
+              <span className="w-5 shrink-0 pt-0.5 font-mono text-xs tabular-nums text-muted-foreground">
                 {String(index + 1).padStart(2, '0')}
               </span>
               <div className="min-w-0">

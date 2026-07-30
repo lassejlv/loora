@@ -5,30 +5,16 @@ import {
   parseAsStringLiteral,
 } from 'nuqs'
 
-export const SETTINGS_TABS = ['account', 'agent', 'integrations', 'billing', 'shortcuts', 'admin'] as const
+export const SETTINGS_TABS = ['account', 'shortcuts', 'admin'] as const
 export type SettingsTab = (typeof SETTINGS_TABS)[number]
 
-export const INTEGRATION_TABS = ['providers', 'github', 'figma', 'mcp'] as const
+export const INTEGRATION_TABS = ['github', 'mcp'] as const
 export type IntegrationTab = (typeof INTEGRATION_TABS)[number]
-
-const LEGACY_INTEGRATION_SETTINGS = new Set<string>([
-  ...INTEGRATION_TABS,
-  'chatgpt',
-  'openrouter',
-])
-
-function integrationTab(value: string): IntegrationTab {
-  return value === 'chatgpt' || value === 'openrouter'
-    ? 'providers'
-    : value as IntegrationTab
-}
 
 export const editorSearchParams = {
   d: parseAsString,
   draft: parseAsString,
   settings: parseAsStringLiteral(SETTINGS_TABS),
-  integration: parseAsStringLiteral(INTEGRATION_TABS),
-  agent: parseAsBoolean.withDefault(true),
   layers: parseAsBoolean.withDefault(false),
   assets: parseAsBoolean.withDefault(false),
   history: parseAsBoolean.withDefault(false),
@@ -39,12 +25,46 @@ export const editorValidateSearch = createStandardSchemaV1(editorSearchParams, {
   partialOutput: true,
 })
 
+export const integrationsSearchParams = {
+  integration: parseAsStringLiteral(INTEGRATION_TABS),
+  github: parseAsString,
+}
+
+export const integrationsValidateSearch = createStandardSchemaV1(
+  integrationsSearchParams,
+  { partialOutput: true },
+)
+
+/**
+ * `/design/$id` keys the open document from the path. The deep-link keys below
+ * are read straight from `window.location` by the editor, so they are declared
+ * here only to keep router navigations from dropping them.
+ */
+export const designSearchParams = {
+  ...editorSearchParams,
+  node: parseAsString,
+  page: parseAsString,
+  instancePath: parseAsString,
+}
+
+export const designValidateSearch = createStandardSchemaV1(designSearchParams, {
+  partialOutput: true,
+})
+
+export const legacyDesignValidateSearch = createStandardSchemaV1(
+  {
+    ...designSearchParams,
+    id: parseAsString,
+  },
+  {
+    partialOutput: true,
+  },
+)
+
 export type EditorSearchParams = {
   d: string | null
   draft: string | null
   settings: SettingsTab | null
-  integration: IntegrationTab | null
-  agent: boolean
   layers: boolean
   assets: boolean
   history: boolean
@@ -55,8 +75,6 @@ export type EditorSearchParams = {
 export function bootstrapEditorSearch(activeId: string): Partial<{
   d: string
   settings: SettingsTab
-  integration: IntegrationTab
-  agent: boolean
   layers: boolean
 }> {
   if (typeof window === 'undefined') return {}
@@ -64,32 +82,16 @@ export function bootstrapEditorSearch(activeId: string): Partial<{
   const patch: Partial<{
     d: string
     settings: SettingsTab
-    integration: IntegrationTab
-    agent: boolean
     layers: boolean
   }> = {}
 
   const settingsRaw = raw.get('settings')
-  if (settingsRaw && LEGACY_INTEGRATION_SETTINGS.has(settingsRaw)) {
-    patch.settings = 'integrations'
-    patch.integration = integrationTab(settingsRaw)
-  } else if (settingsRaw === 'integrations') {
-    patch.settings = 'integrations'
-    const integrationRaw = raw.get('integration')
-    if (integrationRaw && LEGACY_INTEGRATION_SETTINGS.has(integrationRaw)) {
-      patch.integration = integrationTab(integrationRaw)
-    }
-  } else if (settingsRaw && (SETTINGS_TABS as readonly string[]).includes(settingsRaw)) {
+  if (settingsRaw && (SETTINGS_TABS as readonly string[]).includes(settingsRaw)) {
     patch.settings = settingsRaw as SettingsTab
-  } else if (raw.get('topup') === 'success') {
-    patch.settings = 'billing'
   }
 
   if (!raw.get('d') && activeId) patch.d = activeId
 
-  if (raw.get('agent') === null && window.localStorage.getItem('loora:agent') === '0') {
-    patch.agent = false
-  }
   if (raw.get('layers') === null && window.localStorage.getItem('loora:layers') === '1') {
     patch.layers = true
   }

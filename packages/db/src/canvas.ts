@@ -1,8 +1,6 @@
-// The persisted canvas model: every element is a positioned box of code. The
-// code is plain HTML/CSS/JS or JSX defining App — rendered live in a sandboxed
-// iframe with React and Tailwind available (see apps/web element-frame.tsx).
-// Lives in @loora/db because design rows persist `CanvasElement[]` as JSONB;
-// the canvas helpers built on top of it stay in apps/web (src/lib/canvas.ts).
+// Legacy persisted canvas data. It remains readable only for rollback and
+// expiring-link compatibility. Writable editor code uses CanvasDocument from
+// @loora/canvas.
 export interface CanvasElement {
   id: string
   name: string
@@ -33,4 +31,24 @@ export interface CanvasPage {
   y: number
   w: number
   items: CanvasPageItem[]
+}
+
+/**
+ * Older writes stored `shapes`/`pages` as a JSON *string* inside the jsonb
+ * column instead of a jsonb array, so a row reads back as `"[{…}]"` rather
+ * than `[{…}]`. Production is mostly in that state, and iterating a string
+ * yields characters, which used to crash consumers of those designs.
+ * Read every legacy array through this.
+ */
+export function legacyArray<T>(value: unknown): T[] {
+  if (Array.isArray(value)) return value as T[]
+  if (typeof value === 'string') {
+    try {
+      const parsed = JSON.parse(value)
+      return Array.isArray(parsed) ? (parsed as T[]) : []
+    } catch {
+      return []
+    }
+  }
+  return []
 }

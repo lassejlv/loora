@@ -42,14 +42,12 @@ export type BuiltInShortcutId =
   | 'nudgeRight'
   | 'nudgeUp'
   | 'nudgeDown'
-  | 'toggleAgent'
-  | 'toggleLayers'
   | 'toggleAssets'
   | 'toggleHistory'
-  | 'toggleCode'
   | 'openCommandMenu'
   | 'openSettings'
 
+/** Kept for DB row shape compatibility. App no longer creates these. */
 export type CustomShortcut = {
   id: string
   name: string

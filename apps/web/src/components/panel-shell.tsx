@@ -13,7 +13,7 @@ export function PanelShell({
   children,
   bodyClassName,
   className,
-  /** Native overflow when the body hosts a filling child (e.g. Monaco). */
+  /** Native overflow when the body hosts a filling child. */
   bodyScroll = true,
 }: {
   title: string
@@ -26,10 +26,12 @@ export function PanelShell({
   bodyScroll?: boolean
 }) {
   return (
-    <aside className={cn('flex h-full min-h-0 w-full flex-col bg-card', className)}>
-      <header className="flex items-start justify-between gap-2 border-b px-3 py-2.5">
+    <aside className={cn('flex h-full min-h-0 w-full flex-col bg-surface', className)}>
+      <header className="flex min-h-9 items-center justify-between gap-2 border-b border-line px-3 py-2">
         <div className="min-w-0">
-          <h2 className="font-heading text-sm font-semibold">{title}</h2>
+          <h2 className="font-heading text-xs font-semibold tracking-tight">
+            {title}
+          </h2>
           {description ? (
             <div className="mt-0.5 text-xs leading-relaxed text-muted-foreground">
               {description}
@@ -82,16 +84,20 @@ export function PanelEmpty({
   onClick?: () => void
 }) {
   const classes = cn(
-    'flex flex-1 flex-col items-center justify-center gap-2 px-4 py-8 text-center',
-    onClick && 'cursor-pointer rounded-lg border border-dashed hover:bg-secondary/60',
+    'flex flex-1 flex-col items-center justify-center gap-1.5 px-3 py-6 text-center',
+    onClick && 'cursor-pointer rounded-md border border-dashed border-line transition-colors hover:bg-accent',
     className,
   )
 
   const body = (
     <>
-      {title ? <p className="font-heading text-sm font-semibold text-foreground">{title}</p> : null}
+      {title ? (
+        <p className="font-heading text-xs font-semibold text-foreground">
+          {title}
+        </p>
+      ) : null}
       {description ? (
-        <p className="max-w-[16rem] text-xs leading-relaxed text-muted-foreground">{description}</p>
+        <p className="max-w-[15rem] text-xs leading-relaxed text-muted-foreground">{description}</p>
       ) : null}
       {children && !title && !description ? (
         <div className="text-xs text-muted-foreground">{children}</div>
@@ -118,10 +124,10 @@ export function PanelLoading({
   rows?: number
 }) {
   return (
-    <div className="flex flex-col gap-2 p-3" aria-busy="true" aria-label={label}>
+    <div className="flex flex-col gap-1.5 p-2.5" aria-busy="true" aria-label={label}>
       <p className="cx-shimmer text-xs">{label}</p>
       {Array.from({ length: rows }, (_, index) => (
-        <Skeleton key={index} className="h-8 w-full" />
+        <Skeleton key={index} className="h-7 w-full" />
       ))}
     </div>
   )

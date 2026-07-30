@@ -8,7 +8,7 @@ This document is a professional draft for owner and counsel review. It is not le
 
 ## 1. The Service
 
-Loora is a canvas-based design tool. You can create and arrange design elements on an infinite canvas, save designs with version history, upload assets, chat with an AI agent to generate and edit UI, publish shareable pages, create time-limited handoff links, and optionally connect integrations (for example GitHub, Figma, or your own ChatGPT account). A remote MCP server may expose Loora capabilities to compatible AI clients when you authorize them.
+Loora is a canvas-based design tool. You can create and arrange design elements on an infinite canvas, save designs with version history, upload assets, chat with an AI agent to generate and edit UI, publish shareable pages, create time-limited handoff links, and optionally connect integrations (for example GitHub or your own ChatGPT account). A remote MCP server may expose Loora capabilities to compatible AI clients when you authorize them.
 
 Features, plans, and integrations may change over time. Some features may require preview access, an active subscription, or a connected third-party account.
 
@@ -96,7 +96,7 @@ The Service relies on and may integrate with third-party providers, including (w
 - Billing (Polar)
 - Analytics (Databuddy)
 - AI providers (Neon AI Gateway for Loora-managed models; OpenAI / ChatGPT when you connect your own account)
-- Optional integrations (GitHub, Figma)
+- Optional integrations (GitHub)
 - MCP clients you authorize
 
 Third-party services are governed by their own terms and privacy policies. We are not responsible for third-party services we do not control. Enabling an integration authorizes us to exchange data with that provider as needed to provide the connected feature.

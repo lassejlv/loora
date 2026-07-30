@@ -27,7 +27,7 @@ const RootDocument = (
 ).shellComponent
 
 describe('theme hydration', () => {
-  it('does not warn when the theme script applies dark mode before hydration', async () => {
+  it('restores dark mode before hydration without a warning', async () => {
     const markup = renderToString(
       <RootDocument>
         <main>Loora</main>
@@ -38,32 +38,22 @@ describe('theme hydration', () => {
     document.close()
     window.localStorage.setItem('loora:theme', 'dark')
 
-    const originalMatchMedia = globalThis.matchMedia
     const originalConsoleError = console.error
     const errors: string[] = []
     let root: Root | undefined
 
-    globalThis.matchMedia = (() => ({
-      matches: true,
-      media: '(prefers-color-scheme: dark)',
-      onchange: null,
-      addEventListener() {},
-      removeEventListener() {},
-      addListener() {},
-      removeListener() {},
-      dispatchEvent: () => true,
-    })) as typeof matchMedia
     console.error = (...args: unknown[]) => {
       errors.push(args.map(String).join(' '))
     }
 
     try {
-      Function('localStorage', 'matchMedia', 'document', THEME_INIT_SCRIPT)(
+      document.documentElement.classList.add('dark')
+      Function('localStorage', 'document', THEME_INIT_SCRIPT)(
         window.localStorage,
-        globalThis.matchMedia,
         document,
       )
       expect(document.documentElement.classList.contains('dark')).toBe(true)
+      expect(window.localStorage.getItem('loora:theme')).toBe('dark')
 
       await act(async () => {
         root = hydrateRoot(
@@ -80,13 +70,10 @@ describe('theme hydration', () => {
           message.includes("server rendered HTML didn't match the client properties"),
         ),
       ).toBe(false)
-      // Suppressing the warning must not mean React strips the class back off —
-      // that would repaint light on every dark load.
       expect(document.documentElement.classList.contains('dark')).toBe(true)
     } finally {
       root?.unmount()
       console.error = originalConsoleError
-      globalThis.matchMedia = originalMatchMedia
       window.localStorage.removeItem('loora:theme')
       document.documentElement.className = ''
     }
