@@ -1,5 +1,10 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test'
 import {
+  DARK_PRESET,
+  makeCustomTheme,
+  saveCustomTheme,
+} from './custom-themes'
+import {
   applyThemePreference,
   getThemePreference,
   setThemePreference,
@@ -8,6 +13,7 @@ import {
 } from './theme'
 
 const STORAGE_KEY = 'loora:theme'
+const CUSTOM_STORAGE_KEY = 'loora:custom-themes'
 const originalMatchMedia = window.matchMedia
 
 function runInitScript() {
@@ -19,14 +25,18 @@ function runInitScript() {
 
 beforeEach(() => {
   window.localStorage.removeItem(STORAGE_KEY)
+  window.localStorage.removeItem(CUSTOM_STORAGE_KEY)
   document.documentElement.classList.remove('dark')
   document.documentElement.removeAttribute('data-theme')
+  document.documentElement.removeAttribute('style')
 })
 
 afterEach(() => {
   window.localStorage.removeItem(STORAGE_KEY)
+  window.localStorage.removeItem(CUSTOM_STORAGE_KEY)
   document.documentElement.classList.remove('dark')
   document.documentElement.removeAttribute('data-theme')
+  document.documentElement.removeAttribute('style')
   Object.defineProperty(window, 'matchMedia', {
     configurable: true,
     value: originalMatchMedia,
@@ -99,6 +109,47 @@ describe('theme preferences', () => {
     expect(getThemePreference()).toBe('light')
 
     runInitScript()
+
+    expect(document.documentElement.hasAttribute('data-theme')).toBe(false)
+    expect(document.documentElement.classList.contains('dark')).toBe(false)
+  })
+
+  test('applies a custom theme inline and clears it again', () => {
+    const theme = saveCustomTheme(
+      makeCustomTheme({ name: 'Mine', dark: true, colors: { ...DARK_PRESET, canvas: '#101014' } }),
+    )[0]!
+
+    setThemePreference(theme.id)
+
+    const root = document.documentElement
+    expect(root.getAttribute('data-theme')).toBe('custom')
+    expect(root.classList.contains('dark')).toBe(true)
+    expect(root.style.getPropertyValue('--cx-canvas')).toBe('#101014')
+
+    setThemePreference('light')
+
+    expect(root.hasAttribute('data-theme')).toBe(false)
+    expect(root.style.getPropertyValue('--cx-canvas')).toBe('')
+  })
+
+  test('restores a custom theme before first paint', () => {
+    const theme = saveCustomTheme(
+      makeCustomTheme({ name: 'Mine', dark: true, colors: { ...DARK_PRESET, canvas: '#0b0b0f' } }),
+    )[0]!
+    window.localStorage.setItem(STORAGE_KEY, theme.id)
+
+    runInitScript()
+
+    expect(document.documentElement.getAttribute('data-theme')).toBe('custom')
+    expect(document.documentElement.style.getPropertyValue('--cx-canvas')).toBe('#0b0b0f')
+  })
+
+  test('falls back when the selected custom theme is gone', () => {
+    window.localStorage.setItem(STORAGE_KEY, 'custom:missing')
+
+    expect(getThemePreference()).toBe('light')
+
+    applyThemePreference()
 
     expect(document.documentElement.hasAttribute('data-theme')).toBe(false)
     expect(document.documentElement.classList.contains('dark')).toBe(false)
