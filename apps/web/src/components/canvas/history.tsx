@@ -5,6 +5,8 @@ import { diffDocuments } from '@loora/canvas/merge'
 import { useCanvasDocument } from '@loora/canvas/react'
 import { orpc } from '#/lib/orpc-client'
 import { CanvasDocumentPreview } from '#/components/canvas-preview'
+import { PanelEmpty, PanelLoading } from '#/components/panel-shell'
+import { Badge } from '#/components/ui/badge'
 import { Button } from '#/components/ui/button'
 import {
   Dialog,
@@ -17,6 +19,7 @@ import { Input } from '#/components/ui/input'
 import { Spinner } from '#/components/ui/spinner'
 import { relativeTime } from '#/lib/designs'
 import { cn } from '#/lib/utils'
+import { DiffChips } from './diff-chips'
 import type { CanvasEditorController } from './editor'
 
 type VersionPage = Awaited<ReturnType<typeof orpc.history.list>>
@@ -240,9 +243,9 @@ export function CanvasHistory({
             </DialogDescription>
           </DialogHeader>
 
-          <div className="grid h-[min(64svh,32rem)] grid-cols-[minmax(0,18rem)_minmax(0,1fr)]">
-            <div className="flex min-h-0 flex-col border-e">
-              <div className="flex shrink-0 items-center gap-1 border-b p-2">
+          <div className="grid h-[min(68svh,34rem)] grid-cols-1 md:grid-cols-[minmax(0,19rem)_minmax(0,1fr)]">
+            <div className="flex min-h-0 flex-col border-line md:border-e">
+              <div className="flex shrink-0 items-center gap-1 border-b border-line p-2">
                 <Input
                   size="sm"
                   aria-label="Checkpoint name"
@@ -263,59 +266,82 @@ export function CanvasHistory({
                 </Button>
               </div>
 
-              <div className="min-h-0 flex-1 overflow-y-auto p-1">
+              <div className="min-h-0 flex-1 overflow-y-auto">
+                {versions.length === 0 && loading ? (
+                  <PanelLoading label="Loading checkpoints…" rows={4} />
+                ) : null}
                 {versions.length === 0 && !loading ? (
-                  <p className="px-3 py-8 text-center text-xs text-muted-foreground">
-                    No checkpoints yet.
-                  </p>
+                  <PanelEmpty
+                    title="No checkpoints yet"
+                    description="Name the current state above to save one. Every checkpoint keeps the whole document."
+                  />
                 ) : null}
                 {groups.map((group) => (
                   <section key={group.day}>
-                    <p className="px-2 pt-2 pb-1 text-xs font-medium tracking-wide text-muted-foreground uppercase">
+                    <p className="sticky top-0 z-10 bg-popover px-3 py-1.5 text-2xs font-medium uppercase tracking-[0.08em] text-muted-foreground">
                       {group.day}
                     </p>
-                    {group.items.map((version) => (
-                      <button
-                        key={version.id}
-                        type="button"
-                        aria-pressed={version.id === selectedId}
-                        className={cn(
-                          'flex w-full flex-col gap-0.5 rounded-md px-2 py-1.5 text-left',
-                          version.id === selectedId
-                            ? 'bg-secondary'
-                            : 'hover:bg-secondary/60',
-                        )}
-                        onClick={() => setSelectedId(version.id)}
-                      >
-                        <span className="flex items-center gap-2">
-                          <span className="min-w-0 flex-1 truncate text-xs font-medium">
-                            {version.message}
-                          </span>
-                          {version.canvasVersion !== 2 ? (
-                            <span className="shrink-0 rounded bg-background px-1 text-xs text-muted-foreground">
-                              Legacy
-                            </span>
-                          ) : null}
-                        </span>
-                        <span
-                          className="text-xs text-muted-foreground"
-                          title={new Date(version.at).toLocaleString()}
+                    {group.items.map((version) => {
+                      const active = version.id === selectedId
+                      return (
+                        <button
+                          key={version.id}
+                          type="button"
+                          aria-pressed={active}
+                          // The rail: a hairline down the gutter with a node per
+                          // checkpoint, so the column reads as one timeline
+                          // rather than a stack of cards.
+                          className={cn(
+                            'relative flex w-full flex-col gap-1 py-2 pe-3 ps-8 text-left transition-colors',
+                            'before:absolute before:inset-y-0 before:start-[1.1875rem] before:w-px before:bg-line',
+                            'first:before:top-2 last:before:bottom-[calc(100%-1.125rem)]',
+                            active ? 'bg-secondary' : 'hover:bg-secondary/50',
+                          )}
+                          onClick={() => setSelectedId(version.id)}
                         >
-                          {timeFormatter.format(new Date(version.at))} ·{' '}
-                          {relativeTime(version.at)}
-                        </span>
-                        <span className="text-xs text-muted-foreground/70">
-                          +{version.added} −{version.removed} · {version.changed} changed
-                        </span>
-                      </button>
-                    ))}
+                          <span
+                            aria-hidden="true"
+                            className={cn(
+                              'absolute start-[0.9375rem] top-[0.6875rem] size-2 rounded-full ring-2 ring-popover',
+                              active ? 'bg-foreground' : 'bg-line',
+                            )}
+                          />
+                          <span className="flex items-center gap-2">
+                            <span className="min-w-0 flex-1 truncate text-xs font-medium">
+                              {version.message}
+                            </span>
+                            {version.canvasVersion !== 2 ? (
+                              <Badge size="sm" variant="outline" className="shrink-0">
+                                Legacy
+                              </Badge>
+                            ) : null}
+                          </span>
+                          <span className="flex items-center gap-2">
+                            <span
+                              className="shrink-0 text-xs text-muted-foreground tabular-nums"
+                              title={new Date(version.at).toLocaleString()}
+                            >
+                              {timeFormatter.format(new Date(version.at))}
+                            </span>
+                            <span aria-hidden="true" className="text-muted-foreground/40">
+                              ·
+                            </span>
+                            <DiffChips
+                              added={version.added}
+                              removed={version.removed}
+                              changed={version.changed}
+                            />
+                          </span>
+                        </button>
+                      )
+                    })}
                   </section>
                 ))}
                 {cursor ? (
                   <Button
                     size="xs"
                     variant="ghost"
-                    className="mt-1 w-full"
+                    className="w-full rounded-none border-t border-line"
                     disabled={loading}
                     onClick={() => void load(cursor)}
                   >
@@ -326,8 +352,26 @@ export function CanvasHistory({
               </div>
             </div>
 
-            <div className="flex min-h-0 flex-col">
-              <div className="min-h-0 flex-1 overflow-hidden border-b bg-cx-canvas">
+            <div className="flex min-h-0 flex-col max-md:hidden">
+              {selected ? (
+                <div className="flex shrink-0 items-center gap-2 border-b border-line px-3 py-2">
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-xs font-medium">{selected.message}</p>
+                    <p className="mt-0.5 text-xs text-muted-foreground">
+                      Saved {relativeTime(selected.at)}
+                    </p>
+                  </div>
+                  {drift ? (
+                    <DiffChips
+                      className="shrink-0"
+                      added={drift.added}
+                      removed={drift.removed}
+                      changed={drift.changed}
+                    />
+                  ) : null}
+                </div>
+              ) : null}
+              <div className="min-h-0 flex-1 overflow-hidden border-b border-line bg-cx-canvas">
                 {selected && selected.canvasVersion !== 2 ? (
                   <div className="grid size-full place-items-center px-8 text-center">
                     <p className="text-xs text-muted-foreground">
@@ -351,22 +395,21 @@ export function CanvasHistory({
 
               <div className="shrink-0 space-y-2 p-3">
                 {error ? (
-                  <p className="text-xs text-destructive-foreground">{error}</p>
+                  <p className="rounded-md border border-destructive/32 bg-destructive/8 px-2 py-1.5 text-xs text-destructive-foreground">
+                    {error}
+                  </p>
                 ) : null}
                 {progress ? (
-                  <p className="text-xs text-muted-foreground">{progress}</p>
+                  <p className="cx-shimmer text-xs">{progress}</p>
                 ) : null}
                 {selected ? (
-                  <>
-                    <p className="text-sm font-medium">{selected.message}</p>
-                    <p className="text-xs text-muted-foreground">
-                      {drift
-                        ? drift.added + drift.removed + drift.changed === 0
-                          ? 'Identical to the document on screen.'
-                          : `Restoring changes ${drift.added} added, ${drift.removed} removed, ${drift.changed} edited against what is on screen.`
-                        : 'Saved ' + relativeTime(selected.at) + '.'}
-                    </p>
-                  </>
+                  <p className="text-xs text-muted-foreground">
+                    {drift
+                      ? drift.added + drift.removed + drift.changed === 0
+                        ? 'Identical to the document on screen.'
+                        : `Restoring changes ${drift.added} added, ${drift.removed} removed, ${drift.changed} edited against what is on screen.`
+                      : 'The current state is checkpointed before a restore.'}
+                  </p>
                 ) : null}
                 <div className="flex justify-end gap-2">
                   <Button variant="outline" onClick={() => setOpen(false)}>

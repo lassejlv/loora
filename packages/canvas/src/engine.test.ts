@@ -112,6 +112,75 @@ describe('Canvas transactions', () => {
     expect(engine.getNode('hero')?.metadata).toEqual({ origin: 'html' })
   })
 
+  it('validates a whole-object replace without a full document pass', () => {
+    const engine = engineFixture()
+    const before = structuredClone(engine.getNode('hero')!.style)
+    const complete = { ...before, opacity: 0.4, overflow: 'hidden' as const }
+
+    engine.apply({
+      id: 'replace-style',
+      label: 'Restyle',
+      operations: [
+        { type: 'node.patch', id: 'hero', patch: { style: complete }, replace: ['style'] },
+      ],
+    })
+    expect(engine.getNode('hero')?.style.opacity).toBe(0.4)
+    engine.undo()
+    expect(engine.getNode('hero')?.style).toEqual(before)
+
+    // A replaced field stands alone, so a partial one is not a valid node.
+    const { fills: _fills, ...partial } = complete
+    expect(() =>
+      engine.apply({
+        id: 'replace-partial-style',
+        label: 'Restyle',
+        operations: [
+          {
+            type: 'node.patch',
+            id: 'hero',
+            patch: { style: partial as never },
+            replace: ['style'],
+          },
+        ],
+      }),
+    ).toThrow()
+    expect(() =>
+      engine.apply({
+        id: 'replace-partial-layout',
+        label: 'Relayout',
+        operations: [
+          {
+            type: 'node.patch',
+            id: 'hero',
+            patch: { layout: { x: 4, y: 4 } },
+            replace: ['layout'],
+          },
+        ],
+      }),
+    ).toThrow()
+    expect(engine.getNode('hero')?.style).toEqual(before)
+  })
+
+  it('deletes a subtree that the same transaction just added to', () => {
+    const engine = engineFixture()
+    const before = structuredClone(engine.document)
+    engine.apply({
+      id: 'insert-then-delete',
+      label: 'Insert then delete',
+      operations: [
+        {
+          type: 'node.insert',
+          node: createTextNode('Late', { id: 'late', parentId: 'hero', order: 2048 }),
+        },
+        { type: 'node.delete', id: 'hero' },
+      ],
+    })
+    expect(engine.getNode('late')).toBeNull()
+    expect(engine.getNode('hero')).toBeNull()
+    engine.undo()
+    expect(engine.document).toEqual(before)
+  })
+
   it('rejects a fast-path patch whose interaction names an undeclared state', () => {
     const engine = engineFixture()
     const before = structuredClone(engine.document)

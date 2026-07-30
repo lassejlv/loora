@@ -9,7 +9,9 @@ import {
   type InstanceNode,
   type NodeId,
   type NodePatch,
+  type CanvasChildIndex,
   assertDocument,
+  buildChildIndex,
   orderedChildren,
   resolveNodeAtWidth,
   stateDefinitionsForNode,
@@ -348,16 +350,17 @@ function instanceVariantContent(
   componentId: NodeId,
   instance: InstanceNode,
   options: CanvasExportOptions,
+  index: CanvasChildIndex,
 ) {
   const component = document.nodes[componentId]
   if (component?.type !== 'component') return {}
   const sourceNodes: CanvasNode[] = []
-  const queue = [...orderedChildren(document, component.id)]
+  const queue = [...orderedChildren(document, component.id, index)]
   while (queue.length > 0) {
     const source = queue.shift()!
     sourceNodes.push(source)
     if (source.type !== 'instance') {
-      queue.push(...orderedChildren(document, source.id))
+      queue.push(...orderedChildren(document, source.id, index))
     }
   }
   const output: Record<
@@ -405,6 +408,7 @@ function renderNode(
   document: CanvasDocument,
   rawNode: CanvasNode,
   options: CanvasExportOptions,
+  index: CanvasChildIndex,
   instance?: InstanceNode,
   exportedRoot = false,
 ): string {
@@ -457,26 +461,27 @@ function renderNode(
   if (node.type === 'instance') {
     const component = document.nodes[node.componentId]
     if (!component || component.type !== 'component') return ''
-    const children = renderNode(document, component, options, node)
+    const children = renderNode(document, component, options, index, node)
     const variant = node.variant ?? component.defaultVariant ?? ''
     const content = instanceVariantContent(
       document,
       component.id,
       node,
       options,
+      index,
     )
     return `<div ${common} data-loora-component="${escapeAttribute(component.id)}" data-loora-variant="${escapeAttribute(variant)}" data-loora-variant-content="${escapeAttribute(JSON.stringify(content))}">${children}</div>`
   }
   if (node.type === 'component') {
     if (!instance) return ''
-    const children = orderedChildren(document, node.id)
-      .map((child) => renderNode(document, child, options, instance))
+    const children = orderedChildren(document, node.id, index)
+      .map((child) => renderNode(document, child, options, index, instance))
       .join('')
     return `<div ${common} data-loora-component-root="${escapeAttribute(instance.id)}">${children}</div>`
   }
   const tag = node.type === 'frame' ? node.semanticTag : node.type === 'page' ? 'main' : 'div'
-  const children = orderedChildren(document, node.id)
-    .map((child) => renderNode(document, child, options, instance))
+  const children = orderedChildren(document, node.id, index)
+    .map((child) => renderNode(document, child, options, index, instance))
     .join('')
   return `<${tag} ${common}>${children}</${tag}>`
 }
@@ -525,7 +530,7 @@ function cssForNode(
   return [base, pageBase, ...responsive].join('')
 }
 
-function collectCss(document: CanvasDocument) {
+function collectCss(document: CanvasDocument, index: CanvasChildIndex) {
   const output: string[] = []
   for (const node of Object.values(document.nodes)) {
     output.push(cssForNode(document, node))
@@ -544,7 +549,7 @@ function collectCss(document: CanvasDocument) {
             ),
           )
         }
-        const queue = [...orderedChildren(document, component.id)]
+        const queue = [...orderedChildren(document, component.id, index)]
         while (queue.length > 0) {
           const child = queue.shift()!
           output.push(cssForNode(document, child, node))
@@ -559,7 +564,7 @@ function collectCss(document: CanvasDocument) {
               ),
             )
           }
-          queue.push(...orderedChildren(document, child.id))
+          queue.push(...orderedChildren(document, child.id, index))
         }
       }
     }
@@ -596,8 +601,9 @@ export function compileCanvas(
   if (options.pageId && roots.length === 0) {
     throw new Error(`Canvas export Page "${options.pageId}" does not exist`)
   }
+  const index = buildChildIndex(document)
   const html = roots
-    .map((root) => renderNode(document, root, options, undefined, true))
+    .map((root) => renderNode(document, root, options, index, undefined, true))
     .join('')
   const tokenCss = Object.values(document.tokens)
     .map((token) => {
@@ -619,7 +625,7 @@ export function compileCanvas(
         : ''
     })
     .join('')
-  const css = `:root{${tokenCss}}\n${themeCss}\n${collectCss(document)}\n[data-loora-export-root="true"]{position:relative;left:0;top:0}`
+  const css = `:root{${tokenCss}}\n${themeCss}\n${collectCss(document, index)}\n[data-loora-export-root="true"]{position:relative;left:0;top:0}`
   const runtime = `(function(){
 var stateByScope=new WeakMap();
 function read(target,name,fallback){try{return JSON.parse(target.getAttribute(name)||fallback)}catch(error){return JSON.parse(fallback)}}
@@ -1106,6 +1112,7 @@ function portableAttributes(
   node: CanvasNode,
   format: PortableCodeFormat,
   options: CanvasExportOptions,
+  index: CanvasChildIndex,
   exportedRoot: boolean,
   instance?: InstanceNode,
 ) {
@@ -1150,7 +1157,13 @@ function portableAttributes(
         `data-loora-component=${JSON.stringify(component.id)}`,
         `data-loora-variant=${JSON.stringify(variant)}`,
         `data-loora-variant-content={${JSON.stringify(JSON.stringify(
-          instanceVariantContent(document, component.id, patched, options),
+          instanceVariantContent(
+            document,
+            component.id,
+            patched,
+            options,
+            index,
+          ),
         ))}}`,
       )
     }
@@ -1184,6 +1197,7 @@ function renderPortableNode(
   document: CanvasDocument,
   rawNode: CanvasNode,
   options: CanvasExportOptions,
+  index: CanvasChildIndex,
   format: PortableCodeFormat,
   instance?: InstanceNode,
   exportedRoot = false,
@@ -1196,6 +1210,7 @@ function renderPortableNode(
     rawNode,
     format,
     options,
+    index,
     exportedRoot,
     instance,
   )
@@ -1230,9 +1245,9 @@ ${indent(paths.join('\n'), 2)}
   if (node.type === 'instance') {
     const component = document.nodes[node.componentId]
     if (!component || component.type !== 'component') return ''
-    const children = orderedChildren(document, component.id)
+    const children = orderedChildren(document, component.id, index)
       .map((child) =>
-        renderPortableNode(document, child, options, format, node),
+        renderPortableNode(document, child, options, index, format, node),
       )
       .filter(Boolean)
     return `<div ${attributes}>
@@ -1241,9 +1256,9 @@ ${indent(children.join('\n'), 2)}
   }
   if (node.type === 'component') {
     if (!instance) return ''
-    const children = orderedChildren(document, node.id)
+    const children = orderedChildren(document, node.id, index)
       .map((child) =>
-        renderPortableNode(document, child, options, format, instance),
+        renderPortableNode(document, child, options, index, format, instance),
       )
       .filter(Boolean)
     return `<div ${attributes}>
@@ -1256,9 +1271,9 @@ ${indent(children.join('\n'), 2)}
       : node.type === 'page'
         ? 'main'
         : 'div'
-  const children = orderedChildren(document, node.id)
+  const children = orderedChildren(document, node.id, index)
     .map((child) =>
-      renderPortableNode(document, child, options, format, instance),
+      renderPortableNode(document, child, options, index, format, instance),
     )
     .filter(Boolean)
   if (children.length === 0) return `<${tag} ${attributes} />`
@@ -1498,12 +1513,14 @@ function compilePortableComponent(
   options: CanvasExportOptions,
   format: PortableCodeFormat,
 ) {
+  const index = buildChildIndex(document)
   const roots = portableRoots(document, options)
     .map((root) =>
       renderPortableNode(
         document,
         root,
         options,
+        index,
         format,
         undefined,
         true,

@@ -1,6 +1,7 @@
 import {
   type CanvasDocument,
   type CanvasInteraction,
+  type CanvasLayout,
   type CanvasNode,
   type CanvasShadow,
   type CanvasStyle,
@@ -408,24 +409,66 @@ function hasUnrepresentableFlowSpacing(style: Record<string, string>) {
   })
 }
 
-function nodeLayout(
-  snapshot: HtmlCanvasSnapshot,
-  parentRect: HtmlCanvasRect,
-  parentMode: 'absolute' | 'flex' | 'grid',
-) {
-  const ownMode = mode(snapshot.style)
-  const isFlow =
-    parentMode !== 'absolute' &&
+function canFlow(snapshot: HtmlCanvasSnapshot) {
+  return (
     snapshot.style.position !== 'absolute' &&
     snapshot.style.position !== 'fixed' &&
     !hasUnrepresentableFlowSpacing(snapshot.style)
+  )
+}
+
+/**
+ * How a container places its children. Arranging only some of them is what
+ * wrecks an imported layout: one margin pulls a single child out of the row,
+ * every sibling repacks around the hole, and nothing lands where it was
+ * measured. Either the whole container arranges, or none of it does and each
+ * child keeps the position it was captured at.
+ */
+function childArrangement(
+  snapshot: HtmlCanvasSnapshot,
+): 'absolute' | 'flex' | 'grid' {
+  const ownMode = mode(snapshot.style)
+  if (ownMode === 'absolute') return 'absolute'
+  return snapshot.children.every(canFlow) ? ownMode : 'absolute'
+}
+
+/**
+ * Where a child's absolute offset is measured from. The renderer positions an
+ * absolute child against its parent's padding box and re-applies the same
+ * border and padding this import captured, so an offset taken from the border
+ * box lands one padding too far in on every level of nesting.
+ */
+export interface HtmlCanvasOrigin {
+  x: number
+  y: number
+}
+
+function childOrigin(
+  snapshot: HtmlCanvasSnapshot,
+  layout: CanvasLayout,
+  style: CanvasStyle,
+): HtmlCanvasOrigin {
+  const border = style.stroke?.width ?? 0
+  return {
+    x: snapshot.rect.x + border + (layout.padding?.left ?? 0),
+    y: snapshot.rect.y + border + (layout.padding?.top ?? 0),
+  }
+}
+
+function nodeLayout(
+  snapshot: HtmlCanvasSnapshot,
+  parentOrigin: HtmlCanvasOrigin,
+  parentMode: 'absolute' | 'flex' | 'grid',
+  ownMode = childArrangement(snapshot),
+) {
+  const isFlow = parentMode !== 'absolute' && canFlow(snapshot)
   return defaultLayout(
     positiveDimension(snapshot.rect.width),
     positiveDimension(snapshot.rect.height),
     {
       position: isFlow ? 'flow' : 'absolute',
-      x: isFlow ? 0 : finite(snapshot.rect.x - parentRect.x),
-      y: isFlow ? 0 : finite(snapshot.rect.y - parentRect.y),
+      x: isFlow ? 0 : finite(snapshot.rect.x - parentOrigin.x),
+      y: isFlow ? 0 : finite(snapshot.rect.y - parentOrigin.y),
       mode: ownMode,
       direction:
         snapshot.style.flexDirection === 'column' ||
@@ -462,7 +505,7 @@ function vectorNode(
   snapshot: HtmlCanvasSnapshot,
   parentId: NodeId,
   order: number,
-  parentRect: HtmlCanvasRect,
+  parentOrigin: HtmlCanvasOrigin,
   parentMode: 'absolute' | 'flex' | 'grid',
 ): VectorNode | null {
   if (snapshot.tag !== 'svg') return null
@@ -515,7 +558,7 @@ function vectorNode(
       id: canvasId('vector'),
       parentId,
       order,
-      layout: nodeLayout(snapshot, parentRect, parentMode),
+      layout: nodeLayout(snapshot, parentOrigin, parentMode),
       style: frameStyle(snapshot.style),
     },
   )
@@ -535,7 +578,7 @@ function imageNode(
   snapshot: HtmlCanvasSnapshot,
   parentId: NodeId,
   order: number,
-  parentRect: HtmlCanvasRect,
+  parentOrigin: HtmlCanvasOrigin,
   parentMode: 'absolute' | 'flex' | 'grid',
 ): ImageNode | null {
   if (snapshot.tag !== 'img') return null
@@ -547,7 +590,7 @@ function imageNode(
       id: canvasId('image'),
       parentId,
       order,
-      layout: nodeLayout(snapshot, parentRect, parentMode),
+      layout: nodeLayout(snapshot, parentOrigin, parentMode),
       style: frameStyle(snapshot.style),
     },
   )
@@ -566,11 +609,56 @@ function imageNode(
   }
 }
 
+/**
+ * Whether the element paints a box of its own. A label that does gets a frame
+ * and a text child, because a Canvas text node spends its fill on the glyphs —
+ * flattening a pill into one text node throws its background away.
+ */
+function hasVisibleBox(style: Record<string, string>) {
+  return (
+    !isTransparent(style.backgroundColor) ||
+    !!stroke(style) ||
+    shadows(style.boxShadow).length > 0 ||
+    !!backgroundImageUrl(style.backgroundImage) ||
+    ['paddingTop', 'paddingRight', 'paddingBottom', 'paddingLeft'].some(
+      (side) => numberStyle(style, side) > 0,
+    )
+  )
+}
+
+function textNode(
+  snapshot: HtmlCanvasSnapshot,
+  patch: {
+    id: NodeId
+    parentId: NodeId
+    order: number
+    layout: CanvasLayout
+  },
+): TextNode {
+  const style = textStyle(snapshot.style)
+  const typography = style.typography!
+  // A line that was measured as one line has to stay one line. The editor
+  // rarely has the source page's webfont, and a substituted one that wraps
+  // pushes every box after it out of place.
+  const lineHeight = typography.lineHeight * typography.size
+  const singleLine =
+    lineHeight > 0 &&
+    snapshot.rect.height > 0 &&
+    snapshot.rect.height < lineHeight * 1.5
+  return createTextNode(cleanText(snapshot.text ?? ''), {
+    ...patch,
+    style: singleLine
+      ? { ...style, typography: { ...typography, wrap: false } }
+      : style,
+    metadata: { importedHtmlTag: snapshot.tag },
+  })
+}
+
 function convertSnapshot(
   snapshot: HtmlCanvasSnapshot,
   parentId: NodeId,
   order: number,
-  parentRect: HtmlCanvasRect,
+  parentOrigin: HtmlCanvasOrigin,
   parentMode: 'absolute' | 'flex' | 'grid',
   nodes: Record<NodeId, CanvasNode>,
   warnings: string[],
@@ -579,7 +667,7 @@ function convertSnapshot(
     snapshot,
     parentId,
     order,
-    parentRect,
+    parentOrigin,
     parentMode,
   )
   if (vector) {
@@ -595,7 +683,7 @@ function convertSnapshot(
     snapshot,
     parentId,
     order,
-    parentRect,
+    parentOrigin,
     parentMode,
   )
   if (image) {
@@ -612,28 +700,24 @@ function convertSnapshot(
     (textTags.has(snapshot.tag) &&
       !!snapshot.text &&
       snapshot.children.length === 0)
-  if (asText) {
+  if (asText && !(snapshot.tag !== '#text' && hasVisibleBox(snapshot.style))) {
     const value = cleanText(snapshot.text ?? '')
     if (!value) return null
     const id = canvasId('text')
-    const text: TextNode = createTextNode(value, {
+    nodes[id] = textNode(snapshot, {
       id,
       parentId,
       order,
       layout: {
-        ...nodeLayout(snapshot, parentRect, parentMode),
+        ...nodeLayout(snapshot, parentOrigin, parentMode),
         mode: 'absolute',
-        height: { unit: 'hug' },
       },
-      style: textStyle(snapshot.style),
-      metadata: { importedHtmlTag: snapshot.tag },
     })
-    nodes[id] = text
     return id
   }
 
   const id = canvasId('frame')
-  const ownMode = mode(snapshot.style)
+  const ownMode = childArrangement(snapshot)
   const tag = semanticTags.has(snapshot.tag as SemanticTag)
     ? (snapshot.tag as SemanticTag)
     : 'div'
@@ -648,13 +732,14 @@ function convertSnapshot(
       order,
       semanticTag: tag,
       rotation: rotation(snapshot.style.transform),
-      layout: nodeLayout(snapshot, parentRect, parentMode),
+      layout: nodeLayout(snapshot, parentOrigin, parentMode, ownMode),
       style: frameStyle(snapshot.style),
       interactions: interactions(snapshot),
       metadata: { importedHtmlTag: snapshot.tag },
     },
   )
   nodes[id] = frame
+  const origin = childOrigin(snapshot, frame.layout, frame.style)
   const backgroundSrc = backgroundImageUrl(snapshot.style.backgroundImage)
   if (backgroundSrc && Object.keys(nodes).length < MAX_HTML_IMPORT_NODES) {
     const backgroundFrame = createFrameNode(`${frame.name} background`, {
@@ -678,6 +763,31 @@ function convertSnapshot(
       metadata: { importedHtmlTag: snapshot.tag, importedCssProperty: 'background-image' },
     }
   }
+  // A styled label carries its own text, and the frame above holds the box it
+  // is painted in.
+  if (
+    snapshot.text &&
+    cleanText(snapshot.text) &&
+    Object.keys(nodes).length < MAX_HTML_IMPORT_NODES
+  ) {
+    const labelId = canvasId('text')
+    nodes[labelId] = textNode(snapshot, {
+      id: labelId,
+      parentId: id,
+      order: DEFAULT_ORDER_STEP,
+      layout: defaultLayout(
+        positiveDimension(snapshot.rect.width),
+        positiveDimension(snapshot.rect.height),
+        {
+          position: 'flow',
+          x: 0,
+          y: 0,
+          width: ownMode === 'absolute' ? { unit: 'fill' } : { unit: 'hug' },
+          height: { unit: 'hug' },
+        },
+      ),
+    })
+  }
   snapshot.children.forEach((child, index) => {
     if (Object.keys(nodes).length >= MAX_HTML_IMPORT_NODES) {
       throw new Error(
@@ -688,7 +798,7 @@ function convertSnapshot(
       child,
       id,
       (index + 1) * DEFAULT_ORDER_STEP,
-      snapshot.rect,
+      origin,
       ownMode,
       nodes,
       warnings,
@@ -715,7 +825,6 @@ export function convertHtmlSnapshotToCanvas(
   })
   document.nodes[page.id] = page
   const warnings: string[] = []
-  const rootMode = mode(input.root.style)
   const sourceChildren =
     input.root.tag === 'body' || input.root.tag === 'html'
       ? input.root.children
@@ -733,8 +842,10 @@ export function convertHtmlSnapshotToCanvas(
       child,
       page.id,
       (index + 1) * DEFAULT_ORDER_STEP,
-      input.root.rect,
-      rootMode === 'absolute' ? 'absolute' : rootMode,
+      // The Page places its children freely, so a root keeps the position it
+      // was captured at rather than being arranged by the body's own display.
+      { x: input.root.rect.x, y: input.root.rect.y },
+      'absolute',
       document.nodes,
       warnings,
     )

@@ -601,6 +601,38 @@ describe('Canvas React surface', () => {
     expect(engine.canUndo).toBe(true)
   })
 
+  it('renames a layer from its selection label', async () => {
+    const engine = new CanvasEngine(fixture())
+    const view = render(
+      <CanvasProvider engine={engine}>
+        <SelectNode id="frame" />
+        <CanvasSurface pageWidth={1_440} />
+      </CanvasProvider>,
+    )
+    const label = await waitFor(() => {
+      const element = view.container.querySelector<SVGGElement>(
+        '[data-loora-selection-label]',
+      )
+      expect(element).not.toBeNull()
+      return element!
+    })
+
+    fireEvent.doubleClick(label)
+    const field = view.getByLabelText('Layer name') as HTMLInputElement
+    expect(field.value).toBe('Card')
+
+    fireEvent.change(field, { target: { value: 'Deployment card' } })
+    fireEvent.blur(field)
+    expect(engine.getNode('frame')?.name).toBe('Deployment card')
+
+    // Escape leaves the name alone.
+    fireEvent.doubleClick(label)
+    const reopened = view.getByLabelText('Layer name') as HTMLInputElement
+    fireEvent.change(reopened, { target: { value: 'Discarded' } })
+    fireEvent.keyDown(reopened, { key: 'Escape' })
+    expect(engine.getNode('frame')?.name).toBe('Deployment card')
+  })
+
   it('edits text when pointer capture retargets the double click to the surface', () => {
     const engine = new CanvasEngine(fixture())
     const view = render(

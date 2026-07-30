@@ -11,6 +11,8 @@ import {
   type NodeId,
   type NodeMutationPatch,
   type NodePatch,
+  type CanvasChildIndex,
+  buildChildIndex,
   orderedChildren,
   DEFAULT_ORDER_STEP,
   MIN_ORDER_GAP,
@@ -416,6 +418,7 @@ export function withTransactionPreconditions(
 ): CanvasTransaction {
   if (transaction.preconditions !== undefined) return transaction
   const preconditions: CanvasFieldPrecondition[] = []
+  let childIndex: CanvasChildIndex | undefined
   for (const operation of transaction.operations) {
     if (operation.type === 'node.insert') {
       preconditions.push({
@@ -443,7 +446,8 @@ export function withTransactionPreconditions(
       continue
     }
     if (operation.type === 'node.delete') {
-      for (const node of descendants(document, operation.id)) {
+      childIndex ??= buildChildIndex(document)
+      for (const node of descendants(document, operation.id, childIndex)) {
         preconditions.push({
           scope: 'node',
           id: node.id,
@@ -591,7 +595,16 @@ function patchNode(
   return next
 }
 
-function descendants(document: CanvasDocument, id: NodeId) {
+/**
+ * The subtree at `id`, parents before children. Pass an index when more than
+ * one subtree is walked against the same document — building it once is what
+ * keeps a delete linear in the document rather than quadratic.
+ */
+function descendants(
+  document: CanvasDocument,
+  id: NodeId,
+  index: CanvasChildIndex = buildChildIndex(document),
+) {
   const result: CanvasNode[] = []
   const queue = [id]
   while (queue.length > 0) {
@@ -599,7 +612,9 @@ function descendants(document: CanvasDocument, id: NodeId) {
     const node = document.nodes[current]
     if (!node) continue
     result.push(node)
-    for (const child of orderedChildren(document, current)) queue.push(child.id)
+    for (const child of orderedChildren(document, current, index)) {
+      queue.push(child.id)
+    }
   }
   return result
 }
@@ -632,6 +647,9 @@ export function applyTransaction(
     metadata: { ...source.metadata },
   }
   const inverseOperations: CanvasOperation[] = []
+  // Held across consecutive deletes, which only ever remove entries the walk
+  // already skips. Anything that changes parentage drops it.
+  let childIndex: CanvasChildIndex | undefined
   const changedNodeIds = new Set<NodeId>()
   const changedTokenIds = new Set<string>()
   const changedThemeIds = new Set<string>()
@@ -643,6 +661,7 @@ export function applyTransaction(
           throw new Error(`Node ${operation.node.id} already exists`)
         }
         document.nodes[operation.node.id] = clone(operation.node)
+        childIndex = undefined
         inverseOperations.unshift({ type: 'node.delete', id: operation.node.id })
         changedNodeIds.add(operation.node.id)
         if (operation.node.parentId) changedNodeIds.add(operation.node.parentId)
@@ -696,6 +715,7 @@ export function applyTransaction(
         })
         if (current.parentId) changedNodeIds.add(current.parentId)
         if (operation.parentId) changedNodeIds.add(operation.parentId)
+        childIndex = undefined
         document.nodes[operation.id] = {
           ...current,
           parentId: operation.parentId,
@@ -705,7 +725,8 @@ export function applyTransaction(
         break
       }
       case 'node.delete': {
-        const removed = descendants(document, operation.id)
+        childIndex ??= buildChildIndex(document)
+        const removed = descendants(document, operation.id, childIndex)
         if (removed.length === 0) throw new Error(`Node ${operation.id} does not exist`)
         const removedRootParent = removed[0]?.parentId
         if (removedRootParent) changedNodeIds.add(removedRootParent)
@@ -815,6 +836,16 @@ export function applyTransaction(
   }
 }
 
+/**
+ * Whether every operation can be checked against the patch alone, so applying
+ * it does not have to revalidate the whole document. Patches restricted to the
+ * common fields cannot reach a cross-node invariant: they touch no parentage,
+ * no component wiring, and every reference they can carry — a token, a
+ * breakpoint, an interaction target — is checked against this document.
+ *
+ * `unset` stays out. Dropping a field can leave a node without a layout or a
+ * style, and only a full pass sees that.
+ */
 function canValidateIncrementally(
   document: CanvasDocument,
   transaction: CanvasTransaction,
@@ -822,10 +853,14 @@ function canValidateIncrementally(
   return transaction.operations.every(
     (operation) =>
       operation.type === 'node.patch' &&
-      !operation.replace?.length &&
       !operation.unset?.length &&
       !!document.nodes[operation.id] &&
-      validateCommonNodeMutationPatch(document, operation.patch, operation.id),
+      validateCommonNodeMutationPatch(
+        document,
+        operation.patch,
+        operation.id,
+        operation.replace ?? [],
+      ),
   )
 }
 
@@ -1045,7 +1080,13 @@ export class CanvasEngine {
     const entry = this.#undo.pop()
     if (!entry) return null
     const previous = this.#document
-    const result = applyTransaction(this.#document, entry.transaction, { checkPreconditions: false })
+    const result = applyTransaction(this.#document, entry.transaction, {
+      checkPreconditions: false,
+      validateDocument: !canValidateIncrementally(
+        this.#document,
+        entry.transaction,
+      ),
+    })
     this.#document = result.document
     this.#updateIndexes(previous, result.document, result.changedNodeIds)
     this.#redo.push({
@@ -1061,7 +1102,13 @@ export class CanvasEngine {
     const entry = this.#redo.pop()
     if (!entry) return null
     const previous = this.#document
-    const result = applyTransaction(this.#document, entry.transaction, { checkPreconditions: false })
+    const result = applyTransaction(this.#document, entry.transaction, {
+      checkPreconditions: false,
+      validateDocument: !canValidateIncrementally(
+        this.#document,
+        entry.transaction,
+      ),
+    })
     this.#document = result.document
     this.#updateIndexes(previous, result.document, result.changedNodeIds)
     this.#undo.push({

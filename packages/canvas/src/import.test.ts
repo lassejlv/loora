@@ -220,7 +220,7 @@ describe('HTML snapshot import', () => {
     })
   })
 
-  it('preserves captured positions when flex auto margins cannot be represented', () => {
+  it('places a whole container absolutely when one child cannot be arranged', () => {
     const result = convertHtmlSnapshotToCanvas({
       id: 'paper-pricing-card',
       name: 'Pricing card',
@@ -298,15 +298,81 @@ describe('HTML snapshot import', () => {
 
     const nodes = Object.values(result.document.nodes)
     const card = nodes.find((node) => node.name === 'Pro plan')
+    const heading = nodes.find(
+      (node) => node.metadata?.importedHtmlTag === 'h2',
+    )
     const ctaRow = nodes.find(
       (node) => node.metadata?.importedHtmlTag === 'p',
     )
 
-    expect(card?.layout.mode).toBe('flex')
+    // The auto margin cannot be arranged, so no sibling is arranged either —
+    // one flow child among absolute ones repacks and lands nowhere near where
+    // it was captured.
+    expect(card?.layout.mode).toBe('absolute')
+    expect(heading?.layout).toMatchObject({ position: 'absolute', x: 0, y: 0 })
+    // Offsets are measured from the card's content box: its 20px padding is
+    // re-applied by the renderer and must not be counted twice.
     expect(ctaRow?.layout).toMatchObject({
       position: 'absolute',
-      x: 20,
-      y: 534,
+      x: 0,
+      y: 514,
+    })
+  })
+
+  it('keeps the box a styled label is painted in', () => {
+    const result = convertHtmlSnapshotToCanvas({
+      id: 'paper-status-pill',
+      name: 'Status pill',
+      width: 200,
+      height: 80,
+      root: {
+        tag: 'body',
+        attributes: {},
+        style: { display: 'block' },
+        rect: { x: 0, y: 0, width: 200, height: 80 },
+        children: [{
+          tag: 'span',
+          text: 'ACTIVE',
+          attributes: {},
+          style: {
+            display: 'inline-flex',
+            backgroundColor: 'rgb(20, 62, 33)',
+            borderTopLeftRadius: '6px',
+            borderTopRightRadius: '6px',
+            borderBottomRightRadius: '6px',
+            borderBottomLeftRadius: '6px',
+            paddingTop: '4px',
+            paddingRight: '8px',
+            paddingBottom: '4px',
+            paddingLeft: '8px',
+            color: 'rgb(126, 231, 135)',
+            fontSize: '13px',
+            lineHeight: '20px',
+          },
+          rect: { x: 16, y: 16, width: 88, height: 28 },
+          children: [],
+        }],
+      },
+    })
+
+    const nodes = Object.values(result.document.nodes)
+    const pill = nodes.find((node) => node.metadata?.importedHtmlTag === 'span')
+    const label = nodes.find((node) => node.type === 'text')
+
+    expect(pill).toMatchObject({
+      type: 'frame',
+      style: {
+        radius: 6,
+        fills: [{ type: 'solid', color: 'rgb(20, 62, 33)' }],
+      },
+      layout: { padding: { top: 4, right: 8, bottom: 4, left: 8 } },
+    })
+    expect(label).toMatchObject({
+      type: 'text',
+      text: 'ACTIVE',
+      parentId: pill?.id,
+      // Measured as one line, so a substituted font must not rewrap it.
+      style: { typography: { wrap: false } },
     })
   })
 

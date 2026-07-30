@@ -13,7 +13,10 @@ import type { CanvasDocument } from '@loora/canvas/model'
 import { diffDocuments } from '@loora/canvas/merge'
 import { orpc } from '#/lib/orpc-client'
 import { CanvasDocumentPreview } from '#/components/canvas-preview'
+import { PanelEmpty } from '#/components/panel-shell'
+import { Badge } from '#/components/ui/badge'
 import { Button } from '#/components/ui/button'
+import { DiffChips } from './diff-chips'
 import { Input } from '#/components/ui/input'
 import { Spinner } from '#/components/ui/spinner'
 import { Textarea } from '#/components/ui/textarea'
@@ -77,6 +80,17 @@ const STATUS_LABEL: Record<CanvasBranchSummary['status'], string> = {
   proposed: 'Proposed',
   applied: 'Applied',
   closed: 'Discarded',
+}
+
+/** Proposed is waiting on someone, applied is done, discarded is inert. */
+const STATUS_VARIANT: Record<
+  CanvasBranchSummary['status'],
+  'secondary' | 'warning' | 'success' | 'outline'
+> = {
+  active: 'secondary',
+  proposed: 'warning',
+  applied: 'success',
+  closed: 'outline',
 }
 
 function isOpen(branch: CanvasBranchSummary) {
@@ -274,16 +288,24 @@ export function CanvasBranches({
   const branchRow = (branch: CanvasBranchSummary) => {
     const ahead = branch.revision - branch.baseRevision
     return (
-      <li key={branch.id} className="flex items-start gap-2 px-3 py-2.5">
+      <li
+        key={branch.id}
+        className={cn(
+          'flex items-start gap-2.5 px-3 py-2.5 transition-colors',
+          branch.id === activeDraftId ? 'bg-surface-2' : 'hover:bg-secondary/40',
+        )}
+      >
         <span
           aria-hidden="true"
           className={cn(
-            'mt-1.5 size-1.5 shrink-0 rounded-full',
+            'mt-[0.4375rem] size-1.5 shrink-0 rounded-full',
             branch.status === 'active'
               ? 'bg-cx-accent'
               : branch.status === 'proposed'
-                ? 'bg-amber-500'
-                : 'bg-border',
+                ? 'bg-warning'
+                : branch.status === 'applied'
+                  ? 'bg-success'
+                  : 'bg-line',
           )}
         />
         <div className="min-w-0 flex-1">
@@ -301,27 +323,37 @@ export function CanvasBranches({
               }}
             />
           ) : (
-            <p className="flex items-center gap-2 text-xs font-medium">
+            <p className="flex items-center gap-1.5 text-xs font-medium">
               <span className="min-w-0 truncate">{branch.name}</span>
               {branch.id === activeDraftId ? (
-                <span className="shrink-0 rounded bg-secondary px-1 text-xs font-normal">
+                <Badge size="sm" variant="secondary" className="shrink-0">
                   Open
-                </span>
+                </Badge>
               ) : null}
               {branch.status !== 'active' ? (
-                <span className="shrink-0 text-xs font-normal text-muted-foreground">
+                <Badge size="sm" variant={STATUS_VARIANT[branch.status]} className="shrink-0">
                   {STATUS_LABEL[branch.status]}
-                </span>
+                </Badge>
               ) : null}
             </p>
           )}
-          <p className="truncate text-xs text-muted-foreground">
-            {ahead > 0 ? `${ahead} revision${ahead === 1 ? '' : 's'} ahead · ` : ''}
-            {branch.status === 'applied' && branch.appliedAt
-              ? `applied ${relativeTime(branch.appliedAt)}`
-              : branch.status === 'closed' && branch.closedAt
-                ? `discarded ${relativeTime(branch.closedAt)}`
-                : `updated ${relativeTime(branch.updatedAt)}`}
+          <p className="flex items-center gap-1.5 truncate text-xs text-muted-foreground">
+            {ahead > 0 ? (
+              <>
+                <span className="tabular-nums text-foreground">+{ahead}</span>
+                <span>revision{ahead === 1 ? '' : 's'} ahead</span>
+                <span aria-hidden="true" className="text-muted-foreground/40">
+                  ·
+                </span>
+              </>
+            ) : null}
+            <span className="truncate">
+              {branch.status === 'applied' && branch.appliedAt
+                ? `applied ${relativeTime(branch.appliedAt)}`
+                : branch.status === 'closed' && branch.closedAt
+                  ? `discarded ${relativeTime(branch.closedAt)}`
+                  : `updated ${relativeTime(branch.updatedAt)}`}
+            </span>
           </p>
           {branch.description ? (
             <p className="mt-0.5 line-clamp-2 text-xs text-muted-foreground/80">
@@ -329,8 +361,8 @@ export function CanvasBranches({
             </p>
           ) : null}
           {confirmId === branch.id ? (
-            <div className="mt-2 flex items-center gap-2">
-              <p className="min-w-0 flex-1 text-xs text-muted-foreground">
+            <div className="mt-2 flex items-center gap-2 rounded-md border border-destructive/32 bg-destructive/8 px-2 py-1.5">
+              <p className="min-w-0 flex-1 text-xs text-destructive-foreground">
                 Discard it? You can restore it from Archived.
               </p>
               <Button size="xs" variant="ghost" onClick={() => setConfirmId(null)}>
@@ -495,49 +527,62 @@ export function CanvasBranches({
             </DialogDescription>
           </DialogHeader>
           <div className="max-h-[min(64svh,32rem)] min-h-0 overflow-y-auto">
-            <ul className="divide-y">
-              <li className="flex items-center gap-2 px-3 py-2.5">
+            <ul className="divide-y divide-line">
+              <li
+                className={cn(
+                  'flex items-center gap-2.5 px-3 py-2.5 transition-colors',
+                  activeDraftId ? 'hover:bg-secondary/40' : 'bg-surface-2',
+                )}
+              >
                 <span
                   aria-hidden="true"
                   className="size-1.5 shrink-0 rounded-full bg-foreground"
                 />
                 <div className="min-w-0 flex-1">
-                  <p className="text-xs font-medium">Main</p>
+                  <p className="flex items-center gap-1.5 text-xs font-medium">
+                    Main
+                    {activeDraftId ? null : (
+                      <Badge size="sm" variant="secondary" className="shrink-0">
+                        Open
+                      </Badge>
+                    )}
+                  </p>
                   <p className="text-xs text-muted-foreground">
-                    The shared source of truth.
+                    The shared source of truth. Only Main can be published.
                   </p>
                 </div>
                 {activeDraftId ? (
                   <Button
                     size="xs"
-                    variant="ghost"
+                    variant="outline"
                     disabled={working}
                     onClick={() => void onSwitch(null)}
                   >
                     Open
                   </Button>
-                ) : (
-                  <span className="rounded bg-secondary px-1 text-xs">Open</span>
-                )}
+                ) : null}
               </li>
               {openBranches.map(branchRow)}
             </ul>
             {archived.length > 0 ? (
               <>
-                <p className="border-t px-3 pt-3 pb-1 text-xs font-medium tracking-wide text-muted-foreground uppercase">
+                <p className="border-t border-line bg-surface-2 px-3 py-1.5 text-2xs font-medium uppercase tracking-[0.08em] text-muted-foreground">
                   Archived
                 </p>
-                <ul className="divide-y border-t">{archived.map(branchRow)}</ul>
+                <ul className="divide-y divide-line border-t border-line">
+                  {archived.map(branchRow)}
+                </ul>
               </>
             ) : null}
             {branches.length === 0 ? (
-              <p className="px-3 py-8 text-center text-xs text-muted-foreground">
-                No branches yet. Main is the only target.
-              </p>
+              <PanelEmpty
+                title="No branches yet"
+                description="A branch is a private copy of this design. Main stays the only publish target."
+              />
             ) : null}
           </div>
           {error ? (
-            <p className="border-t px-4 py-2 text-xs text-destructive-foreground">
+            <p className="border-t border-line bg-destructive/8 px-4 py-2 text-xs text-destructive-foreground">
               {error}
             </p>
           ) : null}
@@ -619,35 +664,46 @@ export function CanvasBranches({
             </DialogDescription>
           </DialogHeader>
 
-          <div className="grid h-[min(76svh,40rem)] grid-cols-[minmax(0,22rem)_minmax(0,1fr)]">
-            <div className="flex min-h-0 flex-col overflow-y-auto border-e">
-              <div className="space-y-2 border-b p-3">
-                <div className="rounded-lg border p-2.5">
-                  <p className="text-xs font-medium tracking-wide text-muted-foreground uppercase">
-                    This branch, since it started
-                  </p>
-                  <p className="mt-0.5 text-sm">
-                    {comparison ? countLabel(comparison.summary) : '—'}
-                  </p>
+          <div className="grid h-[min(76svh,40rem)] grid-cols-1 md:grid-cols-[minmax(0,22rem)_minmax(0,1fr)]">
+            <div className="flex min-h-0 flex-col overflow-y-auto border-line md:border-e">
+              {/* The two sides of the merge, stated before the conflicts: what
+                  the branch did, and what Main did underneath it. */}
+              <dl className="grid shrink-0 grid-cols-2 gap-px border-b border-line bg-line">
+                <div className="bg-popover p-3">
+                  <dt className="text-2xs font-medium uppercase tracking-[0.08em] text-muted-foreground">
+                    This branch
+                  </dt>
+                  <dd className="mt-1">
+                    {comparison ? (
+                      <DiffChips {...comparison.summary} emptyLabel="No changes yet" />
+                    ) : (
+                      <span className="text-xs text-muted-foreground">—</span>
+                    )}
+                  </dd>
                 </div>
-                <div className="rounded-lg border p-2.5">
-                  <p className="text-xs font-medium tracking-wide text-muted-foreground uppercase">
+                <div className="bg-popover p-3">
+                  <dt className="text-2xs font-medium uppercase tracking-[0.08em] text-muted-foreground">
                     Main, since you branched
-                  </p>
-                  <p className="mt-0.5 text-sm">
-                    {mainDrift ? countLabel(mainDrift) : '—'}
-                  </p>
+                  </dt>
+                  <dd className="mt-1">
+                    {mainDrift ? (
+                      <DiffChips {...mainDrift} emptyLabel="Unchanged" />
+                    ) : (
+                      <span className="text-xs text-muted-foreground">—</span>
+                    )}
+                  </dd>
                 </div>
-              </div>
+              </dl>
 
-              <div className="min-h-0 flex-1 p-3">
+              <div className="min-h-0 flex-1">
                 {conflicts.length === 0 ? (
-                  <p className="rounded-lg bg-secondary p-3 text-xs">
-                    Nothing collides. This branch applies cleanly.
-                  </p>
+                  <PanelEmpty
+                    title="Nothing collides"
+                    description="Every edit lands on its own field, so this branch applies cleanly."
+                  />
                 ) : (
                   <>
-                    <div className="mb-2 flex items-center gap-1">
+                    <div className="sticky top-0 z-10 flex items-center gap-1 border-b border-line bg-popover px-3 py-2">
                       <p className="min-w-0 flex-1 text-xs text-muted-foreground">
                         {unresolved.length === 0
                           ? `${conflicts.length} resolved`
@@ -660,63 +716,64 @@ export function CanvasBranches({
                         All branch
                       </Button>
                     </div>
-                    <ul className="space-y-2">
+                    <ul className="divide-y divide-line">
                       {conflicts.map((conflict) => {
                         const title = conflictTitle(conflict, mainDocument, draftDocument)
+                        const choice = resolutions[conflict.id]
                         return (
-                        <li key={conflict.id} className="rounded-lg border p-2.5">
-                          <p className="truncate text-xs font-medium">{title}</p>
-                          <div className="mt-2 space-y-1">
-                            <button
-                              type="button"
-                              aria-label={`Keep Main for ${title}`}
-                              aria-pressed={resolutions[conflict.id] === 'main'}
-                              className={cn(
-                                'block w-full rounded-md border px-2 py-1.5 text-left text-xs',
-                                resolutions[conflict.id] === 'main'
-                                  ? 'border-cx-accent bg-secondary'
-                                  : 'hover:bg-secondary/60',
+                          <li key={conflict.id} className="px-3 py-2.5">
+                            <p className="flex items-center gap-1.5 text-xs font-medium">
+                              <span className="min-w-0 truncate">{title}</span>
+                              {choice ? null : (
+                                <Badge size="sm" variant="warning" className="shrink-0">
+                                  Needs a choice
+                                </Badge>
                               )}
-                              onClick={() =>
-                                setResolutions((current) => ({
-                                  ...current,
-                                  [conflict.id]: 'main',
-                                }))
-                              }
-                            >
-                              <span className="block text-xs text-muted-foreground">
-                                Main
-                              </span>
-                              <span className="block truncate font-mono">
-                                {formatValue(conflict.main)}
-                              </span>
-                            </button>
-                            <button
-                              type="button"
-                              aria-label={`Use this branch for ${title}`}
-                              aria-pressed={resolutions[conflict.id] === 'draft'}
-                              className={cn(
-                                'block w-full rounded-md border px-2 py-1.5 text-left text-xs',
-                                resolutions[conflict.id] === 'draft'
-                                  ? 'border-cx-accent bg-secondary'
-                                  : 'hover:bg-secondary/60',
-                              )}
-                              onClick={() =>
-                                setResolutions((current) => ({
-                                  ...current,
-                                  [conflict.id]: 'draft',
-                                }))
-                              }
-                            >
-                              <span className="block text-xs text-muted-foreground">
-                                This branch
-                              </span>
-                              <span className="block truncate font-mono">
-                                {formatValue(conflict.draft)}
-                              </span>
-                            </button>
-                          </div>
-                        </li>
+                            </p>
+                            {/* Both values side by side: the decision is a
+                                comparison, so it should not read as a list. */}
+                            <div className="mt-2 grid gap-1">
+                              {(
+                                [
+                                  { side: 'main', label: 'Main', value: conflict.main },
+                                  { side: 'draft', label: 'This branch', value: conflict.draft },
+                                ] as const
+                              ).map((option) => (
+                                <button
+                                  key={option.side}
+                                  type="button"
+                                  aria-label={
+                                    option.side === 'main'
+                                      ? `Keep Main for ${title}`
+                                      : `Use this branch for ${title}`
+                                  }
+                                  aria-pressed={choice === option.side}
+                                  className={cn(
+                                    'flex w-full items-center gap-2 rounded-md border px-2 py-1.5 text-left text-xs transition-colors',
+                                    choice === option.side
+                                      ? 'border-cx-accent bg-secondary'
+                                      : 'border-line hover:bg-secondary/50',
+                                  )}
+                                  onClick={() =>
+                                    setResolutions((current) => ({
+                                      ...current,
+                                      [conflict.id]: option.side,
+                                    }))
+                                  }
+                                >
+                                  <span className="w-20 shrink-0 text-muted-foreground">
+                                    {option.label}
+                                  </span>
+                                  <span className="min-w-0 flex-1 truncate font-mono">
+                                    {formatValue(option.value)}
+                                  </span>
+                                  {choice === option.side ? (
+                                    <CheckIcon className="size-3.5 shrink-0" />
+                                  ) : null}
+                                </button>
+                              ))}
+                            </div>
+                          </li>
                         )
                       })}
                     </ul>
@@ -725,31 +782,43 @@ export function CanvasBranches({
               </div>
             </div>
 
-            <div className="flex min-h-0 flex-col">
-              <div className="flex shrink-0 items-center gap-1 border-b px-2 py-1.5">
-                <Button
-                  size="xs"
-                  variant={side === 'draft' ? 'secondary' : 'ghost'}
-                  onClick={() => setSide('draft')}
+            <div className="flex min-h-0 flex-col max-md:hidden">
+              <div className="flex shrink-0 items-center border-b border-line px-2 py-1.5">
+                {/* One segmented control, not two buttons that happen to sit
+                    together: the preview shows one side at a time. */}
+                <div
+                  role="group"
+                  aria-label="Preview side"
+                  className="flex items-center gap-0.5 rounded-sm border border-line p-0.5"
                 >
-                  This branch
-                </Button>
-                <Button
-                  size="xs"
-                  variant={side === 'main' ? 'secondary' : 'ghost'}
-                  onClick={() => setSide('main')}
-                >
-                  Main
-                </Button>
+                  <Button
+                    size="xs"
+                    variant={side === 'draft' ? 'secondary' : 'ghost'}
+                    aria-pressed={side === 'draft'}
+                    onClick={() => setSide('draft')}
+                  >
+                    This branch
+                  </Button>
+                  <Button
+                    size="xs"
+                    variant={side === 'main' ? 'secondary' : 'ghost'}
+                    aria-pressed={side === 'main'}
+                    onClick={() => setSide('main')}
+                  >
+                    Main
+                  </Button>
+                </div>
               </div>
               <div className="min-h-0 flex-1 overflow-hidden bg-cx-canvas">
                 <CanvasDocumentPreview
                   document={side === 'draft' ? draftDocument : mainDocument}
                 />
               </div>
-              <div className="shrink-0 space-y-2 border-t p-3">
+              <div className="shrink-0 space-y-2 border-t border-line p-3">
                 {error ? (
-                  <p className="text-xs text-destructive-foreground">{error}</p>
+                  <p className="rounded-md border border-destructive/32 bg-destructive/8 px-2 py-1.5 text-xs text-destructive-foreground">
+                    {error}
+                  </p>
                 ) : (
                   <p className="text-xs text-muted-foreground">
                     Applying writes the merged document to Main and checkpoints

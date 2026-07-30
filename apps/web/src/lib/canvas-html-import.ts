@@ -314,6 +314,21 @@ function nextFrame(view: Window) {
   return new Promise<void>((resolve) => view.requestAnimationFrame(() => resolve()))
 }
 
+/**
+ * An image that has not decoded yet measures as an empty box, and an empty box
+ * is either dropped or captured at the wrong size. Broken sources settle too —
+ * `decode` rejects for them — so this waits for an answer either way, and the
+ * timeout keeps one stalled response from holding up the whole import.
+ */
+function settleImages(sandbox: Document) {
+  const pending = [...sandbox.images].filter((image) => !image.complete)
+  if (pending.length === 0) return Promise.resolve()
+  return Promise.race([
+    Promise.allSettled(pending.map((image) => image.decode())),
+    new Promise<void>((resolve) => window.setTimeout(resolve, 1_500)),
+  ]).then(() => undefined)
+}
+
 export async function importHtmlCssToCanvas(
   input: HtmlCssImportInput,
 ): Promise<HtmlCanvasImportResult> {
@@ -362,6 +377,7 @@ export async function importHtmlCssToCanvas(
       sandbox.fonts?.ready ?? Promise.resolve(),
       new Promise<void>((resolve) => window.setTimeout(resolve, 1_000)),
     ])
+    await settleImages(sandbox)
     await nextFrame(view)
     await nextFrame(view)
 

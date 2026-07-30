@@ -562,10 +562,39 @@ export function createTextNode(
   } satisfies TextNode, patch)
 }
 
-export function orderedChildren(document: CanvasDocument, parentId: NodeId | null) {
+/** Children of every parent, in order. Built in one pass over the nodes. */
+export type CanvasChildIndex = Map<NodeId | null, CanvasNode[]>
+
+function bySiblingOrder(left: CanvasNode, right: CanvasNode) {
+  return left.order - right.order || left.id.localeCompare(right.id)
+}
+
+export function buildChildIndex(document: CanvasDocument): CanvasChildIndex {
+  const index: CanvasChildIndex = new Map()
+  for (const node of Object.values(document.nodes)) {
+    const siblings = index.get(node.parentId)
+    if (siblings) siblings.push(node)
+    else index.set(node.parentId, [node])
+  }
+  for (const siblings of index.values()) siblings.sort(bySiblingOrder)
+  return index
+}
+
+/**
+ * Without an index this scans every node, so walking a whole tree one parent at
+ * a time is quadratic. Anything that visits more than a couple of parents —
+ * export, a subtree delete — should build one index and pass it in. The array
+ * an index returns is shared; treat it as read-only.
+ */
+export function orderedChildren(
+  document: CanvasDocument,
+  parentId: NodeId | null,
+  index?: CanvasChildIndex,
+) {
+  if (index) return index.get(parentId) ?? []
   return Object.values(document.nodes)
     .filter((node) => node.parentId === parentId)
-    .sort((left, right) => left.order - right.order || left.id.localeCompare(right.id))
+    .sort(bySiblingOrder)
 }
 
 export function stateDefinitionsForNode(
@@ -1373,15 +1402,30 @@ const fastMutationKeys = new Set([
  * `nodeId` scopes interaction validation to the state definitions that node can
  * actually see. Without it a patch may declare an action against a state that
  * does not exist, and the caller skipping full validation would keep it.
+ *
+ * `replace` names the fields the caller will write whole rather than merge.
+ * Those have to hold up as complete values, because nothing of the node's own
+ * layout or style survives underneath them.
  */
 export function validateCommonNodeMutationPatch(
   document: CanvasDocument,
   value: unknown,
   nodeId?: NodeId,
+  replace: readonly string[] = [],
 ) {
   if (
     !isRecord(value) ||
     Object.keys(value).some((key) => !fastMutationKeys.has(key))
+  ) {
+    return false
+  }
+  if (replace.some((key) => !fastMutationKeys.has(key))) return false
+  const replaced = new Set(replace)
+  if (
+    (replaced.has('layout') &&
+      !validLayoutPatch(value.layout, false)) ||
+    (replaced.has('style') &&
+      !validStylePatch(value.style, document, false))
   ) {
     return false
   }

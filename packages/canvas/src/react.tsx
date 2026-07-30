@@ -1139,6 +1139,7 @@ function SelectionOverlay({
   useSyncExternalStore(registry.subscribe, () => registry.revision, () => registry.revision)
   useSyncExternalStore(engine.subscribe.bind(engine), () => engine.revision, () => engine.revision)
   const [, refresh] = useState(0)
+  const [renaming, setRenaming] = useState(false)
   const selected = session.selection[0] ?? null
   const element = selected ? registry.get(selected) : null
   const groupRef = useRef<SVGGElement | null>(null)
@@ -1237,6 +1238,32 @@ function SelectionOverlay({
 
   const source = selected ? engine.getNode(selected.nodeId) : null
   const instanceId = selected?.instancePath.at(-1)
+  const selectionKey = selected ? refKey(selected) : null
+
+  // Selecting something else abandons an open rename rather than carrying the
+  // field over to the next layer.
+  useEffect(() => setRenaming(false), [selectionKey, readOnly])
+
+  const commitRename = (value: string) => {
+    setRenaming(false)
+    const name = value.trim().slice(0, 200)
+    if (readOnly || !source || !name || name === source.name) return
+    transact({
+      id: canvasId('tx'),
+      label: 'Rename node',
+      preconditions: instanceId
+        ? undefined
+        : preconditionsForNodePatch(engine.document, source.id, { name }),
+      operations: instanceId
+        ? [{
+            type: 'instance.patchOverride',
+            id: instanceId,
+            targetId: source.id,
+            patch: { name },
+          }]
+        : [{ type: 'node.patch', id: source.id, patch: { name } }],
+    })
+  }
 
   const startResize = (
     event: ReactPointerEvent<SVGRectElement>,
@@ -1327,6 +1354,7 @@ function SelectionOverlay({
 
   const label = source?.name ?? ''
   const labelWidth = Math.min(240, Math.max(44, label.length * 6.5 + 12))
+  const renameWidth = Math.max(labelWidth, 140)
   return (
     <svg
       data-loora-viewport-overlay
@@ -1389,22 +1417,66 @@ function SelectionOverlay({
             stroke="#6c5ce7"
             strokeWidth="1.5"
           />
-          <g ref={labelRef}>
+          <g
+            ref={labelRef}
+            data-loora-selection-label
+            // The press must not reach the surface: it would hit-test the empty
+            // space above the layer and drop the selection the label belongs to.
+            onPointerDown={(event) => event.stopPropagation()}
+            onDoubleClick={(event) => {
+              event.stopPropagation()
+              event.preventDefault()
+              if (!readOnly) setRenaming(true)
+            }}
+            style={{
+              pointerEvents: readOnly ? 'none' : 'auto',
+              cursor: readOnly ? 'default' : 'text',
+            }}
+          >
             <rect
-              width={labelWidth}
+              width={renaming ? renameWidth : labelWidth}
               height="18"
               rx="4"
               fill="#6c5ce7"
             />
-            <text
-              x="6"
-              y="12.5"
-              fill="#fff"
-              fontFamily="ui-sans-serif, system-ui"
-              fontSize="11"
-            >
-              {label}
-            </text>
+            {renaming ? (
+              <foreignObject width={renameWidth} height="18">
+                <input
+                  aria-label="Layer name"
+                  defaultValue={label}
+                  autoFocus
+                  onFocus={(event) => event.currentTarget.select()}
+                  onBlur={(event) => commitRename(event.currentTarget.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter') event.currentTarget.blur()
+                    if (event.key === 'Escape') {
+                      // Blurring after this would commit the discarded value.
+                      setRenaming(false)
+                    }
+                  }}
+                  style={{
+                    width: '100%',
+                    height: '100%',
+                    padding: '0 5px',
+                    border: 0,
+                    outline: 'none',
+                    background: 'transparent',
+                    color: '#fff',
+                    font: '11px ui-sans-serif, system-ui',
+                  }}
+                />
+              </foreignObject>
+            ) : (
+              <text
+                x="6"
+                y="12.5"
+                fill="#fff"
+                fontFamily="ui-sans-serif, system-ui"
+                fontSize="11"
+              >
+                {label}
+              </text>
+            )}
           </g>
           {readOnly
             ? null
