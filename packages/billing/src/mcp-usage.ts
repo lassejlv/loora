@@ -71,6 +71,26 @@ export function includedMcpCalls(plan: McpUsagePlan) {
     : MCP_WEEKLY_INCLUDED[plan]
 }
 
+/**
+ * Resolve the MCP usage plan from billing status/authorize results.
+ * Admin and billing-disabled accounts are unlimited. Metered plans only
+ * apply when access is currently granted (same gate as MCP tool calls).
+ */
+export function resolveMcpUsagePlan(input: {
+  source: 'admin' | 'disabled' | 'cache' | 'polar'
+  access: boolean
+  plan: BillingPlan | null | undefined
+}): McpUsagePlan | null {
+  if (input.source === 'admin' || input.source === 'disabled') {
+    return input.source
+  }
+  if (!input.access) return null
+  if (input.plan === 'free' || input.plan === 'pro' || input.plan === 'studio') {
+    return input.plan
+  }
+  return null
+}
+
 export function mcpUsageSnapshot(
   plan: McpUsagePlan,
   used: number,

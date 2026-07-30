@@ -5,6 +5,7 @@ import {
   createMcpUsageService,
   includedMcpCalls,
   mcpUsageWindow,
+  resolveMcpUsagePlan,
   type McpUsageMeter,
 } from './mcp-usage'
 
@@ -98,5 +99,33 @@ describe('MCP included usage', () => {
     expect((await service.current('admin-1', 'admin')).included).toBeNull()
     expect((await service.reserve('local-1', 'disabled')).included).toBeNull()
     expect(calls).toBe(0)
+  })
+
+  test('resolveMcpUsagePlan matches MCP access gates', () => {
+    expect(resolveMcpUsagePlan({
+      source: 'admin',
+      access: true,
+      plan: null,
+    })).toBe('admin')
+    expect(resolveMcpUsagePlan({
+      source: 'disabled',
+      access: true,
+      plan: null,
+    })).toBe('disabled')
+    expect(resolveMcpUsagePlan({
+      source: 'cache',
+      access: true,
+      plan: 'pro',
+    })).toBe('pro')
+    expect(resolveMcpUsagePlan({
+      source: 'polar',
+      access: false,
+      plan: 'pro',
+    })).toBeNull()
+    expect(resolveMcpUsagePlan({
+      source: 'cache',
+      access: true,
+      plan: null,
+    })).toBeNull()
   })
 })

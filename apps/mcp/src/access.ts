@@ -4,7 +4,7 @@ import { user } from '@loora/db/schema'
 import { canUseApp } from '@loora/auth/preview-access'
 import { hasAcceptedCurrentLegal } from '@loora/auth/legal-consent'
 import { authorizeBilling } from '@loora/billing/billing'
-import type { McpUsagePlan } from '@loora/billing/mcp-usage'
+import { resolveMcpUsagePlan } from '@loora/billing/mcp-usage'
 
 export class AccessDeniedError extends Error {}
 
@@ -22,16 +22,16 @@ export async function requireAppAccess(userId: string) {
   if (!billing.access) {
     throw new AccessDeniedError('An active Loora plan is required.')
   }
-  let mcpPlan: McpUsagePlan
-  if (billing.source === 'admin' || billing.source === 'disabled') {
-    mcpPlan = billing.source
-  } else if (
-    billing.entitlement?.plan === 'free' ||
-    billing.entitlement?.plan === 'pro' ||
-    billing.entitlement?.plan === 'studio'
-  ) {
-    mcpPlan = billing.entitlement.plan
-  } else {
+  const mcpPlan = resolveMcpUsagePlan({
+    source: billing.source,
+    access: billing.access,
+    plan: billing.entitlement?.plan === 'free' ||
+      billing.entitlement?.plan === 'pro' ||
+      billing.entitlement?.plan === 'studio'
+      ? billing.entitlement.plan
+      : null,
+  })
+  if (!mcpPlan) {
     throw new AccessDeniedError('A recognized Loora plan is required.')
   }
   return { account, mcpPlan }

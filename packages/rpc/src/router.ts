@@ -78,6 +78,11 @@ import {
   getBillingStatus,
   refreshBillingStatus,
 } from '@loora/billing/billing'
+import {
+  getMcpUsage,
+  McpUsageUnavailableError,
+  resolveMcpUsagePlan,
+} from '@loora/billing/mcp-usage'
 import { canUseApp, isPreviewAccessRequired } from '@loora/auth/preview-access'
 import {
   CURRENT_PRIVACY_VERSION,
@@ -2614,6 +2619,28 @@ const createSubscriptionCheckout = previewProcedure
     return createPlanCheckout(context.user, input.plan)
   })
 
+const getCurrentMcpUsage = previewProcedure.handler(async ({ context }) => {
+  // Same refresh path as billing.status so plan labels and weekly included
+  // limits stay aligned when both load in parallel on the billing page.
+  const status = await getBillingStatus(context.user)
+  const plan = resolveMcpUsagePlan({
+    source: status.source,
+    access: status.access,
+    plan: status.plan,
+  })
+  if (!plan) return { usage: null }
+  try {
+    return { usage: await getMcpUsage(context.user.id, plan) }
+  } catch (error) {
+    if (error instanceof McpUsageUnavailableError) {
+      throw new ORPCError('INTERNAL_SERVER_ERROR', {
+        message: 'MCP usage is temporarily unavailable.',
+      })
+    }
+    throw error
+  }
+})
+
 const listUsersWithUsage = adminProcedure.handler(async () => {
   return db
     .select({
@@ -2734,6 +2761,7 @@ export const appRouter = {
     status: getCurrentBilling,
     refresh: refreshCurrentBilling,
     checkout: createSubscriptionCheckout,
+    mcpUsage: getCurrentMcpUsage,
   },
   design: {
     list: listDesigns,
