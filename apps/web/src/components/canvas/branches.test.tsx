@@ -222,10 +222,12 @@ describe('CanvasBranches', () => {
     await waitFor(() =>
       expect(compare).toHaveBeenCalledWith({ designId: 'design-1', id: 'b1' }),
     )
-    expect(await view.findByText('+2 −0 · 1 edited')).toBeTruthy()
+    // The branch added two nodes and edited one; zero counts are left out.
+    expect(await view.findByText('+2')).toBeTruthy()
+    expect(view.getByText('~1')).toBeTruthy()
     // Main gained a frame while the branch was open, which the old review
     // never surfaced at all.
-    expect(view.getByText('+1 −0 · 0 edited')).toBeTruthy()
+    expect(view.getByText('+1')).toBeTruthy()
   })
 
   test('names the layer a conflict is on and blocks Apply until it is settled', async () => {

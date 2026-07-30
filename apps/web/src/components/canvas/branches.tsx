@@ -119,12 +119,6 @@ function conflictTitle(
   return conflict.path ? `${name} · ${conflict.path}` : `${name} · whole layer`
 }
 
-function countLabel(diff: { added: number; removed: number; changed: number }) {
-  const total = diff.added + diff.removed + diff.changed
-  if (total === 0) return 'no changes'
-  return `+${diff.added} −${diff.removed} · ${diff.changed} edited`
-}
-
 export function CanvasBranches({
   designId,
   activeDraftId,
@@ -548,7 +542,7 @@ export function CanvasBranches({
                     )}
                   </p>
                   <p className="text-xs text-muted-foreground">
-                    The shared source of truth. Only Main can be published.
+                    The shared source of truth.
                   </p>
                 </div>
                 {activeDraftId ? (
