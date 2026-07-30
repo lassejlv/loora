@@ -4,6 +4,8 @@ import {
   type CanvasNode,
   type ImageNode,
   type NodeId,
+  type NodeRef,
+  type PageNode,
 } from '@loora/canvas/model'
 
 const MAX_FETCHED_IMAGE_BYTES = 5 * 1024 * 1024
@@ -11,6 +13,25 @@ const MAX_FETCHED_IMAGE_BYTES = 5 * 1024 * 1024
 export interface PlacedHtmlPaste {
   nodes: CanvasNode[]
   rootIds: NodeId[]
+}
+
+export function containingPage(
+  document: CanvasDocument,
+  nodeId?: NodeId,
+): PageNode | null {
+  let node = nodeId ? document.nodes[nodeId] : null
+  while (node) {
+    if (node.type === 'page') return node
+    node = node.parentId ? document.nodes[node.parentId] : null
+  }
+  return null
+}
+
+export function containingPageForRef(
+  document: CanvasDocument,
+  ref?: NodeRef,
+) {
+  return containingPage(document, ref?.instancePath[0] ?? ref?.nodeId)
 }
 
 export function placeHtmlImport(

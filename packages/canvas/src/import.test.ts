@@ -137,4 +137,86 @@ describe('HTML snapshot import', () => {
       parentId: expect.any(String),
     })
   })
+
+  it('omits the Paper Snapshot wrapper while preserving button geometry and text', () => {
+    const result = convertHtmlSnapshotToCanvas({
+      id: 'paper-button-import',
+      name: 'Paper button',
+      width: 1_440,
+      height: 900,
+      root: {
+        tag: 'body',
+        attributes: {},
+        style: { display: 'block' },
+        rect: { x: 0, y: 0, width: 1_440, height: 900 },
+        children: [{
+          tag: 'x-paper-html',
+          attributes: {},
+          style: { display: 'inline' },
+          rect: { x: 0, y: 121, width: 1_440, height: 58 },
+          children: [{
+            tag: 'a',
+            attributes: { href: 'https://railway.com/new' },
+            style: {
+              display: 'flex',
+              width: '138px',
+              height: '58px',
+              alignItems: 'center',
+              justifyContent: 'center',
+              paddingTop: '12px',
+              paddingRight: '24px',
+              paddingBottom: '12px',
+              paddingLeft: '24px',
+              backgroundColor: 'rgb(94, 69, 144)',
+              borderTopLeftRadius: '8px',
+              borderTopRightRadius: '8px',
+              borderBottomRightRadius: '8px',
+              borderBottomLeftRadius: '8px',
+            },
+            rect: { x: 0, y: 121, width: 138, height: 58 },
+            children: [{
+              tag: '#text',
+              text: 'Deploy →',
+              attributes: {},
+              style: {
+                display: 'inline',
+                color: 'rgb(255, 255, 255)',
+                fontSize: '20px',
+                fontWeight: '500',
+                lineHeight: '32px',
+              },
+              rect: { x: 24, y: 134, width: 90, height: 32 },
+              children: [],
+            }],
+          }],
+        }],
+      },
+    })
+
+    const nodes = Object.values(result.document.nodes)
+    expect(
+      nodes.find((node) => node.type === 'text'),
+    ).toMatchObject({
+      type: 'text',
+      text: 'Deploy →',
+    })
+    expect(
+      nodes.some(
+        (node) => node.metadata.importedHtmlTag === 'x-paper-html',
+      ),
+    ).toBe(false)
+    expect(
+      nodes.find((node) => node.metadata.importedHtmlTag === 'a'),
+    ).toMatchObject({
+      parentId: result.pageId,
+      layout: {
+        width: { unit: 'px', value: 138 },
+        height: { unit: 'px', value: 58 },
+      },
+      style: {
+        radius: 8,
+        fills: [{ type: 'solid', color: 'rgb(94, 69, 144)' }],
+      },
+    })
+  })
 })

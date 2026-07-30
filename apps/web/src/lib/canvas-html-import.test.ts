@@ -26,4 +26,18 @@ describe('HTML import sandbox', () => {
     expect(output).not.toContain('</style><script')
     expect(output).toContain('<\\/style>')
   })
+
+  it('gives the Paper Snapshot transport wrapper a shrink-to-fit layout', () => {
+    const output = buildHtmlImportDocument(
+      '<x-paper-html><a style="display:flex;width:auto;height:58px;padding:12px 24px">Deploy →</a></x-paper-html>',
+    )
+    const parsed = new DOMParser().parseFromString(output, 'text/html')
+    const sandboxStyle = parsed.querySelector(
+      'style[data-loora-html-import="true"]',
+    )
+
+    expect(sandboxStyle?.textContent).toContain(
+      'x-paper-html{display:inline-block}',
+    )
+  })
 })

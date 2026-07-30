@@ -117,6 +117,7 @@ import {
 } from '#/lib/canvas-clipboard'
 import { importHtmlCssToCanvas } from '#/lib/canvas-html-import'
 import {
+  containingPageForRef,
   fetchImageFile,
   importedImageNodes,
   placeHtmlImport,
@@ -1265,10 +1266,11 @@ function useCanvasEditorActions(): CanvasEditorActions {
   const history = useCanvasHistory()
   const readOnly = useCanvasReadOnly()
   const selected = selection[0]
+  const activePage = containingPageForRef(document, selected)
   const parent =
     selected?.instancePath.length === 0
       ? insertionParent(document, selected.nodeId)
-      : insertionParent(document)
+      : activePage ?? insertionParent(document)
 
   const insert = (node: CanvasNode) => {
     if (readOnly) return
@@ -1358,7 +1360,10 @@ function useCanvasEditorActions(): CanvasEditorActions {
     }))
   }
 
-  const insertDocument = (imported: CanvasDocument) => {
+  const insertDocument = (
+    imported: CanvasDocument,
+    label = 'Import HTML & CSS',
+  ) => {
     if (readOnly) return
     const importedNodes = Object.values(imported.nodes)
     if (importedNodes.length === 0) return
@@ -1410,7 +1415,7 @@ function useCanvasEditorActions(): CanvasEditorActions {
     )
     transact({
       id: canvasId('tx'),
-      label: 'Import HTML & CSS',
+      label,
       operations: nodes.map((node) => ({ type: 'node.insert', node })),
     })
     session.select(
@@ -1687,12 +1692,12 @@ function useCanvasEditorActions(): CanvasEditorActions {
   }
 
   const pasteFromHtml = async (html: string, fallbackText = '') => {
-    if (!parent || readOnly || !html.trim()) return
+    if (readOnly || !html.trim()) return
     try {
       const width =
-        parent.type === 'page'
+        activePage && parent?.type === 'page'
           ? parent.viewport.width
-          : parent.layout.width.unit === 'px'
+          : activePage && parent?.layout.width.unit === 'px'
             ? parent.layout.width.value
             : 1_440
       const imported = await importHtmlCssToCanvas({
@@ -1700,6 +1705,11 @@ function useCanvasEditorActions(): CanvasEditorActions {
         name: 'Paper Snapshot',
         width,
       })
+      if (!activePage || !parent) {
+        insertDocument(imported.document, 'Paste Paper Snapshot')
+        void saveImportedImages(Object.values(imported.document.nodes))
+        return
+      }
       const placed = placeHtmlImport(document, imported.document, parent.id)
       if (
         placed.nodes.length === 0 ||
