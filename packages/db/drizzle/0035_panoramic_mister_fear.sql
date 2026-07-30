@@ -1,0 +1,1 @@
+DROP TABLE "canvas_agent_activity" CASCADE;

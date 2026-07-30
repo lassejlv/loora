@@ -270,63 +270,130 @@ body {
   }
 }
 
-.cx-agent-dots {
+/* An external agent working in this document. The badge borrows the inverted
+   tooltip material so it reads as chrome and never as part of the design. */
+.cx-agent-badge {
   position: absolute;
   top: 0;
   left: 0;
-  display: grid;
-  grid-template-columns: repeat(12, 5px);
-  grid-auto-rows: 5px;
-  gap: 4px;
-  width: max-content;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  height: 20px;
+  max-width: 16rem;
+  padding-inline: 6px 8px;
+  border-radius: 6px;
+  background: var(--foreground);
+  color: var(--background);
+  font-size: 10px;
+  font-weight: 500;
+  line-height: 1;
+  white-space: nowrap;
+  box-shadow: var(--panel-shadow);
   opacity: 0;
-  filter: drop-shadow(0 0 5px rgb(59 130 246 / 22%));
   transition:
-    opacity 180ms ease,
-    transform 140ms cubic-bezier(0.22, 1, 0.36, 1);
+    opacity 140ms ease,
+    transform 160ms cubic-bezier(0.22, 1, 0.36, 1);
   will-change: transform;
 }
 
-.cx-agent-dot {
-  width: 5px;
-  height: 5px;
+.cx-agent-badge[data-visible='true'] {
+  opacity: 1;
+}
+
+.cx-agent-badge[data-visible='true'][data-phase='settled'] {
+  opacity: 0.6;
+}
+
+.cx-agent-typing {
+  display: inline-flex;
+  gap: 2px;
+}
+
+.cx-agent-typing i {
+  width: 3px;
+  height: 3px;
   border-radius: 999px;
-  background: #3b82f6;
-  opacity: var(--cx-agent-dot-opacity);
-  animation: cx-agent-dot-wave 1.2s ease-in-out var(--cx-agent-dot-delay)
-    infinite;
+  background: currentColor;
+  animation: cx-agent-typing 1s ease-in-out infinite;
 }
 
-.cx-agent-dots[data-phase='settled'] .cx-agent-dot {
-  animation-duration: 1.7s;
+.cx-agent-typing i:nth-child(2) {
+  animation-delay: 150ms;
 }
 
-.cx-agent-target {
+.cx-agent-typing i:nth-child(3) {
+  animation-delay: 300ms;
+}
+
+.cx-agent-badge[data-phase='settled'] .cx-agent-typing {
+  display: none;
+}
+
+.cx-agent-ring {
   position: absolute;
   top: 0;
   left: 0;
-  border: 1px solid rgb(59 130 246 / 30%);
-  border-radius: 4px;
-  box-shadow:
-    0 0 0 3px rgb(59 130 246 / 6%),
-    0 0 24px rgb(59 130 246 / 5%);
-  opacity: 0.75;
+  border-radius: 5px;
+  background: --alpha(var(--foreground) / 4%);
+  outline: 1px solid --alpha(var(--foreground) / 45%);
+  box-shadow: 0 0 0 4px --alpha(var(--foreground) / 5%);
   transition:
-    width 140ms cubic-bezier(0.22, 1, 0.36, 1),
-    height 140ms cubic-bezier(0.22, 1, 0.36, 1),
-    transform 140ms cubic-bezier(0.22, 1, 0.36, 1);
+    width 150ms cubic-bezier(0.22, 1, 0.36, 1),
+    height 150ms cubic-bezier(0.22, 1, 0.36, 1),
+    transform 150ms cubic-bezier(0.22, 1, 0.36, 1);
   will-change: width, height, transform;
 }
 
-@keyframes cx-agent-dot-wave {
+.cx-agent-ring[data-phase='working'] {
+  animation: cx-agent-breathe 1.8s ease-in-out infinite;
+}
+
+.cx-agent-ring[data-phase='settled'] {
+  opacity: 0.5;
+}
+
+/* One outward pulse per beat while a tool call is in flight. */
+.cx-agent-avatar[data-phase='working']::after {
+  content: '';
+  position: absolute;
+  inset: -3px;
+  border-radius: 999px;
+  border: 1px solid --alpha(var(--foreground) / 35%);
+  animation: cx-agent-halo 1.8s ease-out infinite;
+}
+
+@keyframes cx-agent-typing {
   0%,
   100% {
-    opacity: calc(var(--cx-agent-dot-opacity) * 0.3);
-    transform: scale(0.78);
+    opacity: 0.3;
+    transform: translateY(0);
   }
-  48% {
-    opacity: var(--cx-agent-dot-opacity);
-    transform: scale(1);
+  40% {
+    opacity: 1;
+    transform: translateY(-1px);
+  }
+}
+
+@keyframes cx-agent-breathe {
+  0%,
+  100% {
+    opacity: 0.6;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+@keyframes cx-agent-halo {
+  0% {
+    transform: scale(0.85);
+    opacity: 0.7;
+  }
+  70%,
+  100% {
+    transform: scale(1.18);
+    opacity: 0;
   }
 }
 
@@ -340,12 +407,14 @@ body {
     -webkit-text-fill-color: var(--color-muted-foreground);
   }
 
-  .cx-agent-dots,
-  .cx-agent-target {
+  .cx-agent-badge,
+  .cx-agent-ring {
     transition: none;
+    animation: none;
   }
 
-  .cx-agent-dot {
+  .cx-agent-typing i,
+  .cx-agent-avatar[data-phase='working']::after {
     animation: none;
   }
 }

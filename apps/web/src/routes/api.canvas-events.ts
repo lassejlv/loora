@@ -16,6 +16,7 @@ import {
 } from '@loora/billing/billing'
 import { db } from '@loora/db'
 import {
+  readCanvasAgentActivity,
   readCanvasPresence,
   subscribeCanvasRealtimeEvents,
   type CanvasRealtimeEvent,
@@ -170,6 +171,15 @@ export async function canvasEventsResponse(request: Request) {
         .then((peers) => {
           if (peers.length > 0) {
             push({ type: 'presence.state', peers, sentAt: Date.now() })
+          }
+        })
+        .catch(() => undefined)
+      // Same for an agent that is already mid-run: the tab shows it now rather
+      // than at its next tool call.
+      void readCanvasAgentActivity(access.ownerUserId, { designId, draftId })
+        .then((activity) => {
+          if (activity) {
+            push({ type: 'agent.activity', activity, sentAt: Date.now() })
           }
         })
         .catch(() => undefined)

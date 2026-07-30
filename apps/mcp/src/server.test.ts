@@ -12,7 +12,6 @@ import {
   createLooraServer,
   exportCanvasCode,
 } from './server'
-import { canvasAgentActivityNodeIds } from './designs'
 import type { McpUsageController } from './server'
 
 const originalAppUrl = process.env.LOORA_APP_URL
@@ -118,41 +117,6 @@ describe('MCP agent workflow', () => {
         width: 800,
       }),
     ).toThrow('Choose either pageId or ref')
-  })
-
-  test('locates the nodes and parents an agent transaction is working on', () => {
-    expect(
-      canvasAgentActivityNodeIds([
-        {
-          id: 'tx-activity',
-          label: 'MCP inserted nodes',
-          operations: [
-            {
-              type: 'node.insert',
-              node: createTextNode('New detail', {
-                id: 'text-new',
-                parentId: 'page-home',
-              }),
-            },
-            {
-              type: 'node.patch',
-              id: 'text-title',
-              patch: { text: 'Updated title' },
-            },
-            {
-              type: 'token.upsert',
-              token: {
-                id: 'accent',
-                name: 'Accent',
-                type: 'color',
-                value: '#3b82f6',
-                modes: {},
-              },
-            },
-          ],
-        },
-      ]),
-    ).toEqual(['text-new', 'page-home', 'text-title'])
   })
 
   test('advertises context, code export, and a real screenshot tool', async () => {
