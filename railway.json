@@ -15,8 +15,6 @@
     ]
   },
   "deploy": {
-    "healthcheckPath": "/api/ready",
-    "healthcheckTimeout": 60,
     "restartPolicyType": "ON_FAILURE",
     "restartPolicyMaxRetries": 5,
     "sleepApplication": false

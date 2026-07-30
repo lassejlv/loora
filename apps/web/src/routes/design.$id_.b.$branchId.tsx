@@ -23,7 +23,7 @@ function BranchDesignPage() {
   const { id, branchId } = Route.useParams()
 
   return (
-    <AccountGate>
+    <AccountGate designId={id}>
       <CanvasApp
         key={`${id}:${branchId}`}
         designId={id}

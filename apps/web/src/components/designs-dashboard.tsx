@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useNavigate } from '@tanstack/react-router'
 import {
   EllipsisIcon,
+  FileCode2Icon,
   FilePlus2Icon,
   ListIcon,
   PencilIcon,
@@ -52,6 +53,16 @@ type FilesView = 'grid' | 'list'
 function initialView(): FilesView {
   if (typeof window === 'undefined') return 'grid'
   return window.localStorage.getItem(VIEW_STORAGE_KEY) === 'list' ? 'list' : 'grid'
+}
+
+interface SharedDesign {
+  id: string
+  name: string
+  ownerUserId: string
+  ownerName: string | null
+  ownerEmail: string | null
+  role: 'view' | 'edit'
+  updatedAt: number
 }
 
 function byRecent(left: DesignSummary, right: DesignSummary) {
@@ -231,17 +242,30 @@ export function DesignsDashboard() {
   const [renaming, setRenaming] = useState(false)
   const [deleteTarget, setDeleteTarget] = useState<DesignSummary | null>(null)
   const [deleting, setDeleting] = useState(false)
+  const [shared, setShared] = useState<SharedDesign[]>([])
 
   const loadDesigns = useCallback(async () => {
     setError(null)
     setDesigns(null)
-    try {
-      const found = await orpc.design.list()
-      setDesigns([...found].sort(byRecent))
-    } catch (cause) {
+    // The two lists are independent: somebody whose own plan has lapsed still
+    // reaches the files other people shared with them.
+    const [own, invited] = await Promise.allSettled([
+      orpc.design.list(),
+      orpc.design.listShared(),
+    ])
+    if (own.status === 'fulfilled') {
+      setDesigns([...own.value].sort(byRecent))
+    } else {
       setDesigns([])
-      setError(cause instanceof Error ? cause.message : 'Your files could not be loaded')
+      if (invited.status !== 'fulfilled' || invited.value.length === 0) {
+        setError(
+          own.reason instanceof Error
+            ? own.reason.message
+            : 'Your files could not be loaded',
+        )
+      }
     }
+    setShared(invited.status === 'fulfilled' ? invited.value : [])
   }, [])
 
   useEffect(() => {
@@ -434,6 +458,38 @@ export function DesignsDashboard() {
               <XIcon />
             </Button>
           </div>
+        ) : null}
+
+        {shared.length > 0 ? (
+          <section className="px-4 pt-4 md:px-4">
+            <h2 className="mb-2 px-0.5 text-xs font-medium text-muted-foreground">
+              Shared with me
+            </h2>
+            <div className="overflow-hidden rounded-lg bg-surface shadow-panel">
+              {shared.map((entry) => (
+                <Link
+                  key={`${entry.ownerUserId}:${entry.id}`}
+                  to="/design/$id"
+                  params={{ id: entry.id }}
+                  className="flex items-center gap-3 border-b border-line px-3 py-2.5 last:border-b-0 hover:bg-accent/50"
+                >
+                  <FileCode2Icon className="size-4 shrink-0 text-muted-foreground" />
+                  <span className="min-w-0 flex-1 truncate text-sm">
+                    {entry.name}
+                  </span>
+                  <span className="hidden shrink-0 text-xs text-muted-foreground sm:block">
+                    {entry.ownerName || entry.ownerEmail}
+                  </span>
+                  <span className="shrink-0 rounded border border-line px-1.5 py-0.5 text-2xs text-muted-foreground">
+                    {entry.role === 'edit' ? 'Can edit' : 'Can view'}
+                  </span>
+                  <span className="hidden shrink-0 text-xs text-muted-foreground md:block">
+                    {relativeTime(entry.updatedAt)}
+                  </span>
+                </Link>
+              ))}
+            </div>
+          </section>
         ) : null}
 
         <div className="min-h-0 flex-1 px-4 pt-4 pb-8 md:px-4">

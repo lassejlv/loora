@@ -48,6 +48,11 @@ const STORE_NAME = 'pending-transactions'
 const REALTIME_CONNECTED_REFRESH_MS = 5 * 60_000
 const REALTIME_DISCONNECTED_REFRESH_MS = 15_000
 const REALTIME_RETRY_MAX_MS = 30_000
+/** A pointer moves at frame rate; the wire does not have to. */
+const PRESENCE_THROTTLE_MS = 80
+const PRESENCE_HEARTBEAT_MS = 20_000
+/** Matches the server's expiry, so a tab that died stops being drawn. */
+const PRESENCE_TTL_MS = 45_000
 
 function targetKey(target: CanvasSyncTarget) {
   return `${target.designId}:${target.draftId ?? 'main'}`
@@ -100,6 +105,18 @@ export function applyAcknowledgedTransactions(
   return document
 }
 
+export interface CanvasPeer {
+  sessionId: string
+  userId: string
+  name: string
+  image: string | null
+  color: string
+  role: 'owner' | 'edit' | 'view'
+  cursor: { x: number; y: number } | null
+  selection: string[]
+  updatedAt: number
+}
+
 type CanvasRealtimeMessage =
   | {
       type: 'canvas.changed'
@@ -112,6 +129,38 @@ type CanvasRealtimeMessage =
       activity: CanvasAgentActivity | null
       sentAt: number
     }
+  | {
+      type: 'presence.peer'
+      sessionId: string
+      peer: CanvasPeer | null
+      sentAt: number
+    }
+  | {
+      type: 'presence.state'
+      peers: CanvasPeer[]
+      sentAt: number
+    }
+
+function isPeer(value: unknown): value is CanvasPeer {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false
+  const peer = value as Record<string, unknown>
+  return (
+    typeof peer.sessionId === 'string' &&
+    typeof peer.userId === 'string' &&
+    typeof peer.name === 'string' &&
+    (peer.image === null || typeof peer.image === 'string') &&
+    typeof peer.color === 'string' &&
+    (peer.role === 'owner' || peer.role === 'edit' || peer.role === 'view') &&
+    (peer.cursor === null ||
+      (!!peer.cursor &&
+        typeof peer.cursor === 'object' &&
+        Number.isFinite((peer.cursor as Record<string, unknown>).x) &&
+        Number.isFinite((peer.cursor as Record<string, unknown>).y))) &&
+    Array.isArray(peer.selection) &&
+    peer.selection.every((id) => typeof id === 'string') &&
+    Number.isFinite(peer.updatedAt)
+  )
+}
 
 export function parseCanvasRealtimeMessage(
   value: string,
@@ -133,6 +182,20 @@ export function parseCanvasRealtimeMessage(
     Number(event.revision) >= 0 &&
     Array.isArray(event.nodeIds) &&
     event.nodeIds.every((id) => typeof id === 'string')
+  ) {
+    return parsed as CanvasRealtimeMessage
+  }
+  if (
+    event.type === 'presence.peer' &&
+    typeof event.sessionId === 'string' &&
+    (event.peer === null || isPeer(event.peer))
+  ) {
+    return parsed as CanvasRealtimeMessage
+  }
+  if (
+    event.type === 'presence.state' &&
+    Array.isArray(event.peers) &&
+    event.peers.every(isPeer)
   ) {
     return parsed as CanvasRealtimeMessage
   }
@@ -240,6 +303,7 @@ export class CanvasSyncController {
   #remoteChange: CanvasRemoteChange | null = null
   #remoteChangeSequence = 0
   #listeners = new Set<Listener>()
+  #presenceListeners = new Set<Listener>()
   #timer: ReturnType<typeof setTimeout> | null = null
   #refreshTimer: ReturnType<typeof setTimeout> | null = null
   #activityTimer: ReturnType<typeof setTimeout> | null = null
@@ -251,6 +315,17 @@ export class CanvasSyncController {
   #flushing: Promise<void> | null = null
   #refreshing: Promise<void> | null = null
   #closed = false
+  readonly #sessionId = crypto.randomUUID()
+  #peers = new Map<string, CanvasPeer>()
+  #peerList: CanvasPeer[] = []
+  #presence: { cursor: { x: number; y: number } | null; selection: string[] } = {
+    cursor: null,
+    selection: [],
+  }
+  #presenceSentAt = 0
+  #presenceTimer: ReturnType<typeof setTimeout> | null = null
+  #presenceHeartbeat: ReturnType<typeof setInterval> | null = null
+  #presenceExpiry: ReturnType<typeof setInterval> | null = null
 
   private constructor(
     target: CanvasSyncTarget,
@@ -296,6 +371,7 @@ export class CanvasSyncController {
     }
     controller.#connectRealtime()
     controller.#scheduleRefresh(0)
+    controller.#startPresence()
     return controller
   }
 
@@ -323,10 +399,151 @@ export class CanvasSyncController {
     return this.#remoteChange
   }
 
+  /**
+   * Everyone else in this document, most recently active first. The array is
+   * rebuilt only when the room actually changes: this feeds
+   * `useSyncExternalStore`, which compares snapshots by reference, so returning
+   * a fresh array on every read makes React re-render until it gives up with
+   * "Maximum update depth exceeded".
+   */
+  get peers() {
+    return this.#peerList
+  }
+
+  #rebuildPeerList() {
+    this.#peerList = [...this.#peers.values()].sort(
+      (left, right) => right.updatedAt - left.updatedAt,
+    )
+  }
+
+  /**
+   * Reports where this person is pointing and what they have selected. Called
+   * on every pointer move, so it coalesces: one request per throttle window,
+   * with the last position sent on the trailing edge.
+   */
+  publishPresence(
+    presence: Partial<{
+      cursor: { x: number; y: number } | null
+      selection: string[]
+    }>,
+  ) {
+    if (this.#closed) return
+    const next = {
+      cursor:
+        presence.cursor === undefined
+          ? this.#presence.cursor
+          : presence.cursor === null
+            ? null
+            : {
+                x: Math.round(presence.cursor.x),
+                y: Math.round(presence.cursor.y),
+              },
+      selection: presence.selection ?? this.#presence.selection,
+    }
+    if (
+      next.cursor?.x === this.#presence.cursor?.x &&
+      next.cursor?.y === this.#presence.cursor?.y &&
+      (next.cursor === null) === (this.#presence.cursor === null) &&
+      next.selection.join('\u0000') ===
+        this.#presence.selection.join('\u0000')
+    ) {
+      return
+    }
+    this.#presence = next
+    const elapsed = Date.now() - this.#presenceSentAt
+    if (elapsed >= PRESENCE_THROTTLE_MS) {
+      void this.#sendPresence()
+      return
+    }
+    if (this.#presenceTimer) return
+    this.#presenceTimer = setTimeout(() => {
+      this.#presenceTimer = null
+      void this.#sendPresence()
+    }, PRESENCE_THROTTLE_MS - elapsed)
+  }
+
+  async #sendPresence(leaving = false) {
+    if (this.#closed && !leaving) return
+    this.#presenceSentAt = Date.now()
+    const body = JSON.stringify({
+      designId: this.target.designId,
+      draftId: this.target.draftId,
+      sessionId: this.#sessionId,
+      cursor: this.#presence.cursor,
+      selection: this.#presence.selection,
+      ...(leaving ? { leaving: true } : {}),
+    })
+    try {
+      await fetch('/api/canvas-presence', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body,
+        keepalive: leaving,
+      })
+    } catch {
+      // Presence is decoration; losing a frame of it changes nothing.
+    }
+  }
+
+  #startPresence() {
+    if (this.#presenceHeartbeat || this.#closed) return
+    this.#presenceHeartbeat = setInterval(() => {
+      void this.#sendPresence()
+    }, PRESENCE_HEARTBEAT_MS)
+    this.#presenceExpiry = setInterval(() => {
+      const cutoff = Date.now() - PRESENCE_TTL_MS
+      let dropped = false
+      for (const [sessionId, peer] of this.#peers) {
+        if (peer.updatedAt >= cutoff) continue
+        this.#peers.delete(sessionId)
+        dropped = true
+      }
+      if (dropped) {
+        this.#rebuildPeerList()
+        this.#emitPresence()
+      }
+    }, 10_000)
+    void this.#sendPresence()
+  }
+
+  #stopPresence() {
+    if (this.#presenceHeartbeat) clearInterval(this.#presenceHeartbeat)
+    if (this.#presenceExpiry) clearInterval(this.#presenceExpiry)
+    if (this.#presenceTimer) clearTimeout(this.#presenceTimer)
+    this.#presenceHeartbeat = null
+    this.#presenceExpiry = null
+    this.#presenceTimer = null
+  }
+
+  #setPeers(peers: CanvasPeer[]) {
+    let changed = false
+    for (const peer of peers) {
+      if (peer.sessionId === this.#sessionId) continue
+      this.#peers.set(peer.sessionId, peer)
+      changed = true
+    }
+    if (changed) {
+      this.#rebuildPeerList()
+      this.#emitPresence()
+    }
+  }
+
   subscribe = (listener: Listener) => {
     this.#listeners.add(listener)
     return () => {
       this.#listeners.delete(listener)
+    }
+  }
+
+  /**
+   * Presence has its own listeners on purpose. Cursors arrive many times a
+   * second, and waking every panel in the app for each one made the editor
+   * unusable — only the overlay and the face pile need to hear about them.
+   */
+  subscribePresence = (listener: Listener) => {
+    this.#presenceListeners.add(listener)
+    return () => {
+      this.#presenceListeners.delete(listener)
     }
   }
 
@@ -371,6 +588,8 @@ export class CanvasSyncController {
     if (this.#refreshTimer) clearTimeout(this.#refreshTimer)
     if (this.#activityTimer) clearTimeout(this.#activityTimer)
     if (this.#realtimeRetryTimer) clearTimeout(this.#realtimeRetryTimer)
+    this.#stopPresence()
+    void this.#sendPresence(true)
     this.#disconnectRealtime()
     await this.flush()
     this.#closed = true
@@ -613,6 +832,7 @@ export class CanvasSyncController {
 
   #realtimeReady = () => {
     this.#scheduleRefresh(0)
+    void this.#sendPresence()
   }
 
   #realtimeCanvas = (message: Event) => {
@@ -621,6 +841,19 @@ export class CanvasSyncController {
     if (!event) return
     if (event.type === 'agent.activity') {
       this.#setAgentActivity(event.activity)
+      return
+    }
+    if (event.type === 'presence.state') {
+      this.#setPeers(event.peers)
+      return
+    }
+    if (event.type === 'presence.peer') {
+      if (event.sessionId === this.#sessionId) return
+      if (event.peer) this.#setPeers([event.peer])
+      else if (this.#peers.delete(event.sessionId)) {
+        this.#rebuildPeerList()
+        this.#emitPresence()
+      }
       return
     }
     this.#announcedRevision = Math.max(
@@ -715,6 +948,7 @@ export class CanvasSyncController {
 
   #pageHide = () => {
     void writePending(targetKey(this.target), this.#pending)
+    void this.#sendPresence(true)
     void this.flush()
   }
 
@@ -727,5 +961,9 @@ export class CanvasSyncController {
 
   #emit() {
     for (const listener of this.#listeners) listener()
+  }
+
+  #emitPresence() {
+    for (const listener of this.#presenceListeners) listener()
   }
 }

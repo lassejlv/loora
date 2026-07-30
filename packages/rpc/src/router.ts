@@ -20,6 +20,7 @@ import {
   design,
   designDraft,
   designGithubRepository,
+  designShare,
   designVersion,
   oauthAccessToken,
   oauthApplication,
@@ -47,6 +48,16 @@ import {
   type CanvasMergeResolutions,
 } from '@loora/canvas/merge'
 import { EMPTY_SHORTCUT_CONFIG } from '@loora/db/shortcuts'
+import {
+  allows,
+  claimDesignShares,
+  isEmail,
+  listDesignCollaborators,
+  listSharedDesigns,
+  normalizeEmail,
+  resolveDesignAccess,
+  type DesignRole,
+} from '@loora/db/design-access'
 import { getCanvasAgentActivity } from '@loora/db/canvas-agent-activity'
 import { publishCanvasRealtimeEvent } from '@loora/db/canvas-realtime'
 import { canvasTransactionPruneBefore } from '@loora/db/canvas-transactions'
@@ -223,6 +234,41 @@ function documentDiff(
 
 // Chats and versions can arrive before the debounced design save; make sure
 // the parent row exists so their FKs hold. The real save upserts over this.
+/**
+ * A design id on its own does not say whose design it is — designs are keyed by
+ * (id, ownerUserId) — so every design-scoped call resolves the viewer's standing
+ * before it touches a row. Owners are still held to the plan their designs are
+ * billed under; someone working in a design shared with them rides the owner's.
+ */
+async function requireDesignAccess(
+  viewer: { id: string; email: string } & Record<string, unknown>,
+  designId: string,
+  required: DesignRole = 'view',
+) {
+  const access = await resolveDesignAccess(designId, {
+    id: viewer.id,
+    email: viewer.email,
+  })
+  if (!access) throw new ORPCError('NOT_FOUND')
+  if (access.role === 'owner') {
+    if (!canUseApp(viewer as Parameters<typeof canUseApp>[0])) {
+      throw new ORPCError('FORBIDDEN', { message: 'Preview access is required.' })
+    }
+    if (
+      !(await authorizeBilling(viewer as Parameters<typeof authorizeBilling>[0]))
+        .access
+    ) {
+      throw new ORPCError('FORBIDDEN', { message: 'An active Loora plan is required.' })
+    }
+  }
+  if (!allows(access.role, required)) {
+    throw new ORPCError('FORBIDDEN', {
+      message: 'You have view-only access to this design.',
+    })
+  }
+  return access
+}
+
 async function ensureDesign(designId: string, userId: string) {
   await db
     .insert(design)
@@ -335,6 +381,186 @@ const deleteDesign = protectedProcedure
     return { deleted: deleted.length > 0 }
   })
 
+const designIdInput = z.object({ designId: z.string().min(1).max(128) })
+
+const shareRoleInput = z.enum(['view', 'edit'])
+
+/** What the share dialog renders: link mode, everyone invited, and my standing. */
+const getDesignShare = consentedProcedure
+  .input(designIdInput)
+  .handler(async ({ context, input }) => {
+    // Opening the design is what turns an invitation addressed to an email
+    // into a grant held by an account.
+    await claimDesignShares({ id: context.user.id, email: context.user.email })
+    const access = await requireDesignAccess(context.user, input.designId)
+    const collaborators =
+      access.role === 'owner'
+        ? await listDesignCollaborators(input.designId, access.ownerUserId)
+        : []
+    const [owner] = await db
+      .select({ id: user.id, name: user.name, email: user.email, image: user.image })
+      .from(user)
+      .where(eq(user.id, access.ownerUserId))
+      .limit(1)
+    return {
+      role: access.role,
+      source: access.source,
+      linkAccess: access.linkAccess,
+      owner: owner ?? null,
+      collaborators: collaborators.map((collaborator) => ({
+        ...collaborator,
+        acceptedAt: collaborator.acceptedAt?.getTime() ?? null,
+        createdAt: collaborator.createdAt.getTime(),
+      })),
+    }
+  })
+
+const setDesignLinkAccess = consentedProcedure
+  .input(
+    designIdInput.extend({
+      linkAccess: z.enum(['restricted', 'view', 'edit']),
+    }),
+  )
+  .handler(async ({ context, input }) => {
+    const access = await requireDesignAccess(context.user, input.designId, 'owner')
+    await db
+      .update(design)
+      .set({ linkAccess: input.linkAccess })
+      .where(
+        and(
+          eq(design.id, input.designId),
+          eq(design.userId, access.ownerUserId),
+        ),
+      )
+    return { linkAccess: input.linkAccess }
+  })
+
+const inviteDesignCollaborator = consentedProcedure
+  .input(
+    designIdInput.extend({
+      email: z.string().trim().min(3).max(320),
+      role: shareRoleInput,
+    }),
+  )
+  .handler(async ({ context, input }) => {
+    const access = await requireDesignAccess(context.user, input.designId, 'owner')
+    const email = normalizeEmail(input.email)
+    if (!isEmail(email)) {
+      throw new ORPCError('BAD_REQUEST', { message: 'Enter a valid email address.' })
+    }
+    if (email === normalizeEmail(context.user.email)) {
+      throw new ORPCError('BAD_REQUEST', { message: 'You already own this design.' })
+    }
+    const existing = await listDesignCollaborators(
+      input.designId,
+      access.ownerUserId,
+    )
+    if (
+      existing.length >= 100 &&
+      !existing.some((collaborator) => collaborator.email === email)
+    ) {
+      throw new ORPCError('BAD_REQUEST', {
+        message: 'A design can be shared with at most 100 people.',
+      })
+    }
+    // An invitation may be written before that person has an account, so the
+    // account is looked up opportunistically and filled in on their first visit
+    // otherwise.
+    const [account] = await db
+      .select({ id: user.id })
+      .from(user)
+      .where(eq(user.email, email))
+      .limit(1)
+    await db
+      .insert(designShare)
+      .values({
+        id: crypto.randomUUID(),
+        designId: input.designId,
+        ownerUserId: access.ownerUserId,
+        email,
+        role: input.role,
+        invitedByUserId: context.user.id,
+        userId: account?.id ?? null,
+      })
+      .onConflictDoUpdate({
+        target: [designShare.designId, designShare.ownerUserId, designShare.email],
+        set: { role: input.role, updatedAt: new Date() },
+      })
+    return { email, role: input.role }
+  })
+
+const setDesignCollaboratorRole = consentedProcedure
+  .input(designIdInput.extend({ shareId: z.string().min(1).max(128), role: shareRoleInput }))
+  .handler(async ({ context, input }) => {
+    const access = await requireDesignAccess(context.user, input.designId, 'owner')
+    const [updated] = await db
+      .update(designShare)
+      .set({ role: input.role })
+      .where(
+        and(
+          eq(designShare.id, input.shareId),
+          eq(designShare.designId, input.designId),
+          eq(designShare.ownerUserId, access.ownerUserId),
+        ),
+      )
+      .returning({ id: designShare.id })
+    if (!updated) throw new ORPCError('NOT_FOUND')
+    return { id: updated.id, role: input.role }
+  })
+
+const revokeDesignCollaborator = consentedProcedure
+  .input(designIdInput.extend({ shareId: z.string().min(1).max(128) }))
+  .handler(async ({ context, input }) => {
+    const access = await requireDesignAccess(context.user, input.designId, 'owner')
+    const removed = await db
+      .delete(designShare)
+      .where(
+        and(
+          eq(designShare.id, input.shareId),
+          eq(designShare.designId, input.designId),
+          eq(designShare.ownerUserId, access.ownerUserId),
+        ),
+      )
+      .returning({ id: designShare.id })
+    return { revoked: removed.length > 0 }
+  })
+
+/** Removes yourself from a design somebody else shared with you. */
+const leaveDesignShare = consentedProcedure
+  .input(designIdInput)
+  .handler(async ({ context, input }) => {
+    const access = await requireDesignAccess(context.user, input.designId)
+    if (access.role === 'owner') {
+      throw new ORPCError('BAD_REQUEST', { message: 'The owner cannot leave a design.' })
+    }
+    const removed = await db
+      .delete(designShare)
+      .where(
+        and(
+          eq(designShare.designId, input.designId),
+          eq(designShare.ownerUserId, access.ownerUserId),
+          or(
+            eq(designShare.userId, context.user.id),
+            eq(designShare.email, normalizeEmail(context.user.email)),
+          ),
+        ),
+      )
+      .returning({ id: designShare.id })
+    return { left: removed.length > 0 }
+  })
+
+const listDesignsSharedWithMe = consentedProcedure.handler(async ({ context }) => {
+  await claimDesignShares({ id: context.user.id, email: context.user.email })
+  const designs = await listSharedDesigns({
+    id: context.user.id,
+    email: context.user.email,
+  })
+  return designs.map((entry) => ({
+    ...entry,
+    updatedAt: entry.updatedAt.getTime(),
+  }))
+})
+
 const canvasTargetKey = (draftId: string | null | undefined) =>
   draftId ? `draft:${draftId}` : 'main'
 
@@ -405,7 +631,7 @@ const createCanvasDesign = protectedProcedure
     }
   })
 
-const renameCanvasDesign = protectedProcedure
+const renameCanvasDesign = consentedProcedure
   .input(
     z.object({
       designId: z.string().min(1).max(128),
@@ -414,6 +640,11 @@ const renameCanvasDesign = protectedProcedure
     }),
   )
   .handler(async ({ context, input }) => {
+    const access = await requireDesignAccess(
+      context.user,
+      input.designId,
+      'edit',
+    )
     const [target] = await db
       .select({
         document: design.canvasDocument,
@@ -421,7 +652,7 @@ const renameCanvasDesign = protectedProcedure
         revision: design.revision,
       })
       .from(design)
-      .where(and(eq(design.id, input.designId), eq(design.userId, context.user.id)))
+      .where(and(eq(design.id, input.designId), eq(design.userId, access.ownerUserId)))
       .limit(1)
     if (!target) throw new ORPCError('NOT_FOUND')
     if (target.version !== CANVAS_SCHEMA_VERSION || !target.document) {
@@ -449,7 +680,7 @@ const renameCanvasDesign = protectedProcedure
       .where(
         and(
           eq(design.id, input.designId),
-          eq(design.userId, context.user.id),
+          eq(design.userId, access.ownerUserId),
           eq(design.revision, target.revision),
         ),
       )
@@ -526,13 +757,19 @@ async function canvasTargetSnapshot(
         .then((rows) => rows[0] ?? null)
 }
 
-const getCanvas = protectedProcedure
+const getCanvas = consentedProcedure
   .input(
     canvasTargetInput.extend({
       sinceRevision: z.number().int().nonnegative().optional(),
     }),
   )
   .handler(async ({ context, input }) => {
+    // Rows belong to the owner, whoever is reading them.
+    const access = await requireDesignAccess(
+      context.user,
+      input.designId,
+      'view',
+    )
     const targetPromise =
       input.sinceRevision === undefined
         ? input.draftId
@@ -547,7 +784,7 @@ const getCanvas = protectedProcedure
                 and(
                   eq(designDraft.id, input.draftId),
                   eq(designDraft.designId, input.designId),
-                  eq(designDraft.userId, context.user.id),
+                  eq(designDraft.userId, access.ownerUserId),
                 ),
               )
               .limit(1)
@@ -562,7 +799,7 @@ const getCanvas = protectedProcedure
               .where(
                 and(
                   eq(design.id, input.designId),
-                  eq(design.userId, context.user.id),
+                  eq(design.userId, access.ownerUserId),
                 ),
               )
               .limit(1)
@@ -578,7 +815,7 @@ const getCanvas = protectedProcedure
                 and(
                   eq(designDraft.id, input.draftId),
                   eq(designDraft.designId, input.designId),
-                  eq(designDraft.userId, context.user.id),
+                  eq(designDraft.userId, access.ownerUserId),
                 ),
               )
               .limit(1)
@@ -592,14 +829,14 @@ const getCanvas = protectedProcedure
               .where(
                 and(
                   eq(design.id, input.designId),
-                  eq(design.userId, context.user.id),
+                  eq(design.userId, access.ownerUserId),
                 ),
               )
               .limit(1)
               .then((rows) => rows[0])
     const [target, activity] = await Promise.all([
       targetPromise,
-      getCanvasAgentActivity(context.user.id, input),
+      getCanvasAgentActivity(access.ownerUserId, input),
     ])
     if (!target) throw new ORPCError('NOT_FOUND')
     if (target.version !== CANVAS_SCHEMA_VERSION) {
@@ -638,7 +875,7 @@ const getCanvas = protectedProcedure
       }
     }
     const intervening = await canvasInterveningTransactions(
-      context.user.id,
+      access.ownerUserId,
       input.designId,
       input.draftId,
       input.sinceRevision,
@@ -651,7 +888,7 @@ const getCanvas = protectedProcedure
     const snapshot = complete
       ? null
       : await canvasTargetSnapshot(
-          context.user.id,
+          access.ownerUserId,
           input.designId,
           input.draftId,
         )
@@ -681,7 +918,7 @@ const getCanvas = protectedProcedure
     }
   })
 
-const applyCanvasTransactions = protectedProcedure
+const applyCanvasTransactions = consentedProcedure
   .input(
     canvasTargetInput.extend({
       expectedRevision: z.number().int().nonnegative(),
@@ -689,6 +926,12 @@ const applyCanvasTransactions = protectedProcedure
     }),
   )
   .handler(async ({ context, input }) => {
+    // Writes land on the owner's rows, and only an editor may make them.
+    const access = await requireDesignAccess(
+      context.user,
+      input.designId,
+      'edit',
+    )
     const transactions = input.transactions.map(parseCanvasTransaction)
     if (
       new Set(transactions.map((transaction) => transaction.id)).size !==
@@ -704,7 +947,7 @@ const applyCanvasTransactions = protectedProcedure
         .from(canvasTransactionLog)
         .where(
           and(
-            eq(canvasTransactionLog.userId, context.user.id),
+            eq(canvasTransactionLog.userId, access.ownerUserId),
             eq(canvasTransactionLog.designId, input.designId),
             eq(canvasTransactionLog.targetKey, canvasTargetKey(input.draftId)),
             inArray(
@@ -730,7 +973,7 @@ const applyCanvasTransactions = protectedProcedure
               and(
                 eq(designDraft.id, input.draftId),
                 eq(designDraft.designId, input.designId),
-                eq(designDraft.userId, context.user.id),
+                eq(designDraft.userId, access.ownerUserId),
               ),
             )
             .limit(1)
@@ -742,7 +985,7 @@ const applyCanvasTransactions = protectedProcedure
               revision: design.revision,
             })
             .from(design)
-            .where(and(eq(design.id, input.designId), eq(design.userId, context.user.id)))
+            .where(and(eq(design.id, input.designId), eq(design.userId, access.ownerUserId)))
             .limit(1)
             .then((rows) => rows[0])
       if (!target) throw new ORPCError('NOT_FOUND')
@@ -766,7 +1009,7 @@ const applyCanvasTransactions = protectedProcedure
       }
       if (target.revision !== input.expectedRevision) {
         const intervening = await canvasInterveningTransactions(
-          context.user.id,
+          access.ownerUserId,
           input.designId,
           input.draftId,
           input.expectedRevision,
@@ -831,7 +1074,7 @@ const applyCanvasTransactions = protectedProcedure
               and(
                 eq(designDraft.id, input.draftId),
                 eq(designDraft.designId, input.designId),
-                eq(designDraft.userId, context.user.id),
+                eq(designDraft.userId, access.ownerUserId),
                 eq(designDraft.status, 'active'),
                 eq(designDraft.revision, target.revision),
               ),
@@ -848,7 +1091,7 @@ const applyCanvasTransactions = protectedProcedure
             .where(
               and(
                 eq(design.id, input.designId),
-                eq(design.userId, context.user.id),
+                eq(design.userId, access.ownerUserId),
                 eq(design.revision, target.revision),
               ),
             )
@@ -865,7 +1108,7 @@ const applyCanvasTransactions = protectedProcedure
                 and(
                   eq(designDraft.id, input.draftId),
                   eq(designDraft.designId, input.designId),
-                  eq(designDraft.userId, context.user.id),
+                  eq(designDraft.userId, access.ownerUserId),
                 ),
               )
               .limit(1)
@@ -879,7 +1122,7 @@ const applyCanvasTransactions = protectedProcedure
               .where(
                 and(
                   eq(design.id, input.designId),
-                  eq(design.userId, context.user.id),
+                  eq(design.userId, access.ownerUserId),
                 ),
               )
               .limit(1)
@@ -899,7 +1142,8 @@ const applyCanvasTransactions = protectedProcedure
         await tx.insert(canvasTransactionLog).values(
           appliedTransactions.map((transaction, index) => ({
             designId: input.designId,
-            userId: context.user.id,
+            userId: access.ownerUserId,
+            authorUserId: context.user.id,
             targetKey: canvasTargetKey(input.draftId),
             transactionId: transaction.id,
             baseRevision: target.revision + index,
@@ -916,7 +1160,7 @@ const applyCanvasTransactions = protectedProcedure
             .delete(canvasTransactionLog)
             .where(
               and(
-                eq(canvasTransactionLog.userId, context.user.id),
+                eq(canvasTransactionLog.userId, access.ownerUserId),
                 eq(canvasTransactionLog.designId, input.designId),
                 eq(
                   canvasTransactionLog.targetKey,
@@ -940,7 +1184,7 @@ const applyCanvasTransactions = protectedProcedure
       }
     })
     if (result.applied && !result.idempotent) {
-      void publishCanvasRealtimeEvent(context.user.id, input, {
+      void publishCanvasRealtimeEvent(access.ownerUserId, input, {
         type: 'canvas.changed',
         revision: result.revision,
         nodeIds: result.changedNodeIds,
@@ -2491,9 +2735,18 @@ export const appRouter = {
   },
   design: {
     list: listDesigns,
+    listShared: listDesignsSharedWithMe,
     get: getDesign,
     save: saveDesign,
     delete: deleteDesign,
+  },
+  share: {
+    get: getDesignShare,
+    setLinkAccess: setDesignLinkAccess,
+    invite: inviteDesignCollaborator,
+    setRole: setDesignCollaboratorRole,
+    revoke: revokeDesignCollaborator,
+    leave: leaveDesignShare,
   },
   canvas: {
     create: createCanvasDesign,

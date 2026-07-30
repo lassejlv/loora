@@ -14,6 +14,24 @@ export interface CanvasRealtimeActivity {
   expiresAt: number
 }
 
+/**
+ * Somebody else looking at the same document. Identity is filled in on the
+ * server from the session; a client only ever supplies where its pointer is and
+ * what it has selected, so a peer cannot claim to be another person.
+ */
+export interface CanvasPresencePeer {
+  sessionId: string
+  userId: string
+  name: string
+  image: string | null
+  color: string
+  role: 'owner' | 'edit' | 'view'
+  /** Scene coordinates, so every viewer places it under their own camera. */
+  cursor: { x: number; y: number } | null
+  selection: string[]
+  updatedAt: number
+}
+
 export type CanvasRealtimeEvent =
   | {
       type: 'canvas.changed'
@@ -26,10 +44,23 @@ export type CanvasRealtimeEvent =
       activity: CanvasRealtimeActivity | null
       sentAt: number
     }
+  | {
+      type: 'presence.peer'
+      sessionId: string
+      peer: CanvasPresencePeer | null
+      sentAt: number
+    }
+  | {
+      type: 'presence.state'
+      peers: CanvasPresencePeer[]
+      sentAt: number
+    }
 
 export type CanvasRealtimeEventInput =
   | Omit<Extract<CanvasRealtimeEvent, { type: 'canvas.changed' }>, 'sentAt'>
   | Omit<Extract<CanvasRealtimeEvent, { type: 'agent.activity' }>, 'sentAt'>
+  | Omit<Extract<CanvasRealtimeEvent, { type: 'presence.peer' }>, 'sentAt'>
+  | Omit<Extract<CanvasRealtimeEvent, { type: 'presence.state' }>, 'sentAt'>
 
 export function canvasRealtimeChannel(
   userId: string,
@@ -76,6 +107,33 @@ function activity(value: unknown): value is CanvasRealtimeActivity {
   )
 }
 
+export const MAX_PRESENCE_PEERS = 50
+export const PRESENCE_TTL_MS = 45_000
+
+function presencePeer(value: unknown): value is CanvasPresencePeer {
+  return (
+    record(value) &&
+    typeof value.sessionId === 'string' &&
+    value.sessionId.length > 0 &&
+    value.sessionId.length <= 128 &&
+    typeof value.userId === 'string' &&
+    value.userId.length > 0 &&
+    value.userId.length <= 128 &&
+    typeof value.name === 'string' &&
+    value.name.length <= 200 &&
+    (value.image === null || typeof value.image === 'string') &&
+    typeof value.color === 'string' &&
+    /^#[0-9a-f]{6}$/i.test(value.color) &&
+    (value.role === 'owner' || value.role === 'edit' || value.role === 'view') &&
+    (value.cursor === null ||
+      (record(value.cursor) &&
+        Number.isFinite(value.cursor.x) &&
+        Number.isFinite(value.cursor.y))) &&
+    nodeIds(value.selection) &&
+    Number.isFinite(value.updatedAt)
+  )
+}
+
 export function parseCanvasRealtimeEvent(
   value: string,
 ): CanvasRealtimeEvent | null {
@@ -103,6 +161,23 @@ export function parseCanvasRealtimeEvent(
   if (
     parsed.type === 'agent.activity' &&
     (parsed.activity === null || activity(parsed.activity))
+  ) {
+    return parsed as unknown as CanvasRealtimeEvent
+  }
+  if (
+    parsed.type === 'presence.peer' &&
+    typeof parsed.sessionId === 'string' &&
+    parsed.sessionId.length > 0 &&
+    parsed.sessionId.length <= 128 &&
+    (parsed.peer === null || presencePeer(parsed.peer))
+  ) {
+    return parsed as unknown as CanvasRealtimeEvent
+  }
+  if (
+    parsed.type === 'presence.state' &&
+    Array.isArray(parsed.peers) &&
+    parsed.peers.length <= MAX_PRESENCE_PEERS &&
+    parsed.peers.every(presencePeer)
   ) {
     return parsed as unknown as CanvasRealtimeEvent
   }
@@ -177,6 +252,131 @@ export async function publishCanvasRealtimeEvent(
     console.error('[canvas-realtime] Could not publish event')
     return false
   }
+}
+
+function presenceKey(userId: string, target: CanvasRealtimeTarget) {
+  return `${canvasRealtimeChannel(userId, target)}:presence`
+}
+
+function fresh(peer: CanvasPresencePeer, now: number) {
+  return now - peer.updatedAt < PRESENCE_TTL_MS
+}
+
+/**
+ * Everyone currently in the document. Held in Redis rather than in the process
+ * so a second web instance sees the same room, and expired by timestamp on read
+ * so a tab that vanished without a goodbye drops out on its own.
+ */
+export async function readCanvasPresence(
+  userId: string,
+  target: CanvasRealtimeTarget,
+): Promise<CanvasPresencePeer[]> {
+  const url = redisUrl()
+  if (!url) return []
+  try {
+    const client = await connectedPublisher(url)
+    const entries = (await client.send('HGETALL', [
+      presenceKey(userId, target),
+    ])) as unknown
+    const values = Array.isArray(entries)
+      ? entries.filter((_, index) => index % 2 === 1)
+      : Object.values((entries ?? {}) as Record<string, string>)
+    const now = Date.now()
+    const peers: CanvasPresencePeer[] = []
+    for (const value of values) {
+      if (typeof value !== 'string') continue
+      let parsed: unknown
+      try {
+        parsed = JSON.parse(value)
+      } catch {
+        continue
+      }
+      if (presencePeer(parsed) && fresh(parsed, now)) peers.push(parsed)
+    }
+    return peers.slice(0, MAX_PRESENCE_PEERS)
+  } catch {
+    publisher?.close()
+    publisher = null
+    return []
+  }
+}
+
+/** Records where a person is and tells the room, in one round trip each. */
+export async function publishCanvasPresence(
+  userId: string,
+  target: CanvasRealtimeTarget,
+  peer: CanvasPresencePeer,
+) {
+  const url = redisUrl()
+  if (!url) return false
+  const key = presenceKey(userId, target)
+  try {
+    const client = await connectedPublisher(url)
+    await client.send('HSET', [key, peer.sessionId, JSON.stringify(peer)])
+    await client.send('PEXPIRE', [key, String(PRESENCE_TTL_MS * 4)])
+    await client.publish(
+      canvasRealtimeChannel(userId, target),
+      JSON.stringify({
+        type: 'presence.peer',
+        sessionId: peer.sessionId,
+        peer,
+        sentAt: Date.now(),
+      }),
+    )
+    return true
+  } catch {
+    publisher?.close()
+    publisher = null
+    return false
+  }
+}
+
+export async function clearCanvasPresence(
+  userId: string,
+  target: CanvasRealtimeTarget,
+  sessionId: string,
+) {
+  const url = redisUrl()
+  if (!url) return false
+  try {
+    const client = await connectedPublisher(url)
+    await client.send('HDEL', [presenceKey(userId, target), sessionId])
+    await client.publish(
+      canvasRealtimeChannel(userId, target),
+      JSON.stringify({
+        type: 'presence.peer',
+        sessionId,
+        peer: null,
+        sentAt: Date.now(),
+      }),
+    )
+    return true
+  } catch {
+    publisher?.close()
+    publisher = null
+    return false
+  }
+}
+
+/** Stable per person, so the same collaborator keeps the same colour. */
+const PRESENCE_COLORS = [
+  '#6c5ce7',
+  '#e056fd',
+  '#00b894',
+  '#0984e3',
+  '#e17055',
+  '#fdcb6e',
+  '#e84393',
+  '#00cec9',
+]
+
+export function presenceColor(userId: string) {
+  let hash = 2166136261
+  for (let index = 0; index < userId.length; index += 1) {
+    hash ^= userId.charCodeAt(index)
+    hash = Math.imul(hash, 16777619)
+  }
+  return PRESENCE_COLORS[(hash >>> 0) % PRESENCE_COLORS.length]!
 }
 
 export interface CanvasRealtimeSubscription {

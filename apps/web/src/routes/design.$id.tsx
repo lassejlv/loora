@@ -23,7 +23,7 @@ function DesignPage() {
   const { id } = Route.useParams()
 
   return (
-    <AccountGate>
+    <AccountGate designId={id}>
       {/* Remount on switch so the sync controller opens the new target cleanly. */}
       <CanvasApp key={id} designId={id} />
     </AccountGate>

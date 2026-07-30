@@ -11,6 +11,7 @@ import {
   primaryKey,
   text,
   timestamp,
+  uniqueIndex,
 } from 'drizzle-orm/pg-core'
 import type { CanvasDocument } from '@loora/canvas/model'
 import type { CanvasTransaction } from '@loora/canvas/engine'
@@ -118,6 +119,13 @@ export const design = pgTable(
     canvasMigrationLeaseId: text('canvas_migration_lease_id'),
     canvasMigrationLeaseExpiresAt: timestamp('canvas_migration_lease_expires_at'),
     revision: integer('revision').default(0).notNull(),
+    // What the editor URL grants on its own. 'restricted' means the link is a
+    // pointer and nothing more: only the owner and the people in design_share
+    // can open it.
+    linkAccess: text('link_access')
+      .$type<'restricted' | 'view' | 'edit'>()
+      .default('restricted')
+      .notNull(),
     createdAt: timestamp('created_at').defaultNow().notNull(),
     updatedAt: timestamp('updated_at')
       .defaultNow()
@@ -127,6 +135,45 @@ export const design = pgTable(
   (table) => [
     primaryKey({ columns: [table.id, table.userId] }),
     index('design_user_id_idx').on(table.userId),
+  ],
+)
+
+// People the owner has invited to a design, by email. The grant is keyed by
+// email rather than user id so an invitation can be issued before that person
+// has an account; `userId` is filled in the first time they open the design and
+// is what every later lookup uses.
+export const designShare = pgTable(
+  'design_share',
+  {
+    id: text('id').primaryKey(),
+    designId: text('design_id').notNull(),
+    ownerUserId: text('owner_user_id').notNull(),
+    email: text('email').notNull(),
+    role: text('role').$type<'view' | 'edit'>().notNull(),
+    invitedByUserId: text('invited_by_user_id')
+      .notNull()
+      .references(() => user.id, { onDelete: 'cascade' }),
+    userId: text('user_id').references(() => user.id, { onDelete: 'set null' }),
+    acceptedAt: timestamp('accepted_at'),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+    updatedAt: timestamp('updated_at')
+      .defaultNow()
+      .$onUpdate(() => new Date())
+      .notNull(),
+  },
+  (table) => [
+    foreignKey({
+      columns: [table.designId, table.ownerUserId],
+      foreignColumns: [design.id, design.userId],
+      name: 'design_share_design_fk',
+    }).onDelete('cascade'),
+    uniqueIndex('design_share_design_email_idx').on(
+      table.designId,
+      table.ownerUserId,
+      table.email,
+    ),
+    index('design_share_email_idx').on(table.email),
+    index('design_share_user_idx').on(table.userId),
   ],
 )
 
@@ -212,7 +259,10 @@ export const canvasTransaction = pgTable(
   'canvas_transaction',
   {
     designId: text('design_id').notNull(),
+    // The owner, because that is what the design is keyed by. Who actually made
+    // the edit is `authorUserId` — on a shared design those differ.
     userId: text('user_id').notNull(),
+    authorUserId: text('author_user_id'),
     targetKey: text('target_key').notNull(),
     transactionId: text('transaction_id').notNull(),
     baseRevision: integer('base_revision').notNull(),

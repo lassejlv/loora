@@ -19,6 +19,8 @@ import {
   CanvasBranches,
   type CanvasBranchSummary,
 } from './branches'
+import { CanvasPresenceFacePile } from './presence'
+import { ShareDialog } from './share-dialog'
 import {
   CanvasSyncController,
   type CanvasSyncTarget,
@@ -27,6 +29,7 @@ import { createStarterCanvas } from '#/lib/canvas-fixtures'
 import { createDesign, type DesignSummary } from '#/lib/designs'
 import { orpc } from '#/lib/orpc-client'
 import { Button } from '#/components/ui/button'
+import { Share2Icon } from '#/components/icons'
 import { Input } from '#/components/ui/input'
 import {
   Dialog,
@@ -150,6 +153,8 @@ export function CanvasApp({
   const navigate = useNavigate()
   const previewValue = useMemo(previewController, [])
   const [documents, setDocuments] = useState<DesignSummary[]>([])
+  const [shareRole, setShareRole] = useState<'owner' | 'edit' | 'view'>('owner')
+  const [shareOpen, setShareOpen] = useState(false)
   const [activeId, setActiveId] = useState<string | null>(designId ?? null)
   const [activeDraftId, setActiveDraftId] = useState<string | null>(null)
   const [branches, setBranches] = useState<CanvasBranchSummary[]>([])
@@ -226,14 +231,20 @@ export function CanvasApp({
     let cancelled = false
     void (async () => {
       try {
-        const found = await orpc.design.list()
+        const [found, share] = await Promise.all([
+          orpc.design.list().catch(() => [] as DesignSummary[]),
+          orpc.share.get({ designId }).catch(() => null),
+        ])
         if (cancelled) return
         setDocuments(found)
         setActiveId(designId)
-        const foundBranches = await orpc.draft.list({
-          designId,
-          includeArchived: true,
-        })
+        if (share) setShareRole(share.role)
+        const foundBranches =
+          share && share.role !== 'owner'
+            ? []
+            : await orpc.draft
+                .list({ designId, includeArchived: true })
+                .catch(() => [])
         if (cancelled) return
         setBranches(foundBranches)
         const requestedDraft = branchId ?? null
@@ -369,6 +380,7 @@ export function CanvasApp({
         controller={controller}
         name={active?.name ?? controller.engine.document.name}
         readOnly={
+          shareRole === 'view' ||
           activeBranch?.status === 'applied' ||
           activeBranch?.status === 'closed'
         }
@@ -388,17 +400,39 @@ export function CanvasApp({
               onDelete={() => setDeleteOpen(true)}
             />
             <span className="text-muted-foreground/50">/</span>
-            <CanvasBranches
-              designId={activeId}
-              activeDraftId={activeDraftId}
-              controller={controller}
-              branches={branches}
-              onBranchesChange={setBranches}
-              onSwitch={switchTarget}
-            />
+            {shareRole === 'owner' ? (
+              <CanvasBranches
+                designId={activeId}
+                activeDraftId={activeDraftId}
+                controller={controller}
+                branches={branches}
+                onBranchesChange={setBranches}
+                onSwitch={switchTarget}
+              />
+            ) : null}
           </>
         )}
+        topBarEnd={
+          <>
+            <CanvasPresenceFacePile controller={controller} />
+            <Button
+              size="xs"
+              variant={shareRole === 'owner' ? 'outline' : 'ghost'}
+              onClick={() => setShareOpen(true)}
+            >
+              <Share2Icon />
+              {shareRole === 'view' ? 'Viewing' : 'Share'}
+            </Button>
+          </>
+        }
       />
+      {activeId ? (
+        <ShareDialog
+          designId={activeId}
+          open={shareOpen}
+          onOpenChange={setShareOpen}
+        />
+      ) : null}
       <Dialog open={renameOpen} onOpenChange={setRenameOpen}>
         <DialogPopup className="max-w-sm">
           <DialogHeader>

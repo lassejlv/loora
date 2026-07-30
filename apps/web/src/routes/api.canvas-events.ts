@@ -16,11 +16,13 @@ import {
 } from '@loora/billing/billing'
 import { db } from '@loora/db'
 import {
+  readCanvasPresence,
   subscribeCanvasRealtimeEvents,
   type CanvasRealtimeEvent,
   type CanvasRealtimeSubscription,
 } from '@loora/db/canvas-realtime'
-import { design, designDraft } from '@loora/db/schema'
+import { resolveDesignAccess } from '@loora/db/design-access'
+import { designDraft } from '@loora/db/schema'
 
 const encoder = new TextEncoder()
 const eventHeaders = {
@@ -35,29 +37,21 @@ function eventData(event: CanvasRealtimeEvent) {
   return `event: canvas\ndata: ${JSON.stringify(event)}\n\n`
 }
 
-async function ownsTarget(
-  userId: string,
+async function draftExists(
+  ownerUserId: string,
   designId: string,
-  draftId: string | null,
+  draftId: string,
 ) {
-  if (draftId) {
-    return db
-      .select({ id: designDraft.id })
-      .from(designDraft)
-      .where(
-        and(
-          eq(designDraft.id, draftId),
-          eq(designDraft.designId, designId),
-          eq(designDraft.userId, userId),
-        ),
-      )
-      .limit(1)
-      .then((rows) => !!rows[0])
-  }
   return db
-    .select({ id: design.id })
-    .from(design)
-    .where(and(eq(design.id, designId), eq(design.userId, userId)))
+    .select({ id: designDraft.id })
+    .from(designDraft)
+    .where(
+      and(
+        eq(designDraft.id, draftId),
+        eq(designDraft.designId, designId),
+        eq(designDraft.userId, ownerUserId),
+      ),
+    )
     .limit(1)
     .then((rows) => !!rows[0])
 }
@@ -66,10 +60,6 @@ export async function canvasEventsResponse(request: Request) {
   const session = await requireSession(request)
   if (!session) return new Response('Unauthorized', { status: 401 })
   if (!hasAcceptedCurrentLegal(session.user)) return legalConsentRequiredResponse()
-  if (!canUseApp(session.user)) return previewAccessRequiredResponse()
-  if (!(await authorizeBilling(session.user)).access) {
-    return subscriptionRequiredResponse()
-  }
 
   const search = new URL(request.url).searchParams
   const designId = search.get('designId')?.trim() ?? ''
@@ -81,7 +71,21 @@ export async function canvasEventsResponse(request: Request) {
   ) {
     return new Response('Invalid Canvas target', { status: 400 })
   }
-  if (!(await ownsTarget(session.user.id, designId, draftId))) {
+
+  const access = await resolveDesignAccess(designId, {
+    id: session.user.id,
+    email: session.user.email,
+  })
+  if (!access) return new Response('Not found', { status: 404 })
+  // Owners are held to their own plan; a guest in a shared design rides the
+  // owner's, which is what makes an invitation worth anything.
+  if (access.role === 'owner') {
+    if (!canUseApp(session.user)) return previewAccessRequiredResponse()
+    if (!(await authorizeBilling(session.user)).access) {
+      return subscriptionRequiredResponse()
+    }
+  }
+  if (draftId && !(await draftExists(access.ownerUserId, designId, draftId))) {
     return new Response('Not found', { status: 404 })
   }
 
@@ -127,7 +131,7 @@ export async function canvasEventsResponse(request: Request) {
 
   try {
     subscription = await subscribeCanvasRealtimeEvents(
-      session.user.id,
+      access.ownerUserId,
       { designId, draftId },
       push,
       () => {
@@ -160,6 +164,15 @@ export async function canvasEventsResponse(request: Request) {
       controller.enqueue(
         encoder.encode('retry: 5000\nevent: ready\ndata: {}\n\n'),
       )
+      // Whoever is already in the room, so a late arrival sees them without
+      // waiting for each of them to move.
+      void readCanvasPresence(access.ownerUserId, { designId, draftId })
+        .then((peers) => {
+          if (peers.length > 0) {
+            push({ type: 'presence.state', peers, sentAt: Date.now() })
+          }
+        })
+        .catch(() => undefined)
       for (const event of pending.splice(0)) push(event)
       heartbeat = setInterval(() => {
         try {

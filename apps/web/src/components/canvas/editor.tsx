@@ -74,6 +74,7 @@ import {
 } from '@loora/canvas/model'
 import type {
   CanvasAgentActivity,
+  CanvasPeer,
   CanvasRemoteChange,
   CanvasSyncStatus,
   CanvasSyncTarget,
@@ -86,6 +87,10 @@ import type {
 import { CanvasLayersPanel } from './layers-panel'
 import { CanvasPropertiesPanel } from './properties-panel'
 import { CanvasContextMenu } from './canvas-menu'
+import {
+  CanvasCollaboratorPresence,
+  type PresenceCamera,
+} from './presence'
 import { CanvasExport } from './export-panel'
 import { CanvasHistory } from './history'
 import { HtmlImportDialog } from './html-import-dialog'
@@ -227,11 +232,14 @@ export function CanvasEditor({
   controller,
   name,
   topBar,
+  topBarEnd,
   readOnly = false,
 }: {
   controller: CanvasEditorController
   name: string
   topBar?: ReactNode | ((actions: CanvasTopBarActions) => ReactNode)
+  /** Trailing header slot, pushed to the far end away from the breadcrumb. */
+  topBarEnd?: ReactNode
   readOnly?: boolean
 }) {
   return (
@@ -244,6 +252,7 @@ export function CanvasEditor({
         controller={controller}
         name={name}
         topBar={topBar}
+        topBarEnd={topBarEnd}
         readOnly={readOnly}
       />
     </CanvasProvider>
@@ -284,11 +293,13 @@ function CanvasShell({
   controller,
   name,
   topBar,
+  topBarEnd,
   readOnly,
 }: {
   controller: CanvasEditorController
   name: string
   topBar?: ReactNode | ((actions: CanvasTopBarActions) => ReactNode)
+  topBarEnd?: ReactNode
   readOnly: boolean
 }) {
   const isMobile = useIsMobile()
@@ -316,6 +327,8 @@ function CanvasShell({
     [controller.engine],
   )
   const [zoom, setZoom] = useState(0.75)
+  const surfaceRef = useRef<HTMLElement | null>(null)
+  const [camera, setCamera] = useState<PresenceCamera>({ x: 0, y: 0, zoom: 0.75 })
   const [shortcutConfig, setShortcutConfig] = useState<ShortcutConfig>(() =>
     controller.target
       ? loadCachedShortcuts()
@@ -719,7 +732,10 @@ function CanvasShell({
 
   return (
     <div className="relative h-full min-h-0 w-full bg-cx-canvas">
-      <main className="absolute inset-0 overflow-hidden">
+      <main
+        ref={surfaceRef}
+        className="absolute inset-0 overflow-hidden"
+      >
         <CanvasContextMenu
           actions={actions}
           shortcutLabel={shortcutLabel}
@@ -748,16 +764,23 @@ function CanvasShell({
               }
               void uploadDroppedImages([...event.dataTransfer.files], placement)
             }}
-            onCameraChange={(camera) => {
-              setZoom(camera.zoom)
+            onCameraChange={(next) => {
+              setZoom(next.zoom)
+              setCamera(next)
               if (controller.target) {
-                window.localStorage.setItem(cameraKey, JSON.stringify(camera))
+                window.localStorage.setItem(cameraKey, JSON.stringify(next))
               }
             }}
           />
         </CanvasContextMenu>
 
         <CanvasAgentPresence controller={controller} />
+
+        <CanvasCollaboratorPresence
+          controller={controller}
+          camera={camera}
+          surfaceRef={surfaceRef}
+        />
 
         {controller.target ? (
           <CanvasHistory
@@ -870,7 +893,11 @@ function CanvasShell({
               <CanvasSyncIndicator controller={controller} />
             )}
           </div>
-
+          {topBarEnd ? (
+            <div className="ms-auto flex shrink-0 items-center gap-2">
+              {topBarEnd}
+            </div>
+          ) : null}
         </header>
 
         <div className="flex min-h-0 flex-1">
@@ -927,7 +954,14 @@ export interface CanvasEditorController {
   revision?: number
   agentActivity?: CanvasAgentActivity | null
   remoteChange?: CanvasRemoteChange | null
+  peers?: CanvasPeer[]
+  publishPresence?: (presence: {
+    cursor?: { x: number; y: number } | null
+    selection?: string[]
+  }) => void
   subscribe: (listener: () => void) => () => void
+  /** Separate from `subscribe`: cursor updates must not rerender the editor. */
+  subscribePresence?: (listener: () => void) => () => void
   enqueue: (transaction: CanvasTransaction) => void
   flush?: () => Promise<void>
   adoptSnapshot?: (

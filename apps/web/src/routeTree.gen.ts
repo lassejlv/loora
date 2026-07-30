@@ -18,6 +18,7 @@ import { Route as PrivacyRouteImport } from './routes/privacy'
 import { Route as TermsRouteImport } from './routes/terms'
 import { Route as DotwellKnownOauthAuthorizationServerRouteImport } from './routes/[.]well-known.oauth-authorization-server'
 import { Route as ApiCanvasEventsRouteImport } from './routes/api.canvas-events'
+import { Route as ApiCanvasPresenceRouteImport } from './routes/api.canvas-presence'
 import { Route as ApiReadyRouteImport } from './routes/api.ready'
 import { Route as AppIndexRouteImport } from './routes/app.index'
 import { Route as AppAppearanceRouteImport } from './routes/app.appearance'
@@ -81,6 +82,11 @@ const DotwellKnownOauthAuthorizationServerRoute =
 const ApiCanvasEventsRoute = ApiCanvasEventsRouteImport.update({
   id: '/api/canvas-events',
   path: '/api/canvas-events',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiCanvasPresenceRoute = ApiCanvasPresenceRouteImport.update({
+  id: '/api/canvas-presence',
+  path: '/api/canvas-presence',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ApiReadyRoute = ApiReadyRouteImport.update({
@@ -184,6 +190,7 @@ export interface FileRoutesByFullPath {
   '/terms': typeof TermsRoute
   '/.well-known/oauth-authorization-server': typeof DotwellKnownOauthAuthorizationServerRoute
   '/api/canvas-events': typeof ApiCanvasEventsRoute
+  '/api/canvas-presence': typeof ApiCanvasPresenceRoute
   '/api/ready': typeof ApiReadyRoute
   '/app/appearance': typeof AppAppearanceRoute
   '/app/billing': typeof AppBillingRoute
@@ -213,6 +220,7 @@ export interface FileRoutesByTo {
   '/terms': typeof TermsRoute
   '/.well-known/oauth-authorization-server': typeof DotwellKnownOauthAuthorizationServerRoute
   '/api/canvas-events': typeof ApiCanvasEventsRoute
+  '/api/canvas-presence': typeof ApiCanvasPresenceRoute
   '/api/ready': typeof ApiReadyRoute
   '/app/appearance': typeof AppAppearanceRoute
   '/app/billing': typeof AppBillingRoute
@@ -243,6 +251,7 @@ export interface FileRoutesById {
   '/terms': typeof TermsRoute
   '/.well-known/oauth-authorization-server': typeof DotwellKnownOauthAuthorizationServerRoute
   '/api/canvas-events': typeof ApiCanvasEventsRoute
+  '/api/canvas-presence': typeof ApiCanvasPresenceRoute
   '/api/ready': typeof ApiReadyRoute
   '/app/appearance': typeof AppAppearanceRoute
   '/app/billing': typeof AppBillingRoute
@@ -274,6 +283,7 @@ export interface FileRouteTypes {
     | '/terms'
     | '/.well-known/oauth-authorization-server'
     | '/api/canvas-events'
+    | '/api/canvas-presence'
     | '/api/ready'
     | '/app/appearance'
     | '/app/billing'
@@ -303,6 +313,7 @@ export interface FileRouteTypes {
     | '/terms'
     | '/.well-known/oauth-authorization-server'
     | '/api/canvas-events'
+    | '/api/canvas-presence'
     | '/api/ready'
     | '/app/appearance'
     | '/app/billing'
@@ -332,6 +343,7 @@ export interface FileRouteTypes {
     | '/terms'
     | '/.well-known/oauth-authorization-server'
     | '/api/canvas-events'
+    | '/api/canvas-presence'
     | '/api/ready'
     | '/app/appearance'
     | '/app/billing'
@@ -362,6 +374,7 @@ export interface RootRouteChildren {
   TermsRoute: typeof TermsRoute
   DotwellKnownOauthAuthorizationServerRoute: typeof DotwellKnownOauthAuthorizationServerRoute
   ApiCanvasEventsRoute: typeof ApiCanvasEventsRoute
+  ApiCanvasPresenceRoute: typeof ApiCanvasPresenceRoute
   ApiReadyRoute: typeof ApiReadyRoute
   AppAppearanceRoute: typeof AppAppearanceRoute
   AppBillingRoute: typeof AppBillingRoute
@@ -444,6 +457,13 @@ declare module '@tanstack/react-router' {
       path: '/api/canvas-events'
       fullPath: '/api/canvas-events'
       preLoaderRoute: typeof ApiCanvasEventsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/canvas-presence': {
+      id: '/api/canvas-presence'
+      path: '/api/canvas-presence'
+      fullPath: '/api/canvas-presence'
+      preLoaderRoute: typeof ApiCanvasPresenceRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/api/ready': {
@@ -598,6 +618,7 @@ const rootRouteChildren: RootRouteChildren = {
   DotwellKnownOauthAuthorizationServerRoute:
     DotwellKnownOauthAuthorizationServerRoute,
   ApiCanvasEventsRoute: ApiCanvasEventsRoute,
+  ApiCanvasPresenceRoute: ApiCanvasPresenceRoute,
   ApiReadyRoute: ApiReadyRoute,
   AppAppearanceRoute: AppAppearanceRoute,
   AppBillingRoute: AppBillingRoute,

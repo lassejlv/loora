@@ -3,6 +3,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/re
 import { afterEach, beforeEach, describe, expect, mock, test } from 'bun:test'
 
 const list = mock()
+const listShared = mock()
 const deleteDesign = mock()
 const create = mock()
 const rename = mock()
@@ -10,7 +11,7 @@ const getPreferences = mock()
 
 mock.module('#/lib/orpc-client', () => ({
   orpc: {
-    design: { list, delete: deleteDesign },
+    design: { list, listShared, delete: deleteDesign },
     canvas: { create, rename },
     preferences: {
       get: getPreferences,
@@ -75,6 +76,7 @@ describe('DesignsDashboard', () => {
     create.mockReset().mockResolvedValue({ revision: 1 })
     rename.mockReset()
     deleteDesign.mockReset().mockResolvedValue({ deleted: true })
+    listShared.mockReset().mockResolvedValue([])
     list.mockReset().mockResolvedValue([
       { id: 'design-old', name: 'Portfolio Design', revision: 3, updatedAt: Date.now() - 48 * HOUR },
       { id: 'design-new', name: 'Ideal pine', revision: 7, updatedAt: Date.now() - 2 * HOUR },

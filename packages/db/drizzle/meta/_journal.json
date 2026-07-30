@@ -239,6 +239,13 @@
       "when": 1785370574852,
       "tag": "0033_sloppy_george_stacy",
       "breakpoints": true
+    },
+    {
+      "idx": 34,
+      "version": "7",
+      "when": 1785377203380,
+      "tag": "0034_mature_peter_parker",
+      "breakpoints": true
     }
   ]
 }
