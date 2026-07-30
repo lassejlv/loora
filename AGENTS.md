@@ -94,7 +94,7 @@ Legacy helpers remain in `@loora/db/canvas` and `@loora/db/drafts` for rollback 
 
 ### `packages/billing`
 
-Polar grants plan access (Free / Pro / Studio). MCP tool calls are metered weekly via Polar (`packages/billing` mcp-usage); Free includes 200/week and Pro/Studio 1,000,000/week. There are no prepaid AI credits or top-ups. `billingEntitlement` may still carry unused legacy `meterBalance` / `creditedUnits` / `consumedUnits` columns as zeros.
+Polar grants plan access (Free / Pro / Studio). Capacity limits for Free are enforced in product code (`@loora/billing/plan-limits`): 50 design files and 1 open branch per design (`active` or `proposed`). Pro/Studio are unlimited for both. MCP tool calls are metered weekly via Polar (`mcp-usage`); Free includes 200/week and Pro/Studio 1,000,000/week. There are no prepaid AI credits or top-ups. `billingEntitlement` may still carry unused legacy `meterBalance` / `creditedUnits` / `consumedUnits` columns as zeros.
 
 ---
 

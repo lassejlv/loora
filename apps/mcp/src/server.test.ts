@@ -128,7 +128,7 @@ describe('MCP agent workflow', () => {
         reservations += 1
         return usage.reserve()
       },
-    })
+    }, 'free')
     const client = new Client({ name: 'loora-test', version: '1.0.0' })
     const [clientTransport, serverTransport] =
       InMemoryTransport.createLinkedPair()

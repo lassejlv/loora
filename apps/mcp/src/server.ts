@@ -67,6 +67,8 @@ import {
   McpUsageUnavailableError,
   type McpIncludedUsage,
 } from '@loora/billing/mcp-usage'
+import { PlanLimitError } from '@loora/billing/plan-limits'
+import type { LimitsPlan } from '@loora/billing/plan-limits'
 
 export interface McpUsageController {
   current: () => Promise<McpIncludedUsage>
@@ -103,6 +105,20 @@ function fail(error: unknown, usage?: McpIncludedUsage) {
       ],
       isError: true,
       ...usageMeta(error.usage),
+    }
+  }
+  if (error instanceof PlanLimitError) {
+    return {
+      content: [{
+        type: 'text' as const,
+        text: JSON.stringify({
+          error: error.message,
+          code: error.code,
+          limit: error.limit,
+        }),
+      }],
+      isError: true,
+      ...usageMeta(usage),
     }
   }
   if (error instanceof McpUsageUnavailableError) {
@@ -209,6 +225,7 @@ export function exportCanvasCode(
 export function createLooraServer(
   userId: string,
   usage: McpUsageController,
+  plan: LimitsPlan,
 ) {
   const server = new McpServer({ name: 'loora', version: '0.3.0' })
 
@@ -939,7 +956,7 @@ export function createLooraServer(
       },
     },
     tool('createDesign', async ({ name }: { name: string }) =>
-      createDesign(userId, name),
+      createDesign(userId, name, plan),
     ),
   )
 
@@ -993,7 +1010,7 @@ export function createLooraServer(
       },
     },
     tool('createBranch', (args: { designId: string; name: string }) =>
-      createDraft(userId, args.designId, args.name),
+      createDraft(userId, args.designId, args.name, plan),
     ),
   )
 

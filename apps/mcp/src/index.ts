@@ -104,6 +104,7 @@ async function handleMcp(
   const server = createLooraServer(
     userId,
     createMcpUsageController(userId, mcpPlan),
+    mcpPlan,
   )
   const transport = new StreamableHTTPServerTransport({
     sessionIdGenerator: undefined,

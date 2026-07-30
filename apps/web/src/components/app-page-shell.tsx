@@ -7,6 +7,7 @@ import {
   type AppSection,
 } from '#/components/app-navigation'
 import { AppSettingsDialog } from '#/components/settings-dialog'
+import { UpgradeToProButton } from '#/components/upgrade-to-pro'
 import { clearWelcomeSeen } from '#/components/welcome-dialog'
 
 export function AppPageShell({
@@ -43,7 +44,8 @@ export function AppPageShell({
           <span className="text-xs font-semibold tracking-tight">loora</span>
         </Link>
         <AppNavigation active={active} onSettings={() => setSettingsOpen(true)} />
-        <div className="mt-auto border-t border-line p-2">
+        <div className="mt-auto flex flex-col gap-2 border-t border-line p-2">
+          <UpgradeToProButton fullWidth size="sm" />
           <AppAccountMenu
             name={accountName}
             onSettings={() => setSettingsOpen(true)}

@@ -115,7 +115,9 @@ Keep the MCP / handoff tool vocabulary aligned via `@loora/agent/canvas-tools`:
 `readNode`, `readTree`, `searchNodes`, `createComponent`, `createInstance`,
 `setTokens`, `viewNode`, `viewPage`, and `viewCanvas`.
 
-Billing is Polar plan access plus weekly MCP call metering (no prepaid AI credits or top-ups).
+Billing is Polar plan access plus capacity limits: Free is 50 design files and
+1 open branch per design (enforced); Pro is unlimited. MCP tool calls are
+metered weekly (no prepaid AI credits or top-ups).
 
 ## Security and access
 

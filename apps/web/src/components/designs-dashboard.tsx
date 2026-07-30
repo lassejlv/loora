@@ -20,6 +20,7 @@ import {
 } from '#/components/app-navigation'
 import { DesignThumbnail } from '#/components/design-thumbnail'
 import { AppSettingsDialog } from '#/components/settings-dialog'
+import { UpgradeToProButton } from '#/components/upgrade-to-pro'
 import { clearWelcomeSeen } from '#/components/welcome-dialog'
 import { Button } from '#/components/ui/button'
 import {
@@ -381,7 +382,8 @@ export function DesignsDashboard() {
           active="recents"
           onSettings={() => setSettingsOpen(true)}
         />
-        <div className="mt-auto border-t border-line p-2">
+        <div className="mt-auto flex flex-col gap-2 border-t border-line p-2">
+          <UpgradeToProButton fullWidth size="sm" />
           <AppAccountMenu
             name={accountName}
             onSettings={() => setSettingsOpen(true)}

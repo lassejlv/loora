@@ -55,11 +55,24 @@ describe('SubscriptionScreen', () => {
     expect(await screen.findByText('$0')).toBeTruthy()
     expect(await screen.findByText('$20')).toBeTruthy()
     expect(screen.getByText('No card required')).toBeTruthy()
-    expect(screen.getByText('$200 / year')).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Go Pro — $20/month' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Go Pro — $200/year' })).toBeTruthy()
     expect(screen.queryByText('Real editor')).toBeNull()
     fireEvent.click(screen.getByRole('button', { name: 'Start free' }))
     await waitFor(() => expect(checkout).toHaveBeenCalledWith({ plan: 'free' }))
     expect(redirect).toHaveBeenCalledWith('https://polar.sh/checkout/free')
+  })
+
+  test('starts yearly Pro checkout from the plan picker', async () => {
+    const redirect = mock()
+    checkout.mockResolvedValue({ url: 'https://polar.sh/checkout/pro-year' })
+    renderScreen(redirect)
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Go Pro — $200/year' }))
+    await waitFor(() =>
+      expect(checkout).toHaveBeenCalledWith({ plan: 'pro', interval: 'year' }),
+    )
+    expect(redirect).toHaveBeenCalledWith('https://polar.sh/checkout/pro-year')
   })
 
   test('shows the loading shimmer, not the plan picker, while the first check runs', () => {

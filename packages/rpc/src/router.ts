@@ -83,6 +83,11 @@ import {
   McpUsageUnavailableError,
   resolveMcpUsagePlan,
 } from '@loora/billing/mcp-usage'
+import {
+  requireDesignFileRoom,
+  requireOpenBranchRoom,
+} from '@loora/billing/enforce-plan-limits'
+import { PlanLimitError } from '@loora/billing/plan-limits'
 import { canUseApp, isPreviewAccessRequired } from '@loora/auth/preview-access'
 import {
   CURRENT_PRIVACY_VERSION,
@@ -159,6 +164,35 @@ const requireUser = os.$context<ORPCContext>().middleware(async ({ context, next
 })
 
 const protectedProcedure = os.$context<ORPCContext>().use(requireUser)
+
+function planLimitOrpcError(error: unknown): never {
+  if (error instanceof PlanLimitError) {
+    throw new ORPCError('FORBIDDEN', {
+      message: error.message,
+      data: { code: error.code, limit: error.limit },
+    })
+  }
+  throw error
+}
+
+async function ensureDesignFileRoom(user: { id: string; isAdmin?: boolean | null }) {
+  try {
+    await requireDesignFileRoom(user)
+  } catch (error) {
+    planLimitOrpcError(error)
+  }
+}
+
+async function ensureOpenBranchRoom(
+  user: { id: string; isAdmin?: boolean | null },
+  designId: string,
+) {
+  try {
+    await requireOpenBranchRoom(user, designId)
+  } catch (error) {
+    planLimitOrpcError(error)
+  }
+}
 
 const requireSignedInUser = os.$context<ORPCContext>().middleware(async ({ context, next }) => {
   if (!context.session) throw new ORPCError('UNAUTHORIZED')
@@ -276,10 +310,20 @@ async function requireDesignAccess(
   return access
 }
 
-async function ensureDesign(designId: string, userId: string) {
+async function ensureDesign(
+  designId: string,
+  user: { id: string; isAdmin?: boolean | null },
+) {
+  const [existing] = await db
+    .select({ id: design.id })
+    .from(design)
+    .where(and(eq(design.id, designId), eq(design.userId, user.id)))
+    .limit(1)
+  if (existing) return
+  await ensureDesignFileRoom(user)
   await db
     .insert(design)
-    .values({ id: designId, userId, name: 'Untitled', shapes: [], pages: [] })
+    .values({ id: designId, userId: user.id, name: 'Untitled', shapes: [], pages: [] })
     .onConflictDoNothing({ target: [design.id, design.userId] })
 }
 
@@ -336,6 +380,7 @@ const saveDesign = protectedProcedure
       .limit(1)
 
     if (!existing) {
+      await ensureDesignFileRoom(context.user)
       const [created] = await db
         .insert(design)
         .values({ ...values, userId: context.user.id })
@@ -591,6 +636,14 @@ const createCanvasDesign = protectedProcedure
         message: 'Canvas document id must match the design id.',
       })
     }
+    // Idempotent create: only charge the Free file cap when a new row is
+    // actually inserted. Conflict → existing id is not a new file.
+    const [existingBefore] = await db
+      .select({ id: design.id })
+      .from(design)
+      .where(and(eq(design.id, input.designId), eq(design.userId, context.user.id)))
+      .limit(1)
+    if (!existingBefore) await ensureDesignFileRoom(context.user)
     const [created] = await db
       .insert(design)
       .values({
@@ -1379,6 +1432,7 @@ const createDraft = protectedProcedure
       .where(and(eq(design.id, input.designId), eq(design.userId, context.user.id)))
       .limit(1)
     if (!main) throw new ORPCError('NOT_FOUND')
+    await ensureOpenBranchRoom(context.user, input.designId)
     const mainDocument =
       main.canvasVersion === CANVAS_SCHEMA_VERSION && main.canvasDocument
         ? parseCanvasDocument(main.canvasDocument)
@@ -1543,6 +1597,16 @@ const reopenDraft = protectedProcedure
   .handler(async ({ context, input }) => {
     // A discarded draft is recoverable; an applied one is not — reopening
     // that would resurrect work already merged into Main.
+    const existing = await getOwnedDraft(context.user.id, input.designId, input.id)
+    if (existing.status !== 'proposed' && existing.status !== 'closed') {
+      throw new ORPCError('CONFLICT', {
+        message: 'Only proposed or discarded drafts can be reopened.',
+      })
+    }
+    // Closed → open increases the open-branch count; proposed → active does not.
+    if (existing.status === 'closed') {
+      await ensureOpenBranchRoom(context.user, input.designId)
+    }
     const [updated] = await db
       .update(designDraft)
       .set({ status: 'active', proposedAt: null, closedAt: null, updatedAt: new Date() })
@@ -1897,7 +1961,7 @@ const importVersions = protectedProcedure
     }),
   )
   .handler(async ({ context, input }) => {
-    await ensureDesign(input.designId, context.user.id)
+    await ensureDesign(input.designId, context.user)
     if (input.draftId) {
       const draft = await getOwnedDraft(context.user.id, input.designId, input.draftId)
       if (draft.status !== 'active') {
@@ -1971,7 +2035,7 @@ const commitVersion = protectedProcedure
       latest?.pages ?? [],
       input.pages,
     )
-    await ensureDesign(input.designId, context.user.id)
+    await ensureDesign(input.designId, context.user)
     const [version] = await db
       .insert(designVersion)
       .values({
@@ -2017,7 +2081,7 @@ const commitCanvasVersion = protectedProcedure
         throw new ORPCError('CONFLICT', { message: 'This branch is read-only.' })
       }
     } else {
-      await ensureDesign(input.designId, context.user.id)
+      await ensureDesign(input.designId, context.user)
     }
     const [latest] = await db
       .select({
@@ -2608,15 +2672,31 @@ const refreshCurrentBilling = previewProcedure.handler(({ context }) =>
 )
 
 const createSubscriptionCheckout = previewProcedure
-  .input(z.object({ plan: z.enum(['free', 'pro']) }))
+  .input(
+    z.object({
+      plan: z.enum(['free', 'pro']),
+      /** Billing cycle for Pro. Ignored for Free. */
+      interval: z.enum(['month', 'year']).default('month'),
+    }),
+  )
   .handler(async ({ context, input }) => {
     const billing = await authorizeBilling(context.user)
     if (billing.access) {
-      throw new ORPCError('FORBIDDEN', {
-        message: 'Manage your existing subscription from Billing.',
-      })
+      const current = billing.entitlement?.plan
+      // Free → Pro upgrade is allowed (monthly or yearly). Paid plans manage
+      // changes in the Polar customer portal.
+      const upgradingFreeToPro = input.plan === 'pro' && current === 'free'
+      if (!upgradingFreeToPro) {
+        throw new ORPCError('FORBIDDEN', {
+          message: 'Manage your existing subscription from Billing.',
+        })
+      }
     }
-    return createPlanCheckout(context.user, input.plan)
+    return createPlanCheckout(
+      context.user,
+      input.plan,
+      input.plan === 'pro' ? input.interval : 'month',
+    )
   })
 
 const getCurrentMcpUsage = previewProcedure.handler(async ({ context }) => {

@@ -15,6 +15,7 @@ import {
 } from '#/components/ui/dialog'
 
 type Plan = 'free' | 'pro'
+type ProInterval = 'month' | 'year'
 type BillingStatus = Awaited<ReturnType<typeof orpc.billing.status>>
 
 interface SubscriptionScreenProps {
@@ -29,15 +30,15 @@ const plans = [
     id: 'free' as const,
     name: 'Free',
     price: '$0',
-    summary: '50 files, 1 GB assets, and 200 MCP calls a week',
+    summary: '50 files, 1 open branch per design, and 200 MCP calls a week',
     note: 'No card required',
   },
   {
     id: 'pro' as const,
     name: 'Pro',
     price: '$20',
-    summary: 'Unlimited files, branches, agent access, and image generation',
-    note: '$200 / year',
+    summary: 'Unlimited files and branches, agent access, and image generation',
+    note: 'Save with yearly',
   },
 ]
 
@@ -80,12 +81,14 @@ export function SubscriptionScreen({ userId, children, preview, redirect }: Subs
 
   if (status ? status.access : optimistic) return children
 
-  async function startCheckout(plan: Plan) {
+  async function startCheckout(plan: Plan, interval: ProInterval = 'month') {
     setSelectedPlan(plan)
     setPending(true)
     setError('')
     try {
-      const checkout = await orpc.billing.checkout({ plan })
+      const checkout = await orpc.billing.checkout(
+        plan === 'pro' ? { plan, interval } : { plan },
+      )
       const goToCheckout = redirect ?? ((url: string) => window.location.assign(url))
       goToCheckout(checkout.url)
     } catch {
@@ -117,7 +120,7 @@ export function SubscriptionScreen({ userId, children, preview, redirect }: Subs
             </p>
             <DialogTitle>Choose your Loora plan</DialogTitle>
             <DialogDescription>
-              Free is the whole editor, not a demo. Pro lifts the limits and adds branches,
+              Free is the whole editor, not a demo. Pro lifts the limits — unlimited files and branches,
               the in-app agent, and image generation.
             </DialogDescription>
           </DialogHeader>
@@ -141,23 +144,43 @@ export function SubscriptionScreen({ userId, children, preview, redirect }: Subs
                   </p>
                   {plan.id === 'pro' ? (
                     <p className="mt-2 text-xs text-muted-foreground">
-                      Or $200 billed yearly — two months off. Nothing is billed per generation.
+                      $20/month or $200/year (two months free). Nothing is billed per generation.
                     </p>
                   ) : (
                     <p className="mt-2 text-xs text-muted-foreground">
                       Does not expire. Upgrade whenever you need more capacity.
                     </p>
                   )}
-                  <div className="mt-4 flex flex-1 flex-col justify-end">
-                    <Button
-                      variant={plan.id === 'pro' ? 'default' : 'outline'}
-                      disabled={pending}
-                      onClick={() => void startCheckout(plan.id)}
-                    >
-                      {pending && selectedPlan === plan.id
-                        ? 'Opening checkout…'
-                        : plan.id === 'free' ? 'Start free' : 'Go Pro'}
-                    </Button>
+                  <div className="mt-4 flex flex-1 flex-col justify-end gap-2">
+                    {plan.id === 'free' ? (
+                      <Button
+                        variant="outline"
+                        disabled={pending}
+                        onClick={() => void startCheckout('free')}
+                      >
+                        {pending && selectedPlan === 'free'
+                          ? 'Opening checkout…'
+                          : 'Start free'}
+                      </Button>
+                    ) : (
+                      <>
+                        <Button
+                          disabled={pending}
+                          onClick={() => void startCheckout('pro', 'month')}
+                        >
+                          {pending && selectedPlan === 'pro'
+                            ? 'Opening checkout…'
+                            : 'Go Pro — $20/month'}
+                        </Button>
+                        <Button
+                          variant="outline"
+                          disabled={pending}
+                          onClick={() => void startCheckout('pro', 'year')}
+                        >
+                          Go Pro — $200/year
+                        </Button>
+                      </>
+                    )}
                   </div>
                 </div>
               ))}

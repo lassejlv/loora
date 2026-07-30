@@ -21,6 +21,7 @@ import {
 } from './branches'
 import { CanvasPresenceFacePile } from './presence'
 import { ShareDialog } from './share-dialog'
+import { UpgradeToProButton } from '#/components/upgrade-to-pro'
 import {
   CanvasSyncController,
   type CanvasSyncTarget,
@@ -414,6 +415,7 @@ export function CanvasApp({
         )}
         topBarEnd={
           <>
+            <UpgradeToProButton size="xs" variant="outline" />
             <CanvasPresenceFacePile controller={controller} />
             <Button
               size="xs"

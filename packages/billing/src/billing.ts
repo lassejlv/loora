@@ -29,6 +29,7 @@ export interface BillingStatus {
 }
 
 export type CheckoutPlan = 'free' | 'pro'
+export type CheckoutInterval = 'month' | 'year'
 
 export function subscriptionRequiredResponse() {
   return Response.json(
@@ -224,19 +225,24 @@ export async function getBillingStatus(user: BillingUser, force = false): Promis
 export async function createPlanCheckout(
   user: { id: string; email: string },
   plan: CheckoutPlan,
+  interval: CheckoutInterval = 'month',
 ) {
   const { config } = getPolarRuntime()
   if (!config) throw new Error('Polar is not configured')
+  const products = plan === 'free'
+    ? [config.freeProductId]
+    : interval === 'year'
+      ? [config.proYearlyProductId]
+      : [config.proProductId]
   const checkout = await getPolarClient().checkouts.create({
-    products: plan === 'free'
-      ? [config.freeProductId]
-      : [config.proProductId, config.proYearlyProductId],
+    products,
     externalCustomerId: user.id,
     customerEmail: user.email,
     allowTrial: false,
     metadata: {
       loora_kind: 'subscription',
       loora_plan: plan,
+      loora_interval: plan === 'pro' ? interval : 'month',
       loora_user_id: user.id,
     },
     successUrl: `${config.origin}/app?checkout=success&checkout_id={CHECKOUT_ID}`,

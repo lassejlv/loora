@@ -76,6 +76,11 @@ const freeBenefits: BenefitSpec[] = [
     description: '2 days of version history',
     note: 'Rolling two-day version history window.',
   },
+  {
+    key: 'branches_1_open',
+    description: '1 open branch per design',
+    note: 'Keep one active or proposed branch per design at a time.',
+  },
 ]
 
 // Weekly MCP allowances stay as public product benefits and are enforced from
@@ -104,8 +109,8 @@ const proBenefits: BenefitSpec[] = [
   },
   {
     key: 'branches',
-    description: 'Branches: fork, compare, merge',
-    note: 'Create branches, compare changes, and merge them.',
+    description: 'Unlimited branches: fork, compare, merge',
+    note: 'Create as many branches as you need; compare and merge freely.',
   },
   {
     key: 'in_app_agent',
@@ -126,6 +131,7 @@ const freeDescription = [
   '- 1 GB asset storage',
   '- 200 MCP calls per week',
   '- 2 days of version history',
+  '- 1 open branch per design',
   '- Full canvas editor, MCP server, exports, and integrations',
 ].join('\n')
 
@@ -136,7 +142,7 @@ const proDescription = [
   '- 100 GB asset storage',
   '- 1,000,000 MCP calls per week',
   '- 90 days of version history',
-  '- Branches: fork, compare, merge',
+  '- Unlimited branches: fork, compare, merge',
   '- In-app agent access',
   '- Image generation',
 ].join('\n')

@@ -35,6 +35,11 @@ import {
 } from '@loora/canvas/merge'
 import { publishCanvasRealtimeEvent } from '@loora/db/canvas-realtime'
 import { canvasTransactionPruneBefore } from '@loora/db/canvas-transactions'
+import {
+  requireDesignFileRoomForPlan,
+  requireOpenBranchRoomForPlan,
+} from '@loora/billing/enforce-plan-limits'
+import type { LimitsPlan } from '@loora/billing/plan-limits'
 
 export const MAX_NAME_LENGTH = 200
 
@@ -326,7 +331,8 @@ export async function applyCanvasTransactions(
   return result
 }
 
-export async function createDesign(userId: string, name: string) {
+export async function createDesign(userId: string, name: string, plan: LimitsPlan) {
+  await requireDesignFileRoomForPlan(userId, plan)
   const id = newDesignId()
   const document = createCanvasDocument(name, id)
   const [created] = await db
@@ -439,7 +445,13 @@ export async function listDrafts(userId: string, designId: string) {
   }))
 }
 
-export async function createDraft(userId: string, designId: string, name: string) {
+export async function createDraft(
+  userId: string,
+  designId: string,
+  name: string,
+  plan: LimitsPlan,
+) {
+  await requireOpenBranchRoomForPlan(userId, designId, plan)
   const main = await getCanvasTarget(userId, { designId })
   const [created] = await db
     .insert(designDraft)

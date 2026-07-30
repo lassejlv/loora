@@ -12,6 +12,7 @@ const access = await requireAppAccess(user.id)
 const server = createLooraServer(
   user.id,
   createMcpUsageController(user.id, access.mcpPlan),
+  access.mcpPlan,
 )
 await server.connect(new StdioServerTransport())
 // stdout is the MCP channel; anything human-facing goes to stderr.
