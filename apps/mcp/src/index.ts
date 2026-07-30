@@ -8,7 +8,6 @@
 // StreamableHTTPServerTransport speaks IncomingMessage/ServerResponse.
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js'
-import { auth } from '@loora/auth'
 import { checkDatabaseConnection } from '@loora/db'
 import { serviceReadinessResponse } from '@loora/rpc/readiness'
 import {
@@ -19,6 +18,7 @@ import {
 } from '@loora/rpc/request-timing'
 import { createLooraServer } from './server'
 import { AccessDeniedError, requireAppAccess } from './access'
+import { createMcpSessionVerifier } from './auth'
 import { createMcpUsageController } from './usage'
 
 const PORT = Number(process.env.PORT ?? 4100)
@@ -28,6 +28,7 @@ const PUBLIC_URL = (process.env.MCP_PUBLIC_URL?.trim() || `http://localhost:${PO
 )
 const AUTH_ORIGIN = new URL(process.env.BETTER_AUTH_URL ?? 'http://localhost:3000').origin
 const RESOURCE = `${PUBLIC_URL}/mcp`
+const mcpSessionVerifier = createMcpSessionVerifier(AUTH_ORIGIN)
 
 const CORS_HEADERS: Record<string, string> = {
   'Access-Control-Allow-Origin': '*',
@@ -64,7 +65,7 @@ async function handleMcp(
     else if (Array.isArray(value)) for (const item of value) headers.append(key, item)
   }
   const authStartedAt = performance.now()
-  const session = await auth.api.getMcpSession({ headers })
+  const session = await mcpSessionVerifier.getSession(headers)
   phases.auth = elapsedMilliseconds(authStartedAt)
   if (!session) {
     res.setHeader(

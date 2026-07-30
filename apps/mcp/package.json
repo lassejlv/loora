@@ -15,6 +15,7 @@
     "@loora/db": "workspace:*",
     "@loora/rpc": "workspace:*",
     "@modelcontextprotocol/sdk": "^1.21.0",
+    "better-auth": "catalog:",
     "drizzle-orm": "catalog:",
     "playwright-core": "^1.61.1",
     "zod": "catalog:"

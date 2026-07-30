@@ -16,16 +16,22 @@ opencode, etc. connect without any pre-registered client).
 3. Client registers dynamically, sends the user through
    `/api/auth/mcp/authorize` — unauthenticated users land on the app root to
    sign in and the flow resumes — and exchanges the code for a token.
-4. Tokens live in the shared database; this server validates them with
-   `auth.api.getMcpSession` and then applies the same gates as the oRPC
-   `protectedProcedure` (preview access + active plan).
+4. Tokens live in the web app's auth database. This server validates them
+   through Better Auth's remote MCP client and then applies the same gates as
+   the oRPC `protectedProcedure` (legal consent + preview access + active
+   plan). The MCP process does not initialize the web app's Polar auth plugin.
 
 ## Env
 
-Same `.env` as the web app (`DATABASE_URL`, `BETTER_AUTH_SECRET`,
-`BETTER_AUTH_URL`), plus:
+Required:
 
+- `DATABASE_URL` — shared application database
+- `BETTER_AUTH_URL` — public web app origin; MCP verifies tokens through
+  `${BETTER_AUTH_URL}/api/auth`
 - `MCP_PUBLIC_URL` — public origin of this server, e.g. `https://mcp.loora.design`
+
+Optional:
+
 - `LOORA_APP_URL` — canonical web app origin used in returned editor links
 - `PORT` — defaults to 4100
 - `LOORA_MCP_USER` — stdio mode only: email or id of the acting user
@@ -35,6 +41,11 @@ Same `.env` as the web app (`DATABASE_URL`, `BETTER_AUTH_SECRET`,
 - `MCP_SCREENSHOT_QUEUE_LIMIT` — queued captures before returning busy,
   defaults to `8`
 - `MCP_SCREENSHOT_QUEUE_TIMEOUT_MS` — maximum queue wait, defaults to `20000`
+
+Polar is not required for the process to start. Set
+`REQUIRE_POLAR_BILLING=false` to run tools without plan checks or MCP usage
+metering. When billing is required, authenticated tool calls remain fail-closed
+if Polar metering is unavailable.
 
 Optionally set `MCP_RESOURCE_URL=https://mcp.loora.design/mcp` for the web app
 so Better Auth's own protected-resource metadata names the right resource.
