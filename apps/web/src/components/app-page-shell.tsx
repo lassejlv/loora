@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react'
+import { useState, type ReactNode } from 'react'
 import { Link } from '@tanstack/react-router'
 import { authClient } from '@loora/auth/client'
 import {
@@ -6,6 +6,7 @@ import {
   AppNavigation,
   type AppSection,
 } from '#/components/app-navigation'
+import { AppSettingsDialog } from '#/components/settings-dialog'
 import { clearWelcomeSeen } from '#/components/welcome-dialog'
 
 export function AppPageShell({
@@ -20,6 +21,7 @@ export function AppPageShell({
   children: ReactNode
 }) {
   const { data: session } = authClient.useSession()
+  const [settingsOpen, setSettingsOpen] = useState(false)
   const accountName = session?.user.name ?? session?.user.email ?? 'Account'
 
   const signOut = async () => {
@@ -40,10 +42,11 @@ export function AppPageShell({
           />
           <span className="text-xs font-semibold tracking-tight">loora</span>
         </Link>
-        <AppNavigation active={active} />
+        <AppNavigation active={active} onSettings={() => setSettingsOpen(true)} />
         <div className="mt-auto border-t border-line p-2">
           <AppAccountMenu
             name={accountName}
+            onSettings={() => setSettingsOpen(true)}
             onSignOut={() => void signOut()}
           />
         </div>
@@ -55,6 +58,7 @@ export function AppPageShell({
             <AppAccountMenu
               compact
               name={accountName}
+              onSettings={() => setSettingsOpen(true)}
               onSignOut={() => void signOut()}
             />
           </div>
@@ -68,6 +72,8 @@ export function AppPageShell({
             sections below bring their own surfaces where grouping helps. */}
         <section className="mx-auto w-full max-w-3xl p-4 md:p-6">{children}</section>
       </main>
+
+      <AppSettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} />
     </div>
   )
 }

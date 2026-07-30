@@ -42,8 +42,11 @@ export function AppNavigation({
             aria-current={selected ? 'page' : undefined}
             className={cn(
               'flex items-center gap-1.5 rounded-sm px-2 py-1 text-xs transition-colors',
+              // The hover tint is translucent zinc, so a selected item painted
+              // in the same tint would be indistinguishable from a hovered one.
+              // Selected reads as its own surface: a step up plus a hairline.
               selected
-                ? 'bg-accent font-medium text-foreground'
+                ? 'bg-surface-2 font-medium text-foreground shadow-panel'
                 : 'text-muted-foreground hover:bg-accent hover:text-foreground',
             )}
           >

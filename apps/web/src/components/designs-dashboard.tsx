@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useNavigate } from '@tanstack/react-router'
 import {
   EllipsisIcon,
@@ -10,6 +10,7 @@ import {
 import {
   LayoutGridIcon,
   SearchIcon,
+  XIcon,
 } from '#/components/icons'
 import { authClient } from '@loora/auth/client'
 import {
@@ -17,7 +18,7 @@ import {
   AppNavigation,
 } from '#/components/app-navigation'
 import { DesignThumbnail } from '#/components/design-thumbnail'
-import { SettingsPanel } from '#/components/settings-panel'
+import { AppSettingsDialog } from '#/components/settings-dialog'
 import { clearWelcomeSeen } from '#/components/welcome-dialog'
 import { Button } from '#/components/ui/button'
 import {
@@ -37,15 +38,11 @@ import {
   DropdownMenuTrigger,
 } from '#/components/ui/dropdown-menu'
 import { Input } from '#/components/ui/input'
+import { Skeleton } from '#/components/ui/skeleton'
 import { Spinner } from '#/components/ui/spinner'
 import { orpc } from '#/lib/orpc-client'
 import { createDesign, relativeTime, type DesignSummary } from '#/lib/designs'
-import {
-  cacheShortcuts,
-  loadCachedShortcuts,
-  normalizeConfig,
-  type ShortcutConfig,
-} from '#/lib/shortcuts'
+import { formatChord } from '#/lib/shortcuts'
 import { cn } from '#/lib/utils'
 
 const VIEW_STORAGE_KEY = 'loora:files-view'
@@ -59,6 +56,11 @@ function initialView(): FilesView {
 
 function byRecent(left: DesignSummary, right: DesignSummary) {
   return right.updatedAt - left.updatedAt
+}
+
+/** Platform-correct label for the search binding below (`⌘F` / `Ctrl+F`). */
+function searchHint() {
+  return formatChord({ key: 'f', meta: true })
 }
 
 function FileActions({
@@ -175,6 +177,41 @@ function FileRow({
   )
 }
 
+const GRID_CLASSES = 'grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5'
+
+/**
+ * Placeholders in the shape of the real thing, so the first render does not
+ * jump from one line of text into a full grid.
+ */
+function FilesLoading({ view }: { view: FilesView }) {
+  const rows = Array.from({ length: view === 'grid' ? 8 : 6 }, (_, index) => index)
+  if (view === 'list') {
+    return (
+      <div className="overflow-hidden rounded-lg bg-surface shadow-panel" aria-busy="true">
+        {rows.map((row) => (
+          <div key={row} className="flex items-center gap-2.5 border-b border-line px-2.5 py-1.5 last:border-b-0">
+            <Skeleton className="size-7 shrink-0 rounded-sm" />
+            <Skeleton className="h-3 w-40" />
+          </div>
+        ))}
+      </div>
+    )
+  }
+  return (
+    <div className={GRID_CLASSES} aria-busy="true">
+      {rows.map((row) => (
+        <div key={row} className="flex flex-col gap-2 rounded-md bg-surface p-1.5 shadow-panel">
+          <Skeleton className="aspect-[4/3] w-full rounded-sm" />
+          <div className="flex flex-col gap-1 px-0.5 pb-0.5">
+            <Skeleton className="h-3 w-24" />
+            <Skeleton className="h-3 w-16" />
+          </div>
+        </div>
+      ))}
+    </div>
+  )
+}
+
 /**
  * The file browser at `/app`. It owns creation, rename, and deletion; the
  * canvas itself lives at `/design/:id` and is never mounted from here.
@@ -194,40 +231,22 @@ export function DesignsDashboard() {
   const [renaming, setRenaming] = useState(false)
   const [deleteTarget, setDeleteTarget] = useState<DesignSummary | null>(null)
   const [deleting, setDeleting] = useState(false)
-  const [shortcutConfig, setShortcutConfig] = useState<ShortcutConfig>(loadCachedShortcuts)
 
-  useEffect(() => {
-    let cancelled = false
-    void orpc.design
-      .list()
-      .then((found) => {
-        if (!cancelled) setDesigns([...found].sort(byRecent))
-      })
-      .catch((cause) => {
-        if (cancelled) return
-        setDesigns([])
-        setError(cause instanceof Error ? cause.message : 'Your files could not be loaded')
-      })
-    return () => {
-      cancelled = true
+  const loadDesigns = useCallback(async () => {
+    setError(null)
+    setDesigns(null)
+    try {
+      const found = await orpc.design.list()
+      setDesigns([...found].sort(byRecent))
+    } catch (cause) {
+      setDesigns([])
+      setError(cause instanceof Error ? cause.message : 'Your files could not be loaded')
     }
   }, [])
 
   useEffect(() => {
-    let cancelled = false
-    void orpc.preferences
-      .get()
-      .then((preferences) => {
-        if (cancelled) return
-        const next = normalizeConfig(preferences.shortcuts)
-        setShortcutConfig(next)
-        cacheShortcuts(next)
-      })
-      .catch(() => undefined)
-    return () => {
-      cancelled = true
-    }
-  }, [])
+    void loadDesigns()
+  }, [loadDesigns])
 
   useEffect(() => {
     window.localStorage.setItem(VIEW_STORAGE_KEY, view)
@@ -324,7 +343,7 @@ export function DesignsDashboard() {
   return (
     <div className="flex h-screen min-h-0 bg-cx-canvas text-foreground">
       <aside className="hidden w-48 shrink-0 flex-col border-e border-line bg-surface md:flex">
-        <div className="flex h-10 shrink-0 items-center gap-2 px-3">
+        <Link to="/app" className="flex h-10 shrink-0 items-center gap-2 px-3">
           <img
             src="/logo192.png"
             alt=""
@@ -333,7 +352,7 @@ export function DesignsDashboard() {
             className="size-4 shrink-0 rounded-sm"
           />
           <span className="text-xs font-semibold tracking-tight">loora</span>
-        </div>
+        </Link>
         <AppNavigation
           active="recents"
           onSettings={() => setSettingsOpen(true)}
@@ -387,10 +406,17 @@ export function DesignsDashboard() {
               type="search"
               aria-label="Search files"
               placeholder="Search recents"
-              className="rounded-sm bg-surface-2 ps-7"
+              className="rounded-sm bg-surface-2 pe-8 ps-7"
               value={query}
               onChange={(event) => setQuery(event.target.value)}
             />
+            {/* The ⌘F binding above is invisible otherwise; the hint retires
+                once there is a query, where it would sit under the text. */}
+            {query ? null : (
+              <kbd className="pointer-events-none absolute end-1.5 top-1/2 -translate-y-1/2 rounded-sm border border-line px-1 text-[10px] leading-4 text-muted-foreground">
+                {searchHint()}
+              </kbd>
+            )}
           </div>
           <Button onClick={() => void newFile()} disabled={creating}>
             {creating ? <Spinner /> : <FilePlus2Icon />}
@@ -399,16 +425,22 @@ export function DesignsDashboard() {
         </header>
 
         {error ? (
-          <div className="mx-4 mt-4 rounded-md border border-destructive/32 bg-destructive/8 px-3 py-2 text-xs text-destructive-foreground md:mx-5">
-            {error}
+          <div className="mx-4 mt-4 flex items-center gap-2 rounded-md border border-destructive/32 bg-destructive/8 px-3 py-2 text-xs text-destructive-foreground md:mx-5">
+            <span className="min-w-0 flex-1">{error}</span>
+            <Button size="xs" variant="outline" onClick={() => void loadDesigns()}>
+              Try again
+            </Button>
+            <Button size="icon-xs" variant="ghost" aria-label="Dismiss" onClick={() => setError(null)}>
+              <XIcon />
+            </Button>
           </div>
         ) : null}
 
         <div className="min-h-0 flex-1 px-4 pt-4 pb-8 md:px-4">
           {designs === null ? (
-            <p className="cx-shimmer text-xs">Loading your files…</p>
+            <FilesLoading view={view} />
           ) : visible.length === 0 ? (
-            <div className="rounded-xl border border-dashed border-line bg-surface px-4 py-12 text-center">
+            <div className="rounded-md border border-dashed border-line bg-surface px-4 py-12 text-center">
               <p className="text-sm font-medium">
                 {designs.length === 0 ? 'No design files yet' : 'No files match that search'}
               </p>
@@ -425,12 +457,7 @@ export function DesignsDashboard() {
               ) : null}
             </div>
           ) : view === 'grid' ? (
-            <div
-              className={cn(
-                'grid gap-3',
-                'sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5',
-              )}
-            >
+            <div className={GRID_CLASSES}>
               {visible.map((design) => (
                 <FileCard
                   key={design.id}
@@ -514,20 +541,7 @@ export function DesignsDashboard() {
         </DialogPopup>
       </Dialog>
 
-      <Dialog open={settingsOpen} onOpenChange={setSettingsOpen}>
-        <DialogPopup showCloseButton={false} className="h-[min(70svh,36rem)] overflow-hidden p-0">
-          <SettingsPanel
-            onClose={() => setSettingsOpen(false)}
-            shortcutConfig={shortcutConfig}
-            onShortcutConfigChange={(next) => {
-              const normalized = normalizeConfig(next)
-              setShortcutConfig(normalized)
-              cacheShortcuts(normalized)
-              void orpc.preferences.save({ shortcuts: normalized }).catch(() => undefined)
-            }}
-          />
-        </DialogPopup>
-      </Dialog>
+      <AppSettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} />
     </div>
   )
 }

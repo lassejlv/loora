@@ -2233,15 +2233,27 @@ function CanvasToolStrip({
           label="Zoom out"
           onClick={() => controls.current?.zoomOut()}
         />
-        <Button
-          size="lg"
-          variant="ghost"
-          className="min-w-11 px-1.5 font-semibold tabular-nums sm:text-xs"
-          title="Reset zoom"
-          onClick={() => controls.current?.zoomReset()}
-        >
-          {Math.round(zoom * 100)}%
-        </Button>
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <Button
+                size="lg"
+                variant="ghost"
+                aria-label="Reset zoom"
+                className="min-w-11 px-1.5 font-semibold tabular-nums sm:text-xs"
+                onClick={() => controls.current?.zoomReset()}
+              >
+                {Math.round(zoom * 100)}%
+              </Button>
+            }
+          />
+          <TooltipPopup side="top" sideOffset={8}>
+            <span className="flex items-center gap-2 whitespace-nowrap">
+              Reset zoom
+              <span className="text-muted-foreground">{shortcutLabel('zoomReset')}</span>
+            </span>
+          </TooltipPopup>
+        </Tooltip>
         <CanvasToolButton
           icon={ZoomInIcon}
           label="Zoom in"
