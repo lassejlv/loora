@@ -516,6 +516,12 @@ export class CanvasSyncController {
       }
       return
     }
+    // A socket is the transport unless this controller has fallen back to the
+    // event stream. While one is being ticketed, handshaking, or waiting out a
+    // retry, drop the frame rather than posting the same peer over HTTP: two
+    // channels publishing one cursor is how the room ends up echoing itself.
+    // The socket sends fresh presence as soon as it is ready.
+    if (this.#transport !== 'sse') return
     const body = JSON.stringify({
       designId: this.target.designId,
       draftId: this.target.draftId,
