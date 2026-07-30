@@ -1,0 +1,12 @@
+{
+  "name": "@loora/realtime",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./*": "./src/*.ts"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.3.14",
+    "typescript": "catalog:"
+  }
+}

@@ -13,3 +13,6 @@ dist-ssr
 __unconfig*
 todos.json
 outputs
+.grok
+.claude
+.codex

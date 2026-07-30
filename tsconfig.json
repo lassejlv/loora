@@ -14,6 +14,7 @@
       "@loora/canvas": ["./packages/canvas/src/index.ts"],
       "@loora/canvas/*": ["./packages/canvas/src/*"],
       "@loora/agent/*": ["./packages/agent/src/*"],
+      "@loora/realtime/*": ["./packages/realtime/src/*"],
       "@loora/rpc": ["./packages/rpc/src/router.ts"],
       "@loora/rpc/*": ["./packages/rpc/src/*"]
     },

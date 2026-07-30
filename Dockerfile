@@ -8,11 +8,13 @@ WORKDIR /app
 COPY package.json bun.lock bunfig.toml ./
 COPY apps/web/package.json apps/web/
 COPY apps/mcp/package.json apps/mcp/
+COPY apps/ws/package.json apps/ws/
 COPY packages/db/package.json packages/db/
 COPY packages/auth/package.json packages/auth/
 COPY packages/billing/package.json packages/billing/
 COPY packages/agent/package.json packages/agent/
 COPY packages/canvas/package.json packages/canvas/
+COPY packages/realtime/package.json packages/realtime/
 COPY packages/rpc/package.json packages/rpc/
 RUN bun install --frozen-lockfile
 
@@ -50,6 +52,7 @@ COPY --from=deps /app/packages/auth/node_modules ./packages/auth/node_modules
 COPY --from=deps /app/packages/billing/node_modules ./packages/billing/node_modules
 COPY --from=deps /app/packages/agent/node_modules ./packages/agent/node_modules
 COPY --from=deps /app/packages/canvas/node_modules ./packages/canvas/node_modules
+COPY --from=deps /app/packages/realtime/node_modules ./packages/realtime/node_modules
 COPY --from=deps /app/packages/rpc/node_modules ./packages/rpc/node_modules
 COPY package.json bun.lock bunfig.toml ./
 COPY apps/web/package.json apps/web/
@@ -57,6 +60,7 @@ COPY packages/auth/package.json packages/auth/
 COPY packages/billing/package.json packages/billing/
 COPY packages/agent/package.json packages/agent/
 COPY packages/canvas ./packages/canvas
+COPY packages/realtime ./packages/realtime
 COPY packages/rpc/package.json packages/rpc/
 COPY packages/db ./packages/db
 COPY --from=build /app/apps/web/.output ./apps/web/.output

@@ -1,0 +1,285 @@
+import { afterAll, beforeAll, describe, expect, test } from 'bun:test'
+import {
+  REALTIME_TICKET_TTL_MS,
+  signRealtimeTicket,
+  type RealtimeTicketClaims,
+} from '@loora/realtime/ticket'
+import { createRealtimeService, type RealtimeService } from './server'
+
+const SECRET = 's'.repeat(32)
+const TOKEN = 't'.repeat(32)
+
+let service: RealtimeService
+let origin: string
+
+function ticketFor(overrides: Partial<RealtimeTicketClaims> = {}) {
+  const issuedAt = Date.now()
+  return signRealtimeTicket(
+    {
+      v: 1,
+      userId: 'user-1',
+      sessionId: 'session-1',
+      ownerUserId: 'owner-1',
+      designId: 'design-1',
+      draftId: null,
+      role: 'owner',
+      name: 'Ada',
+      image: null,
+      color: '#6c5ce7',
+      issuedAt,
+      expiresAt: issuedAt + REALTIME_TICKET_TTL_MS,
+      ...overrides,
+    },
+    SECRET,
+  )
+}
+
+/** Opens a socket and hands back the messages it receives, in order. */
+async function connect(ticket: string) {
+  const socket = new WebSocket(`${origin.replace('http', 'ws')}/canvas?ticket=${ticket}`)
+  const received: Record<string, unknown>[] = []
+  const waiters: ((message: Record<string, unknown>) => void)[] = []
+  socket.addEventListener('message', (event) => {
+    const message = JSON.parse(String(event.data)) as Record<string, unknown>
+    const waiter = waiters.shift()
+    if (waiter) waiter(message)
+    else received.push(message)
+  })
+  await new Promise<void>((resolve, reject) => {
+    socket.addEventListener('open', () => resolve(), { once: true })
+    socket.addEventListener('error', () => reject(new Error('socket failed')), {
+      once: true,
+    })
+  })
+  return {
+    socket,
+    send: (message: unknown) => socket.send(JSON.stringify(message)),
+    next: () =>
+      new Promise<Record<string, unknown>>((resolve, reject) => {
+        const queued = received.shift()
+        if (queued) {
+          resolve(queued)
+          return
+        }
+        const timer = setTimeout(() => reject(new Error('no message')), 2_000)
+        waiters.push((message) => {
+          clearTimeout(timer)
+          resolve(message)
+        })
+      }),
+    close: () =>
+      new Promise<void>((resolve) => {
+        socket.addEventListener('close', () => resolve(), { once: true })
+        socket.close()
+      }),
+  }
+}
+
+function publish(body: unknown, token = TOKEN) {
+  return fetch(`${origin}/publish`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify(body),
+  })
+}
+
+beforeAll(() => {
+  service = createRealtimeService({
+    port: 0,
+    ticketSecret: SECRET,
+    internalToken: TOKEN,
+    redisUrl: null,
+    allowedOrigins: null,
+  })
+  origin = `http://localhost:${service.server.port}`
+})
+
+afterAll(async () => {
+  await service.stop()
+})
+
+describe('realtime service', () => {
+  test('reports health without a ticket', async () => {
+    const response = await fetch(`${origin}/health`)
+
+    expect(response.status).toBe(200)
+    expect(await response.json()).toMatchObject({ name: 'loora-ws', bus: 'memory' })
+  })
+
+  test('refuses a socket without a valid ticket', async () => {
+    const response = await fetch(`${origin}/canvas?ticket=nonsense`, {
+      headers: { Upgrade: 'websocket' },
+    })
+
+    expect(response.status).toBe(401)
+  })
+
+  test('sends the room state on connect', async () => {
+    const client = await connect(await ticketFor())
+
+    await expect(client.next()).resolves.toMatchObject({
+      type: 'ready',
+      sessionId: 'session-1',
+      role: 'owner',
+      peers: [],
+      activity: null,
+    })
+    await client.close()
+  })
+
+  test('fans a published canvas change out to the room', async () => {
+    const client = await connect(await ticketFor())
+    await client.next()
+
+    const response = await publish({
+      kind: 'event',
+      ownerUserId: 'owner-1',
+      target: { designId: 'design-1', draftId: null },
+      event: { type: 'canvas.changed', revision: 4, nodeIds: ['node-1'] },
+    })
+
+    expect(response.status).toBe(200)
+    await expect(client.next()).resolves.toMatchObject({
+      type: 'canvas.changed',
+      revision: 4,
+      nodeIds: ['node-1'],
+    })
+    await client.close()
+  })
+
+  test('carries agent activity from an MCP tool call', async () => {
+    const client = await connect(await ticketFor())
+    await client.next()
+    const now = Date.now()
+
+    await publish({
+      kind: 'activity',
+      ownerUserId: 'owner-1',
+      target: { designId: 'design-1', draftId: null },
+      activity: {
+        id: 'agent_1',
+        label: 'Adding elements',
+        nodeIds: ['node-1'],
+        phase: 'working',
+        updatedAt: now,
+        expiresAt: now + 30_000,
+      },
+    })
+
+    await expect(client.next()).resolves.toMatchObject({
+      type: 'agent.activity',
+      activity: { id: 'agent_1', label: 'Adding elements' },
+    })
+    // A tab that opens mid-run sees the same thing without waiting for the next
+    // tool call.
+    const late = await connect(await ticketFor({ sessionId: 'session-2' }))
+    await expect(late.next()).resolves.toMatchObject({
+      type: 'ready',
+      activity: { id: 'agent_1' },
+    })
+    await Promise.all([client.close(), late.close()])
+  })
+
+  test('stamps presence from the ticket, not from the client', async () => {
+    const client = await connect(await ticketFor())
+    await client.next()
+    const other = await connect(await ticketFor({ sessionId: 'session-2' }))
+    await other.next()
+
+    client.send({
+      type: 'presence',
+      cursor: { x: 12.4, y: 8 },
+      selection: ['node-1'],
+      // Ignored: the room does not take identity from a socket.
+      userId: 'someone-else',
+      role: 'owner',
+      name: 'Impostor',
+    })
+
+    const event = await other.next()
+    expect(event).toMatchObject({ type: 'presence.peer', sessionId: 'session-1' })
+    expect(event.peer).toMatchObject({
+      userId: 'user-1',
+      name: 'Ada',
+      role: 'owner',
+      cursor: { x: 12, y: 8 },
+      selection: ['node-1'],
+    })
+
+    await client.close()
+    // Leaving clears the peer for everyone still in the room.
+    await expect(other.next()).resolves.toMatchObject({
+      type: 'presence.peer',
+      sessionId: 'session-1',
+      peer: null,
+    })
+    await other.close()
+  })
+
+  test('answers a heartbeat', async () => {
+    const client = await connect(await ticketFor())
+    await client.next()
+
+    client.send({ type: 'ping' })
+
+    await expect(client.next()).resolves.toMatchObject({ type: 'pong' })
+    await client.close()
+  })
+
+  test('keeps rooms apart', async () => {
+    const client = await connect(await ticketFor())
+    await client.next()
+
+    await publish({
+      kind: 'event',
+      ownerUserId: 'owner-1',
+      target: { designId: 'another-design', draftId: null },
+      event: { type: 'canvas.changed', revision: 9, nodeIds: [] },
+    })
+    client.send({ type: 'ping' })
+
+    // The pong arrives first only because the other room's event never does.
+    await expect(client.next()).resolves.toMatchObject({ type: 'pong' })
+    await client.close()
+  })
+
+  test('refuses ingest without the internal token', async () => {
+    const body = {
+      kind: 'event',
+      ownerUserId: 'owner-1',
+      target: { designId: 'design-1', draftId: null },
+      event: { type: 'canvas.changed', revision: 1, nodeIds: [] },
+    }
+
+    expect((await publish(body, 'wrong-token')).status).toBe(401)
+    expect((await publish({ kind: 'nope' })).status).toBe(400)
+  })
+
+  test('serves room state to another service', async () => {
+    const client = await connect(await ticketFor())
+    await client.next()
+    client.send({ type: 'presence', cursor: null, selection: [] })
+    await client.next()
+
+    const response = await fetch(`${origin}/state`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${TOKEN}`,
+      },
+      body: JSON.stringify({
+        ownerUserId: 'owner-1',
+        target: { designId: 'design-1', draftId: null },
+      }),
+    })
+
+    expect(response.status).toBe(200)
+    const state = (await response.json()) as { peers: { userId: string }[] }
+    expect(state.peers).toHaveLength(1)
+    expect(state.peers[0]).toMatchObject({ userId: 'user-1' })
+    await client.close()
+  })
+})

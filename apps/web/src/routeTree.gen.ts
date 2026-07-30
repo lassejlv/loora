@@ -20,6 +20,7 @@ import { Route as DotwellKnownOauthAuthorizationServerRouteImport } from './rout
 import { Route as ApiCanvasEventsRouteImport } from './routes/api.canvas-events'
 import { Route as ApiCanvasPresenceRouteImport } from './routes/api.canvas-presence'
 import { Route as ApiReadyRouteImport } from './routes/api.ready'
+import { Route as ApiRealtimeTicketRouteImport } from './routes/api.realtime-ticket'
 import { Route as AppIndexRouteImport } from './routes/app.index'
 import { Route as AppAdminRouteImport } from './routes/app.admin'
 import { Route as AppAppearanceRouteImport } from './routes/app.appearance'
@@ -93,6 +94,11 @@ const ApiCanvasPresenceRoute = ApiCanvasPresenceRouteImport.update({
 const ApiReadyRoute = ApiReadyRouteImport.update({
   id: '/api/ready',
   path: '/api/ready',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiRealtimeTicketRoute = ApiRealtimeTicketRouteImport.update({
+  id: '/api/realtime-ticket',
+  path: '/api/realtime-ticket',
   getParentRoute: () => rootRouteImport,
 } as any)
 const AppIndexRoute = AppIndexRouteImport.update({
@@ -198,6 +204,7 @@ export interface FileRoutesByFullPath {
   '/api/canvas-events': typeof ApiCanvasEventsRoute
   '/api/canvas-presence': typeof ApiCanvasPresenceRoute
   '/api/ready': typeof ApiReadyRoute
+  '/api/realtime-ticket': typeof ApiRealtimeTicketRoute
   '/app/admin': typeof AppAdminRoute
   '/app/appearance': typeof AppAppearanceRoute
   '/app/billing': typeof AppBillingRoute
@@ -229,6 +236,7 @@ export interface FileRoutesByTo {
   '/api/canvas-events': typeof ApiCanvasEventsRoute
   '/api/canvas-presence': typeof ApiCanvasPresenceRoute
   '/api/ready': typeof ApiReadyRoute
+  '/api/realtime-ticket': typeof ApiRealtimeTicketRoute
   '/app/admin': typeof AppAdminRoute
   '/app/appearance': typeof AppAppearanceRoute
   '/app/billing': typeof AppBillingRoute
@@ -261,6 +269,7 @@ export interface FileRoutesById {
   '/api/canvas-events': typeof ApiCanvasEventsRoute
   '/api/canvas-presence': typeof ApiCanvasPresenceRoute
   '/api/ready': typeof ApiReadyRoute
+  '/api/realtime-ticket': typeof ApiRealtimeTicketRoute
   '/app/admin': typeof AppAdminRoute
   '/app/appearance': typeof AppAppearanceRoute
   '/app/billing': typeof AppBillingRoute
@@ -294,6 +303,7 @@ export interface FileRouteTypes {
     | '/api/canvas-events'
     | '/api/canvas-presence'
     | '/api/ready'
+    | '/api/realtime-ticket'
     | '/app/admin'
     | '/app/appearance'
     | '/app/billing'
@@ -325,6 +335,7 @@ export interface FileRouteTypes {
     | '/api/canvas-events'
     | '/api/canvas-presence'
     | '/api/ready'
+    | '/api/realtime-ticket'
     | '/app/admin'
     | '/app/appearance'
     | '/app/billing'
@@ -356,6 +367,7 @@ export interface FileRouteTypes {
     | '/api/canvas-events'
     | '/api/canvas-presence'
     | '/api/ready'
+    | '/api/realtime-ticket'
     | '/app/admin'
     | '/app/appearance'
     | '/app/billing'
@@ -388,6 +400,7 @@ export interface RootRouteChildren {
   ApiCanvasEventsRoute: typeof ApiCanvasEventsRoute
   ApiCanvasPresenceRoute: typeof ApiCanvasPresenceRoute
   ApiReadyRoute: typeof ApiReadyRoute
+  ApiRealtimeTicketRoute: typeof ApiRealtimeTicketRoute
   AppAdminRoute: typeof AppAdminRoute
   AppAppearanceRoute: typeof AppAppearanceRoute
   AppBillingRoute: typeof AppBillingRoute
@@ -484,6 +497,13 @@ declare module '@tanstack/react-router' {
       path: '/api/ready'
       fullPath: '/api/ready'
       preLoaderRoute: typeof ApiReadyRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/realtime-ticket': {
+      id: '/api/realtime-ticket'
+      path: '/api/realtime-ticket'
+      fullPath: '/api/realtime-ticket'
+      preLoaderRoute: typeof ApiRealtimeTicketRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/app/': {
@@ -640,6 +660,7 @@ const rootRouteChildren: RootRouteChildren = {
   ApiCanvasEventsRoute: ApiCanvasEventsRoute,
   ApiCanvasPresenceRoute: ApiCanvasPresenceRoute,
   ApiReadyRoute: ApiReadyRoute,
+  ApiRealtimeTicketRoute: ApiRealtimeTicketRoute,
   AppAdminRoute: AppAdminRoute,
   AppAppearanceRoute: AppAppearanceRoute,
   AppBillingRoute: AppBillingRoute,
@@ -661,12 +682,3 @@ const rootRouteChildren: RootRouteChildren = {
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
   ._addFileTypes<FileRouteTypes>()
-
-import type { getRouter } from './router.tsx'
-import type { createStart } from '@tanstack/react-start'
-declare module '@tanstack/react-start' {
-  interface Register {
-    ssr: true
-    router: Awaited<ReturnType<typeof getRouter>>
-  }
-}

@@ -1,20 +1,5 @@
 import '@tanstack/react-start'
 import { createFileRoute } from '@tanstack/react-router'
-import { and, eq } from 'drizzle-orm'
-import { requireSession } from '@loora/auth'
-import {
-  canUseApp,
-  previewAccessRequiredResponse,
-} from '@loora/auth/preview-access'
-import {
-  hasAcceptedCurrentLegal,
-  legalConsentRequiredResponse,
-} from '@loora/auth/legal-consent'
-import {
-  authorizeBilling,
-  subscriptionRequiredResponse,
-} from '@loora/billing/billing'
-import { db } from '@loora/db'
 import {
   readCanvasAgentActivity,
   readCanvasPresence,
@@ -22,8 +7,7 @@ import {
   type CanvasRealtimeEvent,
   type CanvasRealtimeSubscription,
 } from '@loora/db/canvas-realtime'
-import { resolveDesignAccess } from '@loora/db/design-access'
-import { designDraft } from '@loora/db/schema'
+import { resolveRealtimeAccess } from './-realtime-access'
 
 const encoder = new TextEncoder()
 const eventHeaders = {
@@ -38,57 +22,14 @@ function eventData(event: CanvasRealtimeEvent) {
   return `event: canvas\ndata: ${JSON.stringify(event)}\n\n`
 }
 
-async function draftExists(
-  ownerUserId: string,
-  designId: string,
-  draftId: string,
-) {
-  return db
-    .select({ id: designDraft.id })
-    .from(designDraft)
-    .where(
-      and(
-        eq(designDraft.id, draftId),
-        eq(designDraft.designId, designId),
-        eq(designDraft.userId, ownerUserId),
-      ),
-    )
-    .limit(1)
-    .then((rows) => !!rows[0])
-}
-
 export async function canvasEventsResponse(request: Request) {
-  const session = await requireSession(request)
-  if (!session) return new Response('Unauthorized', { status: 401 })
-  if (!hasAcceptedCurrentLegal(session.user)) return legalConsentRequiredResponse()
-
   const search = new URL(request.url).searchParams
-  const designId = search.get('designId')?.trim() ?? ''
-  const draftId = search.get('draftId')?.trim() || null
-  if (
-    designId.length === 0 ||
-    designId.length > 128 ||
-    (draftId !== null && draftId.length > 128)
-  ) {
-    return new Response('Invalid Canvas target', { status: 400 })
-  }
-
-  const access = await resolveDesignAccess(designId, {
-    id: session.user.id,
-    email: session.user.email,
+  const resolved = await resolveRealtimeAccess(request, {
+    designId: search.get('designId') ?? '',
+    draftId: search.get('draftId'),
   })
-  if (!access) return new Response('Not found', { status: 404 })
-  // Owners are held to their own plan; a guest in a shared design rides the
-  // owner's, which is what makes an invitation worth anything.
-  if (access.role === 'owner') {
-    if (!canUseApp(session.user)) return previewAccessRequiredResponse()
-    if (!(await authorizeBilling(session.user)).access) {
-      return subscriptionRequiredResponse()
-    }
-  }
-  if (draftId && !(await draftExists(access.ownerUserId, designId, draftId))) {
-    return new Response('Not found', { status: 404 })
-  }
+  if (!resolved.ok) return resolved.response
+  const { ownerUserId, designId, draftId } = resolved.access
 
   const pending: CanvasRealtimeEvent[] = []
   let streamController: ReadableStreamDefaultController<Uint8Array> | null =
@@ -132,7 +73,7 @@ export async function canvasEventsResponse(request: Request) {
 
   try {
     subscription = await subscribeCanvasRealtimeEvents(
-      access.ownerUserId,
+      ownerUserId,
       { designId, draftId },
       push,
       () => {
@@ -167,7 +108,7 @@ export async function canvasEventsResponse(request: Request) {
       )
       // Whoever is already in the room, so a late arrival sees them without
       // waiting for each of them to move.
-      void readCanvasPresence(access.ownerUserId, { designId, draftId })
+      void readCanvasPresence(ownerUserId, { designId, draftId })
         .then((peers) => {
           if (peers.length > 0) {
             push({ type: 'presence.state', peers, sentAt: Date.now() })
@@ -176,7 +117,7 @@ export async function canvasEventsResponse(request: Request) {
         .catch(() => undefined)
       // Same for an agent that is already mid-run: the tab shows it now rather
       // than at its next tool call.
-      void readCanvasAgentActivity(access.ownerUserId, { designId, draftId })
+      void readCanvasAgentActivity(ownerUserId, { designId, draftId })
         .then((activity) => {
           if (activity) {
             push({ type: 'agent.activity', activity, sentAt: Date.now() })

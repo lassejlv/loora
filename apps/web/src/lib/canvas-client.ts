@@ -48,6 +48,10 @@ const STORE_NAME = 'pending-transactions'
 const REALTIME_CONNECTED_REFRESH_MS = 5 * 60_000
 const REALTIME_DISCONNECTED_REFRESH_MS = 15_000
 const REALTIME_RETRY_MAX_MS = 30_000
+/** The socket service asking for a fresh ticket, not a broken connection. */
+const CLOSE_REALTIME_REAUTH = 4001
+/** After this many sockets that never opened, stay on the event stream. */
+const MAX_SOCKET_FAILURES = 3
 /** A pointer moves at frame rate; the wire does not have to. */
 const PRESENCE_THROTTLE_MS = 80
 const PRESENCE_HEARTBEAT_MS = 20_000
@@ -124,6 +128,19 @@ type CanvasRealtimeMessage =
       nodeIds: string[]
       sentAt: number
     }
+  /** The socket service's opening frame: the room as it stands right now. */
+  | {
+      type: 'ready'
+      sessionId: string
+      role: 'owner' | 'edit' | 'view'
+      peers: CanvasPeer[]
+      activity: CanvasAgentActivity | null
+      sentAt: number
+    }
+  | {
+      type: 'pong'
+      sentAt: number
+    }
   | {
       type: 'agent.activity'
       activity: CanvasAgentActivity | null
@@ -159,6 +176,20 @@ function isPeer(value: unknown): value is CanvasPeer {
     Array.isArray(peer.selection) &&
     peer.selection.every((id) => typeof id === 'string') &&
     Number.isFinite(peer.updatedAt)
+  )
+}
+
+function isAgentActivity(value: unknown): value is CanvasAgentActivity {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false
+  const activity = value as Record<string, unknown>
+  return (
+    typeof activity.id === 'string' &&
+    typeof activity.label === 'string' &&
+    Array.isArray(activity.nodeIds) &&
+    activity.nodeIds.every((id) => typeof id === 'string') &&
+    (activity.phase === 'working' || activity.phase === 'settled') &&
+    Number.isFinite(activity.updatedAt) &&
+    Number.isFinite(activity.expiresAt)
   )
 }
 
@@ -199,28 +230,22 @@ export function parseCanvasRealtimeMessage(
   ) {
     return parsed as CanvasRealtimeMessage
   }
+  if (
+    event.type === 'ready' &&
+    typeof event.sessionId === 'string' &&
+    (event.role === 'owner' || event.role === 'edit' || event.role === 'view') &&
+    Array.isArray(event.peers) &&
+    event.peers.every(isPeer) &&
+    (event.activity === null || isAgentActivity(event.activity))
+  ) {
+    return parsed as CanvasRealtimeMessage
+  }
+  if (event.type === 'pong') return parsed as CanvasRealtimeMessage
   if (event.type !== 'agent.activity') return null
   if (event.activity === null) return parsed as CanvasRealtimeMessage
-  if (
-    !event.activity ||
-    typeof event.activity !== 'object' ||
-    Array.isArray(event.activity)
-  ) {
-    return null
-  }
-  const activity = event.activity as Record<string, unknown>
-  if (
-    typeof activity.id !== 'string' ||
-    typeof activity.label !== 'string' ||
-    !Array.isArray(activity.nodeIds) ||
-    !activity.nodeIds.every((id) => typeof id === 'string') ||
-    (activity.phase !== 'working' && activity.phase !== 'settled') ||
-    !Number.isFinite(activity.updatedAt) ||
-    !Number.isFinite(activity.expiresAt)
-  ) {
-    return null
-  }
-  return parsed as CanvasRealtimeMessage
+  return isAgentActivity(event.activity)
+    ? (parsed as CanvasRealtimeMessage)
+    : null
 }
 
 function changedSnapshotNodeIds(
@@ -309,6 +334,11 @@ export class CanvasSyncController {
   #activityTimer: ReturnType<typeof setTimeout> | null = null
   #realtimeRetryTimer: ReturnType<typeof setTimeout> | null = null
   #eventSource: EventSource | null = null
+  #socket: WebSocket | null = null
+  /** Guards the async ticket fetch against a target that moved on. */
+  #socketAttempt = 0
+  #socketFailures = 0
+  #transport: 'auto' | 'sse' = 'auto'
   #realtimeConnected = false
   #realtimeRetryDelay = 1_000
   #announcedRevision = 0
@@ -465,6 +495,27 @@ export class CanvasSyncController {
   async #sendPresence(leaving = false) {
     if (this.#closed && !leaving) return
     this.#presenceSentAt = Date.now()
+    const socket = this.#socket
+    if (socket && socket.readyState === WebSocket.OPEN) {
+      // Leaving needs no message: the service clears a peer when its socket
+      // goes, which also covers the tab that never got to say goodbye.
+      if (leaving) {
+        this.#disconnectRealtime()
+        return
+      }
+      try {
+        socket.send(
+          JSON.stringify({
+            type: 'presence',
+            cursor: this.#presence.cursor,
+            selection: this.#presence.selection,
+          }),
+        )
+      } catch {
+        // Presence is decoration; losing a frame of it changes nothing.
+      }
+      return
+    }
     const body = JSON.stringify({
       designId: this.target.designId,
       draftId: this.target.draftId,
@@ -786,13 +837,61 @@ export class CanvasSyncController {
     }, delay)
   }
 
+  /**
+   * A socket when there is a socket service to talk to, and the server-sent
+   * stream when there is not. The WebSocket carries the same events in both
+   * directions, which is what lets cursors ride it instead of paying for an
+   * HTTP request per pointer move.
+   */
   #connectRealtime() {
-    if (
-      this.#closed ||
-      !navigator.onLine ||
-      this.#eventSource ||
-      typeof EventSource === 'undefined'
-    ) {
+    if (this.#closed || !navigator.onLine) return
+    if (this.#socket || this.#eventSource) return
+    if (this.#transport === 'auto' && typeof WebSocket !== 'undefined') {
+      void this.#connectSocket()
+      return
+    }
+    this.#connectEventSource()
+  }
+
+  async #connectSocket() {
+    const attempt = ++this.#socketAttempt
+    let ticket: { url?: unknown; ticket?: unknown } | null = null
+    try {
+      const response = await fetch('/api/realtime-ticket', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          designId: this.target.designId,
+          draftId: this.target.draftId,
+          sessionId: this.#sessionId,
+        }),
+      })
+      // 503 is how the app says "no socket service here" — not a failure worth
+      // retrying, so this controller stays on the event stream from now on.
+      if (response.status === 503 || response.status === 404) {
+        this.#transport = 'sse'
+      }
+      ticket = response.ok ? await response.json() : null
+    } catch {
+      ticket = null
+    }
+    if (this.#closed || attempt !== this.#socketAttempt) return
+    if (typeof ticket?.url !== 'string' || typeof ticket.ticket !== 'string') {
+      if (this.#transport === 'sse') this.#connectEventSource()
+      else this.#retryRealtime()
+      return
+    }
+
+    const socket = new WebSocket(
+      `${ticket.url}?ticket=${encodeURIComponent(ticket.ticket)}`,
+    )
+    this.#socket = socket
+    socket.addEventListener('message', this.#socketMessage)
+    socket.addEventListener('close', this.#socketClose)
+  }
+
+  #connectEventSource() {
+    if (this.#closed || this.#eventSource || typeof EventSource === 'undefined') {
       return
     }
     const url = new URL('/api/canvas-events', window.location.origin)
@@ -809,15 +908,77 @@ export class CanvasSyncController {
   }
 
   #disconnectRealtime() {
+    this.#realtimeConnected = false
+    // A new attempt number retires any ticket fetch still in flight.
+    this.#socketAttempt += 1
+    const socket = this.#socket
+    this.#socket = null
+    if (socket) {
+      socket.removeEventListener('message', this.#socketMessage)
+      socket.removeEventListener('close', this.#socketClose)
+      socket.close()
+    }
     const source = this.#eventSource
     this.#eventSource = null
-    this.#realtimeConnected = false
     if (!source) return
     source.removeEventListener('open', this.#realtimeOpen)
     source.removeEventListener('ready', this.#realtimeReady)
     source.removeEventListener('canvas', this.#realtimeCanvas)
     source.removeEventListener('error', this.#realtimeError)
     source.close()
+  }
+
+  #socketMessage = (message: MessageEvent) => {
+    const event = parseCanvasRealtimeMessage(String(message.data))
+    if (!event) return
+    if (event.type === 'pong') return
+    if (event.type === 'ready') {
+      this.#realtimeConnected = true
+      this.#socketFailures = 0
+      this.#realtimeOpen()
+      if (event.peers.length > 0) this.#setPeers(event.peers)
+      if (event.activity) this.#setAgentActivity(event.activity)
+      this.#realtimeReady()
+      return
+    }
+    this.#applyRealtimeEvent(event)
+  }
+
+  #socketClose = (event: CloseEvent) => {
+    const wasConnected = this.#realtimeConnected
+    this.#disconnectRealtime()
+    if (this.#closed || !navigator.onLine) return
+    this.#scheduleRefresh(0)
+    // 4001 is the service asking for a fresh ticket, not a failure.
+    if (event.code === CLOSE_REALTIME_REAUTH) {
+      this.#realtimeRetryDelay = 1_000
+      this.#retryRealtime(0)
+      return
+    }
+    if (!wasConnected) {
+      this.#socketFailures += 1
+      // A socket that never opens is usually a proxy in the way; the event
+      // stream goes over plain HTTP and gets through.
+      if (this.#socketFailures >= MAX_SOCKET_FAILURES) this.#transport = 'sse'
+    }
+    this.#retryRealtime()
+  }
+
+  /** Without a delay this backs off; with one it reconnects on that schedule. */
+  #retryRealtime(delay?: number) {
+    if (this.#closed) return
+    const wait = delay ?? this.#realtimeRetryDelay
+    if (delay === undefined) {
+      this.#realtimeRetryDelay = Math.min(
+        REALTIME_RETRY_MAX_MS,
+        this.#realtimeRetryDelay * 2,
+      )
+    }
+    if (this.#realtimeRetryTimer) clearTimeout(this.#realtimeRetryTimer)
+    this.#realtimeRetryTimer = setTimeout(() => {
+      this.#realtimeRetryTimer = null
+      this.#connectRealtime()
+    }, wait)
   }
 
   #realtimeOpen = () => {
@@ -838,7 +999,12 @@ export class CanvasSyncController {
   #realtimeCanvas = (message: Event) => {
     if (!(message instanceof MessageEvent)) return
     const event = parseCanvasRealtimeMessage(String(message.data))
-    if (!event) return
+    if (event) this.#applyRealtimeEvent(event)
+  }
+
+  /** Shared by both transports: they carry exactly the same events. */
+  #applyRealtimeEvent(event: CanvasRealtimeMessage) {
+    if (event.type === 'ready' || event.type === 'pong') return
     if (event.type === 'agent.activity') {
       this.#setAgentActivity(event.activity)
       return
@@ -867,16 +1033,7 @@ export class CanvasSyncController {
     this.#disconnectRealtime()
     if (this.#closed || !navigator.onLine) return
     this.#scheduleRefresh(0)
-    const delay = this.#realtimeRetryDelay
-    this.#realtimeRetryDelay = Math.min(
-      REALTIME_RETRY_MAX_MS,
-      this.#realtimeRetryDelay * 2,
-    )
-    if (this.#realtimeRetryTimer) clearTimeout(this.#realtimeRetryTimer)
-    this.#realtimeRetryTimer = setTimeout(() => {
-      this.#realtimeRetryTimer = null
-      this.#connectRealtime()
-    }, delay)
+    this.#retryRealtime()
   }
 
   #scheduleRefresh(delay: number) {

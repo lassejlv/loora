@@ -23,6 +23,7 @@
     "@loora/billing": "workspace:*",
     "@loora/canvas": "workspace:*",
     "@loora/db": "workspace:*",
+    "@loora/realtime": "workspace:*",
     "@loora/rpc": "workspace:*",
     "@orpc/client": "^1.14.8",
     "@orpc/server": "^1.14.8",

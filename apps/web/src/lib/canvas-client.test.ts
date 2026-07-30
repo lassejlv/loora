@@ -133,6 +133,49 @@ describe('Canvas realtime messages', () => {
     })
   })
 
+  test('accepts the socket service opening frame', () => {
+    const peer = {
+      sessionId: 'session-2',
+      userId: 'user-2',
+      name: 'Ada',
+      image: null,
+      color: '#6c5ce7',
+      role: 'edit',
+      cursor: { x: 4, y: 8 },
+      selection: ['hero'],
+      updatedAt: 100,
+    }
+
+    expect(
+      parseCanvasRealtimeMessage(
+        JSON.stringify({
+          type: 'ready',
+          sessionId: 'session-1',
+          role: 'owner',
+          peers: [peer],
+          activity: null,
+          sentAt: 100,
+        }),
+      ),
+    ).toMatchObject({ type: 'ready', peers: [{ sessionId: 'session-2' }] })
+    expect(
+      parseCanvasRealtimeMessage(JSON.stringify({ type: 'pong', sentAt: 100 })),
+    ).toMatchObject({ type: 'pong' })
+    // A room the socket service could not describe is not a room to trust.
+    expect(
+      parseCanvasRealtimeMessage(
+        JSON.stringify({
+          type: 'ready',
+          sessionId: 'session-1',
+          role: 'admin',
+          peers: [],
+          activity: null,
+          sentAt: 100,
+        }),
+      ),
+    ).toBeNull()
+  })
+
   test('drops malformed events', () => {
     expect(parseCanvasRealtimeMessage('{nope')).toBeNull()
     expect(

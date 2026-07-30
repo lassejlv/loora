@@ -17,10 +17,12 @@ Postgres · Better Auth · Polar billing (plan access) · oRPC · Railway
 ```
 apps/web          TanStack Start app (UI, API route handlers, canvas editor shell)
 apps/mcp          Remote MCP server (Streamable HTTP, OAuth resource server)
+apps/ws           Realtime WebSocket service (rooms, presence, MCP agent events)
 packages/canvas   Canvas model, engine, merge, React surface, import, export
 packages/db       Drizzle schema, Neon client, migrations (`@loora/db`)
 packages/rpc      oRPC `appRouter`, storage, history, handoff (`@loora/rpc`)
 packages/agent    Shared canvas tools + layout repair for MCP (`@loora/agent`)
+packages/realtime Realtime wire protocol, connection tickets, ingest client (`@loora/realtime`)
 packages/auth     Better Auth, preview access, GitHub (`@loora/auth`)
 packages/billing  Polar plan access / entitlements (`@loora/billing`)
 ```
@@ -46,6 +48,8 @@ packages/billing  Polar plan access / entitlements (`@loora/billing`)
 | `/design/$id` | Editor on Main. Route supplies `designId` and remounts on change — the editor never picks a document itself. |
 | `/design/$id/b/$branchId` | Editor on an active branch. |
 | `/api/rpc/$` | oRPC |
+| `/api/realtime-ticket` | Mints a signed WebSocket ticket after the usual access checks |
+| `/api/canvas-events`, `/api/canvas-presence` | Server-sent-events fallback for realtime |
 | `/api/auth/$` | Better Auth |
 | `/api/asset/$id`, handoff asset routes | Asset serving |
 | GitHub connect + callback routes | OAuth |
@@ -84,6 +88,14 @@ Most product mutations go through oRPC. External agents use MCP or handoff — t
 
 Remote MCP at `mcp.loora.design` (local default port `4100`). OAuth 2.1 resource server; Better Auth on the web app is the authorization server. Shares DB + canvas transaction path via `@loora/agent/canvas-tools`. Stateless Streamable HTTP.
 
+### `apps/ws`
+
+Realtime service at `ws.loora.design` (local default port `4200`). One socket
+per open document; carries canvas invalidations, agent activity from MCP tool
+calls, and collaborator cursors. It never opens the database: the web app runs
+the access checks and mints a short-lived signed ticket, and this service only
+verifies it. See `apps/ws/README.md` for endpoints and configuration.
+
 ### `packages/db`
 
 - Schema: `packages/db/src/schema.ts`
@@ -106,6 +118,8 @@ Root scripts (from repo root; env loaded from `.env` where needed):
 |---------|---------|
 | `bun install` | Install pinned Bun workspace deps |
 | `bun run dev` | Web app on `http://localhost:3000` |
+| `bun run dev:ws` | Realtime WebSocket service on `:4200` |
+| `bun run dev:mcp` | Remote MCP server on `:4100` |
 | `bun run build` | Production bundle → `apps/web/.output/` |
 | `bun run start` | Serve production build |
 | `bun run test` | All `bun:test` suites with JSDOM preload |
@@ -123,7 +137,9 @@ MCP local: `bun run --cwd apps/mcp dev` (or `start` / `stdio`).
 
 Copy `.env.example` → `.env` before dev. Required pieces typically include `DATABASE_URL`, `BETTER_AUTH_SECRET`, `BETTER_AUTH_URL`; optional billing/OAuth/storage keys as needed.
 
-Deploy: Railway via root `Dockerfile` / `railway.json` (and `apps/mcp` for the MCP service).
+Deploy: Railway via root `Dockerfile` / `railway.json`, with `apps/mcp` and
+`apps/ws` carrying their own `Dockerfile` + `railway.json` for the MCP and
+realtime services.
 
 ---
 
@@ -147,6 +163,34 @@ Keep MCP tools and handoff consumers aligned on the shared `@loora/agent` vocabu
 `createPage` · `insertNodes` · `patchNodes` · `moveNodes` · `deleteNodes` · `readNode` · `readTree` · `searchNodes` · `createComponent` · `createInstance` · `setTokens` · `viewNode` · `viewPage` · `viewCanvas`
 
 Implementation: `packages/agent/src/canvas-tools.ts` (and MCP server wiring in `apps/mcp/src/`).
+
+### Realtime
+
+One protocol, two transports, and one gate in front of both.
+
+- `@loora/realtime` holds the wire protocol (`canvas.changed`, `agent.activity`,
+  `presence.peer`, `presence.state`), the HMAC connection tickets, and the
+  ingest client. It imports nothing from db, auth, or canvas.
+- Browsers prefer a WebSocket to `apps/ws`. `/api/realtime-ticket` runs the
+  same checks as the editor (session, legal consent, design access, preview
+  access, plan) and signs a 60-second ticket; the socket service verifies it and
+  stamps presence identity from those claims. A socket is closed with `4001`
+  after 15 minutes so the client re-tickets.
+- `/api/canvas-events` (SSE) plus `/api/canvas-presence` remain the fallback,
+  used when no socket service is configured or a socket cannot be established.
+  Both transports carry identical events.
+- Server-side publishers (oRPC, MCP tools) call the same
+  `@loora/db/canvas-realtime` functions as before. Those now post to the socket
+  service's `/publish` when `REALTIME_INGEST_URL` is set and fall back to
+  publishing on Redis, so a service missing one of the two still works.
+- Redis carries events between instances and holds room state (presence hash,
+  agent-activity key). Without it, `apps/ws` runs as a single instance with
+  rooms in memory — enough for local development.
+
+Env: `REALTIME_WS_URL` and `REALTIME_TICKET_SECRET` on web; `REALTIME_INGEST_URL`
+and `REALTIME_INTERNAL_TOKEN` on web and MCP; `REALTIME_TICKET_SECRET`,
+`REALTIME_INTERNAL_TOKEN`, and optional `REDIS_URL` /
+`REALTIME_ALLOWED_ORIGINS` on `apps/ws`.
 
 ### Persistence & legacy compatibility
 
@@ -222,6 +266,7 @@ History uses Conventional Commits with scopes when useful:
 | API procedures | `packages/rpc/src/router.ts` (+ focused modules beside it) |
 | Shared MCP canvas tools / layout repair | `packages/agent/src/` |
 | MCP tools / transport | `apps/mcp/src/` |
+| Realtime transport, rooms, presence | `apps/ws/src/` (protocol in `packages/realtime/src/`) |
 | Schema / migrations | `packages/db/src/schema.ts` → `db:generate` |
 | Auth / OAuth integrations | `packages/auth/src/` |
 | Plans / entitlements | `packages/billing/src/` |

@@ -8,6 +8,8 @@
   "private": true,
   "scripts": {
     "dev": "bun run --cwd apps/web dev",
+    "dev:ws": "bun run --cwd apps/ws dev",
+    "dev:mcp": "bun run --cwd apps/mcp dev",
     "build": "bun run --cwd apps/web build",
     "benchmark-api": "bun run --cwd apps/web benchmark-api",
     "docs:dev": "bun run --cwd apps/docs dev",
