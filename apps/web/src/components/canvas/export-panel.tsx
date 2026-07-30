@@ -305,7 +305,7 @@ function ScopeButton({
 function Row({ label, children }: { label: string; children: ReactNode }) {
   return (
     <div className="space-y-1">
-      <p className="text-[11px] font-medium tracking-wide text-muted-foreground uppercase">
+      <p className="text-xs font-medium tracking-wide text-muted-foreground uppercase">
         {label}
       </p>
       {children}
@@ -615,7 +615,7 @@ export function CanvasExport({
                   )}
                   onClick={() => setFormat(item.id)}
                 >
-                  <span className="font-mono text-[10px] font-medium text-muted-foreground">
+                  <span className="font-mono text-2xs font-medium text-muted-foreground">
                     {item.extension}
                   </span>
                   <span className="whitespace-nowrap text-xs font-medium">

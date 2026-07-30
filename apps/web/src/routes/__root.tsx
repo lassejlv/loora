@@ -7,6 +7,7 @@ import { useEffect } from "react";
 
 import appCss from "../styles.css?url";
 import { syncThemePreference, THEME_INIT_SCRIPT } from "#/lib/theme";
+import { syncUiScale, UI_SCALE_INIT_SCRIPT } from "#/lib/ui-scale";
 
 export const Route = createRootRoute({
   head: () => ({
@@ -70,6 +71,9 @@ export const Route = createRootRoute({
       {
         children: THEME_INIT_SCRIPT,
       },
+      {
+        children: UI_SCALE_INIT_SCRIPT,
+      },
     ],
   }),
   shellComponent: RootDocument,
@@ -86,6 +90,7 @@ const DATABUDDY_CLIENT_ID =
 
 function RootDocument({ children }: { children: React.ReactNode }) {
   useEffect(() => syncThemePreference(), []);
+  useEffect(() => syncUiScale(), []);
   return (
     <html lang="en" suppressHydrationWarning>
       <head>

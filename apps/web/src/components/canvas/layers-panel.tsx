@@ -773,7 +773,7 @@ function LayerRow({
             <Icon className="size-3.5 shrink-0 text-muted-foreground" />
             <span className="truncate">{node.name}</span>
             {node.type === 'instance' ? (
-                <span className="ms-auto shrink-0 text-[11px] text-muted-foreground">
+                <span className="ms-auto shrink-0 text-xs text-muted-foreground">
                 Instance
               </span>
             ) : null}

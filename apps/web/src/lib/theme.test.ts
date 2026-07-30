@@ -20,11 +20,13 @@ function runInitScript() {
 beforeEach(() => {
   window.localStorage.removeItem(STORAGE_KEY)
   document.documentElement.classList.remove('dark')
+  document.documentElement.removeAttribute('data-theme')
 })
 
 afterEach(() => {
   window.localStorage.removeItem(STORAGE_KEY)
   document.documentElement.classList.remove('dark')
+  document.documentElement.removeAttribute('data-theme')
   Object.defineProperty(window, 'matchMedia', {
     configurable: true,
     value: originalMatchMedia,
@@ -63,6 +65,42 @@ describe('theme preferences', () => {
     runInitScript()
 
     expect(window.localStorage.getItem(STORAGE_KEY)).toBe('light')
+    expect(document.documentElement.classList.contains('dark')).toBe(false)
+  })
+
+  test('marks a named theme with the attribute and keeps the dark class', () => {
+    setThemePreference('tokyo-night')
+
+    expect(window.localStorage.getItem(STORAGE_KEY)).toBe('tokyo-night')
+    expect(document.documentElement.getAttribute('data-theme')).toBe('tokyo-night')
+    expect(document.documentElement.classList.contains('dark')).toBe(true)
+  })
+
+  test('clears the attribute when returning to a built-in theme', () => {
+    setThemePreference('dracula')
+    setThemePreference('light')
+
+    expect(document.documentElement.hasAttribute('data-theme')).toBe(false)
+    expect(document.documentElement.classList.contains('dark')).toBe(false)
+  })
+
+  test('restores a named theme before first paint', () => {
+    window.localStorage.setItem(STORAGE_KEY, 'github-dark')
+
+    runInitScript()
+
+    expect(document.documentElement.getAttribute('data-theme')).toBe('github-dark')
+    expect(document.documentElement.classList.contains('dark')).toBe(true)
+  })
+
+  test('ignores a theme it does not know', () => {
+    window.localStorage.setItem(STORAGE_KEY, 'solarized')
+
+    expect(getThemePreference()).toBe('light')
+
+    runInitScript()
+
+    expect(document.documentElement.hasAttribute('data-theme')).toBe(false)
     expect(document.documentElement.classList.contains('dark')).toBe(false)
   })
 

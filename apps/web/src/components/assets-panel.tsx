@@ -353,11 +353,11 @@ export function AssetsPanel({
                   >
                     {asset.name}
                   </span>
-                  <span className="shrink-0 text-[11px] text-muted-foreground/60">
+                  <span className="shrink-0 text-xs text-muted-foreground/60">
                     {formatSize(asset.size)}
                   </span>
                 </div>
-                <div className="flex items-center gap-1 text-[11px] text-muted-foreground/60">
+                <div className="flex items-center gap-1 text-xs text-muted-foreground/60">
                   {dimensions[asset.id] ? <span>{dimensions[asset.id]}</span> : null}
                   {asset.at ? <span>{relativeTime(asset.at)}</span> : null}
                   {used > 0 ? (

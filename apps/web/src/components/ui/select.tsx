@@ -11,7 +11,7 @@ import { cn } from "#/lib/utils.ts";
 export const Select: typeof SelectPrimitive.Root = SelectPrimitive.Root;
 
 export const selectTriggerVariants = cva(
-  "relative inline-flex min-h-8 w-full min-w-32 select-none items-center justify-between gap-1.5 rounded-md border border-input bg-background/80 px-[calc(--spacing(2.5)-1px)] text-left text-sm text-foreground outline-none ring-ring/20 transition-[border-color,box-shadow] pointer-coarse:after:absolute pointer-coarse:after:size-full pointer-coarse:after:min-h-11 focus-visible:border-ring focus-visible:ring-2 aria-invalid:border-destructive/36 focus-visible:aria-invalid:border-destructive/64 focus-visible:aria-invalid:ring-destructive/16 data-disabled:pointer-events-none data-disabled:opacity-56 sm:min-h-6 sm:text-[11px] dark:bg-input/24 dark:aria-invalid:ring-destructive/24 [&_svg:not([class*='opacity-'])]:opacity-72 [&_svg:not([class*='size-'])]:size-4 sm:[&_svg:not([class*='size-'])]:size-3 [&_svg]:pointer-events-none [&_svg]:shrink-0",
+  "relative inline-flex min-h-8 w-full min-w-32 select-none items-center justify-between gap-1.5 rounded-md border border-input bg-background/80 px-[calc(--spacing(2.5)-1px)] text-left text-sm text-foreground outline-none ring-ring/20 transition-[border-color,box-shadow] pointer-coarse:after:absolute pointer-coarse:after:size-full pointer-coarse:after:min-h-11 focus-visible:border-ring focus-visible:ring-2 aria-invalid:border-destructive/36 focus-visible:aria-invalid:border-destructive/64 focus-visible:aria-invalid:ring-destructive/16 data-disabled:pointer-events-none data-disabled:opacity-56 sm:min-h-6 sm:text-xs dark:bg-input/24 dark:aria-invalid:ring-destructive/24 [&_svg:not([class*='opacity-'])]:opacity-72 [&_svg:not([class*='size-'])]:size-4 sm:[&_svg:not([class*='size-'])]:size-3 [&_svg]:pointer-events-none [&_svg]:shrink-0",
   {
     defaultVariants: {
       size: "default",
@@ -174,7 +174,7 @@ export function SelectItem({
   return (
     <SelectPrimitive.Item
       className={cn(
-        "grid min-h-7 in-data-[side=none]:min-w-[calc(var(--anchor-width)+1rem)] cursor-default grid-cols-[.75rem_1fr] items-center gap-1.5 rounded-sm py-1 ps-2 pe-3 text-sm outline-none data-disabled:pointer-events-none data-highlighted:bg-accent data-highlighted:text-accent-foreground data-disabled:opacity-56 sm:min-h-5.5 sm:text-[11px] [&_svg:not([class*='size-'])]:size-4 sm:[&_svg:not([class*='size-'])]:size-3 [&_svg]:pointer-events-none [&_svg]:shrink-0",
+        "grid min-h-7 in-data-[side=none]:min-w-[calc(var(--anchor-width)+1rem)] cursor-default grid-cols-[.75rem_1fr] items-center gap-1.5 rounded-sm py-1 ps-2 pe-3 text-sm outline-none data-disabled:pointer-events-none data-highlighted:bg-accent data-highlighted:text-accent-foreground data-disabled:opacity-56 sm:min-h-5.5 sm:text-xs [&_svg:not([class*='size-'])]:size-4 sm:[&_svg:not([class*='size-'])]:size-3 [&_svg]:pointer-events-none [&_svg]:shrink-0",
         className,
       )}
       data-slot="select-item"
@@ -229,7 +229,7 @@ export function SelectLabel({
   return (
     <SelectPrimitive.Label
       className={cn(
-        "not-in-data-[slot=field]:mb-1.5 inline-flex cursor-default items-center gap-1.5 font-medium text-sm/4 text-foreground sm:text-[11px]/4",
+        "not-in-data-[slot=field]:mb-1.5 inline-flex cursor-default items-center gap-1.5 font-medium text-sm/4 text-foreground sm:text-xs/4",
         className,
       )}
       data-slot="select-label"

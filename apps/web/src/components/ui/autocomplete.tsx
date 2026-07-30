@@ -141,7 +141,7 @@ export function AutocompleteItem({
   return (
     <AutocompletePrimitive.Item
       className={cn(
-        "flex min-h-7 cursor-default select-none items-center rounded-sm px-2 py-1 text-sm outline-none data-disabled:pointer-events-none data-highlighted:bg-accent data-highlighted:text-accent-foreground data-disabled:opacity-56 sm:min-h-5.5 sm:text-[11px]",
+        "flex min-h-7 cursor-default select-none items-center rounded-sm px-2 py-1 text-sm outline-none data-disabled:pointer-events-none data-highlighted:bg-accent data-highlighted:text-accent-foreground data-disabled:opacity-56 sm:min-h-5.5 sm:text-xs",
         className,
       )}
       data-slot="autocomplete-item"

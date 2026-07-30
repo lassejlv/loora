@@ -5,6 +5,7 @@ import {
   LinkIcon,
   LogOutIcon,
   SettingsIcon,
+  SunIcon,
 } from '#/components/icons'
 import {
   DropdownMenu,
@@ -15,10 +16,11 @@ import {
 } from '#/components/ui/dropdown-menu'
 import { cn } from '#/lib/utils'
 
-export type AppSection = 'recents' | 'billing' | 'integrations'
+export type AppSection = 'recents' | 'appearance' | 'billing' | 'integrations'
 
 const navigation = [
   { section: 'recents', label: 'Recents', to: '/app', icon: ClockIcon },
+  { section: 'appearance', label: 'Appearance', to: '/app/appearance', icon: SunIcon },
   { section: 'billing', label: 'Billing', to: '/app/billing', icon: CreditCardIcon },
   { section: 'integrations', label: 'Integrations', to: '/app/integrations', icon: LinkIcon },
 ] as const
@@ -91,7 +93,7 @@ export function AppAccountMenu({
             compact ? 'p-1' : 'w-full px-1.5 py-1',
           )}
         >
-          <span className="flex size-5 shrink-0 items-center justify-center rounded-full bg-accent text-[10px] font-semibold">
+          <span className="flex size-5 shrink-0 items-center justify-center rounded-full bg-accent text-2xs font-semibold">
             {name.slice(0, 1).toUpperCase()}
           </span>
           {compact ? null : (

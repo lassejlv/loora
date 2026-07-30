@@ -115,7 +115,13 @@ export function LandingShell({ children }: { children: React.ReactNode }) {
 
   return (
     <PaletteContext.Provider value={LIGHT}>
-      <div className="min-h-dvh bg-background font-mono text-[14px] leading-[1.7] text-foreground antialiased">
+      {/* The marketing pages are typeset in px and are not part of the app's
+          Appearance scale; pin the local root so that preference cannot stretch
+          them. */}
+      <div
+        style={{ fontSize: '16px' }}
+        className="min-h-dvh bg-background font-mono text-[14px] leading-[1.7] text-foreground antialiased"
+      >
         <a
           href="#main"
           className="sr-only focus:not-sr-only focus:absolute focus:left-4 focus:top-3 focus:z-50 focus:border focus:border-border focus:bg-card focus:px-2 focus:py-1 focus:text-[13px]"

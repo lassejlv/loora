@@ -348,7 +348,7 @@ function ChoiceCell<T extends string>({
               aria-pressed={value === choice.value}
               title={choice.label}
               className={cn(
-                'grid h-5 flex-1 place-items-center rounded text-[11px] text-muted-foreground',
+                'grid h-5 flex-1 place-items-center rounded text-xs text-muted-foreground',
                 value === choice.value
                   ? 'bg-secondary text-foreground'
                   : 'hover:text-foreground',
@@ -696,7 +696,7 @@ export function CanvasPropertiesPanel({ onClose }: { onClose?: () => void }) {
               }}
             />
           )}
-          <span className="shrink-0 px-1 text-[11px] text-muted-foreground">
+          <span className="shrink-0 px-1 text-xs text-muted-foreground">
             {ref.instancePath.length > 0 ? 'override' : many ? 'multiple' : node.type}
           </span>
         </div>
@@ -755,7 +755,7 @@ export function CanvasPropertiesPanel({ onClose }: { onClose?: () => void }) {
               ))}
             </SelectCell>
             {breakpoint !== 'base' ? (
-              <p className="px-1 text-[11px] text-muted-foreground">
+              <p className="px-1 text-xs text-muted-foreground">
                 Edits below apply only at {
                   document.breakpoints.find((item) => item.id === breakpoint)?.name ??
                     breakpoint

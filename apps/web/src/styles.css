@@ -78,6 +78,10 @@
   /* The whole app runs one step tighter than stock Tailwind. Setting it here
      keeps every `text-xs`/`text-sm` in the tree honest instead of scattering
      `text-[11px]` overrides. */
+  /* Everything sizes in rem so the Appearance scale (root font size) moves the
+     whole interface. Avoid px type literals in app chrome. */
+  --text-2xs: 0.625rem;
+  --text-2xs--line-height: calc(0.875 / 0.625);
   --text-xs: 0.6875rem;
   --text-xs--line-height: calc(1 / 0.6875);
   --text-sm: 0.8125rem;
@@ -431,4 +435,127 @@ body {
     0 18px 42px -18px --alpha(var(--color-black) / 70%),
     0 2px 8px --alpha(var(--color-black) / 28%);
   color-scheme: dark;
+}
+
+/* Named themes. Each one also carries `.dark`, so `dark:` utilities and the
+   shared dark shadows still apply; these blocks only restate the palette.
+   `html[data-theme]` outranks `.dark`, so order here does not matter. */
+html[data-theme='tokyo-night'] {
+  --cx-canvas: #16161e;
+  --cx-dot: #2f334d;
+  --cx-ink: #c0caf5;
+  --cx-accent: #7aa2f7;
+
+  --background: #1a1b26;
+  --foreground: var(--cx-ink);
+  --card: #1f2335;
+  --card-foreground: var(--cx-ink);
+  --popover: #24283b;
+  --popover-foreground: var(--cx-ink);
+  --primary: #7aa2f7;
+  --primary-foreground: #16161e;
+  --secondary: --alpha(#c0caf5 / 8%);
+  --secondary-foreground: var(--cx-ink);
+  --muted: --alpha(#c0caf5 / 6%);
+  --muted-foreground: #7f88b3;
+  --accent: --alpha(#7aa2f7 / 14%);
+  --accent-foreground: var(--cx-ink);
+  --destructive: #f7768e;
+  --destructive-foreground: #ff9eb0;
+  --border: #292e42;
+  --input: #3b4261;
+  --ring: #7aa2f7;
+  --info: #7dcfff;
+  --info-foreground: #a4dcff;
+  --success: #9ece6a;
+  --success-foreground: #b5e08c;
+  --diff-added: #9ece6a;
+  --diff-removed: #f7768e;
+  --skill: #bb9af7;
+  --warning: #e0af68;
+  --warning-foreground: #edc78e;
+
+  --surface: #1a1b26;
+  --surface-2: #24283b;
+  --line: #292e42;
+}
+
+html[data-theme='github-dark'] {
+  --cx-canvas: #010409;
+  --cx-dot: #30363d;
+  --cx-ink: #e6edf3;
+  --cx-accent: #58a6ff;
+
+  --background: #0d1117;
+  --foreground: var(--cx-ink);
+  --card: #161b22;
+  --card-foreground: var(--cx-ink);
+  --popover: #21262d;
+  --popover-foreground: var(--cx-ink);
+  --primary: #238636;
+  --primary-foreground: #ffffff;
+  --secondary: --alpha(#e6edf3 / 8%);
+  --secondary-foreground: var(--cx-ink);
+  --muted: --alpha(#e6edf3 / 6%);
+  --muted-foreground: #8b949e;
+  --accent: --alpha(#58a6ff / 14%);
+  --accent-foreground: var(--cx-ink);
+  --destructive: #f85149;
+  --destructive-foreground: #ff7b72;
+  --border: #30363d;
+  --input: #3d444d;
+  --ring: #58a6ff;
+  --info: #58a6ff;
+  --info-foreground: #79c0ff;
+  --success: #3fb950;
+  --success-foreground: #56d364;
+  --diff-added: #3fb950;
+  --diff-removed: #f85149;
+  --skill: #bc8cff;
+  --warning: #d29922;
+  --warning-foreground: #e3b341;
+
+  --surface: #0d1117;
+  --surface-2: #161b22;
+  --line: #30363d;
+}
+
+html[data-theme='dracula'] {
+  --cx-canvas: #21222c;
+  --cx-dot: #44475a;
+  --cx-ink: #f8f8f2;
+  --cx-accent: #bd93f9;
+
+  --background: #282a36;
+  --foreground: var(--cx-ink);
+  --card: #2f313f;
+  --card-foreground: var(--cx-ink);
+  --popover: #343746;
+  --popover-foreground: var(--cx-ink);
+  --primary: #bd93f9;
+  --primary-foreground: #21222c;
+  --secondary: --alpha(#f8f8f2 / 8%);
+  --secondary-foreground: var(--cx-ink);
+  --muted: --alpha(#f8f8f2 / 6%);
+  --muted-foreground: #9ba3c7;
+  --accent: --alpha(#bd93f9 / 16%);
+  --accent-foreground: var(--cx-ink);
+  --destructive: #ff5555;
+  --destructive-foreground: #ff7b7b;
+  --border: #44475a;
+  --input: #565a71;
+  --ring: #bd93f9;
+  --info: #8be9fd;
+  --info-foreground: #a8eeff;
+  --success: #50fa7b;
+  --success-foreground: #7bfb9b;
+  --diff-added: #50fa7b;
+  --diff-removed: #ff5555;
+  --skill: #ff79c6;
+  --warning: #ffb86c;
+  --warning-foreground: #ffcb95;
+
+  --surface: #282a36;
+  --surface-2: #343746;
+  --line: #44475a;
 }

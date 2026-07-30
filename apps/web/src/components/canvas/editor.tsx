@@ -941,8 +941,8 @@ function CanvasSyncIndicator({ controller }: { controller: CanvasEditorControlle
     <p
       className={
         controller.status === 'conflict'
-          ? 'text-[11px] text-destructive-foreground'
-          : 'text-[11px] text-muted-foreground'
+          ? 'text-xs text-destructive-foreground'
+          : 'text-xs text-muted-foreground'
       }
     >
       {label}

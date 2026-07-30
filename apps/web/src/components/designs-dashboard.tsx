@@ -413,7 +413,7 @@ export function DesignsDashboard() {
             {/* The ⌘F binding above is invisible otherwise; the hint retires
                 once there is a query, where it would sit under the text. */}
             {query ? null : (
-              <kbd className="pointer-events-none absolute end-1.5 top-1/2 -translate-y-1/2 rounded-sm border border-line px-1 text-[10px] leading-4 text-muted-foreground">
+              <kbd className="pointer-events-none absolute end-1.5 top-1/2 -translate-y-1/2 rounded-sm border border-line px-1 text-2xs leading-4 text-muted-foreground">
                 {searchHint()}
               </kbd>
             )}

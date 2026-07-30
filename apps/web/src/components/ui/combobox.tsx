@@ -210,7 +210,7 @@ export function ComboboxItem({
   return (
     <ComboboxPrimitive.Item
       className={cn(
-        "grid min-h-7 in-data-[side=none]:min-w-[calc(var(--anchor-width)+1rem)] cursor-default grid-cols-[.75rem_1fr] items-center gap-1.5 rounded-sm py-1 ps-2 pe-3 text-sm outline-none data-disabled:pointer-events-none data-highlighted:bg-accent data-highlighted:text-accent-foreground data-disabled:opacity-56 sm:min-h-5.5 sm:text-[11px] [&_svg:not([class*='size-'])]:size-4 sm:[&_svg:not([class*='size-'])]:size-3 [&_svg]:pointer-events-none [&_svg]:shrink-0",
+        "grid min-h-7 in-data-[side=none]:min-w-[calc(var(--anchor-width)+1rem)] cursor-default grid-cols-[.75rem_1fr] items-center gap-1.5 rounded-sm py-1 ps-2 pe-3 text-sm outline-none data-disabled:pointer-events-none data-highlighted:bg-accent data-highlighted:text-accent-foreground data-disabled:opacity-56 sm:min-h-5.5 sm:text-xs [&_svg:not([class*='size-'])]:size-4 sm:[&_svg:not([class*='size-'])]:size-3 [&_svg]:pointer-events-none [&_svg]:shrink-0",
         className,
       )}
       data-slot="combobox-item"
@@ -404,7 +404,7 @@ export function ComboboxChip({
 }): React.ReactElement {
   return (
     <ComboboxPrimitive.Chip
-      className="flex items-center rounded-[calc(var(--radius-md)-1px)] bg-accent ps-2 font-medium text-accent-foreground text-sm outline-none sm:text-[11px]/(--text-xs--line-height) [&_svg:not([class*='size-'])]:size-4 sm:[&_svg:not([class*='size-'])]:size-3"
+      className="flex items-center rounded-[calc(var(--radius-md)-1px)] bg-accent ps-2 font-medium text-accent-foreground text-sm outline-none sm:text-xs/(--text-xs--line-height) [&_svg:not([class*='size-'])]:size-4 sm:[&_svg:not([class*='size-'])]:size-3"
       data-slot="combobox-chip"
       {...props}
     >

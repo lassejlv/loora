@@ -271,7 +271,7 @@ export function CanvasHistory({
                 ) : null}
                 {groups.map((group) => (
                   <section key={group.day}>
-                    <p className="px-2 pt-2 pb-1 text-[11px] font-medium tracking-wide text-muted-foreground uppercase">
+                    <p className="px-2 pt-2 pb-1 text-xs font-medium tracking-wide text-muted-foreground uppercase">
                       {group.day}
                     </p>
                     {group.items.map((version) => (
@@ -292,7 +292,7 @@ export function CanvasHistory({
                             {version.message}
                           </span>
                           {version.canvasVersion !== 2 ? (
-                            <span className="shrink-0 rounded bg-background px-1 text-[11px] text-muted-foreground">
+                            <span className="shrink-0 rounded bg-background px-1 text-xs text-muted-foreground">
                               Legacy
                             </span>
                           ) : null}
@@ -304,7 +304,7 @@ export function CanvasHistory({
                           {timeFormatter.format(new Date(version.at))} ·{' '}
                           {relativeTime(version.at)}
                         </span>
-                        <span className="text-[11px] text-muted-foreground/70">
+                        <span className="text-xs text-muted-foreground/70">
                           +{version.added} −{version.removed} · {version.changed} changed
                         </span>
                       </button>

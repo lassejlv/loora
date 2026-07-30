@@ -19,13 +19,9 @@ import { orpc } from '#/lib/orpc-client'
 import { PanelLoading, PanelShell } from '#/components/panel-shell'
 import { ShortcutsSettings } from '#/components/shortcuts-settings'
 import { clearWelcomeSeen } from '#/components/welcome-dialog'
+import { AppearanceSettings } from '#/components/appearance-settings'
 import { editorSearchParams, type SettingsTab } from '#/lib/url-state'
 import type { ShortcutConfig } from '#/lib/shortcuts'
-import {
-  getThemePreference,
-  setThemePreference,
-  type ThemePreference,
-} from '#/lib/theme'
 
 interface AdminUser {
   id: string
@@ -189,12 +185,12 @@ function AdminTab({ currentUserId }: { currentUserId: string }) {
               <p className="truncate text-sm font-medium">
                 {account.name}
                 {account.isAdmin ? (
-                  <span className="ml-2 text-[11px] font-semibold uppercase tracking-wide text-cx-accent">
+                  <span className="ml-2 text-xs font-semibold uppercase tracking-wide text-cx-accent">
                     Admin
                   </span>
                 ) : null}
                 {!account.isAdmin && account.previewAccessRequestedAt ? (
-                  <span className="ml-2 text-[11px] font-semibold uppercase tracking-wide text-cx-accent">
+                  <span className="ml-2 text-xs font-semibold uppercase tracking-wide text-cx-accent">
                     Requested access
                   </span>
                 ) : null}
@@ -294,77 +290,6 @@ function DeleteAccountSection() {
   )
 }
 
-const THEME_OPTIONS: {
-  value: ThemePreference
-  label: string
-  previewClassName: string
-}[] = [
-  {
-    value: 'light',
-    label: 'Light',
-    previewClassName: 'border-zinc-300 bg-zinc-100 before:bg-white',
-  },
-  {
-    value: 'dark',
-    label: 'Dark',
-    previewClassName: 'border-[#484641] bg-[#191918] before:bg-[#2a2926]',
-  },
-  {
-    value: 'system',
-    label: 'System',
-    previewClassName:
-      'border-zinc-400 bg-[linear-gradient(90deg,#f4f4f5_0_50%,#191918_50%)] before:bg-[linear-gradient(90deg,#fff_0_50%,#2a2926_50%)]',
-  },
-]
-
-function AppearanceSettings() {
-  const [theme, setTheme] = useState<ThemePreference>('light')
-
-  useEffect(() => setTheme(getThemePreference()), [])
-
-  return (
-    <div className="flex flex-col gap-2 border-t pt-4">
-      <div>
-        <h2 className="text-sm font-semibold">Appearance</h2>
-        <p className="mt-1 text-xs text-muted-foreground">
-          Choose how Loora’s workspace looks.
-        </p>
-      </div>
-      <div
-        className="grid grid-cols-3 gap-1"
-        role="group"
-        aria-label="Color theme"
-      >
-        {THEME_OPTIONS.map((option) => {
-          const selected = theme === option.value
-          return (
-            <button
-              key={option.value}
-              type="button"
-              aria-pressed={selected}
-              className={`flex min-w-0 flex-col items-center gap-1.5 rounded-md border px-2 py-2 text-xs font-medium outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring ${
-                selected
-                  ? 'border-ring bg-secondary text-foreground'
-                  : 'border-border bg-background/60 text-muted-foreground hover:bg-accent hover:text-foreground'
-              }`}
-              onClick={() => {
-                setTheme(option.value)
-                setThemePreference(option.value)
-              }}
-            >
-              <span
-                aria-hidden="true"
-                className={`relative h-8 w-full max-w-20 overflow-hidden rounded border ${option.previewClassName} before:absolute before:inset-x-1 before:bottom-1 before:h-2 before:rounded-sm`}
-              />
-              {option.label}
-            </button>
-          )
-        })}
-      </div>
-    </div>
-  )
-}
-
 export function SettingsPanel({
   onClose,
   shortcutConfig,
@@ -423,7 +348,7 @@ export function SettingsPanel({
               Sign out
             </Button>
           </div>
-          <AppearanceSettings />
+          <AppearanceSettings className="border-t pt-4" />
           <DeleteAccountSection />
         </TabsPanel>
 

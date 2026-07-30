@@ -304,12 +304,12 @@ export function CanvasBranches({
             <p className="flex items-center gap-2 text-xs font-medium">
               <span className="min-w-0 truncate">{branch.name}</span>
               {branch.id === activeDraftId ? (
-                <span className="shrink-0 rounded bg-secondary px-1 text-[11px] font-normal">
+                <span className="shrink-0 rounded bg-secondary px-1 text-xs font-normal">
                   Open
                 </span>
               ) : null}
               {branch.status !== 'active' ? (
-                <span className="shrink-0 text-[11px] font-normal text-muted-foreground">
+                <span className="shrink-0 text-xs font-normal text-muted-foreground">
                   {STATUS_LABEL[branch.status]}
                 </span>
               ) : null}
@@ -517,14 +517,14 @@ export function CanvasBranches({
                     Open
                   </Button>
                 ) : (
-                  <span className="rounded bg-secondary px-1 text-[11px]">Open</span>
+                  <span className="rounded bg-secondary px-1 text-xs">Open</span>
                 )}
               </li>
               {openBranches.map(branchRow)}
             </ul>
             {archived.length > 0 ? (
               <>
-                <p className="border-t px-3 pt-3 pb-1 text-[11px] font-medium tracking-wide text-muted-foreground uppercase">
+                <p className="border-t px-3 pt-3 pb-1 text-xs font-medium tracking-wide text-muted-foreground uppercase">
                   Archived
                 </p>
                 <ul className="divide-y border-t">{archived.map(branchRow)}</ul>
@@ -623,7 +623,7 @@ export function CanvasBranches({
             <div className="flex min-h-0 flex-col overflow-y-auto border-e">
               <div className="space-y-2 border-b p-3">
                 <div className="rounded-lg border p-2.5">
-                  <p className="text-[11px] font-medium tracking-wide text-muted-foreground uppercase">
+                  <p className="text-xs font-medium tracking-wide text-muted-foreground uppercase">
                     This branch, since it started
                   </p>
                   <p className="mt-0.5 text-sm">
@@ -631,7 +631,7 @@ export function CanvasBranches({
                   </p>
                 </div>
                 <div className="rounded-lg border p-2.5">
-                  <p className="text-[11px] font-medium tracking-wide text-muted-foreground uppercase">
+                  <p className="text-xs font-medium tracking-wide text-muted-foreground uppercase">
                     Main, since you branched
                   </p>
                   <p className="mt-0.5 text-sm">
@@ -684,7 +684,7 @@ export function CanvasBranches({
                                 }))
                               }
                             >
-                              <span className="block text-[11px] text-muted-foreground">
+                              <span className="block text-xs text-muted-foreground">
                                 Main
                               </span>
                               <span className="block truncate font-mono">
@@ -708,7 +708,7 @@ export function CanvasBranches({
                                 }))
                               }
                             >
-                              <span className="block text-[11px] text-muted-foreground">
+                              <span className="block text-xs text-muted-foreground">
                                 This branch
                               </span>
                               <span className="block truncate font-mono">

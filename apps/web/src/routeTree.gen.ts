@@ -20,6 +20,7 @@ import { Route as DotwellKnownOauthAuthorizationServerRouteImport } from './rout
 import { Route as ApiCanvasEventsRouteImport } from './routes/api.canvas-events'
 import { Route as ApiReadyRouteImport } from './routes/api.ready'
 import { Route as AppIndexRouteImport } from './routes/app.index'
+import { Route as AppAppearanceRouteImport } from './routes/app.appearance'
 import { Route as AppBillingRouteImport } from './routes/app.billing'
 import { Route as AppDesignRouteImport } from './routes/app.design'
 import { Route as AppIntegrationsRouteImport } from './routes/app.integrations'
@@ -90,6 +91,11 @@ const ApiReadyRoute = ApiReadyRouteImport.update({
 const AppIndexRoute = AppIndexRouteImport.update({
   id: '/app/',
   path: '/app/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AppAppearanceRoute = AppAppearanceRouteImport.update({
+  id: '/app/appearance',
+  path: '/app/appearance',
   getParentRoute: () => rootRouteImport,
 } as any)
 const AppBillingRoute = AppBillingRouteImport.update({
@@ -179,6 +185,7 @@ export interface FileRoutesByFullPath {
   '/.well-known/oauth-authorization-server': typeof DotwellKnownOauthAuthorizationServerRoute
   '/api/canvas-events': typeof ApiCanvasEventsRoute
   '/api/ready': typeof ApiReadyRoute
+  '/app/appearance': typeof AppAppearanceRoute
   '/app/billing': typeof AppBillingRoute
   '/app/design': typeof AppDesignRoute
   '/app/integrations': typeof AppIntegrationsRoute
@@ -207,6 +214,7 @@ export interface FileRoutesByTo {
   '/.well-known/oauth-authorization-server': typeof DotwellKnownOauthAuthorizationServerRoute
   '/api/canvas-events': typeof ApiCanvasEventsRoute
   '/api/ready': typeof ApiReadyRoute
+  '/app/appearance': typeof AppAppearanceRoute
   '/app/billing': typeof AppBillingRoute
   '/app/design': typeof AppDesignRoute
   '/app/integrations': typeof AppIntegrationsRoute
@@ -236,6 +244,7 @@ export interface FileRoutesById {
   '/.well-known/oauth-authorization-server': typeof DotwellKnownOauthAuthorizationServerRoute
   '/api/canvas-events': typeof ApiCanvasEventsRoute
   '/api/ready': typeof ApiReadyRoute
+  '/app/appearance': typeof AppAppearanceRoute
   '/app/billing': typeof AppBillingRoute
   '/app/design': typeof AppDesignRoute
   '/app/integrations': typeof AppIntegrationsRoute
@@ -266,6 +275,7 @@ export interface FileRouteTypes {
     | '/.well-known/oauth-authorization-server'
     | '/api/canvas-events'
     | '/api/ready'
+    | '/app/appearance'
     | '/app/billing'
     | '/app/design'
     | '/app/integrations'
@@ -294,6 +304,7 @@ export interface FileRouteTypes {
     | '/.well-known/oauth-authorization-server'
     | '/api/canvas-events'
     | '/api/ready'
+    | '/app/appearance'
     | '/app/billing'
     | '/app/design'
     | '/app/integrations'
@@ -322,6 +333,7 @@ export interface FileRouteTypes {
     | '/.well-known/oauth-authorization-server'
     | '/api/canvas-events'
     | '/api/ready'
+    | '/app/appearance'
     | '/app/billing'
     | '/app/design'
     | '/app/integrations'
@@ -351,6 +363,7 @@ export interface RootRouteChildren {
   DotwellKnownOauthAuthorizationServerRoute: typeof DotwellKnownOauthAuthorizationServerRoute
   ApiCanvasEventsRoute: typeof ApiCanvasEventsRoute
   ApiReadyRoute: typeof ApiReadyRoute
+  AppAppearanceRoute: typeof AppAppearanceRoute
   AppBillingRoute: typeof AppBillingRoute
   AppDesignRoute: typeof AppDesignRoute
   AppIntegrationsRoute: typeof AppIntegrationsRoute
@@ -445,6 +458,13 @@ declare module '@tanstack/react-router' {
       path: '/app'
       fullPath: '/app/'
       preLoaderRoute: typeof AppIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/app/appearance': {
+      id: '/app/appearance'
+      path: '/app/appearance'
+      fullPath: '/app/appearance'
+      preLoaderRoute: typeof AppAppearanceRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/app/billing': {
@@ -579,6 +599,7 @@ const rootRouteChildren: RootRouteChildren = {
     DotwellKnownOauthAuthorizationServerRoute,
   ApiCanvasEventsRoute: ApiCanvasEventsRoute,
   ApiReadyRoute: ApiReadyRoute,
+  AppAppearanceRoute: AppAppearanceRoute,
   AppBillingRoute: AppBillingRoute,
   AppDesignRoute: AppDesignRoute,
   AppIntegrationsRoute: AppIntegrationsRoute,

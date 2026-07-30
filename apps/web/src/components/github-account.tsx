@@ -132,7 +132,7 @@ export function GitHubAccount() {
                         : 'Selected repositories'}
                   </p>
                 </div>
-                <span className="shrink-0 text-[11px] uppercase tracking-wide text-muted-foreground">
+                <span className="shrink-0 text-xs uppercase tracking-wide text-muted-foreground">
                   {installation.type}
                 </span>
               </div>
