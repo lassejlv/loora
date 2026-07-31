@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1
 
-FROM oven/bun:canary AS deps
+FROM oven/bun:1.3.14 AS deps
 WORKDIR /app
 
 # Workspace manifests only, so dependency layers cache until a package.json,
@@ -22,7 +22,7 @@ COPY packages/editor/package.json packages/editor/
 COPY packages/ui/package.json packages/ui/
 RUN bun install --frozen-lockfile
 
-FROM oven/bun:canary AS build
+FROM oven/bun:1.3.14 AS build
 WORKDIR /app
 
 COPY --from=deps /app ./
@@ -39,7 +39,7 @@ RUN echo "VITE_DATABUDDY_CLIENT_ID length: ${#VITE_DATABUDDY_CLIENT_ID}"
 
 RUN bun run --cwd apps/web build --logLevel warn
 
-FROM oven/bun:canary-slim AS runtime
+FROM oven/bun:1.3.14-slim AS runtime
 WORKDIR /app
 
 ENV NODE_ENV=production
