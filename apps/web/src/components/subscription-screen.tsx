@@ -37,7 +37,7 @@ const plans = [
     id: 'pro' as const,
     name: 'Pro',
     price: '$20',
-    summary: 'Unlimited files and branches, agent access, and image generation',
+    summary: 'Unlimited files and branches, 100 GB storage, and agent access',
     note: 'Save with yearly',
   },
 ]
@@ -121,7 +121,7 @@ export function SubscriptionScreen({ userId, children, preview, redirect }: Subs
             <DialogTitle>Choose your Loora plan</DialogTitle>
             <DialogDescription>
               Free is the whole editor, not a demo. Pro lifts the limits — unlimited files and branches,
-              the in-app agent, and image generation.
+              100 GB of storage, 90-day history, and the in-app agent.
             </DialogDescription>
           </DialogHeader>
           <DialogPanel className="flex flex-col gap-4 pt-1">
@@ -144,7 +144,7 @@ export function SubscriptionScreen({ userId, children, preview, redirect }: Subs
                   </p>
                   {plan.id === 'pro' ? (
                     <p className="mt-2 text-xs text-muted-foreground">
-                      $20/month or $200/year (two months free). Nothing is billed per generation.
+                      $20/month or $200/year (two months free).
                     </p>
                   ) : (
                     <p className="mt-2 text-xs text-muted-foreground">

@@ -182,4 +182,37 @@ describe('MCP agent workflow', () => {
       await server.close()
     }
   })
+
+  test('keeps the tool manifest compact via shared schema definitions', async () => {
+    const usage = usageController()
+    const server = createLooraServer('user-test', usage, 'free')
+    const client = new Client({ name: 'loora-test', version: '1.0.0' })
+    const [clientTransport, serverTransport] =
+      InMemoryTransport.createLinkedPair()
+    await server.connect(serverTransport)
+    await client.connect(clientTransport)
+    try {
+      const { tools } = await client.listTools()
+      expect(tools.length).toBeGreaterThanOrEqual(30)
+      // The raw zod conversion inlined every shared shape into every tool
+      // (~156KB total, patchNodes alone 43KB). The custom tools/list handler
+      // hoists registered shapes into named definitions instead.
+      const patchNodes = tools.find((tool) => tool.name === 'patchNodes')
+      const schema = patchNodes?.inputSchema as {
+        definitions?: Record<string, unknown>
+      }
+      expect(schema.definitions?.CanvasStylePatch).toBeDefined()
+      expect(schema.definitions?.CanvasNodePatch).toBeDefined()
+      expect(JSON.stringify(patchNodes).length).toBeLessThan(20_000)
+      expect(JSON.stringify(tools).length).toBeLessThan(100_000)
+      // Conversion still keeps the vocabulary the agents rely on.
+      const insertNodes = tools.find((tool) => tool.name === 'insertNodes')
+      const insertText = JSON.stringify(insertNodes?.inputSchema)
+      expect(insertText).toContain('CanvasNodeDescriptor')
+      expect(insertText).toContain('linear-gradient')
+    } finally {
+      await client.close()
+      await server.close()
+    }
+  })
 })

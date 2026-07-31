@@ -129,8 +129,8 @@ export function UpgradeToProButton({
           <DialogHeader>
             <DialogTitle>Upgrade to Pro</DialogTitle>
             <DialogDescription>
-              Unlimited files and branches, 90-day history, the in-app agent, and
-              image generation. Choose how you want to pay.
+              Unlimited files and branches, 100 GB storage, 90-day history, and the
+              in-app agent. Choose how you want to pay.
             </DialogDescription>
           </DialogHeader>
           <DialogPanel className="flex flex-col gap-2">

@@ -89,6 +89,85 @@ describe('MCP included usage', () => {
     expect(records).toBe(0)
   })
 
+  test('caches Free meter reads between calls instead of reading every time', async () => {
+    let reads = 0
+    let records = 0
+    const service = createMcpUsageService(() => ({
+      readTotal: async () => {
+        reads += 1
+        return 10
+      },
+      record: async () => {
+        records += 1
+        return true
+      },
+    }))
+    const now = new Date('2026-07-29T12:00:00Z')
+
+    const first = await service.reserve('user-1', 'free', now)
+    const second = await service.reserve(
+      'user-1',
+      'free',
+      new Date(now.getTime() + 1_000),
+    )
+    expect(first.used).toBe(11)
+    expect(second.used).toBe(12)
+    expect(reads).toBe(1)
+    expect(records).toBe(2)
+
+    // Past the read TTL the counter re-syncs with Polar, keeping whichever
+    // total is higher so a lagging meter cannot reopen spent quota.
+    const third = await service.reserve(
+      'user-1',
+      'free',
+      new Date(now.getTime() + 31_000),
+    )
+    expect(reads).toBe(2)
+    expect(third.used).toBe(13)
+  })
+
+  test('does not block Pro calls on Polar at all', async () => {
+    let reads = 0
+    let recordedCount = 0
+    const service = createMcpUsageService(() => ({
+      readTotal: async () => {
+        reads += 1
+        return 0
+      },
+      record: async () => {
+        recordedCount += 1
+        return true
+      },
+    }))
+    const now = new Date('2026-07-29T12:00:00Z')
+
+    const usage = await service.reserve('pro-1', 'pro', now)
+    expect(usage.plan).toBe('pro')
+    expect(usage.used).toBe(1)
+    expect(usage.remaining).toBe(1_000_000 - 1)
+    expect(reads).toBe(0)
+    // The event still lands, just off the hot path.
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(recordedCount).toBe(1)
+  })
+
+  test('a failing Polar ingest does not fail a Pro call', async () => {
+    const service = createMcpUsageService(() => ({
+      readTotal: async () => 0,
+      record: async () => {
+        throw new Error('polar down')
+      },
+    }))
+
+    const usage = await service.reserve(
+      'pro-1',
+      'pro',
+      new Date('2026-07-29T12:00:00Z'),
+    )
+    expect(usage.used).toBe(1)
+    await new Promise((resolve) => setTimeout(resolve, 0))
+  })
+
   test('does not contact Polar when billing is disabled or bypassed for admins', async () => {
     let calls = 0
     const service = createMcpUsageService(() => {

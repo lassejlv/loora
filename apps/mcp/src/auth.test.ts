@@ -81,4 +81,108 @@ describe('createMcpSessionVerifier', () => {
     }))).toBeNull()
     expect(aborted).toBe(true)
   })
+
+  it('caches verified sessions per token instead of re-verifying every call', async () => {
+    let requests = 0
+    const verifier = createMcpSessionVerifier(
+      'https://loora.test',
+      async () => {
+        requests += 1
+        return Response.json({
+          accessToken: 'access-token',
+          accessTokenExpiresAt: '2099-01-01T00:00:00.000Z',
+          clientId: 'client-id',
+          userId: 'user-id',
+          scopes: 'openid profile',
+        })
+      },
+      5_000,
+      60_000,
+    )
+
+    const headers = new Headers({ authorization: 'Bearer test-token' })
+    expect((await verifier.getSession(headers))?.userId).toBe('user-id')
+    expect((await verifier.getSession(headers))?.userId).toBe('user-id')
+    expect(requests).toBe(1)
+
+    // A different token is its own cache entry.
+    expect(
+      (
+        await verifier.getSession(
+          new Headers({ authorization: 'Bearer other-token' }),
+        )
+      )?.userId,
+    ).toBe('user-id')
+    expect(requests).toBe(2)
+  })
+
+  it('never caches failed verification', async () => {
+    let requests = 0
+    const verifier = createMcpSessionVerifier(
+      'https://loora.test',
+      async () => {
+        requests += 1
+        return new Response(null, { status: 401 })
+      },
+      5_000,
+      60_000,
+    )
+
+    const headers = new Headers({ authorization: 'Bearer bad-token' })
+    expect(await verifier.getSession(headers)).toBeNull()
+    expect(await verifier.getSession(headers)).toBeNull()
+    expect(requests).toBe(2)
+  })
+
+  it('does not serve a cached session past the token expiry', async () => {
+    let requests = 0
+    const soon = new Date(Date.now() + 20).toISOString()
+    const verifier = createMcpSessionVerifier(
+      'https://loora.test',
+      async () => {
+        requests += 1
+        return Response.json({
+          accessToken: 'access-token',
+          accessTokenExpiresAt: soon,
+          clientId: 'client-id',
+          userId: 'user-id',
+          scopes: 'openid profile',
+        })
+      },
+      5_000,
+      60_000,
+    )
+
+    const headers = new Headers({ authorization: 'Bearer test-token' })
+    expect((await verifier.getSession(headers))?.userId).toBe('user-id')
+    await new Promise((resolve) => setTimeout(resolve, 30))
+    // Token now expired: the cache entry lapsed with it, and Better Auth's
+    // own expiry check rejects the re-verified session.
+    expect(await verifier.getSession(headers)).toBeNull()
+    expect(requests).toBe(2)
+  })
+
+  it('bypasses the cache when the TTL is zero', async () => {
+    let requests = 0
+    const verifier = createMcpSessionVerifier(
+      'https://loora.test',
+      async () => {
+        requests += 1
+        return Response.json({
+          accessToken: 'access-token',
+          accessTokenExpiresAt: '2099-01-01T00:00:00.000Z',
+          clientId: 'client-id',
+          userId: 'user-id',
+          scopes: 'openid profile',
+        })
+      },
+      5_000,
+      0,
+    )
+
+    const headers = new Headers({ authorization: 'Bearer test-token' })
+    await verifier.getSession(headers)
+    await verifier.getSession(headers)
+    expect(requests).toBe(2)
+  })
 })

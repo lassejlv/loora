@@ -374,6 +374,13 @@ const nodePatchFields = {
   variant: z.string().max(128).optional(),
 }
 
+/**
+ * One shared instance for every "record of node patches" spot. Reusing the
+ * instance (instead of calling z.object(nodePatchFields) at each site) lets
+ * the JSON Schema conversion hoist it into a single definition.
+ */
+const nodePatchObjectSchema = z.object(nodePatchFields)
+
 /* -------------------------------------------------------------------------- */
 /* Motion                                                                     */
 /* -------------------------------------------------------------------------- */
@@ -471,7 +478,7 @@ export const canvasNodePatchSchema = z.object({
   variantOverrides: z
     .record(
       z.string().min(1).max(128),
-      z.record(z.string().min(1).max(128), z.object(nodePatchFields)),
+      z.record(z.string().min(1).max(128), nodePatchObjectSchema),
     )
     .optional(),
   shape: z.enum(['rectangle', 'ellipse', 'line']).optional(),
@@ -498,7 +505,7 @@ export const canvasNodePatchSchema = z.object({
     .optional(),
   transition: transitionSchema.optional(),
   animations: z.array(nodeAnimationSchema).max(8).optional(),
-  responsive: z.record(z.string(), z.object(nodePatchFields)).optional(),
+  responsive: z.record(z.string(), nodePatchObjectSchema).optional(),
   metadata: z.record(z.string(), z.unknown()).optional(),
 })
 
@@ -547,7 +554,7 @@ export const canvasNodeDescriptorSchema: z.ZodType<CanvasNodeDescriptor> = z.laz
     hidden: z.boolean().optional(),
     locked: z.boolean().optional(),
     rotation: z.number().finite().optional(),
-    responsive: z.record(z.string(), z.object(nodePatchFields)).optional(),
+    responsive: z.record(z.string(), nodePatchObjectSchema).optional(),
     interactions: z.array(interactionSchema).max(50).optional(),
     semanticTag: nodePatchFields.semanticTag,
     text: z.string().max(200_000).optional(),
@@ -589,6 +596,41 @@ export const canvasNodeDescriptorSchema: z.ZodType<CanvasNodeDescriptor> = z.laz
     }
   }),
 )
+
+/**
+ * Readable JSON Schema ids for the shared shapes. Tool schemas repeat these
+ * heavily (styles inside visual states inside patches inside descriptors);
+ * naming them lets the MCP tools/list conversion hoist each into a single
+ * definition instead of inlining it dozens of times per tool — the raw
+ * manifest was ~156KB of almost entirely duplicated style/layout shapes.
+ * Registration only affects JSON Schema output, never parsing.
+ */
+for (const [id, schema] of Object.entries({
+  CanvasLength: lengthSchema,
+  CanvasColor: colorSchema,
+  CanvasPaint: paintSchema,
+  CanvasTypography: typographySchema,
+  CanvasLayoutPatch: canvasLayoutPatchSchema,
+  CanvasStylePatch: canvasStylePatchSchema,
+  CanvasStateValue: stateValueSchema,
+  CanvasStateDefinitions: stateDefinitionsSchema,
+  CanvasAction: actionSchema,
+  CanvasInteraction: interactionSchema,
+  CanvasImageUrl: imageUrlSchema,
+  CanvasNodePatchFields: nodePatchObjectSchema,
+  CanvasEasing: easingSchema,
+  CanvasTransition: transitionSchema,
+  CanvasMotionTransform: motionTransformSchema,
+  CanvasKeyframe: keyframeSchema,
+  CanvasAnimation: animationSchema,
+  CanvasVisualState: visualStateSchema,
+  CanvasNodeAnimation: nodeAnimationSchema,
+  CanvasNodePatch: canvasNodePatchSchema,
+  CanvasNodeRef: nodeRefSchema,
+  CanvasNodeDescriptor: canvasNodeDescriptorSchema,
+})) {
+  z.globalRegistry.add(schema, { id })
+}
 
 export const createPageInputSchema = z.object({
   name: z.string().trim().min(1).max(200),

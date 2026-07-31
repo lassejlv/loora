@@ -48,14 +48,14 @@ const commonBenefits: BenefitSpec[] = [
     description: 'HTML/CSS, React/TSX, JSON, PNG exports',
     note: 'One-way code, document, and image exports.',
   },
+]
+
+const freeBenefits: BenefitSpec[] = [
   {
     key: 'integrations',
     description: 'GitHub read access',
     note: 'Connect GitHub repositories for read-only context.',
   },
-]
-
-const freeBenefits: BenefitSpec[] = [
   {
     key: 'design_files_50',
     description: '50 design files',
@@ -117,11 +117,6 @@ const proBenefits: BenefitSpec[] = [
     description: 'In-app agent access',
     note: 'Use the Loora agent inside the app.',
   },
-  {
-    key: 'image_generation',
-    description: 'Image generation',
-    note: 'Generate images without per-generation billing.',
-  },
 ]
 
 const freeDescription = [
@@ -132,7 +127,7 @@ const freeDescription = [
   '- 200 MCP calls per week',
   '- 2 days of version history',
   '- 1 open branch per design',
-  '- Full canvas editor, MCP server, exports, and integrations',
+  '- Full canvas editor, MCP server, and exports',
 ].join('\n')
 
 const proDescription = [
@@ -144,7 +139,6 @@ const proDescription = [
   '- 90 days of version history',
   '- Unlimited branches: fork, compare, merge',
   '- In-app agent access',
-  '- Image generation',
 ].join('\n')
 
 async function items<T>(iterator: AsyncIterable<{ result: { items: T[] } }>) {

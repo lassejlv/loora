@@ -1,4 +1,5 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
+import { ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js'
 import { z } from 'zod'
 import {
   compileJsxComponent,
@@ -83,9 +84,11 @@ function usageMeta(usage?: McpIncludedUsage) {
   return usage ? { _meta: { 'loora/usage': usage } } : {}
 }
 
+// Compact on purpose: results feed a model, and the indentation was ~30%
+// extra tokens on every read.
 function json(data: unknown, usage?: McpIncludedUsage) {
   return {
-    content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }],
+    content: [{ type: 'text' as const, text: JSON.stringify(data) }],
     ...usageMeta(usage),
   }
 }
@@ -96,15 +99,11 @@ function fail(error: unknown, usage?: McpIncludedUsage) {
       content: [
         {
           type: 'text' as const,
-          text: JSON.stringify(
-            {
-              error: error.message,
-              code: 'MCP_USAGE_LIMIT_REACHED',
-              usage: error.usage,
-            },
-            null,
-            2,
-          ),
+          text: JSON.stringify({
+            error: error.message,
+            code: 'MCP_USAGE_LIMIT_REACHED',
+            usage: error.usage,
+          }),
         },
       ],
       isError: true,
@@ -143,15 +142,11 @@ function fail(error: unknown, usage?: McpIncludedUsage) {
       content: [
         {
           type: 'text' as const,
-          text: JSON.stringify(
-            {
-              error: error.message,
-              code: error.code,
-              designId: error.designId,
-            },
-            null,
-            2,
-          ),
+          text: JSON.stringify({
+            error: error.message,
+            code: error.code,
+            designId: error.designId,
+          }),
         },
       ],
       isError: true,
@@ -226,12 +221,66 @@ export function exportCanvasCode(
   return { code, pageId, nodeId }
 }
 
+interface RegisteredToolConfig {
+  title?: string
+  description?: string
+  inputSchema?: z.ZodRawShape
+  annotations?: Record<string, unknown>
+}
+
+/**
+ * The SDK's tools/list handler inlines every shared shape into every tool
+ * schema — the manifest came out at ~156KB (patchNodes alone 43KB) because
+ * the style/layout/state shapes repeat a dozen times per tool. Converting
+ * ourselves hoists the shapes registered in @loora/agent into named
+ * definitions, so each appears once per tool. The catalog is identical for
+ * every server instance, so the converted list is built once per process.
+ */
+let cachedToolList: { tools: unknown[] } | undefined
+
+/** Anything slower than this is worth a log line with the tool name. */
+const SLOW_TOOL_MS = 2_000
+
+function logSlowTool(name: string, startedAt: number) {
+  const durationMs = performance.now() - startedAt
+  if (durationMs >= SLOW_TOOL_MS) {
+    console.log(
+      `[loora-mcp] slow tool ${name} took ${Math.round(durationMs)}ms`,
+    )
+  }
+}
+
+function buildToolList(
+  catalog: Array<{ name: string; config: RegisteredToolConfig }>,
+) {
+  return (cachedToolList ??= {
+    tools: catalog.map(({ name, config }) => ({
+      name,
+      title: config.title,
+      description: config.description,
+      inputSchema: config.inputSchema
+        ? z.toJSONSchema(z.object(config.inputSchema), {
+            target: 'draft-7',
+            io: 'input',
+          })
+        : { type: 'object' },
+      annotations: config.annotations,
+    })),
+  })
+}
+
 export function createLooraServer(
   userId: string,
   usage: McpUsageController,
   planSource: LimitsPlan | (() => Promise<LimitsPlan>),
 ) {
   const server = new McpServer({ name: 'loora', version: '0.3.0' })
+  const toolCatalog: Array<{ name: string; config: RegisteredToolConfig }> = []
+  const registerToolDirect = server.registerTool.bind(server)
+  server.registerTool = ((name, config, callback) => {
+    toolCatalog.push({ name, config: config as RegisteredToolConfig })
+    return registerToolDirect(name, config as never, callback as never)
+  }) as typeof server.registerTool
   const currentPlan = () =>
     typeof planSource === 'function'
       ? planSource()
@@ -246,6 +295,7 @@ export function createLooraServer(
     return async (args: Args) => {
       let currentUsage: McpIncludedUsage | undefined
       const activity = trackAgentActivity(userId, name, args)
+      const startedAt = performance.now()
       try {
         currentUsage = await usage.reserve()
         return json(await run(args), currentUsage)
@@ -253,6 +303,7 @@ export function createLooraServer(
         return fail(error, currentUsage)
       } finally {
         activity?.end()
+        logSlowTool(name, startedAt)
       }
     }
   }
@@ -267,6 +318,7 @@ export function createLooraServer(
     return async (args: Args) => {
       let currentUsage: McpIncludedUsage | undefined
       const activity = trackAgentActivity(userId, name, args)
+      const startedAt = performance.now()
       try {
         currentUsage = await usage.reserve()
         const result = await run(args)
@@ -274,7 +326,7 @@ export function createLooraServer(
           content: [
             {
               type: 'text' as const,
-              text: JSON.stringify(result.metadata, null, 2),
+              text: JSON.stringify(result.metadata),
             },
             {
               type: 'image' as const,
@@ -288,6 +340,7 @@ export function createLooraServer(
         return fail(error, currentUsage)
       } finally {
         activity?.end()
+        logSlowTool(name, startedAt)
       }
     }
   }
@@ -1238,6 +1291,10 @@ export function createLooraServer(
     'listAssets',
     { description: 'List the signed-in user’s uploaded image assets.' },
     tool('listAssets', async (_args: unknown) => listAssets(userId)),
+  )
+
+  server.server.setRequestHandler(ListToolsRequestSchema, () =>
+    buildToolList(toolCatalog) as { tools: never[] },
   )
 
   return server
