@@ -4,7 +4,7 @@ import { usePalette } from '#/components/landing/palette'
 import { LandingShell } from '#/components/landing/site-shell'
 
 const DESCRIPTION =
-  'What Loora does: a normalized canvas document, typed transactions shared by the editor and your agent, MCP, branches, history, deterministic exports, HTML/CSS import, and GitHub read access.'
+  'What Loora does: a canvas document, typed transactions shared by the editor and your agent, MCP, branches, history, exports, and HTML/CSS import.'
 
 export const Route = createFileRoute('/features')({
   ssr: false,
@@ -42,9 +42,9 @@ function FeaturesContent() {
       </h1>
 
       <p className="mt-6 text-muted-foreground">
-        Loora is an infinite canvas whose document is structured all the way down, and a set of
-        typed operations over it that the editor and your agent both use. Everything below is one
-        of those two things.
+        Two things make up Loora: a canvas document that is structured all the way down, and a set
+        of typed operations over it that the editor and your agent both use. Everything below is one
+        or the other.
       </p>
 
       {/* Contents: the page is long, so give the reader the shape of it first. */}
