@@ -1,0 +1,11 @@
+interface:
+  display_name: "Loora Design Guide"
+  short_description: "Build polished structured designs through Loora MCP"
+  default_prompt: "Use $loora-design-guide to build and visually verify a polished design in Loora."
+dependencies:
+  tools:
+    - type: "mcp"
+      value: "loora"
+      description: "Loora structured design and Canvas MCP server"
+      transport: "streamable_http"
+      url: "https://mcp.loora.design/mcp"
