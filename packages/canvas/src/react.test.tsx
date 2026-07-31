@@ -543,6 +543,60 @@ describe('Canvas React surface', () => {
     expect(horizontalGuide.style.display).toBe('none')
   })
 
+  it('still moves a child that is larger than its clipped parent', () => {
+    const document = createCanvasDocument('Oversized drag fixture', 'oversized-drag')
+    document.nodes.page = createPageNode('Home', {
+      id: 'page',
+      layout: { ...defaultLayout(800, 600), x: 0, y: 0 },
+      viewport: { width: 800, minHeight: 600 },
+    })
+    // Wider and taller than the page, which is what a full-bleed section or an
+    // imported snapshot usually looks like.
+    document.nodes.card = createFrameNode('Card', {
+      id: 'card',
+      parentId: 'page',
+      order: 1_024,
+      layout: {
+        ...defaultLayout(900, 700),
+        position: 'absolute',
+        x: 0,
+        y: 0,
+      },
+    })
+    const engine = new CanvasEngine(document)
+    const view = render(
+      <CanvasProvider engine={engine}>
+        <CanvasSurface pageWidth={800} initialCamera={{ x: 0, y: 0, zoom: 1 }} />
+      </CanvasProvider>,
+    )
+    const surface = view.container.querySelector<HTMLElement>(
+      '[data-loora-canvas-surface]',
+    )!
+    surface.setPointerCapture = () => undefined
+    const page = view.container.querySelector<HTMLElement>(
+      '[data-loora-node="page"]',
+    )!
+    const card = view.container.querySelector<HTMLElement>(
+      '[data-loora-node="card"]',
+    )!
+    stubRect(page, { left: 100, top: 100, width: 800, height: 600 })
+    stubRect(card, { left: 100, top: 100, width: 900, height: 700 })
+
+    withHits([card, page], () => {
+      fireEvent.pointerDown(surface, { button: 0, clientX: 150, clientY: 150 })
+      fireEvent.pointerMove(surface, { button: 0, clientX: 200, clientY: 190 })
+      fireEvent.pointerUp(surface, { button: 0, clientX: 200, clientY: 190 })
+    })
+
+    // Containment used to invert here and clamp the drag to zero, so the node
+    // sprang back to where it was picked up.
+    expect(engine.getNode('card')?.layout).toMatchObject({
+      position: 'absolute',
+      x: 50,
+      y: 40,
+    })
+  })
+
   it('resolves where an outside drop lands, in flow and in free space', () => {
     const document = createCanvasDocument('Drop fixture', 'drop')
     document.nodes.page = createPageNode('Home', {

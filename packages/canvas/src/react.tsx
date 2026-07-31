@@ -1135,8 +1135,24 @@ function nearestSnap(
   return best
 }
 
-function clampDragDelta(value: number, first: number, second: number) {
-  return Math.min(Math.max(first, second), Math.max(Math.min(first, second), value))
+interface DragRange {
+  min: number
+  max: number
+}
+
+function clampDragDelta(value: number, range: DragRange) {
+  return Math.min(range.max, Math.max(range.min, value))
+}
+
+/**
+ * How far a drag may travel on one axis and still leave the node inside its
+ * clipped parent. A node that is wider (or taller) than that parent, or that
+ * already hangs over an edge, has no such range — pinning it to the inverted
+ * bounds froze the drag and snapped the node back on release, so it stays
+ * free on that axis.
+ */
+function containedRange(min: number, max: number): DragRange | null {
+  return min <= max ? { min, max } : null
 }
 
 const HANDLES: [string, -1 | 0 | 1, -1 | 0 | 1, CSSProperties['cursor']][] = [
@@ -1709,10 +1725,8 @@ export function CanvasSurface({
     guideX: number | null
     guideY: number | null
     containment: {
-      minX: number
-      maxX: number
-      minY: number
-      maxY: number
+      x: DragRange | null
+      y: DragRange | null
     } | null
     originalTransform: string
   } | null>(null)
@@ -2321,10 +2335,14 @@ export function CanvasSurface({
       guideY: null,
       containment: parentRect
         ? {
-            minX: parentRect.left - startRect.left,
-            maxX: parentRect.right - startRect.right,
-            minY: parentRect.top - startRect.top,
-            maxY: parentRect.bottom - startRect.bottom,
+            x: containedRange(
+              parentRect.left - startRect.left,
+              parentRect.right - startRect.right,
+            ),
+            y: containedRange(
+              parentRect.top - startRect.top,
+              parentRect.bottom - startRect.bottom,
+            ),
           }
         : null,
       originalTransform: (element as HTMLElement).style.transform,
@@ -2423,38 +2441,28 @@ export function CanvasSurface({
     )
     const snappedX = rawX + (xSnap?.delta ?? 0)
     const snappedY = rawY + (ySnap?.delta ?? 0)
-    const boundedX = activeDrag.containment
-      ? clampDragDelta(
-          snappedX,
-          activeDrag.containment.minX,
-          activeDrag.containment.maxX,
-        )
-      : snappedX
-    const boundedY = activeDrag.containment
-      ? clampDragDelta(
-          snappedY,
-          activeDrag.containment.minY,
-          activeDrag.containment.maxY,
-        )
-      : snappedY
+    const rangeX = activeDrag.containment?.x ?? null
+    const rangeY = activeDrag.containment?.y ?? null
+    const boundedX = rangeX ? clampDragDelta(snappedX, rangeX) : snappedX
+    const boundedY = rangeY ? clampDragDelta(snappedY, rangeY) : snappedY
     activeDrag.latestX =
       boundedX / cameraRef.current.zoom
     activeDrag.latestY =
       boundedY / cameraRef.current.zoom
     activeDrag.clientX = event.clientX
     activeDrag.clientY = event.clientY
-    activeDrag.guideX = activeDrag.containment
-      ? Math.abs(boundedX - activeDrag.containment.minX) < 0.01
-        ? activeDrag.startRect.left + activeDrag.containment.minX
-        : Math.abs(boundedX - activeDrag.containment.maxX) < 0.01
-          ? activeDrag.startRect.right + activeDrag.containment.maxX
+    activeDrag.guideX = rangeX
+      ? Math.abs(boundedX - rangeX.min) < 0.01
+        ? activeDrag.startRect.left + rangeX.min
+        : Math.abs(boundedX - rangeX.max) < 0.01
+          ? activeDrag.startRect.right + rangeX.max
           : xSnap?.position ?? null
       : xSnap?.position ?? null
-    activeDrag.guideY = activeDrag.containment
-      ? Math.abs(boundedY - activeDrag.containment.minY) < 0.01
-        ? activeDrag.startRect.top + activeDrag.containment.minY
-        : Math.abs(boundedY - activeDrag.containment.maxY) < 0.01
-          ? activeDrag.startRect.bottom + activeDrag.containment.maxY
+    activeDrag.guideY = rangeY
+      ? Math.abs(boundedY - rangeY.min) < 0.01
+        ? activeDrag.startRect.top + rangeY.min
+        : Math.abs(boundedY - rangeY.max) < 0.01
+          ? activeDrag.startRect.bottom + rangeY.max
           : ySnap?.position ?? null
       : ySnap?.position ?? null
     schedule(() => {
