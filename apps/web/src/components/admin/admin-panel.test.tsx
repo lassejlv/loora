@@ -15,7 +15,6 @@ const overview = {
     total: 40,
     newLast7Days: 6,
     openBranches: 2,
-    livePublishLinks: 1,
     versionsLast7Days: 9,
   },
   storage: { assets: 20, bytes: 5 * 1024 * 1024 },
@@ -57,7 +56,6 @@ const designs = [
     revision: 12,
     createdAt: new Date('2026-07-01T10:00:00.000Z'),
     updatedAt: new Date('2026-07-30T10:00:00.000Z'),
-    livePublishLinks: 1,
     shares: 0,
   },
 ]
@@ -132,12 +130,12 @@ describe('AdminPanel', () => {
     await waitFor(() => expect(approvePendingPreviewAccess).toHaveBeenCalled())
   })
 
-  test('revokes public links for a design', async () => {
+  test('restricts a design that is shared by link', async () => {
     const confirm = mock(() => true)
     window.confirm = confirm as unknown as typeof window.confirm
     const screen = within(render(<AdminPanel />).container)
 
-    const revoke = await screen.findByRole('button', { name: 'Revoke links' })
+    const revoke = await screen.findByRole('button', { name: 'Restrict link' })
     fireEvent.click(revoke)
 
     await waitFor(() =>

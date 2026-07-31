@@ -33,7 +33,6 @@ import {
   oauthAccessToken,
   oauthApplication,
   oauthConsent,
-  publishLink,
   session as authSession,
   user,
   userPreferences,
@@ -2818,7 +2817,6 @@ const adminOverview = adminProcedure.handler(async () => {
     [newDesigns],
     [openBranches],
     [assets],
-    [publishLinks],
     [activeSessions],
     [mcpClients],
     [versions],
@@ -2849,10 +2847,6 @@ const adminOverview = adminProcedure.handler(async () => {
         or(eq(designDraft.status, 'active'), eq(designDraft.status, 'proposed')),
       ),
     db.select({ n: count(), bytes: sum(asset.size) }).from(asset),
-    db
-      .select({ n: count() })
-      .from(publishLink)
-      .where(gt(publishLink.expiresAt, now)),
     db
       .select({ n: countDistinct(authSession.userId) })
       .from(authSession)
@@ -2889,7 +2883,6 @@ const adminOverview = adminProcedure.handler(async () => {
       total: toCount(designs?.n),
       newLast7Days: toCount(newDesigns?.n),
       openBranches: toCount(openBranches?.n),
-      livePublishLinks: toCount(publishLinks?.n),
       versionsLast7Days: toCount(versions?.n),
     },
     storage: {
@@ -3203,34 +3196,24 @@ const listRecentDesigns = adminProcedure
 
     if (rows.length === 0) return []
 
-    const now = new Date()
     const ids = rows.map((row) => row.id)
-    const [publishRows, shareRows] = await Promise.all([
-      db
-        .select({ designId: publishLink.designId, links: count() })
-        .from(publishLink)
-        .where(and(inArray(publishLink.designId, ids), gt(publishLink.expiresAt, now)))
-        .groupBy(publishLink.designId),
-      db
-        .select({ designId: designShare.designId, shares: count() })
-        .from(designShare)
-        .where(inArray(designShare.designId, ids))
-        .groupBy(designShare.designId),
-    ])
-    const publishBy = new Map(publishRows.map((row) => [row.designId, row.links]))
+    const shareRows = await db
+      .select({ designId: designShare.designId, shares: count() })
+      .from(designShare)
+      .where(inArray(designShare.designId, ids))
+      .groupBy(designShare.designId)
     const shareBy = new Map(shareRows.map((row) => [row.designId, row.shares]))
 
     return rows.map((row) => ({
       ...row,
-      livePublishLinks: toCount(publishBy.get(row.id)),
       shares: toCount(shareBy.get(row.id)),
     }))
   })
 
 /**
- * Takedown for a design that is public when it should not be: every live
- * publish link is dropped and the editor link falls back to restricted. The
- * document itself is left alone.
+ * Takedown for a design that is shared more widely than it should be: its
+ * editor link falls back to restricted, so only the owner and the people in
+ * `design_share` can open it. The document itself is left alone.
  */
 const revokeDesignLinks = adminProcedure
   .input(
@@ -3247,22 +3230,11 @@ const revokeDesignLinks = adminProcedure
       .limit(1)
     if (!target) throw new ORPCError('NOT_FOUND')
 
-    const [links] = await Promise.all([
-      db
-        .delete(publishLink)
-        .where(
-          and(
-            eq(publishLink.designId, input.designId),
-            eq(publishLink.userId, input.userId),
-          ),
-        )
-        .returning({ id: publishLink.id }),
-      db
-        .update(design)
-        .set({ linkAccess: 'restricted', updatedAt: new Date() })
-        .where(and(eq(design.id, input.designId), eq(design.userId, input.userId))),
-    ])
-    return { revokedLinks: links.length }
+    await db
+      .update(design)
+      .set({ linkAccess: 'restricted', updatedAt: new Date() })
+      .where(and(eq(design.id, input.designId), eq(design.userId, input.userId)))
+    return { restricted: true }
   })
 
 const setUserPreviewAccess = adminProcedure

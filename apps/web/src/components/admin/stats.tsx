@@ -58,11 +58,6 @@ export function AdminStats({ overview }: { overview: AdminOverview }) {
         hint={`${plural(mcp.connectedUsers, 'account')} connected`}
       />
       <StatTile
-        label="Live publish links"
-        value={designs.livePublishLinks.toLocaleString()}
-        hint="Unexpired public pages"
-      />
-      <StatTile
         label="Versions (7d)"
         value={designs.versionsLast7Days.toLocaleString()}
         hint="Committed design versions"

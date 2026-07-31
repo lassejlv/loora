@@ -100,7 +100,9 @@ verifies it. See `apps/ws/README.md` for endpoints and configuration.
 
 - Schema: `packages/db/src/schema.ts`
 - Migrations: `packages/db/drizzle/` (commit SQL **and** `meta/` snapshots)
-- Notable tables: `design`, `designDraft`, `designVersion`, `canvasTransaction`, `asset`, auth/OAuth (incl. `oauth_*` MCP tables), `billingEntitlement`, and GitHub bindings. Legacy publish tables remain for compatibility but have no product runtime.
+- Notable tables: `design`, `designDraft`, `designVersion`, `canvasTransaction`, `asset`, auth/OAuth (incl. `oauth_*` MCP tables), `billingEntitlement`, and GitHub bindings. The `publish_link` and
+  `publish_egress` tables are dead: nothing reads or writes them, and they are
+  waiting on a migration to drop.
 
 Legacy helpers remain in `@loora/db/canvas` and `@loora/db/drafts` for rollback and expiring-link compatibility.
 
@@ -205,7 +207,8 @@ and `REALTIME_INTERNAL_TOKEN` on web and MCP; `REALTIME_TICKET_SECRET`,
 - `canvasTransaction` provides idempotency, stale-revision recovery, and audit. Server writes use compare-and-swap revisions; apply + log a batch atomically.
 - Browser: optimistic apply, queue unacked batches in IndexedDB, flush after ~250ms or before target change. Rebase independent fields; surface only same-field, move-vs-move, or edit-vs-delete conflicts.
 - Legacy designs without a Canvas document are unsupported in the editor; there is no automatic first-open conversion flow.
-- `apps/web/src/components/element-frame.tsx` is **legacy-only** (temporary public-link compatibility). Do not reuse its iframe/Babel/Tailwind/per-element React-root pipeline in the normal editor.
+- The old public-link renderer (`element-frame.tsx`, an iframe/Babel/Tailwind
+  per-element React-root pipeline) is gone. Do not bring that shape back.
 
 ### HTML/CSS import
 

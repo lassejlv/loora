@@ -50,10 +50,10 @@ export function AdminDesigns({ onChanged }: { onChanged: () => void }) {
     void load()
   }, [load])
 
-  async function revokeLinks(item: AdminDesign) {
+  async function restrictLinks(item: AdminDesign) {
     if (
       !window.confirm(
-        `Revoke every public link for "${item.name}"? The editor link falls back to restricted.`,
+        `Restrict "${item.name}"? Its link falls back to owner and invited people only.`,
       )
     ) {
       return
@@ -62,7 +62,7 @@ export function AdminDesigns({ onChanged }: { onChanged: () => void }) {
     setError('')
     setStatus('')
     try {
-      const { revokedLinks } = await orpc.admin.revokeDesignLinks({
+      await orpc.admin.revokeDesignLinks({
         designId: item.id,
         userId: item.userId,
       })
@@ -70,14 +70,14 @@ export function AdminDesigns({ onChanged }: { onChanged: () => void }) {
         (current) =>
           current?.map((row) =>
             row.id === item.id
-              ? { ...row, livePublishLinks: 0, linkAccess: 'restricted' as const }
+              ? { ...row, linkAccess: 'restricted' as const }
               : row,
           ) ?? null,
       )
-      setStatus(`Revoked ${revokedLinks} publish link(s) for "${item.name}".`)
+      setStatus(`Restricted "${item.name}" to its owner and invited people.`)
       onChanged()
     } catch {
-      setError(`Could not revoke links for "${item.name}".`)
+      setError(`Could not restrict "${item.name}".`)
     } finally {
       setBusyId(null)
     }
@@ -119,11 +119,6 @@ export function AdminDesigns({ onChanged }: { onChanged: () => void }) {
                   {item.linkAccess !== 'restricted' ? (
                     <Badge variant="warning">Link {item.linkAccess}</Badge>
                   ) : null}
-                  {item.livePublishLinks > 0 ? (
-                    <Badge variant="info">
-                      {item.livePublishLinks} published
-                    </Badge>
-                  ) : null}
                   {item.shares > 0 ? <Badge variant="outline">{item.shares} shared</Badge> : null}
                 </p>
                 <p className="truncate text-2xs text-muted-foreground">
@@ -142,14 +137,14 @@ export function AdminDesigns({ onChanged }: { onChanged: () => void }) {
                     </a>
                   }
                 />
-                {item.livePublishLinks > 0 || item.linkAccess !== 'restricted' ? (
+                {item.linkAccess !== 'restricted' ? (
                   <Button
                     size="xs"
                     variant="destructive-outline"
                     disabled={busyId === item.id}
-                    onClick={() => void revokeLinks(item)}
+                    onClick={() => void restrictLinks(item)}
                   >
-                    {busyId === item.id ? 'Revoking…' : 'Revoke links'}
+                    {busyId === item.id ? 'Restricting…' : 'Restrict link'}
                   </Button>
                 ) : null}
               </div>
