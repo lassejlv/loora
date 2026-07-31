@@ -6,11 +6,13 @@ FROM oven/bun:canary AS deps
 WORKDIR /app
 
 COPY package.json bun.lock bunfig.toml ./
+COPY apps/desktop/package.json apps/desktop/
 COPY apps/web/package.json apps/web/
 COPY apps/mcp/package.json apps/mcp/
 COPY apps/ws/package.json apps/ws/
 COPY packages/db/package.json packages/db/
 COPY packages/auth/package.json packages/auth/
+COPY packages/email/package.json packages/email/
 COPY packages/billing/package.json packages/billing/
 COPY packages/agent/package.json packages/agent/
 COPY packages/canvas/package.json packages/canvas/
@@ -35,6 +37,7 @@ COPY --from=deps /app/node_modules ./node_modules
 COPY --from=deps /app/apps/mcp/node_modules ./apps/mcp/node_modules
 COPY --from=deps /app/packages/db/node_modules ./packages/db/node_modules
 COPY --from=deps /app/packages/auth/node_modules ./packages/auth/node_modules
+COPY --from=deps /app/packages/email/node_modules ./packages/email/node_modules
 COPY --from=deps /app/packages/billing/node_modules ./packages/billing/node_modules
 COPY --from=deps /app/packages/agent/node_modules ./packages/agent/node_modules
 COPY --from=deps /app/packages/canvas/node_modules ./packages/canvas/node_modules
@@ -44,6 +47,7 @@ COPY package.json bun.lock bunfig.toml ./
 COPY apps/mcp ./apps/mcp
 COPY packages/db ./packages/db
 COPY packages/auth ./packages/auth
+COPY packages/email ./packages/email
 COPY packages/billing ./packages/billing
 COPY packages/agent ./packages/agent
 COPY packages/canvas ./packages/canvas

@@ -9,6 +9,7 @@
       "packages/canvas/**",
       "packages/db/**",
       "packages/auth/**",
+      "packages/email/**",
       "packages/billing/**",
       "packages/rpc/**",
       "package.json",
