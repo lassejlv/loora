@@ -7,7 +7,8 @@
     "./*": "./src/*.ts"
   },
   "scripts": {
-    "repair-layout": "bun --env-file=../../.env run scripts/repair-canvas-layout.ts"
+    "repair-layout": "bun --env-file=../../.env run scripts/repair-canvas-layout.ts",
+    "backfill-asset-urls": "bun --env-file=../../.env run scripts/backfill-asset-urls.ts"
   },
   "dependencies": {
     "@loora/agent": "workspace:*",

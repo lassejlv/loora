@@ -170,6 +170,7 @@ Root scripts (from repo root; env loaded from `.env` where needed):
 | `bun run db:studio` | Drizzle Studio |
 | `bunx tsc --noEmit` | Strict TypeScript check |
 | `bun run canvas:repair-layout` | Layout repair utility (`packages/rpc`) |
+| `bun run assets:backfill-urls` | Rewrite `/api/asset/…` references to the public bucket URL (dry run without `--apply`) |
 | `bun run polar:provision` | Provision Polar products |
 
 MCP local: `bun run --cwd apps/mcp dev` (or `start` / `stdio`).
