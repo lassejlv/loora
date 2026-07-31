@@ -131,8 +131,17 @@ function FeatureGrid() {
           border-colored background draws the dividers. Each cell is a link into
           the matching section of the features page. */}
       <ul className="mt-5 grid gap-px border border-border bg-border sm:grid-cols-2">
-        {FEATURE_SECTIONS.map((section) => (
-          <li key={section.id}>
+        {FEATURE_SECTIONS.map((section, index) => (
+          <li
+            key={section.id}
+            /* An odd count would leave a dead cell in the last row; let the final
+               item run the full width instead. */
+            className={
+              FEATURE_SECTIONS.length % 2 === 1 && index === FEATURE_SECTIONS.length - 1
+                ? 'sm:col-span-2'
+                : undefined
+            }
+          >
             <Link
               to="/features"
               hash={section.id}

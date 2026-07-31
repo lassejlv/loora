@@ -112,8 +112,16 @@ function PricingContent() {
       </p>
 
       <ul className="mt-6 grid gap-px border border-border bg-border sm:grid-cols-2">
-        {PLAN_INCLUDES.map((row) => (
-          <li key={row.capability} className="bg-background px-4 py-3">
+        {PLAN_INCLUDES.map((row, index) => (
+          <li
+            key={row.capability}
+            /* Same as the landing grid: an odd count would leave a dead cell. */
+            className={
+              PLAN_INCLUDES.length % 2 === 1 && index === PLAN_INCLUDES.length - 1
+                ? 'bg-background px-4 py-3 sm:col-span-2'
+                : 'bg-background px-4 py-3'
+            }
+          >
             <p className="text-[13px] font-medium">{row.capability}</p>
             <p className="mt-0.5 text-[13px] text-muted-foreground">{row.detail}</p>
           </li>
