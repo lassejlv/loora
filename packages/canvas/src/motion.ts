@@ -530,8 +530,13 @@ export function motionPreset(
     easing: source.easing,
     iterations: iterations as number | 'infinite',
     direction: 'normal',
-    // A looping motion returns to where it started; a one-shot entrance has to
-    // hold its last frame or the node snaps back the moment it finishes.
-    fill: iterations === 'infinite' ? 'none' : 'both',
+    // `backwards`, not `both`. A filled animation outranks every author rule
+    // for the properties it touches, so an entrance that holds its last frame
+    // silently kills any hover that moves the same node — the shadow would
+    // apply and the lift would not. Each entrance here ends on the resting
+    // style anyway, so releasing it changes nothing on screen and hands the
+    // property back. `backwards` still holds the first frame through a delay,
+    // which is what keeps a staggered list from flashing into view early.
+    fill: iterations === 'infinite' ? 'none' : 'backwards',
   }
 }

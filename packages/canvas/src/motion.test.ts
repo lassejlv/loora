@@ -68,15 +68,17 @@ describe('motion values', () => {
       '@keyframes loora-motion-fade-in-up{0%{opacity:0;transform:translate(0px,16px)}100%{opacity:1;transform:translate(0px,0px)}}',
     )
     expect(animationCss(fade, { animationId: fade.id, trigger: 'load', delay: 120 })).toBe(
-      'loora-motion-fade-in-up 500ms ease-out 120ms 1 normal both',
+      'loora-motion-fade-in-up 500ms ease-out 120ms 1 normal backwards',
     )
   })
 
-  test('a looping preset does not hold its last frame', () => {
+  test('no preset holds the properties a hover needs', () => {
     expect(motionPreset('spin').fill).toBe('none')
     expect(motionPreset('spin').iterations).toBe('infinite')
-    // An entrance must, or the node snaps back the moment it lands.
-    expect(motionPreset('fade-in').fill).toBe('both')
+    // A filled animation outranks author rules for what it touches, so an
+    // entrance that held its last frame would silently kill a hover that moves
+    // the same node. `backwards` still covers a delay.
+    expect(motionPreset('fade-in-up').fill).toBe('backwards')
   })
 })
 
@@ -212,7 +214,7 @@ describe('exported motion', () => {
 
     expect(css).toContain('@keyframes loora-motion-fade-in-up')
     expect(css).toContain('transition:all 180ms ease-out')
-    expect(css).toContain('animation:loora-motion-fade-in-up 500ms ease-out 80ms 1 normal both')
+    expect(css).toContain('animation:loora-motion-fade-in-up 500ms ease-out 80ms 1 normal backwards')
     expect(css).toContain(':hover{')
     expect(css).toContain('box-shadow:0px 8px 24px -4px rgba(0,0,0,0.18)')
     expect(css).toContain('@media (prefers-reduced-motion: reduce)')

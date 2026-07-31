@@ -33,7 +33,7 @@ describe('setAnimations', () => {
     expect(operations).toHaveLength(1)
     expect(operations[0]).toMatchObject({
       type: 'animation.upsert',
-      animation: { id: 'fade-in-up', duration: 500, fill: 'both' },
+      animation: { id: 'fade-in-up', duration: 500, fill: 'backwards' },
     })
   })
 
