@@ -51,6 +51,7 @@ import {
 import { PanelEmpty, PanelShell } from '@loora/ui/panel-shell'
 import { Button } from '@loora/ui/button'
 import { cn } from '@loora/ui/utils'
+import { MotionSection } from './motion-section'
 
 function operationFor(
   ref: NodeRef,
@@ -112,7 +113,7 @@ function inspectedLength(
   }
 }
 
-function Section({
+export function Section({
   title,
   children,
   defaultOpen = true,
@@ -146,7 +147,7 @@ function Section({
   )
 }
 
-function Pair({ children }: { children: ReactNode }) {
+export function Pair({ children }: { children: ReactNode }) {
   return <div className="grid grid-cols-2 gap-1">{children}</div>
 }
 
@@ -154,7 +155,7 @@ function Pair({ children }: { children: ReactNode }) {
  * Compact pill with the label inside the control. Dragging the label scrubs the
  * value, which is how every canvas tool expects a number field to behave.
  */
-function NumberCell({
+export function NumberCell({
   label,
   value,
   min,
@@ -277,7 +278,7 @@ function TextCell({
   )
 }
 
-function SelectCell({
+export function SelectCell({
   label,
   value,
   children,
@@ -1329,6 +1330,8 @@ export function CanvasPropertiesPanel({ onClose }: { onClose?: () => void }) {
             </Pair>
           </Section>
         ) : null}
+
+        <MotionSection nodes={nodes} refs={refs} readOnly={readOnly} />
 
         <Section title="Constraints" defaultOpen={false}>
           <Pair>
