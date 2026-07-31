@@ -348,16 +348,16 @@ export function AssetsPanel({
                     alt={asset.name}
                     className="aspect-square w-full object-contain"
                     loading="lazy"
-                    onLoad={(event) =>
+                    onLoad={(event) => {
+                      // Read the size here: React clears currentTarget once the
+                      // handler returns, and the updater runs after that.
+                      const { naturalWidth, naturalHeight } = event.currentTarget
                       setDimensions((current) =>
                         current[asset.id]
                           ? current
-                          : {
-                              ...current,
-                              [asset.id]: `${event.currentTarget.naturalWidth}×${event.currentTarget.naturalHeight}`,
-                            },
+                          : { ...current, [asset.id]: `${naturalWidth}×${naturalHeight}` },
                       )
-                    }
+                    }}
                   />
                 </button>
                 <div className="mt-1 flex items-center justify-between gap-1">
