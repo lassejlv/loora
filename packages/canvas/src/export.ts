@@ -29,6 +29,46 @@ export interface CompiledCanvas {
   runtime: string
 }
 
+declare const preparedCanvasExportBrand: unique symbol
+
+/**
+ * A validated, snapshot-bound export plan. Reuse it when generating more than
+ * one representation of the same document and options (for example JSX plus
+ * its HTML preview).
+ */
+export interface PreparedCanvasExport {
+  readonly [preparedCanvasExportBrand]: true
+}
+
+interface RenderedOccurrence {
+  node: CanvasNode
+  instance?: InstanceNode
+  rendered: CanvasNode
+}
+
+interface PreparedCanvasExportState {
+  plan: PreparedCanvasExport
+  document: CanvasDocument
+  options: CanvasExportOptions
+  index: CanvasChildIndex
+  roots: CanvasNode[]
+  occurrences: RenderedOccurrence[]
+  resolvedNodes: Map<string, CanvasNode>
+  breakpoints: CanvasDocument['breakpoints']
+  themeValuesJson: string
+  tokenDeclarations: Map<string, string>
+  tokenCss: string
+  themeCss: string
+  compiled?: CompiledCanvas
+  standaloneHtml?: string
+  portable: Partial<Record<'jsx' | 'tailwind', string>>
+}
+
+const preparedCanvasExports = new WeakMap<
+  PreparedCanvasExport,
+  PreparedCanvasExportState
+>()
+
 export interface CanvasPngRenderOptions {
   width?: number
   height?: number
@@ -225,6 +265,13 @@ function applyInstancePatches(
   )
 }
 
+function renderedOccurrenceKey(
+  node: CanvasNode,
+  instance: InstanceNode | undefined,
+) {
+  return `${instance?.id ?? ''}\0${node.id}`
+}
+
 function renderActions(actions: CanvasAction[]) {
   return escapeAttribute(JSON.stringify(actions))
 }
@@ -265,30 +312,84 @@ function renderedStateDefinitions(
 function textMarkup(document: CanvasDocument, node: Extract<CanvasNode, { type: 'text' }>) {
   if (node.runs.length === 0) return escapeHtml(node.text)
   const boundaries = new Set([0, node.text.length])
-  for (const run of node.runs) {
+  const runs = node.runs.map((run, originalIndex) => ({
+    run,
+    originalIndex,
+  }))
+  for (const { run } of runs) {
     boundaries.add(Math.max(0, Math.min(node.text.length, run.start)))
     boundaries.add(Math.max(0, Math.min(node.text.length, run.end)))
   }
   const sorted = [...boundaries].sort((left, right) => left - right)
-  return sorted
-    .slice(0, -1)
-    .map((start, index) => {
-      const end = sorted[index + 1]
-      const run = node.runs.find((candidate) => candidate.start <= start && candidate.end >= end)
-      if (!run) return escapeHtml(node.text.slice(start, end))
-      const styles: string[] = []
-      if (run.color) styles.push(`color:${colorValue(document, run.color)}`)
-      for (const [key, value] of Object.entries(run.typography ?? {})) {
-        if (key === 'wrap') {
-          styles.push(`white-space:${value === false ? 'nowrap' : 'pre-wrap'}`)
-          continue
-        }
-        const cssKey = key.replace(/[A-Z]/g, (character) => `-${character.toLowerCase()}`)
-        styles.push(`${cssKey}:${typeof value === 'number' && key !== 'weight' && key !== 'lineHeight' ? `${value}px` : value}`)
+  // Runs may overlap, and the first run in source order wins. Keep active runs
+  // in a min-heap by that original order instead of scanning every run for
+  // every text segment.
+  const byStart = [...runs].sort(
+    (left, right) =>
+      left.run.start - right.run.start ||
+      left.originalIndex - right.originalIndex,
+  )
+  const active: typeof runs = []
+  const pushActive = (entry: (typeof runs)[number]) => {
+    active.push(entry)
+    let child = active.length - 1
+    while (child > 0) {
+      const parent = Math.floor((child - 1) / 2)
+      if (active[parent]!.originalIndex <= entry.originalIndex) break
+      active[child] = active[parent]!
+      child = parent
+    }
+    active[child] = entry
+  }
+  const popActive = () => {
+    const last = active.pop()
+    if (active.length === 0 || !last) return
+    let parent = 0
+    while (true) {
+      const left = parent * 2 + 1
+      if (left >= active.length) break
+      const right = left + 1
+      const child =
+        right < active.length &&
+        active[right]!.originalIndex < active[left]!.originalIndex
+          ? right
+          : left
+      if (active[child]!.originalIndex >= last.originalIndex) break
+      active[parent] = active[child]!
+      parent = child
+    }
+    active[parent] = last
+  }
+  let nextRun = 0
+  const output: string[] = []
+  for (let index = 0; index < sorted.length - 1; index += 1) {
+    const start = sorted[index]!
+    const end = sorted[index + 1]!
+    while (nextRun < byStart.length && byStart[nextRun]!.run.start <= start) {
+      pushActive(byStart[nextRun]!)
+      nextRun += 1
+    }
+    while (active[0] && active[0].run.end < end) popActive()
+    const run = active[0]?.run
+    if (!run) {
+      output.push(escapeHtml(node.text.slice(start, end)))
+      continue
+    }
+    const styles: string[] = []
+    if (run.color) styles.push(`color:${colorValue(document, run.color)}`)
+    for (const [key, value] of Object.entries(run.typography ?? {})) {
+      if (key === 'wrap') {
+        styles.push(`white-space:${value === false ? 'nowrap' : 'pre-wrap'}`)
+        continue
       }
-      return `<span style="${escapeAttribute(styles.join(';'))}">${escapeHtml(node.text.slice(start, end))}</span>`
-    })
-    .join('')
+      const cssKey = key.replace(/[A-Z]/g, (character) => `-${character.toLowerCase()}`)
+      styles.push(`${cssKey}:${typeof value === 'number' && key !== 'weight' && key !== 'lineHeight' ? `${value}px` : value}`)
+    }
+    output.push(
+      `<span style="${escapeAttribute(styles.join(';'))}">${escapeHtml(node.text.slice(start, end))}</span>`,
+    )
+  }
+  return output.join('')
 }
 
 function instanceVariantContent(
@@ -357,10 +458,16 @@ function renderNode(
   index: CanvasChildIndex,
   instance?: InstanceNode,
   exportedRoot = false,
+  themeValuesJson = JSON.stringify(runtimeThemeValues(document)),
+  resolvedNodes?: ReadonlyMap<string, CanvasNode>,
 ): string {
-  const width = options.width ?? 1440
-  const responsive = resolveNodeAtWidth(document, rawNode, width)
-  const node = applyInstancePatches(document, responsive, instance)
+  const node =
+    resolvedNodes?.get(renderedOccurrenceKey(rawNode, instance)) ??
+    applyInstancePatches(
+      document,
+      resolveNodeAtWidth(document, rawNode, options.width ?? 1440),
+      instance,
+    )
   const classes = className(instance ? `${instance.id}-${node.id}` : node.id)
   const clickActions = node.interactions.flatMap((interaction) =>
     interaction.trigger === 'click' ? interaction.actions : [],
@@ -368,7 +475,7 @@ function renderNode(
   const states = renderedStateDefinitions(document, rawNode, exportedRoot)
   const common = `class="${classes}" data-loora-node="${escapeAttribute(node.id)}"${
     exportedRoot
-      ? ` data-loora-export-root="true" data-loora-theme="${escapeAttribute(document.activeThemeId)}" data-loora-theme-values="${escapeAttribute(JSON.stringify(runtimeThemeValues(document)))}"`
+      ? ` data-loora-export-root="true" data-loora-theme="${escapeAttribute(document.activeThemeId)}" data-loora-theme-values="${escapeAttribute(themeValuesJson)}"`
       : ''
   }${
     clickActions.length > 0 ? ` data-loora-actions="${renderActions(clickActions)}"` : ''
@@ -407,7 +514,16 @@ function renderNode(
   if (node.type === 'instance') {
     const component = document.nodes[node.componentId]
     if (!component || component.type !== 'component') return ''
-    const children = renderNode(document, component, options, index, node)
+    const children = renderNode(
+      document,
+      component,
+      options,
+      index,
+      node,
+      false,
+      themeValuesJson,
+      resolvedNodes,
+    )
     const variant = node.variant ?? component.defaultVariant ?? ''
     const content = instanceVariantContent(
       document,
@@ -421,13 +537,35 @@ function renderNode(
   if (node.type === 'component') {
     if (!instance) return ''
     const children = orderedChildren(document, node.id, index)
-      .map((child) => renderNode(document, child, options, index, instance))
+      .map((child) =>
+        renderNode(
+          document,
+          child,
+          options,
+          index,
+          instance,
+          false,
+          themeValuesJson,
+          resolvedNodes,
+        ),
+      )
       .join('')
     return `<div ${common} data-loora-component-root="${escapeAttribute(instance.id)}">${children}</div>`
   }
   const tag = node.type === 'frame' ? node.semanticTag : node.type === 'page' ? 'main' : 'div'
   const children = orderedChildren(document, node.id, index)
-    .map((child) => renderNode(document, child, options, index, instance))
+    .map((child) =>
+      renderNode(
+        document,
+        child,
+        options,
+        index,
+        instance,
+        false,
+        themeValuesJson,
+        resolvedNodes,
+      ),
+    )
     .join('')
   return `<${tag} ${common}>${children}</${tag}>`
 }
@@ -435,6 +573,7 @@ function renderNode(
 function cssForNode(
   document: CanvasDocument,
   node: CanvasNode,
+  breakpoints: CanvasDocument['breakpoints'],
   instance?: InstanceNode,
   variant?: string,
   selectorPrefix = '',
@@ -463,9 +602,8 @@ function cssForNode(
       : ''
   // Ascending, because these rules share a specificity and later ones win.
   // Document order is not guaranteed to be ascending.
-  const responsive = [...document.breakpoints]
+  const responsive = breakpoints
     .filter((breakpoint) => breakpoint.minWidth > 0 && node.responsive[breakpoint.id])
-    .sort((left, right) => left.minWidth - right.minWidth)
     .map((breakpoint) => {
       const resolved = resolveNodeAtWidth(document, node, breakpoint.minWidth)
       const responsive = applyInstancePatches(
@@ -479,61 +617,117 @@ function cssForNode(
   return [base, pageBase, ...responsive].join('')
 }
 
-function collectCss(document: CanvasDocument, index: CanvasChildIndex) {
-  const output: string[] = []
-  for (const node of Object.values(document.nodes)) {
-    output.push(cssForNode(document, node))
+function collectRenderedOccurrences(
+  document: CanvasDocument,
+  roots: CanvasNode[],
+  index: CanvasChildIndex,
+  width: number,
+) {
+  const output: RenderedOccurrence[] = []
+  const seen = new Set<string>()
+  const stack: Omit<RenderedOccurrence, 'rendered'>[] = [...roots]
+    .reverse()
+    .map((node) => ({ node }))
+  while (stack.length > 0) {
+    const occurrence = stack.pop()!
+    const key = renderedOccurrenceKey(
+      occurrence.node,
+      occurrence.instance,
+    )
+    if (seen.has(key)) continue
+    seen.add(key)
+    const resolved = resolveNodeAtWidth(document, occurrence.node, width)
+    const node = applyInstancePatches(
+      document,
+      resolved,
+      occurrence.instance,
+    )
+    output.push({ ...occurrence, rendered: node })
     if (node.type === 'instance') {
       const component = document.nodes[node.componentId]
       if (component?.type === 'component') {
-        output.push(cssForNode(document, component, node))
+        stack.push({ node: component, instance: node })
+      }
+      continue
+    }
+    if (node.type === 'component' && !occurrence.instance) continue
+    const children = orderedChildren(document, occurrence.node.id, index)
+    for (let child = children.length - 1; child >= 0; child -= 1) {
+      stack.push({
+        node: children[child]!,
+        instance: occurrence.instance,
+      })
+    }
+  }
+  return output
+}
+
+function collectCss(
+  document: CanvasDocument,
+  occurrences: RenderedOccurrence[],
+  breakpoints: CanvasDocument['breakpoints'],
+) {
+  const output: string[] = []
+  const motionNodes: CanvasNode[] = []
+  const motionSelectors = new WeakMap<CanvasNode, string>()
+  for (const occurrence of occurrences) {
+    const { node, instance } = occurrence
+    output.push(cssForNode(document, node, breakpoints, instance))
+    if (instance) {
+      const component = document.nodes[instance.componentId]
+      if (component?.type === 'component') {
         for (const variant of component.variants) {
           output.push(
             cssForNode(
               document,
-              component,
               node,
+              breakpoints,
+              instance,
               variant,
-              `[data-loora-node="${escapeCssString(node.id)}"][data-loora-variant="${escapeCssString(variant)}"] `,
+              `[data-loora-node="${escapeCssString(instance.id)}"][data-loora-variant="${escapeCssString(variant)}"] `,
             ),
           )
         }
-        const queue = [...orderedChildren(document, component.id, index)]
-        while (queue.length > 0) {
-          const child = queue.shift()!
-          output.push(cssForNode(document, child, node))
-          for (const variant of component.variants) {
-            output.push(
-              cssForNode(
-                document,
-                child,
-                node,
-                variant,
-                `[data-loora-node="${escapeCssString(node.id)}"][data-loora-variant="${escapeCssString(variant)}"] `,
-              ),
-            )
-          }
-          queue.push(...orderedChildren(document, child.id, index))
-        }
       }
     }
+    const patched = applyInstancePatches(
+      document,
+      resolveNodeAtWidth(document, node, 0),
+      instance,
+    )
+    const styled = {
+      ...(instance && patched.type === 'component'
+        ? asInstanceComponentRoot(patched)
+        : patched),
+    } as CanvasNode
+    motionNodes.push(styled)
+    motionSelectors.set(
+      styled,
+      `.${className(instance ? `${instance.id}-${node.id}` : node.id)}`,
+    )
   }
   // Keyframes and pointer states come last so a hover rule outranks the base
   // rule it overrides — they share a specificity, and later wins.
   output.push(
     motionStyleSheet(
       document,
-      Object.values(document.nodes),
-      (node) => `.${className(node.id)}`,
+      motionNodes,
+      (node) => motionSelectors.get(node)!,
     ),
   )
   return output.filter(Boolean).join('\n')
 }
 
-export function compileCanvas(
+function createPreparedCanvasExportState(
   document: CanvasDocument,
-  options: CanvasExportOptions = {},
-): CompiledCanvas {
+  options: CanvasExportOptions,
+  ownSnapshot: boolean,
+) {
+  // Public plans own their snapshot, so callers cannot mutate the source and
+  // accidentally observe stale cached output. One-shot compile calls borrow
+  // their input because the whole operation is synchronous and the plan never
+  // escapes.
+  if (ownSnapshot) document = structuredClone(document)
   assertDocument(document)
   const requestedNode = options.nodeId
     ? document.nodes[options.nodeId]
@@ -560,18 +754,23 @@ export function compileCanvas(
     throw new Error(`Canvas export Page "${options.pageId}" does not exist`)
   }
   const index = buildChildIndex(document)
-  const html = roots
-    .map((root) => renderNode(document, root, options, index, undefined, true))
+  const breakpoints = [...document.breakpoints].sort(
+    (left, right) => left.minWidth - right.minWidth,
+  )
+  const tokens = Object.values(document.tokens)
+  const themes = Object.values(document.themes)
+  const tokenDeclarations = new Map(
+    tokens.map((token) => [
+      `--loora-token-${token.id.replace(/[^a-zA-Z0-9_-]/g, '-')}`,
+      String(token.modes?.[document.activeThemeId] ?? token.value),
+    ]),
+  )
+  const tokenCss = [...tokenDeclarations]
+    .map(([property, value]) => `${property}:${value};`)
     .join('')
-  const tokenCss = Object.values(document.tokens)
-    .map((token) => {
-      const value = token.modes?.[document.activeThemeId] ?? token.value
-      return `--loora-token-${token.id.replace(/[^a-zA-Z0-9_-]/g, '-')}:${value};`
-    })
-    .join('')
-  const themeCss = Object.values(document.themes)
+  const themeCss = themes
     .map((theme) => {
-      const values = Object.values(document.tokens)
+      const values = tokens
         .filter((token) => token.modes?.[theme.id] !== undefined)
         .map(
           (token) =>
@@ -583,7 +782,103 @@ export function compileCanvas(
         : ''
     })
     .join('')
-  const css = `:root{${tokenCss}}\n${themeCss}\n${collectCss(document, index)}\n[data-loora-export-root="true"]{position:relative;left:0;top:0}`
+  const preparedOptions = Object.freeze({ ...options })
+  const prepared = Object.freeze({}) as PreparedCanvasExport
+  const occurrences = collectRenderedOccurrences(
+    document,
+    roots,
+    index,
+    options.width ?? 1440,
+  )
+  const state: PreparedCanvasExportState = {
+    plan: prepared,
+    document,
+    options: preparedOptions,
+    index,
+    roots,
+    occurrences,
+    resolvedNodes: new Map(
+      occurrences.map(({ node, instance, rendered }) => [
+        renderedOccurrenceKey(node, instance),
+        rendered,
+      ]),
+    ),
+    breakpoints,
+    themeValuesJson: JSON.stringify(runtimeThemeValues(document)),
+    tokenDeclarations,
+    tokenCss,
+    themeCss,
+    portable: {},
+  }
+  preparedCanvasExports.set(prepared, state)
+  return state
+}
+
+export function prepareCanvasExport(
+  document: CanvasDocument,
+  options: CanvasExportOptions = {},
+): PreparedCanvasExport {
+  return createPreparedCanvasExportState(document, options, true).plan
+}
+
+function preparedCanvasExportState(
+  source: CanvasDocument | PreparedCanvasExport,
+  options: CanvasExportOptions = {},
+) {
+  const existing = preparedCanvasExports.get(source as PreparedCanvasExport)
+  if (existing) {
+    if (Object.keys(options).length > 0) {
+      throw new Error('Prepared Canvas exports already include their options')
+    }
+    return existing
+  }
+  return createPreparedCanvasExportState(
+    source as CanvasDocument,
+    options,
+    false,
+  )
+}
+
+export function compileCanvas(
+  prepared: PreparedCanvasExport,
+): CompiledCanvas
+export function compileCanvas(
+  document: CanvasDocument,
+  options?: CanvasExportOptions,
+): CompiledCanvas
+export function compileCanvas(
+  source: CanvasDocument | PreparedCanvasExport,
+  options: CanvasExportOptions = {},
+): CompiledCanvas {
+  const prepared = preparedCanvasExportState(source, options)
+  if (prepared.compiled) return prepared.compiled
+  const {
+    document,
+    options: preparedOptions,
+    index,
+    roots,
+    occurrences,
+    resolvedNodes,
+    breakpoints,
+    themeValuesJson,
+    tokenCss,
+    themeCss,
+  } = prepared
+  const html = roots
+    .map((root) =>
+      renderNode(
+        document,
+        root,
+        preparedOptions,
+        index,
+        undefined,
+        true,
+        themeValuesJson,
+        resolvedNodes,
+      ),
+    )
+    .join('')
+  const css = `:root{${tokenCss}}\n${themeCss}\n${collectCss(document, occurrences, breakpoints)}\n[data-loora-export-root="true"]{position:relative;left:0;top:0}`
   const runtime = `(function(){
 var stateByScope=new WeakMap();
 function read(target,name,fallback){try{return JSON.parse(target.getAttribute(name)||fallback)}catch(error){return JSON.parse(fallback)}}
@@ -684,16 +979,26 @@ document.addEventListener('focusin',function(event){dispatch('focus',event)});
 document.addEventListener('focusout',function(event){dispatch('blur',event)});
 document.querySelectorAll('[data-loora-states]').forEach(function(scope){stateFor(scope);runState(scope,undefined,0)});
 })()`
-  return { html, css, runtime }
+  prepared.compiled = Object.freeze({ html, css, runtime })
+  return prepared.compiled
 }
 
+export function compileStandaloneHtml(prepared: PreparedCanvasExport): string
 export function compileStandaloneHtml(
   document: CanvasDocument,
+  options?: CanvasExportOptions,
+): string
+export function compileStandaloneHtml(
+  source: CanvasDocument | PreparedCanvasExport,
   options: CanvasExportOptions = {},
 ) {
-  const compiled = compileCanvas(document, options)
-  const title = escapeHtml(options.title ?? document.name)
-  return `<!doctype html>
+  const prepared = preparedCanvasExportState(source, options)
+  if (prepared.standaloneHtml) return prepared.standaloneHtml
+  const compiled = compileCanvas(prepared.plan)
+  const title = escapeHtml(
+    prepared.options.title ?? prepared.document.name,
+  )
+  prepared.standaloneHtml = `<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
@@ -705,13 +1010,20 @@ export function compileStandaloneHtml(
 </head>
 <body>${compiled.html}<script>${compiled.runtime}<\/script></body>
 </html>`
+  return prepared.standaloneHtml
 }
 
+export function compileReactComponent(prepared: PreparedCanvasExport): string
 export function compileReactComponent(
   document: CanvasDocument,
+  options?: CanvasExportOptions,
+): string
+export function compileReactComponent(
+  source: CanvasDocument | PreparedCanvasExport,
   options: CanvasExportOptions = {},
 ) {
-  const compiled = compileCanvas(document, options)
+  const prepared = preparedCanvasExportState(source, options)
+  const compiled = prepared.compiled ?? compileCanvas(prepared.plan)
   const html = JSON.stringify(compiled.html)
   const css = JSON.stringify(compiled.css)
   return `import { useEffect, useRef, useState } from 'react'
@@ -965,38 +1277,6 @@ export default function LooraDesign() {
 
 type PortableCodeFormat = 'jsx' | 'tailwind'
 
-function portableRoots(
-  document: CanvasDocument,
-  options: CanvasExportOptions,
-) {
-  assertDocument(document)
-  const requestedNode = options.nodeId
-    ? document.nodes[options.nodeId]
-    : null
-  if (
-    options.nodeId &&
-    (!requestedNode || requestedNode.type === 'component')
-  ) {
-    throw new Error(`Canvas export target "${options.nodeId}" does not exist`)
-  }
-  const roots = requestedNode
-    ? [requestedNode]
-    : Object.values(document.nodes)
-        .filter(
-          (node) =>
-            node.type === 'page' &&
-            (!options.pageId || node.id === options.pageId),
-        )
-        .sort(
-          (left, right) =>
-            left.order - right.order || left.id.localeCompare(right.id),
-        )
-  if (options.pageId && roots.length === 0) {
-    throw new Error(`Canvas export Page "${options.pageId}" does not exist`)
-  }
-  return roots
-}
-
 function cssPropertyName(value: string) {
   return value.replace(/-([a-z])/g, (_, character: string) =>
     character.toUpperCase(),
@@ -1006,18 +1286,10 @@ function cssPropertyName(value: string) {
 function portableDeclarations(
   document: CanvasDocument,
   node: CanvasNode,
-  width: number,
   exportedRoot: boolean,
-  instance?: InstanceNode,
 ) {
-  const responsive = resolveNodeAtWidth(document, node, width)
-  const patched = applyInstancePatches(document, responsive, instance)
-  const styled =
-    instance && patched.type === 'component'
-      ? asInstanceComponentRoot(patched)
-      : patched
   const declarations = new Map<string, string>()
-  for (const item of styleDeclarations(document, styled).split(';')) {
+  for (const item of styleDeclarations(document, node).split(';')) {
     const separator = item.indexOf(':')
     if (separator <= 0) continue
     declarations.set(
@@ -1025,16 +1297,16 @@ function portableDeclarations(
       item.slice(separator + 1),
     )
   }
-  if (styled.type === 'image') declarations.set('object-fit', styled.fit)
-  if (styled.hidden) declarations.set('display', 'none')
+  if (node.type === 'image') declarations.set('object-fit', node.fit)
+  if (node.hidden) declarations.set('display', 'none')
   if (exportedRoot) {
     declarations.set('position', 'relative')
     declarations.set('left', '0')
     declarations.set('top', '0')
-    if (styled.type === 'page') {
+    if (node.type === 'page') {
       declarations.set('width', '100%')
       declarations.set('height', 'auto')
-      declarations.set('min-height', `${styled.viewport.minHeight}px`)
+      declarations.set('min-height', `${node.viewport.minHeight}px`)
     }
   }
   return declarations
@@ -1068,22 +1340,14 @@ function tailwindClasses(declarations: Map<string, string>) {
 function portableAttributes(
   document: CanvasDocument,
   node: CanvasNode,
+  patched: CanvasNode,
+  declarations: Map<string, string>,
   format: PortableCodeFormat,
   options: CanvasExportOptions,
   index: CanvasChildIndex,
   exportedRoot: boolean,
-  instance?: InstanceNode,
+  themeValuesJson: string,
 ) {
-  const width = options.width ?? 1440
-  const responsive = resolveNodeAtWidth(document, node, width)
-  const patched = applyInstancePatches(document, responsive, instance)
-  const declarations = portableDeclarations(
-    document,
-    node,
-    width,
-    exportedRoot,
-    instance,
-  )
   const attributes = [
     `data-loora-node=${JSON.stringify(patched.id)}`,
     format === 'tailwind'
@@ -1093,7 +1357,7 @@ function portableAttributes(
   if (exportedRoot) {
     attributes.push(
       `data-loora-theme=${JSON.stringify(document.activeThemeId)}`,
-      `data-loora-theme-values={${JSON.stringify(JSON.stringify(runtimeThemeValues(document)))}}`,
+      `data-loora-theme-values={${JSON.stringify(themeValuesJson)}}`,
     )
   }
   if (patched.interactions.length > 0) {
@@ -1159,18 +1423,35 @@ function renderPortableNode(
   format: PortableCodeFormat,
   instance?: InstanceNode,
   exportedRoot = false,
+  themeValuesJson = JSON.stringify(runtimeThemeValues(document)),
+  resolvedNodes?: ReadonlyMap<string, CanvasNode>,
 ): string {
-  const width = options.width ?? 1440
-  const responsive = resolveNodeAtWidth(document, rawNode, width)
-  const node = applyInstancePatches(document, responsive, instance)
+  const node =
+    resolvedNodes?.get(renderedOccurrenceKey(rawNode, instance)) ??
+    applyInstancePatches(
+      document,
+      resolveNodeAtWidth(document, rawNode, options.width ?? 1440),
+      instance,
+    )
+  const styled =
+    instance && node.type === 'component'
+      ? asInstanceComponentRoot(node)
+      : node
+  const declarations = portableDeclarations(
+    document,
+    styled,
+    exportedRoot,
+  )
   const attributes = portableAttributes(
     document,
     rawNode,
+    node,
+    declarations,
     format,
     options,
     index,
     exportedRoot,
-    instance,
+    themeValuesJson,
   )
   if (node.type === 'text') {
     return `<div ${attributes}>${portableText(node)}</div>`
@@ -1205,7 +1486,17 @@ ${indent(paths.join('\n'), 2)}
     if (!component || component.type !== 'component') return ''
     const children = orderedChildren(document, component.id, index)
       .map((child) =>
-        renderPortableNode(document, child, options, index, format, node),
+        renderPortableNode(
+          document,
+          child,
+          options,
+          index,
+          format,
+          node,
+          false,
+          themeValuesJson,
+          resolvedNodes,
+        ),
       )
       .filter(Boolean)
     return `<div ${attributes}>
@@ -1216,7 +1507,17 @@ ${indent(children.join('\n'), 2)}
     if (!instance) return ''
     const children = orderedChildren(document, node.id, index)
       .map((child) =>
-        renderPortableNode(document, child, options, index, format, instance),
+        renderPortableNode(
+          document,
+          child,
+          options,
+          index,
+          format,
+          instance,
+          false,
+          themeValuesJson,
+          resolvedNodes,
+        ),
       )
       .filter(Boolean)
     return `<div ${attributes}>
@@ -1231,22 +1532,23 @@ ${indent(children.join('\n'), 2)}
         : 'div'
   const children = orderedChildren(document, node.id, index)
     .map((child) =>
-      renderPortableNode(document, child, options, index, format, instance),
+      renderPortableNode(
+        document,
+        child,
+        options,
+        index,
+        format,
+        instance,
+        false,
+        themeValuesJson,
+        resolvedNodes,
+      ),
     )
     .filter(Boolean)
   if (children.length === 0) return `<${tag} ${attributes} />`
   return `<${tag} ${attributes}>
 ${indent(children.join('\n'), 2)}
 </${tag}>`
-}
-
-function tokenDeclarations(document: CanvasDocument) {
-  return new Map(
-    Object.values(document.tokens).map((token) => [
-      `--loora-token-${token.id.replace(/[^a-zA-Z0-9_-]/g, '-')}`,
-      String(token.modes?.[document.activeThemeId] ?? token.value),
-    ]),
-  )
 }
 
 function portableRuntimeSource() {
@@ -1467,21 +1769,35 @@ function portableRuntimeSource() {
 }
 
 function compilePortableComponent(
-  document: CanvasDocument,
+  source: CanvasDocument | PreparedCanvasExport,
   options: CanvasExportOptions,
   format: PortableCodeFormat,
 ) {
-  const index = buildChildIndex(document)
-  const roots = portableRoots(document, options)
+  const prepared = preparedCanvasExportState(source, options)
+  const cached = prepared.portable[format]
+  if (cached) return cached
+  const {
+    document,
+    options: preparedOptions,
+    index,
+    roots: preparedRoots,
+    occurrences,
+    resolvedNodes,
+    themeValuesJson,
+    tokenDeclarations: variables,
+  } = prepared
+  const roots = preparedRoots
     .map((root) =>
       renderPortableNode(
         document,
         root,
-        options,
+        preparedOptions,
         index,
         format,
         undefined,
         true,
+        themeValuesJson,
+        resolvedNodes,
       ),
     )
     .filter(Boolean)
@@ -1491,7 +1807,6 @@ function compilePortableComponent(
       : `<>
 ${indent(roots.join('\n'), 2)}
 </>`
-  const variables = tokenDeclarations(document)
   const variableAttributes =
     variables.size === 0
       ? ''
@@ -1503,21 +1818,22 @@ ${indent(roots.join('\n'), 2)}
 ${indent(content, 2)}
 </div>`
     : content
-  const interactive = Object.values(document.nodes).some(
-    (node) =>
-      node.interactions.length > 0 ||
-      ((node.type === 'page' || node.type === 'component') &&
-        Object.keys(node.states ?? {}).length > 0),
-  )
+  const interactive =
+    preparedRoots.some(
+      (node) =>
+        Object.keys(renderedStateDefinitions(document, node, true)).length > 0,
+    ) ||
+    occurrences.some(({ rendered }) => rendered.interactions.length > 0)
   if (!interactive) {
-    return `export default function LooraDesign() {
+    prepared.portable[format] = `export default function LooraDesign() {
   return (
 ${indent(wrapped, 4)}
   )
 }
 `
+    return prepared.portable[format]!
   }
-  return `import { useEffect, useRef, useState } from 'react'
+  prepared.portable[format] = `import { useEffect, useRef, useState } from 'react'
 
 ${portableRuntimeSource()}
 export default function LooraDesign() {
@@ -1530,14 +1846,20 @@ ${indent(wrapped, 6)}
   )
 }
 `
+  return prepared.portable[format]!
 }
 
 /** Pure JSX with structured Canvas styles expressed as React inline styles. */
+export function compileJsxComponent(prepared: PreparedCanvasExport): string
 export function compileJsxComponent(
   document: CanvasDocument,
+  options?: CanvasExportOptions,
+): string
+export function compileJsxComponent(
+  source: CanvasDocument | PreparedCanvasExport,
   options: CanvasExportOptions = {},
 ) {
-  return compilePortableComponent(document, options, 'jsx')
+  return compilePortableComponent(source, options, 'jsx')
 }
 
 /**
@@ -1545,10 +1867,17 @@ export function compileJsxComponent(
  * It needs no generated stylesheet and remains selection/page scoped.
  */
 export function compileTailwindComponent(
+  prepared: PreparedCanvasExport,
+): string
+export function compileTailwindComponent(
   document: CanvasDocument,
+  options?: CanvasExportOptions,
+): string
+export function compileTailwindComponent(
+  source: CanvasDocument | PreparedCanvasExport,
   options: CanvasExportOptions = {},
 ) {
-  return compilePortableComponent(document, options, 'tailwind')
+  return compilePortableComponent(source, options, 'tailwind')
 }
 
 export function serializeCanvasDocument(document: CanvasDocument) {
@@ -1573,6 +1902,10 @@ function loadBrowserImage(src: string) {
 /** 1×1 transparent GIF; stands in for an image that could not be embedded. */
 const BLANK_IMAGE =
   'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7'
+const IMAGE_INLINE_CONCURRENCY = 4
+/** Keeps one browser capture below roughly 128 MiB of raw RGBA pixels. */
+const MAX_BROWSER_PNG_PIXELS = 32_000_000
+const MAX_BROWSER_PNG_DIMENSION = 8_192
 
 async function blobToDataUrl(blob: Blob) {
   const bytes = new Uint8Array(await blob.arrayBuffer())
@@ -1597,27 +1930,48 @@ export async function inlineBrowserImages(root: Element) {
     ...root.querySelectorAll('img'),
     ...(root.tagName === 'IMG' ? [root as HTMLImageElement] : []),
   ]
+  const imagesBySource = new Map<string, HTMLImageElement[]>()
+  for (const image of images) {
+    // A srcset would reintroduce a remote candidate behind the src.
+    image.removeAttribute('srcset')
+    const source = image.getAttribute('src') ?? ''
+    if (!source || source.startsWith('data:')) continue
+    const matching = imagesBySource.get(source) ?? []
+    matching.push(image)
+    imagesBySource.set(source, matching)
+  }
+
+  const entries = [...imagesBySource]
   const skipped: string[] = []
+  let cursor = 0
   await Promise.all(
-    images.map(async (image) => {
-      // A srcset would reintroduce a remote candidate behind the src.
-      image.removeAttribute('srcset')
-      const source = image.getAttribute('src') ?? ''
-      if (!source || source.startsWith('data:')) return
-      try {
-        const response = await fetch(image.src, {
-          credentials: 'same-origin',
-        })
-        if (!response.ok) throw new Error(`Image responded ${response.status}`)
-        image.setAttribute('src', await blobToDataUrl(await response.blob()))
-      } catch {
-        // Hosted elsewhere without permission to read it back. It cannot be
-        // part of a PNG either way; leaving the URL in place would only turn
-        // a missing image into a failed export.
-        skipped.push(source)
-        image.setAttribute('src', BLANK_IMAGE)
-      }
-    }),
+    Array.from(
+      { length: Math.min(IMAGE_INLINE_CONCURRENCY, entries.length) },
+      async () => {
+        while (cursor < entries.length) {
+          const [source, matching] = entries[cursor++]!
+          const image = matching[0]!
+          try {
+            const response = await fetch(image.src, {
+              credentials: 'same-origin',
+            })
+            if (!response.ok) {
+              throw new Error(`Image responded ${response.status}`)
+            }
+            const dataUrl = await blobToDataUrl(await response.blob())
+            for (const target of matching) target.setAttribute('src', dataUrl)
+          } catch {
+            // Hosted elsewhere without permission to read it back. It cannot
+            // be part of a PNG either way; leaving the URL in place would only
+            // turn a missing image into a failed export.
+            skipped.push(...matching.map(() => source))
+            for (const target of matching) {
+              target.setAttribute('src', BLANK_IMAGE)
+            }
+          }
+        }
+      },
+    ),
   )
   return skipped
 }
@@ -1632,6 +1986,22 @@ export async function renderElementToPng(
   const bounds = element.getBoundingClientRect()
   const width = Math.max(1, Math.ceil(options.width ?? bounds.width))
   const height = Math.max(1, Math.ceil(options.height ?? bounds.height))
+  const requestedPixelRatio =
+    options.pixelRatio ?? window.devicePixelRatio ?? 1
+  const pixelRatio = Math.max(0.1, Math.min(requestedPixelRatio, 4))
+  const pixelWidth = Math.max(1, Math.round(width * pixelRatio))
+  const pixelHeight = Math.max(1, Math.round(height * pixelRatio))
+  if (
+    !Number.isFinite(pixelWidth) ||
+    !Number.isFinite(pixelHeight) ||
+    pixelWidth > MAX_BROWSER_PNG_DIMENSION ||
+    pixelHeight > MAX_BROWSER_PNG_DIMENSION ||
+    pixelWidth * pixelHeight > MAX_BROWSER_PNG_PIXELS
+  ) {
+    throw new Error(
+      'The PNG is too large to capture safely. Use a smaller scope or scale.',
+    )
+  }
   const clone = element.cloneNode(true) as HTMLElement | SVGElement
   for (const skipped of await inlineBrowserImages(clone)) {
     options.onSkippedImage?.(skipped)
@@ -1655,12 +2025,8 @@ export async function renderElementToPng(
   try {
     const image = await loadBrowserImage(url)
     const canvas = document.createElement('canvas')
-    const pixelRatio = Math.max(
-      0.1,
-      Math.min(options.pixelRatio ?? window.devicePixelRatio ?? 1, 4),
-    )
-    canvas.width = Math.max(1, Math.round(width * pixelRatio))
-    canvas.height = Math.max(1, Math.round(height * pixelRatio))
+    canvas.width = pixelWidth
+    canvas.height = pixelHeight
     const context = canvas.getContext('2d')
     if (!context) throw new Error('Canvas export context is unavailable')
     context.scale(pixelRatio, pixelRatio)

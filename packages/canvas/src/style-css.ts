@@ -71,9 +71,14 @@ export function colorValue(_document: CanvasDocument, color: CanvasColor) {
 
 export function paintValue(document: CanvasDocument, paint: CanvasPaint) {
   if (paint.type === 'solid') return colorValue(document, paint.color)
-  return `linear-gradient(${paint.angle}deg, ${paint.stops
+  const stops = paint.stops
     .map((stop) => `${colorValue(document, stop.color)} ${stop.offset * 100}%`)
-    .join(', ')})`
+    .join(', ')
+  if (paint.type === 'radial-gradient') {
+    const size = paint.size?.trim() || 'farthest-corner'
+    return `radial-gradient(${size} at ${paint.cx * 100}% ${paint.cy * 100}%, ${stops})`
+  }
+  return `linear-gradient(${paint.angle}deg, ${stops})`
 }
 
 /**

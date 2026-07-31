@@ -511,4 +511,303 @@ describe('HTML snapshot import', () => {
       }],
     })
   })
+
+  it('normalizes color(srgb) fills and oklab shadows from Paper pastes', () => {
+    const result = convertHtmlSnapshotToCanvas({
+      id: 'paper-modern-colors',
+      name: 'Modern colors',
+      width: 400,
+      height: 400,
+      root: {
+        tag: 'body',
+        attributes: {},
+        style: { display: 'block' },
+        rect: { x: 0, y: 0, width: 400, height: 400 },
+        children: [{
+          tag: 'div',
+          attributes: { 'aria-label': 'Hero card' },
+          style: {
+            display: 'block',
+            backgroundColor: 'color(srgb 0.0837647 0.0837647 0.0837647)',
+            borderTopWidth: '1px',
+            borderRightWidth: '1px',
+            borderBottomWidth: '1px',
+            borderLeftWidth: '1px',
+            borderTopStyle: 'solid',
+            borderRightStyle: 'solid',
+            borderBottomStyle: 'solid',
+            borderLeftStyle: 'solid',
+            borderTopColor: 'oklab(0.285016 0.0000130683 0.00000569224 / 0.6)',
+            borderRightColor: 'oklab(0.285016 0.0000130683 0.00000569224 / 0.6)',
+            borderBottomColor: 'oklab(0.285016 0.0000130683 0.00000569224 / 0.6)',
+            borderLeftColor: 'oklab(0.285016 0.0000130683 0.00000569224 / 0.6)',
+            boxShadow:
+              'rgba(0, 0, 0, 0) 0px 0px 0px 0px, color(srgb 0.980392 0.980392 0.980392 / 0.1) 0px 18px 40px 0px',
+            overflow: 'hidden',
+            opacity: '1',
+          },
+          rect: { x: 40, y: 40, width: 200, height: 280 },
+          children: [],
+        }],
+      },
+    })
+
+    expect(validateDocument(result.document).ok).toBe(true)
+    const card = Object.values(result.document.nodes).find(
+      (node) => node.name === 'Hero card',
+    )
+    expect(card?.style.fills[0]).toMatchObject({
+      type: 'solid',
+      color: 'rgb(21, 21, 21)',
+    })
+    expect(card?.style.stroke).toMatchObject({
+      width: 1,
+      color: 'oklab(0.285016 0.0000130683 0.00000569224 / 0.6)',
+    })
+    expect(card?.style.shadows).toHaveLength(1)
+    expect(card?.style.shadows[0]).toMatchObject({
+      x: 0,
+      y: 18,
+      blur: 40,
+      color: 'rgba(250, 250, 250, 0.1)',
+    })
+  })
+
+  it('maps radial and linear CSS gradients onto Canvas paints', () => {
+    const result = convertHtmlSnapshotToCanvas({
+      id: 'paper-gradients',
+      name: 'Gradients',
+      width: 400,
+      height: 400,
+      root: {
+        tag: 'body',
+        attributes: {},
+        style: { display: 'block' },
+        rect: { x: 0, y: 0, width: 400, height: 400 },
+        children: [{
+          tag: 'div',
+          attributes: { 'aria-label': 'Stage' },
+          style: {
+            display: 'block',
+            backgroundImage:
+              'radial-gradient(80% 70% at 50% 42%, color(srgb 0.124706 0.127451 0.132157) 0%, rgb(18, 18, 18) 72%)',
+            opacity: '1',
+          },
+          rect: { x: 0, y: 0, width: 400, height: 400 },
+          children: [],
+        }, {
+          tag: 'div',
+          attributes: { 'aria-label': 'Banner' },
+          style: {
+            display: 'block',
+            backgroundImage:
+              'linear-gradient(90deg, rgb(255, 0, 0) 0%, rgb(0, 0, 255) 100%)',
+            opacity: '1',
+          },
+          rect: { x: 0, y: 400, width: 400, height: 80 },
+          children: [],
+        }],
+      },
+    })
+
+    expect(validateDocument(result.document).ok).toBe(true)
+    const stage = Object.values(result.document.nodes).find(
+      (node) => node.name === 'Stage',
+    )
+    const banner = Object.values(result.document.nodes).find(
+      (node) => node.name === 'Banner',
+    )
+    expect(stage?.style.fills[0]).toMatchObject({
+      type: 'radial-gradient',
+      cx: 0.5,
+      cy: 0.42,
+      size: '80% 70%',
+    })
+    expect(banner?.style.fills[0]).toMatchObject({
+      type: 'linear-gradient',
+      angle: 90,
+    })
+  })
+
+  it('promotes SVG circle and rect shapes to editable paths', () => {
+    const result = convertHtmlSnapshotToCanvas({
+      id: 'paper-svg-shapes',
+      name: 'Shapes',
+      width: 64,
+      height: 64,
+      root: {
+        tag: 'body',
+        attributes: {},
+        style: { display: 'block' },
+        rect: { x: 0, y: 0, width: 64, height: 64 },
+        children: [{
+          tag: 'svg',
+          attributes: { viewBox: '0 0 24 24', fill: 'none' },
+          style: { display: 'block' },
+          rect: { x: 0, y: 0, width: 24, height: 24 },
+          children: [{
+            tag: 'circle',
+            attributes: {
+              cx: '12',
+              cy: '12',
+              r: '8',
+              fill: 'rgb(255, 0, 0)',
+            },
+            style: { display: 'inline' },
+            rect: { x: 4, y: 4, width: 16, height: 16 },
+            children: [],
+          }],
+        }],
+      },
+    })
+
+    const vector = Object.values(result.document.nodes).find(
+      (node) => node.type === 'vector',
+    )
+    expect(vector?.type).toBe('vector')
+    if (vector?.type === 'vector') {
+      expect(vector.paths[0]?.d).toContain('a 8 8')
+      expect(vector.paths[0]?.fill).toBe('rgb(255, 0, 0)')
+    }
+  })
+
+  it('keeps flex when children only have fixed margins, not auto', () => {
+    const result = convertHtmlSnapshotToCanvas({
+      id: 'paper-flex-margins',
+      name: 'Flex margins',
+      width: 400,
+      height: 200,
+      root: {
+        tag: 'body',
+        attributes: {},
+        style: { display: 'block' },
+        rect: { x: 0, y: 0, width: 400, height: 200 },
+        children: [{
+          tag: 'div',
+          attributes: { 'aria-label': 'Stack' },
+          style: {
+            display: 'flex',
+            flexDirection: 'column',
+            rowGap: '0px',
+          },
+          rect: { x: 0, y: 0, width: 400, height: 200 },
+          children: [{
+            tag: 'p',
+            text: 'One',
+            attributes: {},
+            style: {
+              display: 'block',
+              marginBottom: '16px',
+              marginTop: '0px',
+              marginLeft: '0px',
+              marginRight: '0px',
+              color: 'rgb(0, 0, 0)',
+              fontSize: '16px',
+              lineHeight: '24px',
+            },
+            rect: { x: 0, y: 0, width: 40, height: 24 },
+            children: [],
+          }, {
+            tag: 'p',
+            text: 'Two',
+            attributes: {},
+            style: {
+              display: 'block',
+              marginBottom: '0px',
+              marginTop: '0px',
+              marginLeft: '0px',
+              marginRight: '0px',
+              color: 'rgb(0, 0, 0)',
+              fontSize: '16px',
+              lineHeight: '24px',
+            },
+            rect: { x: 0, y: 40, width: 40, height: 24 },
+            children: [],
+          }],
+        }],
+      },
+    })
+
+    const stack = Object.values(result.document.nodes).find(
+      (node) => node.name === 'Stack',
+    )
+    expect(stack?.layout.mode).toBe('flex')
+    expect(
+      Object.values(result.document.nodes).filter(
+        (node) => node.parentId === stack?.id,
+      ),
+    ).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ layout: expect.objectContaining({ position: 'flow' }) }),
+      ]),
+    )
+  })
+
+  it('respects background-size when placing a CSS background image layer', () => {
+    const result = convertHtmlSnapshotToCanvas({
+      id: 'background-contain',
+      name: 'Snapshot',
+      width: 400,
+      height: 300,
+      root: {
+        tag: 'body',
+        attributes: {},
+        style: { display: 'block' },
+        rect: { x: 0, y: 0, width: 400, height: 300 },
+        children: [{
+          tag: 'section',
+          attributes: { 'aria-label': 'Hero' },
+          style: {
+            display: 'block',
+            backgroundImage: 'url("https://cdn.example.com/hero.webp")',
+            backgroundSize: 'contain',
+            backgroundPosition: '0px 0px',
+          },
+          rect: { x: 0, y: 0, width: 400, height: 300 },
+          children: [],
+        }],
+      },
+    })
+
+    const image = Object.values(result.document.nodes).find(
+      (node) => node.type === 'image',
+    )
+    expect(image).toMatchObject({
+      type: 'image',
+      fit: 'contain',
+    })
+  })
+
+  it('imports a rasterized subtree as an image node', () => {
+    const result = convertHtmlSnapshotToCanvas({
+      id: 'raster-import',
+      name: 'Raster',
+      width: 120,
+      height: 80,
+      root: {
+        tag: 'body',
+        attributes: {},
+        style: { display: 'block' },
+        rect: { x: 0, y: 0, width: 120, height: 80 },
+        children: [{
+          tag: 'div',
+          attributes: { 'aria-label': 'Filtered' },
+          style: { display: 'block', filter: 'blur(4px)' },
+          rect: { x: 10, y: 10, width: 100, height: 60 },
+          children: [],
+          rasterDataUrl:
+            'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
+        }],
+      },
+    })
+
+    const image = Object.values(result.document.nodes).find(
+      (node) => node.type === 'image',
+    )
+    expect(image).toMatchObject({
+      type: 'image',
+      fit: 'fill',
+      metadata: expect.objectContaining({ importedAs: 'raster' }),
+    })
+  })
 })

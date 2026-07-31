@@ -104,6 +104,91 @@ describe('CanvasDocument', () => {
     expect(result.issues.some((issue) => issue.message.includes('cycle'))).toBe(true)
   })
 
+  it('marks every descendant whose hierarchy reaches a cycle', () => {
+    const document = documentFixture()
+    document.nodes.hero.parentId = 'headline'
+    const tail = createFrameNode('Tail', {
+      id: 'tail',
+      parentId: 'hero',
+      order: 2048,
+    })
+    document.nodes.tail = tail
+
+    const cyclePaths = validateDocument(document).issues
+      .filter((issue) => issue.message === 'Node hierarchy contains a cycle')
+      .map((issue) => issue.path)
+    expect(cyclePaths).toContain('nodes.hero.parentId')
+    expect(cyclePaths).toContain('nodes.headline.parentId')
+    expect(cyclePaths).toContain('nodes.tail.parentId')
+  })
+
+  it('validates state lookup on a deep hierarchy in linear time', () => {
+    const document = createCanvasDocument('Deep states', 'deep-states')
+    const page = createPageNode('Page', {
+      id: 'page',
+      states: {
+        open: {
+          id: 'open',
+          name: 'Open',
+          type: 'boolean',
+          initial: false,
+        },
+      },
+    })
+    document.nodes.page = page
+    let parentId = page.id
+    for (let index = 0; index < 4_000; index += 1) {
+      const id = `frame-${index}`
+      document.nodes[id] = createFrameNode(id, {
+        id,
+        parentId,
+        order: 1024,
+      })
+      parentId = id
+    }
+    document.nodes[parentId]!.interactions = [
+      {
+        trigger: 'click',
+        actions: [{ type: 'toggle-state', stateId: 'open' }],
+      },
+    ]
+
+    const started = performance.now()
+    const result = validateDocument(document)
+    const duration = performance.now() - started
+    expect(result.ok).toBe(true)
+    expect(duration).toBeLessThan(300)
+  })
+
+  it('reports every component that can reach an instance cycle', () => {
+    const document = createCanvasDocument('Components', 'components')
+    for (const id of ['a', 'b', 'c']) {
+      document.nodes[id] = createComponentNode(id.toUpperCase(), {
+        id,
+        order: (id.charCodeAt(0) - 96) * 1024,
+      })
+    }
+    document.nodes['a-to-b'] = createInstanceNode('b', 'B in A', {
+      id: 'a-to-b',
+      parentId: 'a',
+    })
+    document.nodes['b-to-a'] = createInstanceNode('a', 'A in B', {
+      id: 'b-to-a',
+      parentId: 'b',
+    })
+    document.nodes['c-to-a'] = createInstanceNode('a', 'A in C', {
+      id: 'c-to-a',
+      parentId: 'c',
+    })
+
+    const cyclePaths = validateDocument(document).issues
+      .filter((issue) => issue.message.includes('recursive cycle'))
+      .map((issue) => issue.path)
+    expect(cyclePaths).toContain('nodes.a')
+    expect(cyclePaths).toContain('nodes.b')
+    expect(cyclePaths).toContain('nodes.c')
+  })
+
   it('rejects unsafe image and SVG payloads', () => {
     const document = documentFixture()
     document.nodes.image = {

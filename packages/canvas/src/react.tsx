@@ -115,6 +115,7 @@ export interface CanvasSurfaceProps extends Omit<HTMLAttributes<HTMLDivElement>,
 }
 
 type Listener = () => void
+const CAMERA_COMPOSITING_IDLE_MS = 160
 
 function refKey(ref: NodeRef) {
   return `${ref.instancePath.join('/')}:${ref.nodeId}`
@@ -138,7 +139,7 @@ export class CanvasSession {
   #selection: NodeRef[] = []
   #editingRoot: NodeRef | null = null
   #listeners = new Set<Listener>()
-  #textEditListeners = new Set<(ref: NodeRef) => void>()
+  #textEditListeners = new Map<string, Set<Listener>>()
   #revision = 0
 
   get selection() {
@@ -189,13 +190,19 @@ export class CanvasSession {
    * every node on the page just to focus one of them.
    */
   editText(ref: NodeRef) {
-    for (const listener of this.#textEditListeners) listener(ref)
+    for (const listener of this.#textEditListeners.get(refKey(ref)) ?? []) {
+      listener()
+    }
   }
 
-  onEditText = (listener: (ref: NodeRef) => void) => {
-    this.#textEditListeners.add(listener)
+  onEditText = (ref: NodeRef, listener: Listener) => {
+    const key = refKey(ref)
+    const listeners = this.#textEditListeners.get(key) ?? new Set<Listener>()
+    listeners.add(listener)
+    this.#textEditListeners.set(key, listeners)
     return () => {
-      this.#textEditListeners.delete(listener)
+      listeners.delete(listener)
+      if (listeners.size === 0) this.#textEditListeners.delete(key)
     }
   }
 
@@ -433,6 +440,17 @@ export function useCanvasNode(id: NodeId) {
   return engine.getNode(id)
 }
 
+/** A stable no-op subscription for renderers outside an instance. */
+function useOptionalCanvasNode(id: NodeId | undefined) {
+  const { engine } = useCanvasContext()
+  useSyncExternalStore(
+    (listener) => (id ? engine.subscribeNode(id, listener) : () => {}),
+    () => (id ? engine.getNodeRevision(id) : 0),
+    () => (id ? engine.getNodeRevision(id) : 0),
+  )
+  return id ? engine.getNode(id) : undefined
+}
+
 export function useCanvasSelection() {
   const { session } = useCanvasContext()
   useSyncExternalStore(session.subscribe, () => session.revision, () => session.revision)
@@ -446,9 +464,14 @@ function colorValue(_document: CanvasDocument, color: CanvasColor) {
 
 function paintValue(document: CanvasDocument, paint: CanvasPaint) {
   if (paint.type === 'solid') return colorValue(document, paint.color)
-  return `linear-gradient(${paint.angle}deg, ${paint.stops
+  const stops = paint.stops
     .map((stop) => `${colorValue(document, stop.color)} ${stop.offset * 100}%`)
-    .join(', ')})`
+    .join(', ')
+  if (paint.type === 'radial-gradient') {
+    const size = paint.size?.trim() || 'farthest-corner'
+    return `radial-gradient(${size} at ${paint.cx * 100}% ${paint.cy * 100}%, ${stops})`
+  }
+  return `linear-gradient(${paint.angle}deg, ${stops})`
 }
 
 function lengthValue(length: CanvasLength, axis: 'width' | 'height') {
@@ -673,10 +696,7 @@ const RenderChildren = memo(function RenderChildren({
 function useVisibility(elementRef: RefObject<Element | null>, forceVisible: boolean) {
   const [visible, setVisible] = useState(forceVisible)
   useEffect(() => {
-    if (forceVisible) {
-      setVisible(true)
-      return
-    }
+    if (forceVisible) return
     const element = elementRef.current
     if (!element || typeof IntersectionObserver === 'undefined') {
       setVisible(true)
@@ -700,7 +720,7 @@ function RawCanvasNodeRenderer({
   topLevel = false,
 }: RenderNodeProps) {
   const source = useCanvasNode(id)
-  const liveInstance = useCanvasNode(instance?.id ?? '')
+  const liveInstance = useOptionalCanvasNode(instance?.id)
   const { engine, registry, session, readOnly, transact } = useCanvasContext()
   const elementRef = useRef<HTMLElement | SVGElement | null>(null)
   const [editingText, setEditingText] = useState(false)
@@ -727,23 +747,23 @@ function RawCanvasNodeRenderer({
       selection?.addRange(range)
     })
   }, [registry, id, instancePath.join('/')])
-  useEffect(
-    () =>
-      session.onEditText((target) => {
-        const node = engine.getNode(id)
-        if (
-          !sameRef(target, nodeRefFor(id, instancePath)) ||
-          node?.type !== 'text' ||
-          node.locked ||
-          readOnly
-        ) {
-          return
-        }
-        setEditingText(true)
-        focusText()
-      }),
-    [session, engine, focusText, id, instancePath.join('/'), readOnly],
-  )
+  useEffect(() => {
+    if (source?.type !== 'text') return
+    return session.onEditText(ref, () => {
+      const node = engine.getNode(id)
+      if (node?.type !== 'text' || node.locked || readOnly) return
+      setEditingText(true)
+      focusText()
+    })
+  }, [
+    session,
+    engine,
+    focusText,
+    id,
+    instancePath.join('/'),
+    readOnly,
+    source?.type,
+  ])
   if (!source) return null
 
   const currentInstance =
@@ -1602,10 +1622,18 @@ function RootNodes({ width }: { width: number }) {
  */
 function CanvasMotionStyles() {
   const { engine } = useCanvasContext()
+  const subscribe = useCallback(
+    (listener: () => void) => engine.subscribeDomain('motion', listener),
+    [engine],
+  )
+  const getSnapshot = useCallback(
+    () => engine.getDomainRevision('motion'),
+    [engine],
+  )
   useSyncExternalStore(
-    engine.subscribe.bind(engine),
-    () => engine.revision,
-    () => engine.revision,
+    subscribe,
+    getSnapshot,
+    getSnapshot,
   )
   const document = engine.document
   const sheet = motionStyleSheet(
@@ -1619,10 +1647,18 @@ function CanvasMotionStyles() {
 
 function CanvasTokenStyles() {
   const { engine } = useCanvasContext()
+  const subscribe = useCallback(
+    (listener: () => void) => engine.subscribeDomain('tokens', listener),
+    [engine],
+  )
+  const getSnapshot = useCallback(
+    () => engine.getDomainRevision('tokens'),
+    [engine],
+  )
   useSyncExternalStore(
-    engine.subscribe.bind(engine),
-    () => engine.revision,
-    () => engine.revision,
+    subscribe,
+    getSnapshot,
+    getSnapshot,
   )
   const document = engine.document
   const declarations = Object.values(document.tokens)
@@ -1702,6 +1738,9 @@ export function CanvasSurface({
   const verticalGuideRef = useRef<SVGLineElement | null>(null)
   const horizontalGuideRef = useRef<SVGLineElement | null>(null)
   const frame = useRef<number | null>(null)
+  const cameraCompositingTimer = useRef<ReturnType<typeof setTimeout> | null>(
+    null,
+  )
 
   const hideGuides = () => {
     if (verticalGuideRef.current) {
@@ -1712,13 +1751,27 @@ export function CanvasSurface({
     }
   }
 
+  const promoteCameraScene = useCallback(() => {
+    const scene = sceneRef.current
+    if (!scene) return
+    scene.style.willChange = 'transform'
+    if (cameraCompositingTimer.current) {
+      clearTimeout(cameraCompositingTimer.current)
+    }
+    cameraCompositingTimer.current = setTimeout(() => {
+      cameraCompositingTimer.current = null
+      if (sceneRef.current) sceneRef.current.style.willChange = 'auto'
+    }, CAMERA_COMPOSITING_IDLE_MS)
+  }, [])
+
   const applyCamera = useCallback(() => {
     if (!sceneRef.current) return
+    promoteCameraScene()
     const camera = cameraRef.current
     sceneRef.current.style.transform =
       `translate3d(${camera.x}px, ${camera.y}px, 0) scale(${camera.zoom})`
     overlaySyncRef.current?.()
-  }, [])
+  }, [promoteCameraScene])
 
   const setCamera = useCallback(
     (camera: CanvasCamera) => {
@@ -1853,6 +1906,14 @@ export function CanvasSurface({
   )
 
   useLayoutEffect(applyCamera, [applyCamera])
+  useEffect(
+    () => () => {
+      if (cameraCompositingTimer.current) {
+        clearTimeout(cameraCompositingTimer.current)
+      }
+    },
+    [],
+  )
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (isTextEntryTarget(event.target)) {
@@ -2829,7 +2890,7 @@ export function CanvasSurface({
           position: 'absolute',
           inset: 0,
           transformOrigin: '0 0',
-          willChange: 'transform',
+          willChange: 'auto',
         }}
       >
         <RootNodes width={pageWidth} />

@@ -140,6 +140,8 @@ describe('CanvasExport', () => {
     expect(frame?.getAttribute('sandbox')).toBe('allow-scripts')
     expect(frame?.getAttribute('srcdoc')).toContain('data-loora-node="card"')
     expect(frame?.getAttribute('srcdoc')).toContain('<!doctype html>')
+    fireEvent.click(view.getByRole('button', { name: 'Code' }))
+    expect(codeText(view)).toBe(frame?.getAttribute('srcdoc') ?? '')
   })
 
   test('opens on the selection and exports only that subtree', async () => {

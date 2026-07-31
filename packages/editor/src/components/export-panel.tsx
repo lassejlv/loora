@@ -16,11 +16,14 @@ import {
   compileJsxComponent,
   compileStandaloneHtml,
   compileTailwindComponent,
+  prepareCanvasExport,
   serializeCanvasDocument,
   type CanvasExportOptions,
 } from '@loora/canvas/export'
 import {
+  buildChildIndex,
   orderedChildren,
+  type CanvasChildIndex,
   type CanvasDocument,
   type CanvasNode,
   type NodeId,
@@ -101,6 +104,7 @@ const FORMATS: {
 ]
 
 const PNG_SCALES = [1, 2, 3] as const
+const IMAGE_EMBED_CONCURRENCY = 4
 
 export function safeExportName(name: string, extension: string) {
   const base =
@@ -151,11 +155,15 @@ function pagesOf(document: CanvasDocument) {
  * The nodes an export actually contains. Instances pull in their component, so
  * the count matches the generated markup rather than the layer tree.
  */
-function subtreeNodes(document: CanvasDocument, roots: CanvasNode[]) {
+function subtreeNodes(
+  document: CanvasDocument,
+  roots: CanvasNode[],
+  index: CanvasChildIndex,
+) {
   const seen = new Set<NodeId>()
   const queue = [...roots]
-  while (queue.length > 0) {
-    const node = queue.shift()!
+  for (let cursor = 0; cursor < queue.length; cursor += 1) {
+    const node = queue[cursor]!
     if (seen.has(node.id)) continue
     seen.add(node.id)
     if (node.type === 'instance') {
@@ -163,7 +171,7 @@ function subtreeNodes(document: CanvasDocument, roots: CanvasNode[]) {
       if (component) queue.push(component)
       continue
     }
-    queue.push(...orderedChildren(document, node.id))
+    queue.push(...orderedChildren(document, node.id, index))
   }
   return [...seen].map((id) => document.nodes[id]!).filter(Boolean)
 }
@@ -218,10 +226,14 @@ function exportTarget(
   }
 }
 
-function imageSources(document: CanvasDocument, roots: CanvasNode[]) {
+function imageSources(
+  document: CanvasDocument,
+  roots: CanvasNode[],
+  index: CanvasChildIndex,
+) {
   return [
     ...new Set(
-      subtreeNodes(document, roots)
+      subtreeNodes(document, roots, index)
         .filter((node) => node.type === 'image')
         .map((node) => node.src),
     ),
@@ -230,26 +242,34 @@ function imageSources(document: CanvasDocument, roots: CanvasNode[]) {
 
 /** Fetches every referenced image so a downloaded file survives its links. */
 async function embedImages(sources: string[]) {
-  const entries = await Promise.all(
-    sources.map(async (src) => {
-      try {
-        const response = await fetch(src, { credentials: 'same-origin' })
-        if (!response.ok) return null
-        const blob = await response.blob()
-        const data = await new Promise<string>((resolve, reject) => {
-          const reader = new FileReader()
-          reader.onload = () => resolve(String(reader.result))
-          reader.onerror = () =>
-            reject(reader.error ?? new Error('Image could not be read'))
-          reader.readAsDataURL(blob)
-        })
-        return [src, data] as const
-      } catch {
-        return null
-      }
-    }),
+  const entries: Array<readonly [string, string]> = []
+  let cursor = 0
+  await Promise.all(
+    Array.from(
+      { length: Math.min(IMAGE_EMBED_CONCURRENCY, sources.length) },
+      async () => {
+        while (cursor < sources.length) {
+          const src = sources[cursor++]!
+          try {
+            const response = await fetch(src, { credentials: 'same-origin' })
+            if (!response.ok) continue
+            const blob = await response.blob()
+            const data = await new Promise<string>((resolve, reject) => {
+              const reader = new FileReader()
+              reader.onload = () => resolve(String(reader.result))
+              reader.onerror = () =>
+                reject(reader.error ?? new Error('Image could not be read'))
+              reader.readAsDataURL(blob)
+            })
+            entries.push([src, data] as const)
+          } catch {
+            // One unreadable asset should not prevent the rest of the export.
+          }
+        }
+      },
+    ),
   )
-  return new Map(entries.filter((entry) => entry !== null))
+  return new Map(entries)
 }
 
 function useMeasuredBox(enabled: boolean) {
@@ -327,6 +347,7 @@ export function CanvasExport({
   const selection = useCanvasSelection()
 
   const pages = useMemo(() => pagesOf(document), [document])
+  const childIndex = useMemo(() => buildChildIndex(document), [document])
   const widths = useMemo(
     () => [...document.breakpoints].sort((left, right) => left.minWidth - right.minWidth),
     [document.breakpoints],
@@ -391,8 +412,8 @@ export function CanvasExport({
   )
 
   const sources = useMemo(
-    () => (open ? imageSources(document, target.roots) : []),
-    [open, document, target],
+    () => (open ? imageSources(document, target.roots, childIndex) : []),
+    [open, document, target, childIndex],
   )
   // Keyed by the URLs themselves: an edit elsewhere in the document must not
   // re-download images that did not change.
@@ -418,44 +439,78 @@ export function CanvasExport({
     }
   }, [open, embed, sourceKey])
 
-  const compiled = useMemo(() => {
-    if (!open || format === 'png' || format === 'handoff') return null
+  const webExportEnabled =
+    format === 'html' || format === 'jsx' || format === 'tailwind'
+  const preparedWebExport = useMemo(() => {
+    if (!open || !webExportEnabled) return null
     try {
-      if (format === 'json') {
-        return { text: serializeCanvasDocument(document), error: null }
-      }
-      return {
-        text: format === 'html'
-          ? compileStandaloneHtml(document, options)
-          : format === 'jsx'
-            ? compileJsxComponent(document, options)
-            : compileTailwindComponent(document, options),
-        error: null,
-      }
+      return { plan: prepareCanvasExport(document, options), error: null }
     } catch (cause) {
       return {
-        text: '',
+        plan: null,
         error:
           cause instanceof Error
             ? cause.message
             : 'This selection could not be compiled.',
       }
     }
-  }, [open, format, document, options])
+  }, [open, webExportEnabled, document, options])
 
-  const previewHtml = useMemo(() => {
-    if (
-      !open ||
-      (format !== 'html' && format !== 'jsx' && format !== 'tailwind')
-    ) {
-      return null
+  const webCompiled = useMemo(() => {
+    if (!preparedWebExport) return null
+    if (!preparedWebExport.plan) {
+      return {
+        text: '',
+        previewHtml: null,
+        error: preparedWebExport.error,
+      }
     }
     try {
-      return compileStandaloneHtml(document, options)
-    } catch {
-      return null
+      const previewHtml = compileStandaloneHtml(preparedWebExport.plan)
+      return {
+        text:
+          format === 'html'
+            ? previewHtml
+            : format === 'jsx'
+              ? compileJsxComponent(preparedWebExport.plan)
+              : compileTailwindComponent(preparedWebExport.plan),
+        previewHtml,
+        error: null,
+      }
+    } catch (cause) {
+      return {
+        text: '',
+        previewHtml: null,
+        error:
+          cause instanceof Error
+            ? cause.message
+            : 'This selection could not be compiled.',
+      }
     }
-  }, [open, format, document, options])
+  }, [preparedWebExport, format])
+
+  const compiled = useMemo(() => {
+    if (!open || format === 'png' || format === 'handoff') return null
+    if (format !== 'json') return webCompiled
+    try {
+      return {
+        text: serializeCanvasDocument(document),
+        previewHtml: null,
+        error: null,
+      }
+    } catch (cause) {
+      return {
+        text: '',
+        previewHtml: null,
+        error:
+          cause instanceof Error
+            ? cause.message
+            : 'This document could not be serialized.',
+      }
+    }
+  }, [open, format, document, webCompiled])
+
+  const previewHtml = webCompiled?.previewHtml ?? null
 
   const pngKey = `${scope}:${pageId ?? ''}:${target.ref?.nodeId ?? ''}:${scale}`
   useEffect(() => {
@@ -498,8 +553,9 @@ export function CanvasExport({
   }, [open, format, pngKey])
 
   const nodeCount = useMemo(
-    () => (open ? subtreeNodes(document, target.roots).length : 0),
-    [open, document, target],
+    () =>
+      open ? subtreeNodes(document, target.roots, childIndex).length : 0,
+    [open, document, target, childIndex],
   )
   const byteSize = useMemo(() => {
     if (format === 'png') return png ? dataUrlBytes(png.url) : 0

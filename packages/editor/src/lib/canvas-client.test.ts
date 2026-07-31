@@ -55,6 +55,20 @@ describe('remoteRevealNodeIds', () => {
       ]),
     ).toEqual(['section', 'caption', 'existing-card'])
   })
+
+  test('deduplicates large repeated edit batches without changing order', () => {
+    const operations = Array.from({ length: 2_000 }, (_, index) => ({
+      type: 'node.patch' as const,
+      id: index % 2 === 0 ? 'hero' : 'caption',
+      patch: { hidden: index % 4 === 0 },
+    }))
+
+    expect(
+      remoteRevealNodeIds([
+        { id: 'tx-repeated', label: 'Repeated edits', operations },
+      ]),
+    ).toEqual(['hero', 'caption'])
+  })
 })
 
 describe('applyAcknowledgedTransactions', () => {

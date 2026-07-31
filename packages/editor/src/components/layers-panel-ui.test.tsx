@@ -3,7 +3,9 @@ import { describe, expect, mock, test } from 'bun:test'
 import { CanvasEngine } from '@loora/canvas/engine'
 import {
   createCanvasDocument,
+  createFrameNode,
   createPageNode,
+  createTextNode,
 } from '@loora/canvas/model'
 import { CanvasProvider } from '@loora/canvas/react'
 import { CanvasLayersPanel } from './layers-panel'
@@ -11,10 +13,31 @@ import { CanvasLayersPanel } from './layers-panel'
 function fixture() {
   const document = createCanvasDocument('Layers UI', 'layers-ui')
   document.nodes.page = createPageNode('Page', { id: 'page' })
+  document.nodes.frame = createFrameNode('Card', {
+    id: 'frame',
+    parentId: 'page',
+  })
+  document.nodes.text = createTextNode('Card title', {
+    id: 'text',
+    parentId: 'frame',
+  })
   return document
 }
 
 describe('CanvasLayersPanel controls', () => {
+  test('walks indexed children through expanded nested layers', () => {
+    const view = render(
+      <CanvasProvider engine={new CanvasEngine(fixture())}>
+        <CanvasLayersPanel />
+      </CanvasProvider>,
+    )
+
+    expect(view.getByText('Card')).toBeTruthy()
+    expect(view.queryByText('Card title')).toBeNull()
+    fireEvent.click(view.getByRole('button', { name: 'Expand layer' }))
+    expect(view.getByText('Card title')).toBeTruthy()
+  })
+
   test('creates pages and moves between dock positions', () => {
     const onAddPage = mock()
     const onPositionChange = mock()

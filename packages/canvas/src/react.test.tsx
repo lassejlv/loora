@@ -13,6 +13,7 @@ import {
 } from './model'
 import {
   CanvasProvider,
+  CanvasSession,
   CanvasSurface,
   useCanvasHistory,
   useCanvasSelection,
@@ -140,6 +141,56 @@ function InsertUndoProbe() {
 }
 
 describe('Canvas React surface', () => {
+  it('routes text-edit signals only to the requested node', () => {
+    const session = new CanvasSession()
+    let titleEdits = 0
+    let captionEdits = 0
+    session.onEditText({ nodeId: 'title', instancePath: [] }, () => {
+      titleEdits += 1
+    })
+    session.onEditText({ nodeId: 'caption', instancePath: [] }, () => {
+      captionEdits += 1
+    })
+
+    session.editText({ nodeId: 'title', instancePath: [] })
+
+    expect(titleEdits).toBe(1)
+    expect(captionEdits).toBe(0)
+  })
+
+  it('does not subscribe ordinary nodes to an empty instance id', () => {
+    const engine = new CanvasEngine(fixture())
+    const subscriptions: string[] = []
+    const subscribeNode = engine.subscribeNode.bind(engine)
+    engine.subscribeNode = (id, listener) => {
+      subscriptions.push(id)
+      return subscribeNode(id, listener)
+    }
+
+    render(
+      <CanvasProvider engine={engine}>
+        <CanvasSurface pageWidth={1_440} />
+      </CanvasProvider>,
+    )
+
+    expect(subscriptions).not.toContain('')
+  })
+
+  it('releases the camera compositing hint when movement becomes idle', async () => {
+    const view = render(
+      <CanvasProvider engine={new CanvasEngine(fixture())}>
+        <CanvasSurface pageWidth={1_440} />
+      </CanvasProvider>,
+    )
+    const scene = view.container.querySelector<HTMLElement>(
+      '[data-loora-canvas-scene]',
+    )!
+    expect(scene.style.willChange).toBe('transform')
+    await waitFor(() => expect(scene.style.willChange).toBe('auto'), {
+      timeout: 500,
+    })
+  })
+
   it('uses host theme tokens for the workspace and grid', () => {
     const view = render(
       <CanvasProvider engine={new CanvasEngine(fixture())}>

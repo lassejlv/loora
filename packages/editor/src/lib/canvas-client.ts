@@ -57,6 +57,8 @@ const REALTIME_PROTOCOL = 'loora.realtime.v1'
 /** A pointer moves at frame rate; the wire does not have to. */
 const PRESENCE_THROTTLE_MS = 80
 const PRESENCE_HEARTBEAT_MS = 20_000
+/** Coalesces bursts of local transactions into one IndexedDB snapshot. */
+const PENDING_PERSIST_DELAY_MS = 50
 /** Matches the server's expiry, so a tab that died stops being drawn. */
 const PRESENCE_TTL_MS = 45_000
 
@@ -66,9 +68,12 @@ function targetKey(target: CanvasSyncTarget) {
 
 export function remoteRevealNodeIds(transactions: CanvasTransaction[]) {
   const candidates: string[] = []
+  const candidateIds = new Set<string>()
   const insertedParents = new Map<string, string | null>()
   const add = (id: string) => {
-    if (!candidates.includes(id)) candidates.push(id)
+    if (candidateIds.has(id)) return
+    candidateIds.add(id)
+    candidates.push(id)
   }
 
   for (const transaction of transactions) {
@@ -324,6 +329,9 @@ export class CanvasSyncController {
   #baseDocument: CanvasDocument
   #revision: number
   #pending: CanvasTransaction[]
+  #pendingIds: Set<string>
+  #pendingPersistTimer: ReturnType<typeof setTimeout> | null = null
+  #pendingPersistence: Promise<void> = Promise.resolve()
   #status: CanvasSyncStatus = 'ready'
   #conflicts: CanvasTransactionConflict[] = []
   #agentActivity: CanvasAgentActivity | null = null
@@ -375,6 +383,7 @@ export class CanvasSyncController {
     this.#baseDocument = document
     this.#revision = revision
     this.#pending = pending
+    this.#pendingIds = new Set(pending.map((transaction) => transaction.id))
     const rebased = rebaseTransactions(document, pending)
     if (rebased.ok) {
       this.engine = new CanvasEngine(rebased.document)
@@ -633,9 +642,10 @@ export class CanvasSyncController {
 
   enqueue(transaction: CanvasTransaction) {
     if (this.#closed) throw new Error('Canvas sync controller is closed')
-    if (this.#pending.some((pending) => pending.id === transaction.id)) return
+    if (this.#pendingIds.has(transaction.id)) return
+    this.#pendingIds.add(transaction.id)
     this.#pending.push(structuredClone(transaction))
-    void writePending(targetKey(this.target), this.#pending)
+    this.#schedulePendingPersistence()
     this.#schedule(250)
     this.#emit()
   }
@@ -676,6 +686,7 @@ export class CanvasSyncController {
     void this.#sendPresence(true)
     this.#disconnectRealtime()
     await this.flush()
+    await this.#persistPending().catch(() => {})
     this.#closed = true
     if (this.#refreshTimer) clearTimeout(this.#refreshTimer)
     this.#status = 'closed'
@@ -697,7 +708,7 @@ export class CanvasSyncController {
     this.#conflicts = []
     this.#status = 'ready'
     this.engine.replaceDocument(parsed)
-    await writePending(targetKey(this.target), [])
+    await this.#persistPending()
     this.#emit()
   }
 
@@ -796,6 +807,9 @@ export class CanvasSyncController {
         this.#pending = this.#pending.filter(
           (transaction) => !acknowledged.has(transaction.id),
         )
+        this.#pendingIds = new Set(
+          this.#pending.map((transaction) => transaction.id),
+        )
         this.#baseDocument = result.document
           ? parseCanvasDocument(result.document)
           : applyAcknowledgedTransactions(
@@ -809,7 +823,7 @@ export class CanvasSyncController {
         }
         this.#status = 'ready'
         this.#conflicts = []
-        await writePending(targetKey(this.target), this.#pending)
+        await this.#persistPending()
         this.#emit()
         if (this.#pending.length > 0) this.#schedule(0)
         return
@@ -1155,7 +1169,7 @@ export class CanvasSyncController {
   }
 
   #pageHide = () => {
-    void writePending(targetKey(this.target), this.#pending)
+    void this.#persistPending().catch(() => {})
     void this.#sendPresence(true)
     void this.flush()
   }
@@ -1165,6 +1179,35 @@ export class CanvasSyncController {
       this.#connectRealtime()
       this.#scheduleRefresh(0)
     }
+  }
+
+  /**
+   * A rapid drag or typing gesture can enqueue many transactions in one short
+   * burst. Persist the latest queue once instead of serializing the growing
+   * array after every event. Writes stay ordered so an older snapshot can
+   * never land after a newer acknowledgement.
+   */
+  #schedulePendingPersistence() {
+    if (this.#pendingPersistTimer) return
+    this.#pendingPersistTimer = setTimeout(() => {
+      this.#pendingPersistTimer = null
+      void this.#persistPending().catch(() => {})
+    }, PENDING_PERSIST_DELAY_MS)
+  }
+
+  #persistPending() {
+    if (this.#pendingPersistTimer) {
+      clearTimeout(this.#pendingPersistTimer)
+      this.#pendingPersistTimer = null
+    }
+    const snapshot = [...this.#pending]
+    const write = this.#pendingPersistence.then(() =>
+      writePending(targetKey(this.target), snapshot),
+    )
+    // Keep the ordering chain alive after a best-effort browser storage error;
+    // callers that await this particular write still receive the failure.
+    this.#pendingPersistence = write.catch(() => {})
+    return write
   }
 
   #emit() {

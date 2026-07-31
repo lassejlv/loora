@@ -18,6 +18,7 @@ import {
 import {
   CanvasConflictError,
   CanvasEngine,
+  createValidatedCanvasSnapshot,
   parseCanvasTransaction,
   withTransactionPreconditions,
   type CanvasTransaction,
@@ -487,13 +488,17 @@ export const applyCanvasTransactions = consentedProcedure
       if ('status' in target && target.status !== 'active') {
         throw new ORPCError('CONFLICT', { message: 'This branch is read-only.' })
       }
-      const document = parseCanvasDocument(target.document)
+      let parsedDocument: CanvasDocument | null = null
+      const readDocument = () => {
+        parsedDocument ??= parseCanvasDocument(target.document)
+        return parsedDocument
+      }
       if (transactions.every((transaction) => duplicateIds.has(transaction.id))) {
         return {
           applied: true as const,
           idempotent: true,
           revision: target.revision,
-          document,
+          document: readDocument(),
           transactionIds: transactions.map((transaction) => transaction.id),
           appliedTransactionIds: [] as string[],
           changedNodeIds: [] as string[],
@@ -515,15 +520,17 @@ export const applyCanvasTransactions = consentedProcedure
           applied: false as const,
           reason: 'stale' as const,
           revision: target.revision,
-          document: complete ? null : document,
+          document: complete ? null : readDocument(),
           transactions: complete
             ? intervening.map((entry) => parseCanvasTransaction(entry.transaction))
             : [],
         }
       }
 
-      const engine = new CanvasEngine(document)
-      let nextDocument: CanvasDocument = document
+      const engine = CanvasEngine.fromValidatedSnapshot(
+        createValidatedCanvasSnapshot(target.document),
+      )
+      let nextDocument: CanvasDocument = engine.document
       const freshTransactions = transactions.filter(
         (transaction) => !duplicateIds.has(transaction.id),
       )

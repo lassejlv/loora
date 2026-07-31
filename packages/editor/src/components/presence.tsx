@@ -5,6 +5,8 @@ import type { CanvasEditorController } from './editor'
 import { cn } from '@loora/ui/utils'
 
 const EMPTY_PEERS: CanvasPeer[] = []
+/** Matches the transport cadence so pointer events do not force extra layout. */
+const PRESENCE_LAYOUT_THROTTLE_MS = 80
 
 export interface PresenceCamera {
   x: number
@@ -54,22 +56,55 @@ function useBroadcastPresence(
     if (!surface) return
     const scene = () =>
       surface.querySelector<HTMLElement>('[data-loora-canvas-scene]')
-    const onMove = (event: PointerEvent) => {
+    let frame: number | null = null
+    let timer: ReturnType<typeof setTimeout> | null = null
+    let measuredAt = 0
+    let pointer: { x: number; y: number } | null = null
+    const publishPointer = () => {
+      frame = null
+      const point = pointer
+      if (!point) return
       const element = scene()
       if (!element) return
       const rect = element.getBoundingClientRect()
       const zoom = rect.width === 0 ? 1 : rect.width / element.offsetWidth || 1
+      measuredAt = Date.now()
       controller.publishPresence?.({
         cursor: {
-          x: (event.clientX - rect.left) / zoom,
-          y: (event.clientY - rect.top) / zoom,
+          x: (point.x - rect.left) / zoom,
+          y: (point.y - rect.top) / zoom,
         },
       })
     }
-    const onLeave = () => controller.publishPresence?.({ cursor: null })
+    const schedulePointer = () => {
+      if (frame !== null || timer !== null) return
+      const remaining = PRESENCE_LAYOUT_THROTTLE_MS - (Date.now() - measuredAt)
+      if (remaining > 0) {
+        timer = setTimeout(() => {
+          timer = null
+          frame = requestAnimationFrame(publishPointer)
+        }, remaining)
+        return
+      }
+      frame = requestAnimationFrame(publishPointer)
+    }
+    const onMove = (event: PointerEvent) => {
+      pointer = { x: event.clientX, y: event.clientY }
+      schedulePointer()
+    }
+    const onLeave = () => {
+      pointer = null
+      if (frame !== null) cancelAnimationFrame(frame)
+      if (timer !== null) clearTimeout(timer)
+      frame = null
+      timer = null
+      controller.publishPresence?.({ cursor: null })
+    }
     surface.addEventListener('pointermove', onMove)
     surface.addEventListener('pointerleave', onLeave)
     return () => {
+      if (frame !== null) cancelAnimationFrame(frame)
+      if (timer !== null) clearTimeout(timer)
       surface.removeEventListener('pointermove', onMove)
       surface.removeEventListener('pointerleave', onLeave)
     }

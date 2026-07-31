@@ -6,6 +6,8 @@ import {
   compileStandaloneHtml,
   compileTailwindComponent,
   inlineBrowserImages,
+  prepareCanvasExport,
+  renderElementToPng,
   serializeCanvasDocument,
 } from './export'
 import {
@@ -16,6 +18,7 @@ import {
   createPageNode,
   createTextNode,
 } from './model'
+import { motionPreset } from './motion'
 
 function fixture() {
   const document = createCanvasDocument('Landing', 'doc')
@@ -47,6 +50,16 @@ describe('Canvas exports', () => {
 
   it('exports a directly addressed node for expiring legacy links', () => {
     const document = fixture()
+    document.animations = {
+      pulse: motionPreset('pulse'),
+      'fade-in': motionPreset('fade-in'),
+    }
+    document.nodes.hero.animations = [
+      { animationId: 'fade-in', trigger: 'load' },
+    ]
+    document.nodes.page.animations = [
+      { animationId: 'pulse', trigger: 'always' },
+    ]
     const compiled = compileCanvas(document, { nodeId: 'hero' })
     expect(compiled.html).toContain(
       'data-loora-node="hero" data-loora-export-root="true"',
@@ -56,6 +69,96 @@ describe('Canvas exports', () => {
     expect(compiled.css).toContain(
       '[data-loora-export-root="true"]{position:relative;left:0;top:0}',
     )
+    expect(compiled.css).toContain('.loora-hero{')
+    expect(compiled.css).toContain('.loora-headline{')
+    expect(compiled.css).not.toContain('.loora-page{')
+    expect(compiled.css).toContain('@keyframes loora-motion-fade-in')
+    expect(compiled.css).not.toContain('@keyframes loora-motion-pulse')
+  })
+
+  it('prepares one immutable snapshot and reuses its compiled result', () => {
+    const document = fixture()
+    const prepared = prepareCanvasExport(document, { nodeId: 'hero' })
+    const first = compileCanvas(prepared)
+    const second = compileCanvas(prepared)
+
+    expect(second).toBe(first)
+    expect(compileStandaloneHtml(prepared)).toBe(
+      compileStandaloneHtml(prepared),
+    )
+    document.nodes.headline = createTextNode('Changed later', {
+      id: 'headline',
+      parentId: 'hero',
+      order: 1_024,
+    })
+    expect(compileCanvas(prepared).html).toContain(
+      '&lt;script&gt;alert(1)&lt;/script&gt;',
+    )
+    expect(compileCanvas(document, { nodeId: 'hero' }).html).toContain(
+      'Changed later',
+    )
+  })
+
+  it('keeps overlapping rich-text runs in source-order precedence', () => {
+    const document = fixture()
+    const headline = document.nodes.headline
+    if (headline.type !== 'text') throw new Error('Fixture text is missing')
+    headline.text = 'abcdef'
+    headline.runs = [
+      { start: 1, end: 5, color: '#ff0000' },
+      { start: 0, end: 3, color: '#0000ff' },
+    ]
+
+    expect(compileCanvas(document, { nodeId: 'headline' }).html).toContain(
+      '<span style="color:#0000ff">a</span>' +
+        '<span style="color:#ff0000">bc</span>' +
+        '<span style="color:#ff0000">de</span>f',
+    )
+  })
+
+  it('includes referenced nested components but excludes unused definitions', () => {
+    const document = fixture()
+    document.nodes.icon = createComponentNode('Icon', {
+      id: 'icon',
+      order: 2_048,
+    })
+    document.nodes.iconLabel = createTextNode('Icon label', {
+      id: 'iconLabel',
+      parentId: 'icon',
+      order: 1_024,
+    })
+    document.nodes.card = createComponentNode('Card', {
+      id: 'card',
+      order: 3_072,
+    })
+    document.nodes.nestedIcon = createInstanceNode('icon', 'Nested icon', {
+      id: 'nestedIcon',
+      parentId: 'card',
+      order: 1_024,
+    })
+    document.nodes.cardInstance = createInstanceNode('card', 'Card instance', {
+      id: 'cardInstance',
+      parentId: 'hero',
+      order: 2_048,
+    })
+    document.nodes.unused = createComponentNode('Unused', {
+      id: 'unused',
+      order: 4_096,
+    })
+    document.nodes.unusedLabel = createTextNode('Never rendered', {
+      id: 'unusedLabel',
+      parentId: 'unused',
+      order: 1_024,
+    })
+
+    const compiled = compileCanvas(document, { nodeId: 'hero' })
+    expect(compiled.html).toContain('data-loora-component="card"')
+    expect(compiled.html).toContain('data-loora-component="icon"')
+    expect(compiled.html).toContain('Icon label')
+    expect(compiled.css).toContain('.loora-cardInstance-card{')
+    expect(compiled.css).toContain('.loora-nestedIcon-iconLabel{')
+    expect(compiled.css).not.toContain('.loora-unused{')
+    expect(compiled.css).not.toContain('.loora-unusedLabel{')
   })
 
   it('generates one-way React and versioned JSON outputs', () => {
@@ -563,5 +666,58 @@ describe('inlineBrowserImages', () => {
 
     expect(await inlineBrowserImages(host)).toEqual([])
     expect(host.querySelector('img')!.getAttribute('src')).toBe(inline)
+  })
+
+  it('fetches a repeated image once before reusing its data URL', async () => {
+    let fetches = 0
+    globalThis.fetch = (async () => {
+      fetches += 1
+      return new Response(new Uint8Array([137, 80, 78, 71]), {
+        headers: { 'Content-Type': 'image/png' },
+      })
+    }) as unknown as typeof fetch
+    const host = document.createElement('div')
+    host.innerHTML = '<img src="/api/asset/a1"><img src="/api/asset/a1">'
+
+    expect(await inlineBrowserImages(host)).toEqual([])
+    expect(fetches).toBe(1)
+    const sources = [...host.querySelectorAll('img')].map((image) =>
+      image.getAttribute('src'),
+    )
+    expect(sources[0]).toStartWith('data:image/png')
+    expect(sources[1]).toBe(sources[0])
+  })
+
+  it('bounds simultaneous image reads during a capture', async () => {
+    let active = 0
+    let maximum = 0
+    globalThis.fetch = (async () => {
+      active += 1
+      maximum = Math.max(maximum, active)
+      await new Promise((resolve) => setTimeout(resolve, 0))
+      active -= 1
+      return new Response(new Uint8Array([137, 80, 78, 71]), {
+        headers: { 'Content-Type': 'image/png' },
+      })
+    }) as unknown as typeof fetch
+    const host = document.createElement('div')
+    host.innerHTML = Array.from(
+      { length: 12 },
+      (_, index) => `<img src="/api/asset/${index}">`,
+    ).join('')
+
+    expect(await inlineBrowserImages(host)).toEqual([])
+    expect(maximum).toBe(4)
+  })
+
+  it('refuses a PNG allocation large enough to exhaust browser memory', async () => {
+    const host = document.createElement('div')
+    await expect(
+      renderElementToPng(host, {
+        width: 10_000,
+        height: 10_000,
+        pixelRatio: 2,
+      }),
+    ).rejects.toThrow('too large to capture safely')
   })
 })

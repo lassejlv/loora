@@ -42,6 +42,11 @@ export interface HtmlCanvasSnapshot {
   style: Record<string, string>
   rect: HtmlCanvasRect
   children: HtmlCanvasSnapshot[]
+  /**
+   * When the sandbox could not map a subtree to editable nodes (filters,
+   * pseudos, path-less SVG), it may attach a PNG/JPEG data URL instead.
+   */
+  rasterDataUrl?: string
 }
 
 export interface HtmlCanvasImportInput {
@@ -124,12 +129,117 @@ function opacity(style: Record<string, string>) {
 }
 
 function isTransparent(color: string | undefined) {
+  if (!color) return true
+  const normalized = color.replace(/\s+/g, '').toLowerCase()
   return (
-    !color ||
-    color === 'transparent' ||
-    color === 'rgba(0, 0, 0, 0)' ||
-    color === 'rgba(0,0,0,0)'
+    normalized === 'transparent' ||
+    normalized === 'rgba(0,0,0,0)' ||
+    normalized === 'rgb(0,0,0,0)' ||
+    normalized === '#0000' ||
+    normalized === '#00000000'
   )
+}
+
+/**
+ * Pull a CSS color function/token out of a larger declaration. Handles nested
+ * parentheses so `color(srgb … / 0.1)` survives.
+ */
+function matchCssColorToken(value: string): string | null {
+  const start = value.search(
+    /(?:rgba?|hsla?|oklab|oklch|lab|lch|color-mix|color)\(/i,
+  )
+  if (start >= 0) {
+    let depth = 0
+    for (let index = start; index < value.length; index += 1) {
+      const character = value[index]
+      if (character === '(') depth += 1
+      else if (character === ')') {
+        depth -= 1
+        if (depth === 0) return value.slice(start, index + 1)
+      }
+    }
+  }
+  const hex = value.match(/#[0-9a-f]{3,8}\b/i)
+  if (hex) return hex[0]
+  const named = value.match(/\b([a-z]+)\b/i)
+  return named?.[1] ?? null
+}
+
+function clampByte(value: number) {
+  return Math.min(255, Math.max(0, Math.round(value)))
+}
+
+/**
+ * Paper emits `color(srgb …)` fills that fail Canvas validation. Convert the
+ * common modern forms to rgb/rgba; leave already-valid colors alone.
+ */
+export function normalizeCssColor(value: string | undefined): string | undefined {
+  if (!value) return undefined
+  const trimmed = value.trim()
+  if (!trimmed || isTransparent(trimmed)) return trimmed
+
+  const srgb = trimmed.match(
+    /^color\(\s*srgb\s+([+-]?\d*\.?\d+)\s+([+-]?\d*\.?\d+)\s+([+-]?\d*\.?\d+)(?:\s*\/\s*([+-]?\d*\.?\d+%?))?\s*\)$/i,
+  )
+  if (srgb) {
+    const r = clampByte(Number.parseFloat(srgb[1]!) * 255)
+    const g = clampByte(Number.parseFloat(srgb[2]!) * 255)
+    const b = clampByte(Number.parseFloat(srgb[3]!) * 255)
+    let alpha = 1
+    if (srgb[4] !== undefined) {
+      const raw = srgb[4]
+      alpha = raw.endsWith('%')
+        ? Number.parseFloat(raw) / 100
+        : Number.parseFloat(raw)
+    }
+    if (![r, g, b, alpha].every(Number.isFinite)) return undefined
+    alpha = Math.min(1, Math.max(0, alpha))
+    return alpha < 1
+      ? `rgba(${r}, ${g}, ${b}, ${Number(alpha.toFixed(4))})`
+      : `rgb(${r}, ${g}, ${b})`
+  }
+
+  if (
+    /^#[0-9a-f]{3,8}$/i.test(trimmed) ||
+    /^[a-z]+$/i.test(trimmed) ||
+    /^(?:rgb|rgba|hsl|hsla|oklab|oklch|lab|lch)\(/i.test(trimmed)
+  ) {
+    return trimmed.slice(0, 200)
+  }
+
+  // Browser sandbox can resolve color-mix / remaining color() forms.
+  if (typeof document !== 'undefined') {
+    try {
+      const canvas = document.createElement('canvas')
+      const context = canvas.getContext('2d')
+      if (context) {
+        context.fillStyle = '#000000'
+        context.fillStyle = trimmed
+        const resolved = context.fillStyle
+        if (resolved && resolved !== '#000000') return resolved
+        // fillStyle may keep #000000 for black inputs — verify by round-trip.
+        if (/^(?:#000|#000000|black|rgb\(0,\s*0,\s*0\))$/i.test(trimmed)) {
+          return resolved
+        }
+        context.fillStyle = '#ffffff'
+        context.fillStyle = trimmed
+        if (context.fillStyle !== '#ffffff') return context.fillStyle
+      }
+    } catch {
+      // Fall through.
+    }
+  }
+
+  if (/^color\(/i.test(trimmed) || /^color-mix\(/i.test(trimmed)) {
+    return trimmed.slice(0, 200)
+  }
+  return undefined
+}
+
+function solidPaint(color: string | undefined) {
+  const normalized = normalizeCssColor(color)
+  if (!normalized || isTransparent(normalized)) return []
+  return [{ type: 'solid' as const, color: normalized }]
 }
 
 function cleanText(value: string) {
@@ -186,13 +296,14 @@ function stroke(style: Record<string, string>): CanvasStyle['stroke'] {
   const sides = ['Top', 'Right', 'Bottom', 'Left'] as const
   const borders = sides.map((side) => ({
     width: numberStyle(style, `border${side}Width`),
-    color: style[`border${side}Color`],
+    color: normalizeCssColor(style[`border${side}Color`]),
     style: style[`border${side}Style`],
   }))
   const first = borders[0]!
   if (
     first.width <= 0 ||
     isTransparent(first.color) ||
+    !first.color ||
     !['solid', 'dashed', 'dotted'].includes(first.style)
   ) {
     return undefined
@@ -209,7 +320,7 @@ function stroke(style: Record<string, string>): CanvasStyle['stroke'] {
   }
   return {
     width: first.width,
-    color: first.color!,
+    color: first.color,
     style:
       first.style === 'dashed' || first.style === 'dotted'
         ? first.style
@@ -238,28 +349,181 @@ function shadows(value: string | undefined): CanvasShadow[] {
   if (!value || value === 'none') return []
   const result: CanvasShadow[] = []
   for (const part of splitCssList(value).slice(0, 16)) {
-    const color =
-      part.match(
-        /(rgba?\([^)]*\)|hsla?\([^)]*\)|oklch\([^)]*\)|#[0-9a-f]{3,8}|[a-z]+)$/i,
-      )?.[1] ?? 'rgba(0, 0, 0, 0.2)'
+    const rawColor = matchCssColorToken(part)
+    const color = normalizeCssColor(rawColor ?? undefined) ?? 'rgba(0, 0, 0, 0.2)'
     const lengths = part
-      .replace(color, '')
+      .replace(rawColor ?? '', '')
       .replace(/\binset\b/i, '')
       .match(/-?\d*\.?\d+(?:px)?/g)
       ?.map((item) => Number.parseFloat(item)) ?? []
     if (lengths.length < 2 || lengths.some((item) => !Number.isFinite(item))) {
       continue
     }
-    result.push({
+    const shadow: CanvasShadow = {
       x: lengths[0]!,
       y: lengths[1]!,
       blur: Math.max(0, lengths[2] ?? 0),
       spread: lengths[3] ?? 0,
       color,
       ...(part.includes('inset') ? { inset: true } : {}),
-    })
+    }
+    // Tailwind / Paper leave zero transparent layers in the stack — drop them.
+    if (
+      typeof shadow.color === 'string' &&
+      isTransparent(shadow.color) &&
+      shadow.x === 0 &&
+      shadow.y === 0 &&
+      shadow.blur === 0 &&
+      shadow.spread === 0
+    ) {
+      continue
+    }
+    result.push(shadow)
   }
   return result
+}
+
+function parseGradientStops(body: string) {
+  const stops: { offset: number; color: string }[] = []
+  for (const part of splitCssList(body)) {
+    const color = normalizeCssColor(matchCssColorToken(part) ?? undefined)
+    if (!color || isTransparent(color)) continue
+    const percent = part.match(/(-?\d*\.?\d+)%/)
+    const offset = percent
+      ? Math.min(1, Math.max(0, Number.parseFloat(percent[1]!) / 100))
+      : stops.length === 0
+        ? 0
+        : 1
+    stops.push({ offset, color })
+  }
+  if (stops.length === 1) {
+    stops.push({ offset: 1, color: stops[0]!.color })
+  }
+  return stops.length >= 2 ? stops : null
+}
+
+function parseLinearGradient(value: string) {
+  const match = value.match(/linear-gradient\(\s*([\s\S]*)\)$/i)
+  if (!match) return null
+  const parts = splitCssList(match[1]!)
+  if (parts.length < 2) return null
+  let angle = 180
+  let stopStart = 0
+  const first = parts[0]!.trim().toLowerCase()
+  if (first.endsWith('deg')) {
+    angle = Number.parseFloat(first)
+    stopStart = 1
+  } else if (first.startsWith('to ')) {
+    const map: Record<string, number> = {
+      'to top': 0,
+      'to right': 90,
+      'to bottom': 180,
+      'to left': 270,
+      'to top right': 45,
+      'to right top': 45,
+      'to bottom right': 135,
+      'to right bottom': 135,
+      'to bottom left': 225,
+      'to left bottom': 225,
+      'to top left': 315,
+      'to left top': 315,
+    }
+    angle = map[first] ?? 180
+    stopStart = 1
+  }
+  const stops = parseGradientStops(parts.slice(stopStart).join(', '))
+  if (!stops || !Number.isFinite(angle)) return null
+  return {
+    type: 'linear-gradient' as const,
+    angle,
+    stops,
+  }
+}
+
+function parseRadialGradient(value: string) {
+  const match = value.match(/radial-gradient\(\s*([\s\S]*)\)$/i)
+  if (!match) return null
+  const parts = splitCssList(match[1]!)
+  if (parts.length < 2) return null
+  let cx = 0.5
+  let cy = 0.5
+  let size: string | undefined
+  let stopStart = 0
+  const first = parts[0]!.trim()
+  const at = first.match(/^(.*?)\s+at\s+(-?\d*\.?\d+)%\s+(-?\d*\.?\d+)%$/i)
+  if (at) {
+    size = at[1]!.trim() || undefined
+    cx = Math.min(1, Math.max(0, Number.parseFloat(at[2]!) / 100))
+    cy = Math.min(1, Math.max(0, Number.parseFloat(at[3]!) / 100))
+    stopStart = 1
+  } else if (/^(-?\d*\.?\d+)%\s+(-?\d*\.?\d+)%$/.test(first)) {
+    const onlyAt = first.match(/^(-?\d*\.?\d+)%\s+(-?\d*\.?\d+)%$/)!
+    cx = Math.min(1, Math.max(0, Number.parseFloat(onlyAt[1]!) / 100))
+    cy = Math.min(1, Math.max(0, Number.parseFloat(onlyAt[2]!) / 100))
+    stopStart = 1
+  } else if (
+    /^(circle|ellipse|closest-side|closest-corner|farthest-side|farthest-corner|[\d.%\s]+)$/i.test(
+      first,
+    ) &&
+    !matchCssColorToken(first)
+  ) {
+    size = first
+    stopStart = 1
+  }
+  const stops = parseGradientStops(parts.slice(stopStart).join(', '))
+  if (!stops) return null
+  return {
+    type: 'radial-gradient' as const,
+    cx,
+    cy,
+    ...(size ? { size: size.slice(0, 100) } : {}),
+    stops,
+  }
+}
+
+function backgroundPaints(style: Record<string, string>) {
+  const paints: NonNullable<CanvasStyle['fills']> = []
+  const image = style.backgroundImage?.trim()
+  if (image && image !== 'none') {
+    for (const layer of splitCssList(image)) {
+      if (/^url\(/i.test(layer)) continue
+      const linear = parseLinearGradient(layer)
+      if (linear) {
+        paints.push(linear)
+        continue
+      }
+      const radial = parseRadialGradient(layer)
+      if (radial) paints.push(radial)
+    }
+  }
+  paints.push(...solidPaint(style.backgroundColor))
+  return paints
+}
+
+function backgroundImageFit(style: Record<string, string>): ImageNode['fit'] {
+  const size = (style.backgroundSize || '').toLowerCase()
+  if (size === 'contain') return 'contain'
+  if (size === '100% 100%' || size === '100%') return 'fill'
+  return 'cover'
+}
+
+function backgroundImageOffset(style: Record<string, string>, width: number, height: number) {
+  const position = style.backgroundPosition || '0% 0%'
+  const parts = position.trim().split(/\s+/)
+  const parse = (token: string | undefined, axis: number) => {
+    if (!token || token === 'left' || token === 'top') return 0
+    if (token === 'center') return axis * 0.5
+    if (token === 'right' || token === 'bottom') return axis
+    if (token.endsWith('%')) {
+      return (Number.parseFloat(token) / 100) * axis
+    }
+    if (token.endsWith('px')) return Number.parseFloat(token)
+    return 0
+  }
+  return {
+    x: finite(parse(parts[0], width)),
+    y: finite(parse(parts[1] ?? parts[0], height)),
+  }
 }
 
 function rotation(value: string | undefined) {
@@ -313,17 +577,32 @@ function overflow(style: Record<string, string>) {
 }
 
 function frameStyle(style: Record<string, string>) {
-  const background = style.backgroundColor
   return defaultStyle({
-    fills: isTransparent(background)
-      ? []
-      : [{ type: 'solid' as const, color: background }],
+    fills: backgroundPaints(style),
     stroke: stroke(style),
     radius: radius(style),
     shadows: shadows(style.boxShadow),
     opacity: opacity(style),
     overflow: overflow(style),
-    ...(style.mixBlendMode && style.mixBlendMode !== 'normal'
+    ...(style.mixBlendMode &&
+    style.mixBlendMode !== 'normal' &&
+    [
+      'multiply',
+      'screen',
+      'overlay',
+      'darken',
+      'lighten',
+      'color-dodge',
+      'color-burn',
+      'hard-light',
+      'soft-light',
+      'difference',
+      'exclusion',
+      'hue',
+      'saturation',
+      'color',
+      'luminosity',
+    ].includes(style.mixBlendMode)
       ? { blendMode: style.mixBlendMode }
       : {}),
   })
@@ -331,10 +610,9 @@ function frameStyle(style: Record<string, string>) {
 
 function textStyle(style: Record<string, string>) {
   const fontSize = Math.max(1, numberStyle(style, 'fontSize', 16))
+  const fills = solidPaint(style.color)
   return defaultStyle({
-    fills: isTransparent(style.color)
-      ? []
-      : [{ type: 'solid' as const, color: style.color || '#000000' }],
+    fills: fills.length > 0 ? fills : [{ type: 'solid' as const, color: '#000000' }],
     opacity: opacity(style),
     typography: {
       family: (style.fontFamily || 'Archivo').slice(0, 200),
@@ -343,7 +621,10 @@ function textStyle(style: Record<string, string>) {
       lineHeight: textLineHeight(style, fontSize),
       letterSpacing: numberStyle(style, 'letterSpacing'),
       align: textAlign(style.textAlign),
-      wrap: style.whiteSpace !== 'nowrap' && style.whiteSpace !== 'pre',
+      wrap:
+        style.whiteSpace !== 'nowrap' &&
+        style.whiteSpace !== 'pre' &&
+        style.textWrapMode !== 'nowrap',
       decoration: textDecoration(
         style.textDecorationLine || style.textDecoration,
       ),
@@ -400,29 +681,23 @@ function hasUnrepresentableFlowSpacing(style: Record<string, string>) {
     style.marginRight,
     style.marginBottom,
     style.marginLeft,
-  ].some((value) => {
-    const normalized = value?.trim().toLowerCase()
-    if (!normalized) return false
-    if (normalized === 'auto') return true
-    const amount = Number.parseFloat(normalized)
-    return Number.isFinite(amount) && Math.abs(amount) > 0.001
-  })
+  ].some((value) => value?.trim().toLowerCase() === 'auto')
 }
 
 function canFlow(snapshot: HtmlCanvasSnapshot) {
+  const position = snapshot.style.position
   return (
-    snapshot.style.position !== 'absolute' &&
-    snapshot.style.position !== 'fixed' &&
+    position !== 'absolute' &&
+    position !== 'fixed' &&
+    position !== 'sticky' &&
     !hasUnrepresentableFlowSpacing(snapshot.style)
   )
 }
 
 /**
- * How a container places its children. Arranging only some of them is what
- * wrecks an imported layout: one margin pulls a single child out of the row,
- * every sibling repacks around the hole, and nothing lands where it was
- * measured. Either the whole container arranges, or none of it does and each
- * child keeps the position it was captured at.
+ * How a container places its children. Absolute / fixed / sticky / margin:auto
+ * children force the whole set absolute so measured positions stay honest.
+ * Uniform non-zero margins no longer eject an otherwise clean flex/grid tree.
  */
 function childArrangement(
   snapshot: HtmlCanvasSnapshot,
@@ -501,6 +776,80 @@ function nodeLayout(
   )
 }
 
+function svgNumber(value: string | undefined, fallback = 0) {
+  const parsed = Number.parseFloat(value ?? '')
+  return Number.isFinite(parsed) ? parsed : fallback
+}
+
+function shapePathData(node: HtmlCanvasSnapshot): string | null {
+  if (node.tag === 'path' && node.attributes.d) return node.attributes.d
+  if (node.tag === 'circle') {
+    const cx = svgNumber(node.attributes.cx)
+    const cy = svgNumber(node.attributes.cy)
+    const r = svgNumber(node.attributes.r)
+    if (r <= 0) return null
+    return `M ${cx - r} ${cy} a ${r} ${r} 0 1 0 ${r * 2} 0 a ${r} ${r} 0 1 0 ${-r * 2} 0`
+  }
+  if (node.tag === 'ellipse') {
+    const cx = svgNumber(node.attributes.cx)
+    const cy = svgNumber(node.attributes.cy)
+    const rx = svgNumber(node.attributes.rx)
+    const ry = svgNumber(node.attributes.ry)
+    if (rx <= 0 || ry <= 0) return null
+    return `M ${cx - rx} ${cy} a ${rx} ${ry} 0 1 0 ${rx * 2} 0 a ${rx} ${ry} 0 1 0 ${-rx * 2} 0`
+  }
+  if (node.tag === 'rect') {
+    const x = svgNumber(node.attributes.x)
+    const y = svgNumber(node.attributes.y)
+    const width = svgNumber(node.attributes.width)
+    const height = svgNumber(node.attributes.height)
+    const rx = Math.min(svgNumber(node.attributes.rx), width / 2)
+    const ry = Math.min(
+      svgNumber(node.attributes.ry, svgNumber(node.attributes.rx)),
+      height / 2,
+    )
+    if (width <= 0 || height <= 0) return null
+    if (rx <= 0 && ry <= 0) {
+      return `M ${x} ${y} h ${width} v ${height} h ${-width} z`
+    }
+    return [
+      `M ${x + rx} ${y}`,
+      `H ${x + width - rx}`,
+      `A ${rx} ${ry} 0 0 1 ${x + width} ${y + ry}`,
+      `V ${y + height - ry}`,
+      `A ${rx} ${ry} 0 0 1 ${x + width - rx} ${y + height}`,
+      `H ${x + rx}`,
+      `A ${rx} ${ry} 0 0 1 ${x} ${y + height - ry}`,
+      `V ${y + ry}`,
+      `A ${rx} ${ry} 0 0 1 ${x + rx} ${y}`,
+      'Z',
+    ].join(' ')
+  }
+  if (node.tag === 'line') {
+    const x1 = svgNumber(node.attributes.x1)
+    const y1 = svgNumber(node.attributes.y1)
+    const x2 = svgNumber(node.attributes.x2)
+    const y2 = svgNumber(node.attributes.y2)
+    return `M ${x1} ${y1} L ${x2} ${y2}`
+  }
+  if (node.tag === 'polyline' || node.tag === 'polygon') {
+    const points = (node.attributes.points || '')
+      .trim()
+      .split(/[\s,]+/)
+      .map(Number.parseFloat)
+      .filter(Number.isFinite)
+    if (points.length < 4) return null
+    const pairs: string[] = []
+    for (let index = 0; index + 1 < points.length; index += 2) {
+      pairs.push(`${points[index]} ${points[index + 1]}`)
+    }
+    const prefix = pairs.map((pair, index) => (index === 0 ? `M ${pair}` : `L ${pair}`))
+    if (node.tag === 'polygon') prefix.push('Z')
+    return prefix.join(' ')
+  }
+  return null
+}
+
 function vectorNode(
   snapshot: HtmlCanvasSnapshot,
   parentId: NodeId,
@@ -518,36 +867,33 @@ function vectorNode(
       strokeWidth?: number
     },
   ) => {
-    const fill =
-      node.attributes.fill ||
-      node.style.fill ||
-      inherited.fill
-    const stroke =
-      node.attributes.stroke ||
-      node.style.stroke ||
-      inherited.stroke
+    const fill = normalizeCssColor(
+      node.attributes.fill || node.style.fill || inherited.fill,
+    )
+    const strokeColor = normalizeCssColor(
+      node.attributes.stroke || node.style.stroke || inherited.stroke,
+    )
     const ownStrokeWidth = Number.parseFloat(
       node.attributes['stroke-width'] ?? node.style.strokeWidth ?? '',
     )
     const strokeWidth = Number.isFinite(ownStrokeWidth)
       ? ownStrokeWidth
       : inherited.strokeWidth
-    if (node.tag === 'path' && node.attributes.d) {
+    const d = shapePathData(node)
+    if (d) {
       paths.push({
-        d: node.attributes.d,
-        ...(fill && fill !== 'none'
-          ? { fill }
-          : {}),
-        ...(stroke && stroke !== 'none'
-          ? { stroke }
-          : {}),
-        ...(strokeWidth !== undefined
-          ? { strokeWidth }
-          : {}),
+        d,
+        ...(fill && fill !== 'none' ? { fill } : {}),
+        ...(strokeColor && strokeColor !== 'none' ? { stroke: strokeColor } : {}),
+        ...(strokeWidth !== undefined ? { strokeWidth } : {}),
       })
     }
     node.children.forEach((child) =>
-      visit(child, { fill, stroke, strokeWidth }),
+      visit(child, {
+        fill: fill ?? inherited.fill,
+        stroke: strokeColor ?? inherited.stroke,
+        strokeWidth,
+      }),
     )
   }
   visit(snapshot, {})
@@ -616,7 +962,7 @@ function imageNode(
  */
 function hasVisibleBox(style: Record<string, string>) {
   return (
-    !isTransparent(style.backgroundColor) ||
+    backgroundPaints(style).length > 0 ||
     !!stroke(style) ||
     shadows(style.boxShadow).length > 0 ||
     !!backgroundImageUrl(style.backgroundImage) ||
@@ -663,6 +1009,35 @@ function convertSnapshot(
   nodes: Record<NodeId, CanvasNode>,
   warnings: string[],
 ) {
+  if (snapshot.rasterDataUrl && safeUrl(snapshot.rasterDataUrl)) {
+    const frame = createFrameNode(
+      snapshot.attributes['aria-label'] ||
+        snapshot.attributes.title ||
+        snapshot.tag ||
+        'Raster',
+      {
+        id: canvasId('image'),
+        parentId,
+        order,
+        layout: nodeLayout(snapshot, parentOrigin, parentMode),
+        style: frameStyle(snapshot.style),
+      },
+    )
+    const { semanticTag: _semanticTag, ...base } = frame
+    nodes[frame.id] = {
+      ...base,
+      type: 'image',
+      src: snapshot.rasterDataUrl,
+      alt: (snapshot.attributes.alt || '').slice(0, 1_000),
+      fit: 'fill',
+      metadata: {
+        importedHtmlTag: snapshot.tag,
+        importedAs: 'raster',
+      },
+    }
+    return frame.id
+  }
+
   const vector = vectorNode(
     snapshot,
     parentId,
@@ -721,6 +1096,20 @@ function convertSnapshot(
   const tag = semanticTags.has(snapshot.tag as SemanticTag)
     ? (snapshot.tag as SemanticTag)
     : 'div'
+  const aspect = (() => {
+    const raw = snapshot.style.aspectRatio?.trim()
+    if (!raw || raw === 'auto') return undefined
+    const parts = raw.split('/').map((part) => Number.parseFloat(part.trim()))
+    if (
+      parts.length === 2 &&
+      parts.every((part) => Number.isFinite(part)) &&
+      parts[1]! > 0
+    ) {
+      return parts[0]! / parts[1]!
+    }
+    const single = Number.parseFloat(raw)
+    return Number.isFinite(single) && single > 0 ? single : undefined
+  })()
   const frame: FrameNode = createFrameNode(
     snapshot.attributes['aria-label'] ||
       snapshot.attributes.title ||
@@ -732,7 +1121,10 @@ function convertSnapshot(
       order,
       semanticTag: tag,
       rotation: rotation(snapshot.style.transform),
-      layout: nodeLayout(snapshot, parentOrigin, parentMode, ownMode),
+      layout: {
+        ...nodeLayout(snapshot, parentOrigin, parentMode, ownMode),
+        ...(aspect !== undefined ? { aspectRatio: aspect } : {}),
+      },
       style: frameStyle(snapshot.style),
       interactions: interactions(snapshot),
       metadata: { importedHtmlTag: snapshot.tag },
@@ -742,15 +1134,18 @@ function convertSnapshot(
   const origin = childOrigin(snapshot, frame.layout, frame.style)
   const backgroundSrc = backgroundImageUrl(snapshot.style.backgroundImage)
   if (backgroundSrc && Object.keys(nodes).length < MAX_HTML_IMPORT_NODES) {
+    const width = positiveDimension(snapshot.rect.width)
+    const height = positiveDimension(snapshot.rect.height)
+    const offset = backgroundImageOffset(snapshot.style, width, height)
     const backgroundFrame = createFrameNode(`${frame.name} background`, {
       id: canvasId('image'),
       parentId: id,
       order: 0,
-      layout: defaultLayout(
-        positiveDimension(snapshot.rect.width),
-        positiveDimension(snapshot.rect.height),
-        { position: 'absolute', x: 0, y: 0 },
-      ),
+      layout: defaultLayout(width, height, {
+        position: 'absolute',
+        x: offset.x,
+        y: offset.y,
+      }),
       style: defaultStyle(),
     })
     const { semanticTag: _semanticTag, ...base } = backgroundFrame
@@ -759,8 +1154,11 @@ function convertSnapshot(
       type: 'image',
       src: backgroundSrc,
       alt: '',
-      fit: 'cover',
-      metadata: { importedHtmlTag: snapshot.tag, importedCssProperty: 'background-image' },
+      fit: backgroundImageFit(snapshot.style),
+      metadata: {
+        importedHtmlTag: snapshot.tag,
+        importedCssProperty: 'background-image',
+      },
     }
   }
   // A styled label carries its own text, and the frame above holds the box it

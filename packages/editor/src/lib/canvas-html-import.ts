@@ -79,11 +79,14 @@ const styleProperties = [
   'overflow-y',
   'background-color',
   'background-image',
+  'background-size',
+  'background-position',
   'color',
   'box-shadow',
   'mix-blend-mode',
   'transform',
   'object-fit',
+  'aspect-ratio',
   'fill',
   'stroke',
   'stroke-width',
@@ -97,6 +100,7 @@ const styleProperties = [
   'text-decoration-line',
   'text-transform',
   'white-space',
+  'text-wrap-mode',
   'flex-direction',
   'flex-wrap',
   'gap',
@@ -105,6 +109,9 @@ const styleProperties = [
   'align-items',
   'justify-content',
   'grid-template-columns',
+  'filter',
+  'clip-path',
+  'mask-image',
   'padding-top',
   'padding-right',
   'padding-bottom',
@@ -130,6 +137,45 @@ const styleProperties = [
   'border-bottom-right-radius',
   'border-bottom-left-radius',
 ] as const
+
+const colorStyleProperties = new Set([
+  'backgroundColor',
+  'color',
+  'borderTopColor',
+  'borderRightColor',
+  'borderBottomColor',
+  'borderLeftColor',
+  'fill',
+  'stroke',
+])
+
+let colorNormalizerCanvas: HTMLCanvasElement | null = null
+
+function normalizeSnapshotColor(value: string) {
+  if (!value || value === 'transparent') return value
+  if (
+    /^#[0-9a-f]{3,8}$/i.test(value) ||
+    /^(?:rgb|rgba|hsl|hsla)\(/i.test(value)
+  ) {
+    return value
+  }
+  try {
+    colorNormalizerCanvas ??= document.createElement('canvas')
+    const context = colorNormalizerCanvas.getContext('2d')
+    if (!context) return value
+    context.fillStyle = '#000000'
+    context.fillStyle = value
+    const resolved = context.fillStyle
+    if (resolved && resolved !== '#000000') return resolved
+    context.fillStyle = '#ffffff'
+    context.fillStyle = value
+    if (context.fillStyle !== '#ffffff') return context.fillStyle
+    // Genuine black / unresolved — keep original for import-side parsing.
+    return value
+  } catch {
+    return value
+  }
+}
 
 function camelCase(value: string) {
   return value.replace(/-([a-z])/g, (_, character: string) =>
@@ -187,8 +233,9 @@ export function buildHtmlImportDocument(html: string, css = '') {
     "connect-src 'none'",
     "frame-src 'none'",
     "media-src 'none'",
-    "font-src data:",
-    "img-src data: blob:",
+    // Paper pastes need remote webfonts and product images to measure correctly.
+    "font-src https: data:",
+    "img-src https: data: blob:",
     "style-src 'unsafe-inline'",
   ].join('; ')
   parsed.head.prepend(policy)
@@ -212,11 +259,133 @@ function rect(value: DOMRect | { x: number; y: number; width: number; height: nu
 
 function styleSnapshot(style: CSSStyleDeclaration) {
   return Object.fromEntries(
-    styleProperties.map((property) => [
-      camelCase(property),
-      style.getPropertyValue(property),
-    ]),
+    styleProperties.map((property) => {
+      const key = camelCase(property)
+      let value = style.getPropertyValue(property)
+      if (colorStyleProperties.has(key)) {
+        value = normalizeSnapshotColor(value)
+      }
+      return [key, value]
+    }),
   )
+}
+
+function hasGeneratedPseudo(view: Window, element: Element) {
+  for (const pseudo of ['::before', '::after'] as const) {
+    try {
+      const style = view.getComputedStyle(element, pseudo)
+      const content = style.content
+      if (
+        content &&
+        content !== 'none' &&
+        content !== 'normal' &&
+        content !== '""' &&
+        content !== "''"
+      ) {
+        return true
+      }
+    } catch {
+      // Some environments reject pseudo lookups.
+    }
+  }
+  return false
+}
+
+function needsRasterFallback(
+  element: Element,
+  style: CSSStyleDeclaration,
+  view: Window,
+) {
+  const tag = element.tagName.toLowerCase()
+  if (tag === 'svg') {
+    const hasPathLike = !!element.querySelector(
+      'path[d], circle, ellipse, rect, line, polyline, polygon',
+    )
+    if (!hasPathLike) return true
+  }
+  if (style.filter && style.filter !== 'none') return true
+  if (style.clipPath && style.clipPath !== 'none') return true
+  if (style.maskImage && style.maskImage !== 'none') return true
+  if (hasGeneratedPseudo(view, element)) return true
+  return false
+}
+
+async function rasterizeElement(element: Element): Promise<string | null> {
+  const bounds = element.getBoundingClientRect()
+  const width = Math.ceil(bounds.width)
+  const height = Math.ceil(bounds.height)
+  if (width < 1 || height < 1) return null
+
+  if (element instanceof SVGSVGElement) {
+    try {
+      const clone = element.cloneNode(true) as SVGSVGElement
+      if (!clone.getAttribute('xmlns')) {
+        clone.setAttribute('xmlns', 'http://www.w3.org/2000/svg')
+      }
+      const xml = new XMLSerializer().serializeToString(clone)
+      const url = URL.createObjectURL(
+        new Blob([xml], { type: 'image/svg+xml;charset=utf-8' }),
+      )
+      try {
+        const image = new Image()
+        image.decoding = 'async'
+        await new Promise<void>((resolve, reject) => {
+          image.onload = () => resolve()
+          image.onerror = () => reject(new Error('svg raster failed'))
+          image.src = url
+        })
+        const canvas = document.createElement('canvas')
+        canvas.width = width
+        canvas.height = height
+        const context = canvas.getContext('2d')
+        if (!context) return null
+        context.drawImage(image, 0, 0, width, height)
+        return canvas.toDataURL('image/png')
+      } finally {
+        URL.revokeObjectURL(url)
+      }
+    } catch {
+      return null
+    }
+  }
+
+  // Generic HTML: serialize into an SVG foreignObject and paint.
+  try {
+    const clone = element.cloneNode(true) as HTMLElement
+    const serialized = new XMLSerializer().serializeToString(clone)
+    const svg = `
+      <svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}">
+        <foreignObject width="100%" height="100%">
+          <div xmlns="http://www.w3.org/1999/xhtml" style="width:${width}px;height:${height}px;margin:0">
+            ${serialized}
+          </div>
+        </foreignObject>
+      </svg>
+    `
+    const url = URL.createObjectURL(
+      new Blob([svg], { type: 'image/svg+xml;charset=utf-8' }),
+    )
+    try {
+      const image = new Image()
+      image.decoding = 'async'
+      await new Promise<void>((resolve, reject) => {
+        image.onload = () => resolve()
+        image.onerror = () => reject(new Error('html raster failed'))
+        image.src = url
+      })
+      const canvas = document.createElement('canvas')
+      canvas.width = width
+      canvas.height = height
+      const context = canvas.getContext('2d')
+      if (!context) return null
+      context.drawImage(image, 0, 0, width, height)
+      return canvas.toDataURL('image/png')
+    } finally {
+      URL.revokeObjectURL(url)
+    }
+  } catch {
+    return null
+  }
 }
 
 function textValue(node: Text, style: CSSStyleDeclaration) {
@@ -268,7 +437,9 @@ function elementAttributes(element: Element) {
   return attributes
 }
 
-function snapshotElement(element: Element): HtmlCanvasSnapshot | null {
+async function snapshotElement(
+  element: Element,
+): Promise<HtmlCanvasSnapshot | null> {
   const view = element.ownerDocument.defaultView
   if (!view) return null
   const computed = view.getComputedStyle(element)
@@ -281,6 +452,21 @@ function snapshotElement(element: Element): HtmlCanvasSnapshot | null {
   }
   const bounds = element.getBoundingClientRect()
   const tag = element.tagName.toLowerCase()
+
+  if (needsRasterFallback(element, computed, view)) {
+    const rasterDataUrl = await rasterizeElement(element)
+    if (rasterDataUrl) {
+      return {
+        tag,
+        attributes: elementAttributes(element),
+        style: styleSnapshot(computed),
+        rect: rect(bounds),
+        children: [],
+        rasterDataUrl,
+      }
+    }
+  }
+
   const elementChildren = [...element.children].filter(
     (child) => view.getComputedStyle(child).display !== 'none',
   )
@@ -292,20 +478,18 @@ function snapshotElement(element: Element): HtmlCanvasSnapshot | null {
           .join(' ')
           .trim()
       : ''
-  const children =
-    directText
-      ? []
-      : [...element.childNodes]
-          .map((node) => {
-            if (node.nodeType === Node.ELEMENT_NODE) {
-              return snapshotElement(node as Element)
-            }
-            if (node.nodeType === Node.TEXT_NODE) {
-              return textSnapshot(node as Text, element, computed)
-            }
-            return null
-          })
-          .filter((child): child is HtmlCanvasSnapshot => !!child)
+  const children: HtmlCanvasSnapshot[] = []
+  if (!directText) {
+    for (const node of element.childNodes) {
+      if (node.nodeType === Node.ELEMENT_NODE) {
+        const child = await snapshotElement(node as Element)
+        if (child) children.push(child)
+      } else if (node.nodeType === Node.TEXT_NODE) {
+        const child = textSnapshot(node as Text, element, computed)
+        if (child) children.push(child)
+      }
+    }
+  }
 
   if (
     bounds.width <= 0 &&
@@ -415,7 +599,7 @@ export async function importHtmlCssToCanvas(
     )
     await Promise.race([
       sandbox.fonts?.ready ?? Promise.resolve(),
-      new Promise<void>((resolve) => window.setTimeout(resolve, 1_000)),
+      new Promise<void>((resolve) => window.setTimeout(resolve, 3_000)),
     ])
     await settleImages(sandbox, imageBudgetMs)
     await nextFrame(view)
@@ -432,7 +616,7 @@ export async function importHtmlCssToCanvas(
     iframe.style.height = `${height}px`
     await nextFrame(view)
 
-    const body = snapshotElement(sandbox.body)
+    const body = await snapshotElement(sandbox.body)
     if (!body) throw new Error('The HTML did not produce visible content')
     body.rect = { x: 0, y: 0, width, height }
     return convertHtmlSnapshotToCanvas({

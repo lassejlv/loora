@@ -26,8 +26,10 @@ import {
   useCanvasTransaction,
 } from '@loora/canvas/react'
 import {
+  buildChildIndex,
   canvasId,
   orderedChildren,
+  type CanvasChildIndex,
   type CanvasDocument,
   type CanvasNode,
   type NodePatch,
@@ -124,6 +126,7 @@ export function resolveDrop(
   draggedIds: string[],
   targetId: string,
   position: DropPosition,
+  childIndex?: CanvasChildIndex,
 ): DropPlan | null {
   const target = document.nodes[targetId]
   const dragging = dragRoots(document, draggedIds)
@@ -149,7 +152,7 @@ export function resolveDrop(
   const ordered = dragging
     .map((id) => document.nodes[id]!)
     .sort((left, right) => left.order - right.order)
-  const siblings = orderedChildren(document, parentId).filter(
+  const siblings = orderedChildren(document, parentId, childIndex).filter(
     (node) => !moving.has(node.id),
   )
 
@@ -261,6 +264,9 @@ export function CanvasLayersPanel({
   const [query, setQuery] = useState('')
   const [renamingKey, setRenamingKey] = useState<string | null>(null)
   const search = query.trim().toLowerCase()
+  // LayerRow walks the whole expanded tree. Building this once keeps that
+  // traversal linear instead of making every row rescan every document node.
+  const childIndex = useMemo(() => buildChildIndex(document), [document])
   const matches = useMemo(
     () =>
       search
@@ -271,12 +277,18 @@ export function CanvasLayersPanel({
     [document, search],
   )
   const roots = useMemo(
-    () => orderedChildren(document, null).filter((node) => node.type === 'page'),
-    [document],
+    () =>
+      orderedChildren(document, null, childIndex).filter(
+        (node) => node.type === 'page',
+      ),
+    [childIndex, document],
   )
   const components = useMemo(
-    () => orderedChildren(document, null).filter((node) => node.type === 'component'),
-    [document],
+    () =>
+      orderedChildren(document, null, childIndex).filter(
+        (node) => node.type === 'component',
+      ),
+    [childIndex, document],
   )
 
   const selectedKeys = useMemo(
@@ -359,7 +371,7 @@ export function CanvasLayersPanel({
     const rect = event.currentTarget.getBoundingClientRect()
     const ratio = rect.height > 0 ? (event.clientY - rect.top) / rect.height : 0.5
     const position = dropPositionFor(node, ratio)
-    if (!resolveDrop(document, draggedIds, node.id, position)) {
+    if (!resolveDrop(document, draggedIds, node.id, position, childIndex)) {
       // No drop effect, so the row reads as rejected instead of silently eating
       // the drag.
       setDropTarget(null)
@@ -380,7 +392,13 @@ export function CanvasLayersPanel({
     const dragging = draggedIds
     endDrag()
     if (dragging.length === 0 || readOnly || !target || target.id !== node.id) return
-    const plan = resolveDrop(document, dragging, node.id, target.position)
+    const plan = resolveDrop(
+      document,
+      dragging,
+      node.id,
+      target.position,
+      childIndex,
+    )
     if (!plan) return
     const first = document.nodes[plan.moves[0]!.id]
     transact({
@@ -575,6 +593,7 @@ export function CanvasLayersPanel({
             refValue={{ nodeId: node.id, instancePath: [] }}
             depth={0}
             document={document}
+            childIndex={childIndex}
             selectedKeys={selectedKeys}
             expanded={expanded}
             onToggle={toggle}
@@ -604,6 +623,7 @@ export function CanvasLayersPanel({
                 refValue={{ nodeId: node.id, instancePath: [] }}
                 depth={0}
                 document={document}
+                childIndex={childIndex}
                 selectedKeys={selectedKeys}
                 expanded={expanded}
                 onToggle={toggle}
@@ -633,6 +653,7 @@ function LayerRow({
   refValue,
   depth,
   document,
+  childIndex,
   selectedKeys,
   expanded,
   onToggle,
@@ -647,6 +668,7 @@ function LayerRow({
   refValue: NodeRef
   depth: number
   document: ReturnType<typeof useCanvasDocument>
+  childIndex: CanvasChildIndex
   selectedKeys: Set<string>
   expanded: Set<string>
   onToggle: (key: string) => void
@@ -665,7 +687,7 @@ function LayerRow({
   const childParentId =
     component?.type === 'component' ? component.id : node.id
   const children = ['page', 'component', 'frame', 'group', 'instance'].includes(node.type)
-    ? orderedChildren(document, childParentId)
+    ? orderedChildren(document, childParentId, childIndex)
     : []
   const childPath =
     instance ? [...refValue.instancePath, instance.id] : refValue.instancePath
@@ -798,6 +820,7 @@ function LayerRow({
               refValue={{ nodeId: child.id, instancePath: childPath }}
               depth={depth + 1}
               document={document}
+              childIndex={childIndex}
               selectedKeys={selectedKeys}
               expanded={expanded}
               onToggle={onToggle}

@@ -29,10 +29,6 @@ function useRemoteChange(controller: CanvasEditorController) {
 const BADGE_HEIGHT = 20
 const BADGE_MARGIN = 10
 const BADGE_MIN_Y = 44
-/** A missing node is usually a node not rendered yet; rescanning every frame
-    for one is wasted work on a large document. */
-const RESCAN_INTERVAL_MS = 250
-
 /**
  * Who the agent is and what it is doing, in the same face-pile cluster as the
  * human collaborators. This is the live region for the whole feature; the
@@ -144,20 +140,19 @@ export function CanvasAgentOverlay({
 
     const wanted = nodeKey ? nodeKey.split('\0') : []
     let element: Element | null = null
-    let scannedAt = 0
-    let frame = 0
+    let frame: number | null = null
+    let observedElement: Element | null = null
+    let resizeObserver: ResizeObserver | null = null
 
     const usable = (candidate: Element | null | undefined) =>
       !!candidate &&
       candidate.isConnected &&
       candidate.getClientRects().length > 0
 
-    const resolve = (now: number) => {
+    const resolve = () => {
       if (usable(element)) return element
       element = null
       if (wanted.length === 0) return null
-      if (now - scannedAt < RESCAN_INTERVAL_MS) return null
-      scannedAt = now
       for (const nodeId of wanted) {
         const direct = registry.get({ nodeId, instancePath: [] })
         if (usable(direct)) {
@@ -175,10 +170,16 @@ export function CanvasAgentOverlay({
       return element
     }
 
-    const draw = (now: number) => {
-      frame = window.requestAnimationFrame(draw)
+    const draw = () => {
+      frame = null
       const host = overlay.getBoundingClientRect()
-      const rect = resolve(now)?.getBoundingClientRect() ?? null
+      const target = resolve()
+      if (target !== observedElement) {
+        if (observedElement) resizeObserver?.unobserve(observedElement)
+        if (target) resizeObserver?.observe(target)
+        observedElement = target
+      }
+      const rect = target?.getBoundingClientRect() ?? null
       const width = badge.offsetWidth || 120
       // Above the node when there is room for it, tucked just inside its top
       // edge when there is not.
@@ -216,8 +217,46 @@ export function CanvasAgentOverlay({
       }
     }
 
-    frame = window.requestAnimationFrame(draw)
-    return () => window.cancelAnimationFrame(frame)
+    // Camera transforms, registry changes, and actual size changes are the
+    // events that can move this decoration. Coalescing those events into one
+    // frame avoids a permanent layout-reading animation loop while idle.
+    const schedule = () => {
+      if (frame !== null) return
+      frame = window.requestAnimationFrame(draw)
+    }
+    const unsubscribe = registry.subscribe(schedule)
+    resizeObserver =
+      typeof ResizeObserver === 'undefined'
+        ? null
+        : new ResizeObserver(schedule)
+    resizeObserver?.observe(overlay)
+    const scene = overlay.parentElement?.querySelector(
+      '[data-loora-canvas-scene]',
+    )
+    const cameraObserver =
+      scene && typeof MutationObserver !== 'undefined'
+        ? new MutationObserver(schedule)
+        : null
+    if (scene && cameraObserver) {
+      cameraObserver.observe(scene, {
+        attributes: true,
+        attributeFilter: ['style', 'class', 'hidden'],
+        childList: true,
+        characterData: true,
+        subtree: true,
+      })
+    }
+    window.addEventListener('resize', schedule)
+    overlay.parentElement?.addEventListener('scroll', schedule, true)
+    schedule()
+    return () => {
+      if (frame !== null) window.cancelAnimationFrame(frame)
+      unsubscribe()
+      resizeObserver?.disconnect()
+      cameraObserver?.disconnect()
+      window.removeEventListener('resize', schedule)
+      overlay.parentElement?.removeEventListener('scroll', schedule, true)
+    }
   }, [activity, nodeKey, registry])
 
   if (!activity) return null

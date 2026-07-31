@@ -318,6 +318,7 @@ export interface CanvasApplyResult {
   changedNodeIds: Set<NodeId>
   changedTokenIds: Set<string>
   changedThemeIds: Set<string>
+  changedAnimationIds: Set<string>
   idempotent: boolean
 }
 
@@ -337,6 +338,41 @@ export type CanvasRebaseResult =
 
 function clone<T>(value: T): T {
   return structuredClone(value)
+}
+
+declare const canvasValidatedSnapshotBrand: unique symbol
+
+/**
+ * An opaque, isolated document snapshot that has already crossed the complete
+ * model validation boundary. It can be consumed by exactly one CanvasEngine.
+ */
+export interface CanvasValidatedSnapshot {
+  readonly [canvasValidatedSnapshotBrand]: true
+}
+
+const validatedSnapshotDocuments = new WeakMap<object, CanvasDocument>()
+const ownedValidatedDocuments = new WeakSet<object>()
+
+/**
+ * Clone and validate untrusted persistence/network data once, ready to transfer
+ * into an engine without a second clone and validation pass.
+ */
+export function createValidatedCanvasSnapshot(
+  value: unknown,
+): CanvasValidatedSnapshot {
+  const snapshot = Object.freeze({})
+  validatedSnapshotDocuments.set(snapshot, assertDocument(clone(value)))
+  return snapshot as CanvasValidatedSnapshot
+}
+
+function consumeValidatedCanvasSnapshot(snapshot: CanvasValidatedSnapshot) {
+  const document = validatedSnapshotDocuments.get(snapshot as object)
+  if (!document) {
+    throw new Error('Canvas validated snapshot has already been consumed')
+  }
+  validatedSnapshotDocuments.delete(snapshot as object)
+  ownedValidatedDocuments.add(document)
+  return document
 }
 
 function stable(value: unknown): string {
@@ -649,8 +685,8 @@ function descendants(
 ) {
   const result: CanvasNode[] = []
   const queue = [id]
-  while (queue.length > 0) {
-    const current = queue.shift()!
+  for (let cursor = 0; cursor < queue.length; cursor += 1) {
+    const current = queue[cursor]!
     const node = document.nodes[current]
     if (!node) continue
     result.push(node)
@@ -673,6 +709,9 @@ export function applyTransaction(
     validateDocument?: boolean
   } = {},
 ): CanvasApplyResult {
+  const validateWholeDocument =
+    options.validateDocument ??
+    !canValidateIncrementally(source, transaction)
   if (options.checkPreconditions !== false) {
     const conflicts = verifyPreconditions(source, transaction)
     if (conflicts.length > 0) {
@@ -687,6 +726,9 @@ export function applyTransaction(
     themes: { ...source.themes },
     breakpoints: source.breakpoints,
     metadata: { ...source.metadata },
+    ...(source.animations === undefined
+      ? {}
+      : { animations: { ...source.animations } }),
   }
   const inverseOperations: CanvasOperation[] = []
   // Held across consecutive deletes, which only ever remove entries the walk
@@ -695,6 +737,7 @@ export function applyTransaction(
   const changedNodeIds = new Set<NodeId>()
   const changedTokenIds = new Set<string>()
   const changedThemeIds = new Set<string>()
+  const changedAnimationIds = new Set<string>()
 
   for (const operation of transaction.operations) {
     switch (operation.type) {
@@ -844,6 +887,7 @@ export function applyTransaction(
             ? { type: 'animation.upsert', animation: clone(previous) }
             : { type: 'animation.delete', id: operation.animation.id },
         )
+        changedAnimationIds.add(operation.animation.id)
         break
       }
       case 'animation.delete': {
@@ -854,6 +898,7 @@ export function applyTransaction(
           type: 'animation.upsert',
           animation: clone(previous),
         })
+        changedAnimationIds.add(operation.id)
         break
       }
       case 'theme.upsert': {
@@ -882,7 +927,7 @@ export function applyTransaction(
   }
 
   document.metadata.updatedAt = transaction.documentUpdatedAt ?? Date.now()
-  if (options.validateDocument !== false) assertDocument(document)
+  if (validateWholeDocument) assertDocument(document)
   return {
     document,
     inverse: {
@@ -895,6 +940,7 @@ export function applyTransaction(
     changedNodeIds,
     changedTokenIds,
     changedThemeIds,
+    changedAnimationIds,
     idempotent: false,
   }
 }
@@ -913,7 +959,13 @@ function canValidateIncrementally(
   document: CanvasDocument,
   transaction: CanvasTransaction,
 ) {
-  return transaction.operations.every(
+  if (
+    transaction.documentUpdatedAt !== undefined &&
+    !Number.isFinite(transaction.documentUpdatedAt)
+  ) {
+    return false
+  }
+  return transaction.operations.length > 0 && transaction.operations.every(
     (operation) =>
       operation.type === 'node.patch' &&
       !operation.unset?.length &&
@@ -949,7 +1001,11 @@ export function rebaseTransactions(
       conflicts.push(...current)
       continue
     }
-    document = applyTransaction(document, transaction).document
+    document = applyTransaction(document, transaction, {
+      // The preconditions were checked immediately above. Repeating the same
+      // hashes here doubles the conflict work on every replayed transaction.
+      checkPreconditions: false,
+    }).document
   }
   return conflicts.length > 0
     ? { ok: false, document, conflicts }
@@ -980,10 +1036,47 @@ export function rebalanceSiblingOperations(
 
 type Listener = () => void
 
+/** Expensive document-wide derived outputs that can subscribe independently. */
+export type CanvasEngineDomain = 'motion' | 'tokens'
+
 interface HistoryEntry {
   transaction: CanvasTransaction
   coalesceKey?: string
   timestamp: number
+  approximateBytes: number
+}
+
+export interface CanvasEngineHistoryOptions {
+  /** Maximum undo or redo entries retained independently. */
+  maxEntries?: number
+  /** Approximate UTF-16 bytes retained by either history stack. */
+  maxBytes?: number
+}
+
+export interface CanvasEngineOptions {
+  history?: CanvasEngineHistoryOptions
+}
+
+const DEFAULT_HISTORY_MAX_ENTRIES = 200
+const DEFAULT_HISTORY_MAX_BYTES = 16 * 1024 * 1024
+
+function normalizedHistoryLimit(
+  value: number | undefined,
+  fallback: number,
+  name: string,
+) {
+  if (value === undefined) return fallback
+  if (!Number.isFinite(value) || value < 0) {
+    throw new Error(`${name} must be a finite non-negative number`)
+  }
+  return Math.floor(value)
+}
+
+function approximateTransactionBytes(transaction: CanvasTransaction) {
+  // Transactions are already guaranteed serializable before they reach engine
+  // history. UTF-16 bytes are a conservative, cheap approximation of their JS
+  // string footprint and make the cap deterministic across runtimes.
+  return JSON.stringify(transaction).length * 2
 }
 
 export interface CanvasBounds {
@@ -998,8 +1091,17 @@ export class CanvasEngine {
   #document: CanvasDocument
   #undo: HistoryEntry[] = []
   #redo: HistoryEntry[] = []
+  #undoBytes = 0
+  #redoBytes = 0
+  readonly #historyMaxEntries: number
+  readonly #historyMaxBytes: number
   #listeners = new Set<Listener>()
   #nodeListeners = new Map<NodeId, Set<Listener>>()
+  #domainListeners = new Map<CanvasEngineDomain, Set<Listener>>()
+  #domainRevisions: Record<CanvasEngineDomain, number> = {
+    motion: 0,
+    tokens: 0,
+  }
   #nodeRevisions = new Map<NodeId, number>()
   #children = new Map<NodeId | null, NodeId[]>()
   #topLevelBounds = new Map<NodeId, CanvasBounds>()
@@ -1007,9 +1109,31 @@ export class CanvasEngine {
   #appliedTransactionOrder: string[] = []
   #revision = 0
 
-  constructor(document: CanvasDocument) {
-    this.#document = assertDocument(clone(document))
+  constructor(document: CanvasDocument, options: CanvasEngineOptions = {}) {
+    this.#historyMaxEntries = normalizedHistoryLimit(
+      options.history?.maxEntries,
+      DEFAULT_HISTORY_MAX_ENTRIES,
+      'Canvas history maxEntries',
+    )
+    this.#historyMaxBytes = normalizedHistoryLimit(
+      options.history?.maxBytes,
+      DEFAULT_HISTORY_MAX_BYTES,
+      'Canvas history maxBytes',
+    )
+    this.#document = ownedValidatedDocuments.delete(document)
+      ? document
+      : assertDocument(clone(document))
     this.#rebuildIndexes()
+  }
+
+  static fromValidatedSnapshot(
+    snapshot: CanvasValidatedSnapshot,
+    options: CanvasEngineOptions = {},
+  ) {
+    return new CanvasEngine(
+      consumeValidatedCanvasSnapshot(snapshot),
+      options,
+    )
   }
 
   get document() {
@@ -1057,6 +1181,10 @@ export class CanvasEngine {
     return this.#nodeRevisions.get(id) ?? 0
   }
 
+  getDomainRevision(domain: CanvasEngineDomain) {
+    return this.#domainRevisions[domain]
+  }
+
   subscribe(listener: Listener) {
     this.#listeners.add(listener)
     return () => {
@@ -1071,6 +1199,16 @@ export class CanvasEngine {
     return () => {
       listeners.delete(listener)
       if (listeners.size === 0) this.#nodeListeners.delete(id)
+    }
+  }
+
+  subscribeDomain(domain: CanvasEngineDomain, listener: Listener) {
+    const listeners = this.#domainListeners.get(domain) ?? new Set<Listener>()
+    listeners.add(listener)
+    this.#domainListeners.set(domain, listeners)
+    return () => {
+      listeners.delete(listener)
+      if (listeners.size === 0) this.#domainListeners.delete(domain)
     }
   }
 
@@ -1089,6 +1227,7 @@ export class CanvasEngine {
         changedNodeIds: new Set<NodeId>(),
         changedTokenIds: new Set<string>(),
         changedThemeIds: new Set<string>(),
+        changedAnimationIds: new Set<string>(),
         idempotent: true,
       }
     }
@@ -1096,6 +1235,7 @@ export class CanvasEngine {
     const result = applyTransaction(this.#document, parsed, {
       validateDocument: !canValidateIncrementally(this.#document, parsed),
     })
+    const changedDomains = this.#changedDomains(previous, result)
     this.#document = result.document
     this.#updateIndexes(previous, result.document, result.changedNodeIds)
     this.#rememberTransaction(parsed.id)
@@ -1107,6 +1247,7 @@ export class CanvasEngine {
         previousEntry?.coalesceKey === parsed.coalesceKey &&
         timestamp - previousEntry.timestamp <= 750
       ) {
+        this.#undoBytes -= previousEntry.approximateBytes
         previousEntry.transaction = {
           ...result.inverse,
           operations: [
@@ -1116,16 +1257,18 @@ export class CanvasEngine {
           documentUpdatedAt: previousEntry.transaction.documentUpdatedAt,
         }
         previousEntry.timestamp = timestamp
+        previousEntry.approximateBytes = approximateTransactionBytes(
+          previousEntry.transaction,
+        )
+        this.#undoBytes += previousEntry.approximateBytes
+        this.#trimUndo()
       } else {
-        this.#undo.push({
-          transaction: result.inverse,
-          coalesceKey: parsed.coalesceKey,
-          timestamp,
-        })
+        this.#pushUndo(result.inverse, parsed.coalesceKey, timestamp)
       }
       this.#redo = []
+      this.#redoBytes = 0
     }
-    this.#emit(result.changedNodeIds)
+    this.#emit(result.changedNodeIds, changedDomains)
     return result
   }
 
@@ -1133,15 +1276,21 @@ export class CanvasEngine {
     this.#document = assertDocument(clone(document))
     this.#undo = []
     this.#redo = []
+    this.#undoBytes = 0
+    this.#redoBytes = 0
     this.#appliedTransactionIds.clear()
     this.#appliedTransactionOrder = []
     this.#rebuildIndexes()
-    this.#emit(new Set(Object.keys(document.nodes)))
+    this.#emit(
+      new Set(Object.keys(document.nodes)),
+      new Set<CanvasEngineDomain>(['motion', 'tokens']),
+    )
   }
 
   undo(): CanvasHistoryResult | null {
     const entry = this.#undo.pop()
     if (!entry) return null
+    this.#undoBytes = Math.max(0, this.#undoBytes - entry.approximateBytes)
     const previous = this.#document
     const result = applyTransaction(this.#document, entry.transaction, {
       checkPreconditions: false,
@@ -1150,20 +1299,18 @@ export class CanvasEngine {
         entry.transaction,
       ),
     })
+    const changedDomains = this.#changedDomains(previous, result)
     this.#document = result.document
     this.#updateIndexes(previous, result.document, result.changedNodeIds)
-    this.#redo.push({
-      transaction: result.inverse,
-      coalesceKey: entry.coalesceKey,
-      timestamp: Date.now(),
-    })
-    this.#emit(result.changedNodeIds)
+    this.#pushRedo(result.inverse, entry.coalesceKey, Date.now())
+    this.#emit(result.changedNodeIds, changedDomains)
     return { ...result, transaction: entry.transaction }
   }
 
   redo(): CanvasHistoryResult | null {
     const entry = this.#redo.pop()
     if (!entry) return null
+    this.#redoBytes = Math.max(0, this.#redoBytes - entry.approximateBytes)
     const previous = this.#document
     const result = applyTransaction(this.#document, entry.transaction, {
       checkPreconditions: false,
@@ -1172,15 +1319,65 @@ export class CanvasEngine {
         entry.transaction,
       ),
     })
+    const changedDomains = this.#changedDomains(previous, result)
     this.#document = result.document
     this.#updateIndexes(previous, result.document, result.changedNodeIds)
-    this.#undo.push({
-      transaction: result.inverse,
-      coalesceKey: entry.coalesceKey,
-      timestamp: Date.now(),
-    })
-    this.#emit(result.changedNodeIds)
+    this.#pushUndo(result.inverse, entry.coalesceKey, Date.now())
+    this.#emit(result.changedNodeIds, changedDomains)
     return { ...result, transaction: entry.transaction }
+  }
+
+  #historyEntry(
+    transaction: CanvasTransaction,
+    coalesceKey: string | undefined,
+    timestamp: number,
+  ): HistoryEntry {
+    return {
+      transaction,
+      coalesceKey,
+      timestamp,
+      approximateBytes: approximateTransactionBytes(transaction),
+    }
+  }
+
+  #pushUndo(
+    transaction: CanvasTransaction,
+    coalesceKey: string | undefined,
+    timestamp: number,
+  ) {
+    const entry = this.#historyEntry(transaction, coalesceKey, timestamp)
+    this.#undo.push(entry)
+    this.#undoBytes += entry.approximateBytes
+    this.#trimUndo()
+  }
+
+  #pushRedo(
+    transaction: CanvasTransaction,
+    coalesceKey: string | undefined,
+    timestamp: number,
+  ) {
+    const entry = this.#historyEntry(transaction, coalesceKey, timestamp)
+    this.#redo.push(entry)
+    this.#redoBytes += entry.approximateBytes
+    while (
+      this.#redo.length > this.#historyMaxEntries ||
+      this.#redoBytes > this.#historyMaxBytes
+    ) {
+      const removed = this.#redo.shift()
+      if (!removed) break
+      this.#redoBytes = Math.max(0, this.#redoBytes - removed.approximateBytes)
+    }
+  }
+
+  #trimUndo() {
+    while (
+      this.#undo.length > this.#historyMaxEntries ||
+      this.#undoBytes > this.#historyMaxBytes
+    ) {
+      const removed = this.#undo.shift()
+      if (!removed) break
+      this.#undoBytes = Math.max(0, this.#undoBytes - removed.approximateBytes)
+    }
   }
 
   #rememberTransaction(id: string) {
@@ -1208,29 +1405,54 @@ export class CanvasEngine {
     next: CanvasDocument,
     changedNodeIds: Set<NodeId>,
   ) {
-    const affectedParents = new Set<NodeId | null>()
+    const removedByParent = new Map<NodeId | null, Set<NodeId>>()
+    const addedByParent = new Map<NodeId | null, Set<NodeId>>()
+    const addToGroup = (
+      groups: Map<NodeId | null, Set<NodeId>>,
+      parentId: NodeId | null,
+      id: NodeId,
+    ) => {
+      const ids = groups.get(parentId) ?? new Set<NodeId>()
+      ids.add(id)
+      groups.set(parentId, ids)
+    }
     for (const id of changedNodeIds) {
       const before = previous.nodes[id]
       const after = next.nodes[id]
+      // Mutations include parents in changedNodeIds so their subscribers can
+      // redraw, but the parent object itself is usually unchanged. Do not turn
+      // that notification into a sibling-list rebuild and sort.
+      if (before === after) continue
       if (before) {
-        affectedParents.add(before.parentId)
         this.#topLevelBounds.delete(id)
       }
       if (after) {
-        affectedParents.add(after.parentId)
         this.#indexBounds(after)
       }
       if (!after) this.#children.delete(id)
+
+      const structuralChange =
+        before === undefined ||
+        after === undefined ||
+        before.parentId !== after.parentId ||
+        before.order !== after.order
+      if (!structuralChange) continue
+      if (before) addToGroup(removedByParent, before.parentId, id)
+      if (after) addToGroup(addedByParent, after.parentId, id)
     }
+
+    const affectedParents = new Set([
+      ...removedByParent.keys(),
+      ...addedByParent.keys(),
+    ])
     for (const parentId of affectedParents) {
-      const current = this.#children.get(parentId) ?? []
-      const retained = current.filter((id) => {
-        const node = next.nodes[id]
-        return !!node && node.parentId === parentId && !changedNodeIds.has(id)
-      })
-      for (const id of changedNodeIds) {
-        const node = next.nodes[id]
-        if (node?.parentId === parentId) retained.push(id)
+      const removed = removedByParent.get(parentId) ?? new Set<NodeId>()
+      const retained = (this.#children.get(parentId) ?? []).filter(
+        (id) => !removed.has(id),
+      )
+      const present = new Set(retained)
+      for (const id of addedByParent.get(parentId) ?? []) {
+        if (!present.has(id)) retained.push(id)
       }
       this.#sortChildren(retained)
       if (retained.length === 0) this.#children.delete(parentId)
@@ -1259,11 +1481,47 @@ export class CanvasEngine {
     })
   }
 
-  #emit(changedNodeIds: Set<NodeId>) {
+  #changedDomains(
+    previous: CanvasDocument,
+    result: CanvasApplyResult,
+  ) {
+    const domains = new Set<CanvasEngineDomain>()
+    if (
+      result.changedTokenIds.size > 0 ||
+      result.changedThemeIds.size > 0
+    ) {
+      domains.add('tokens')
+    }
+    if (result.changedAnimationIds.size > 0) domains.add('motion')
+    if (!domains.has('motion')) {
+      for (const id of result.changedNodeIds) {
+        const before = previous.nodes[id]
+        const after = result.document.nodes[id]
+        if (
+          before?.visualStates !== after?.visualStates ||
+          before?.transition !== after?.transition ||
+          before?.animations !== after?.animations
+        ) {
+          domains.add('motion')
+          break
+        }
+      }
+    }
+    return domains
+  }
+
+  #emit(
+    changedNodeIds: Set<NodeId>,
+    changedDomains: Set<CanvasEngineDomain> = new Set(),
+  ) {
     this.#revision += 1
     for (const id of changedNodeIds) {
       this.#nodeRevisions.set(id, (this.#nodeRevisions.get(id) ?? 0) + 1)
       for (const listener of this.#nodeListeners.get(id) ?? []) listener()
+    }
+    for (const domain of changedDomains) {
+      this.#domainRevisions[domain] += 1
+      for (const listener of this.#domainListeners.get(domain) ?? []) listener()
     }
     for (const listener of this.#listeners) listener()
   }

@@ -16,6 +16,8 @@ describe('HTML import sandbox', () => {
     expect(output).not.toContain('<iframe')
     expect(output).toContain("default-src 'none'")
     expect(output).toContain("connect-src 'none'")
+    expect(output).toContain('font-src https: data:')
+    expect(output).toContain('img-src https: data: blob:')
     expect(output).toContain('.hero { color: red }')
   })
 

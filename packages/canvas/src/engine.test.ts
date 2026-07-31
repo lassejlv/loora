@@ -4,6 +4,7 @@ import {
   CanvasEngine,
   applyTransaction,
   canvasTransactionSchema,
+  createValidatedCanvasSnapshot,
   orderBetween,
   preconditionsForNodePatch,
   rebaseTransactions,
@@ -14,6 +15,7 @@ import {
   createPageNode,
   createTextNode,
 } from './model'
+import { motionPreset } from './motion'
 
 function engineFixture() {
   const document = createCanvasDocument('Fixture', 'doc')
@@ -311,6 +313,160 @@ describe('Canvas transactions', () => {
       operations: [{ type: 'node.patch', id: 'hero', patch: { name: 'Remote' } }],
     }).document
     expect(() => applyTransaction(conflicting, rename)).toThrow(CanvasConflictError)
+  })
+
+  it('keeps direct fast-path application safe for an invalid document timestamp', () => {
+    const document = engineFixture().document
+    const before = document.metadata.updatedAt
+    expect(() =>
+      applyTransaction(document, {
+        id: 'invalid-time',
+        label: 'Rename with invalid time',
+        documentUpdatedAt: Number.NaN,
+        operations: [
+          { type: 'node.patch', id: 'hero', patch: { name: 'Still invalid' } },
+        ],
+      }),
+    ).toThrow()
+    expect(document.metadata.updatedAt).toBe(before)
+  })
+
+  it('does not alias the source animation dictionary', () => {
+    const document = engineFixture().document
+    const fade = motionPreset('fade-in')
+    document.animations = { [fade.id]: fade }
+
+    const result = applyTransaction(document, {
+      id: 'delete-animation',
+      label: 'Delete animation',
+      operations: [{ type: 'animation.delete', id: fade.id }],
+    })
+
+    expect(result.document.animations?.[fade.id]).toBeUndefined()
+    expect(document.animations?.[fade.id]).toEqual(fade)
+  })
+
+  it('transfers an isolated validated snapshot into exactly one engine', () => {
+    const source = engineFixture().document
+    const snapshot = createValidatedCanvasSnapshot(source)
+    source.nodes.hero.name = 'Mutated after snapshot'
+
+    const engine = CanvasEngine.fromValidatedSnapshot(snapshot)
+    expect(engine.getNode('hero')?.name).toBe('Hero')
+    expect(() => CanvasEngine.fromValidatedSnapshot(snapshot)).toThrow(
+      'already been consumed',
+    )
+  })
+
+  it('bounds undo history by entry count', () => {
+    const source = engineFixture().document
+    const engine = new CanvasEngine(source, {
+      history: { maxEntries: 2, maxBytes: 1_000_000 },
+    })
+    for (const [index, name] of ['One', 'Two', 'Three'].entries()) {
+      engine.apply({
+        id: `rename-${index}`,
+        label: 'Rename',
+        operations: [{ type: 'node.patch', id: 'hero', patch: { name } }],
+      })
+    }
+
+    expect(engine.undo()).not.toBeNull()
+    expect(engine.undo()).not.toBeNull()
+    expect(engine.getNode('hero')?.name).toBe('One')
+    expect(engine.undo()).toBeNull()
+  })
+
+  it('does not re-sort siblings for a non-structural patch', () => {
+    const document = engineFixture().document
+    document.nodes.sibling = createFrameNode('Sibling', {
+      id: 'sibling',
+      parentId: 'page',
+      order: 2048,
+    })
+    const engine = new CanvasEngine(document)
+    const sibling = engine.getNode('sibling')!
+    const order = sibling.order
+    let orderReads = 0
+    Object.defineProperty(sibling, 'order', {
+      configurable: true,
+      enumerable: true,
+      get() {
+        orderReads += 1
+        return order
+      },
+    })
+
+    engine.apply({
+      id: 'rename-without-sort',
+      label: 'Rename',
+      operations: [{ type: 'node.patch', id: 'hero', patch: { name: 'Renamed' } }],
+    })
+
+    expect(orderReads).toBe(0)
+    expect(engine.getChildren('page').map((node) => node.id)).toEqual([
+      'hero',
+      'sibling',
+    ])
+  })
+
+  it('only bumps document-wide domains that affect their derived styles', () => {
+    const engine = engineFixture()
+    let motionNotifications = 0
+    let tokenNotifications = 0
+    const unsubscribeMotion = engine.subscribeDomain('motion', () => {
+      motionNotifications += 1
+    })
+    const unsubscribeTokens = engine.subscribeDomain('tokens', () => {
+      tokenNotifications += 1
+    })
+
+    engine.apply({
+      id: 'ordinary-layout',
+      label: 'Move',
+      operations: [{ type: 'node.patch', id: 'hero', patch: { layout: { x: 12 } } }],
+    })
+    expect(engine.getDomainRevision('motion')).toBe(0)
+    expect(engine.getDomainRevision('tokens')).toBe(0)
+    expect(motionNotifications).toBe(0)
+    expect(tokenNotifications).toBe(0)
+
+    engine.apply({
+      id: 'add-transition',
+      label: 'Add transition',
+      operations: [
+        {
+          type: 'node.patch',
+          id: 'hero',
+          patch: { transition: { duration: 180, easing: 'ease-out' } },
+        },
+      ],
+    })
+    expect(engine.getDomainRevision('motion')).toBe(1)
+    expect(engine.getDomainRevision('tokens')).toBe(0)
+    expect(motionNotifications).toBe(1)
+
+    engine.apply({
+      id: 'add-token',
+      label: 'Add token',
+      operations: [
+        {
+          type: 'token.upsert',
+          token: {
+            id: 'accent',
+            name: 'Accent',
+            type: 'color',
+            value: '#ff00aa',
+          },
+        },
+      ],
+    })
+    expect(engine.getDomainRevision('motion')).toBe(1)
+    expect(engine.getDomainRevision('tokens')).toBe(1)
+    expect(tokenNotifications).toBe(1)
+
+    unsubscribeMotion()
+    unsubscribeTokens()
   })
 
   it('uses midpoint ordering and signals unsafe gaps', () => {

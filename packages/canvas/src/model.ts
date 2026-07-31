@@ -86,6 +86,16 @@ export type CanvasPaint =
       angle: number
       stops: { offset: number; color: CanvasColor }[]
     }
+  | {
+      type: 'radial-gradient'
+      /** Horizontal center, 0–1. */
+      cx: number
+      /** Vertical center, 0–1. */
+      cy: number
+      /** Optional CSS size fragment, e.g. `80% 70%` or `circle`. */
+      size?: string
+      stops: { offset: number; color: CanvasColor }[]
+    }
 
 export interface CanvasStroke {
   color: CanvasColor
@@ -860,6 +870,28 @@ function validColor(
     /^[a-z]+$/i.test(value) ||
     /^(?:rgb|rgba|hsl|hsla|oklab|oklch|lab|lch)\([0-9a-z.%+,\s/-]+\)$/i.test(
       value,
+    ) ||
+    // Paper / modern browsers emit color(srgb …) and color-mix(…).
+    /^color\([0-9a-z.%+,\s/()-]+\)$/i.test(value) ||
+    /^color-mix\([0-9a-z.%+,\s/()#-]+\)$/i.test(value)
+  )
+}
+
+function validGradientStops(
+  stops: unknown,
+  document: CanvasDocument,
+) {
+  return (
+    Array.isArray(stops) &&
+    stops.length > 0 &&
+    stops.length <= 64 &&
+    stops.every(
+      (stop) =>
+        isRecord(stop) &&
+        finite(stop.offset) &&
+        stop.offset >= 0 &&
+        stop.offset <= 1 &&
+        validColor(stop.color, document),
     )
   )
 }
@@ -872,20 +904,23 @@ function validPaint(value: unknown, document: CanvasDocument) {
       validColor(value.color, document)
     )
   }
+  if (value.type === 'linear-gradient') {
+    return finite(value.angle) && validGradientStops(value.stops, document)
+  }
   return (
-    value.type === 'linear-gradient' &&
-    finite(value.angle) &&
-    Array.isArray(value.stops) &&
-    value.stops.length > 0 &&
-    value.stops.length <= 64 &&
-    value.stops.every(
-      (stop) =>
-        isRecord(stop) &&
-        finite(stop.offset) &&
-        stop.offset >= 0 &&
-        stop.offset <= 1 &&
-        validColor(stop.color, document),
-    )
+    value.type === 'radial-gradient' &&
+    finite(value.cx) &&
+    finite(value.cy) &&
+    value.cx >= 0 &&
+    value.cx <= 1 &&
+    value.cy >= 0 &&
+    value.cy <= 1 &&
+    (value.size === undefined ||
+      (typeof value.size === 'string' &&
+        value.size.length > 0 &&
+        value.size.length <= 100 &&
+        safeCssText(value.size, 100))) &&
+    validGradientStops(value.stops, document)
   )
 }
 
@@ -1821,14 +1856,72 @@ export function validateDocument(value: unknown): DocumentValidationResult {
     children.push(id)
     childrenByParent.set(node.parentId, children)
   }
+
+  // Resolve hierarchy validity once for the whole normalized graph. Walking
+  // every node's parent chain independently made a deep, otherwise valid tree
+  // quadratic. `reachesCycle` also preserves the old result for descendants of
+  // a cycle: their ancestor walk would eventually have found the same cycle.
+  const reachesHierarchyCycle = new Map<NodeId, boolean>()
+  for (const [id] of entries) {
+    if (reachesHierarchyCycle.has(id)) continue
+    const path: NodeId[] = []
+    const pathIndexes = new Map<NodeId, number>()
+    let current: NodeId | null = id
+    while (
+      current !== null &&
+      document.nodes[current] !== undefined &&
+      !reachesHierarchyCycle.has(current) &&
+      !pathIndexes.has(current)
+    ) {
+      pathIndexes.set(current, path.length)
+      path.push(current)
+      const parentId: NodeId | null | undefined =
+        document.nodes[current]?.parentId
+      current = typeof parentId === 'string' ? parentId : null
+    }
+    const reachesCycle =
+      current !== null &&
+      (pathIndexes.has(current) || reachesHierarchyCycle.get(current) === true)
+    for (const pathId of path) reachesHierarchyCycle.set(pathId, reachesCycle)
+  }
+
+  // State definitions belong to the nearest Page or Component root. Cache the
+  // root for every node with parent-path compression so interaction validation
+  // stays linear on deeply nested documents.
+  const stateRootByNode = new Map<NodeId, NodeId | null>()
+  for (const [id] of entries) {
+    if (stateRootByNode.has(id)) continue
+    const path: NodeId[] = []
+    const seen = new Set<NodeId>()
+    let current: NodeId | null = id
+    let rootId: NodeId | null = null
+    while (current !== null && !seen.has(current)) {
+      if (stateRootByNode.has(current)) {
+        rootId = stateRootByNode.get(current) ?? null
+        break
+      }
+      seen.add(current)
+      const node: CanvasNode | undefined = document.nodes[current]
+      if (!node) break
+      if (node.type === 'page' || node.type === 'component') {
+        rootId = node.id
+        stateRootByNode.set(node.id, node.id)
+        break
+      }
+      path.push(current)
+      current = typeof node.parentId === 'string' ? node.parentId : null
+    }
+    for (const pathId of path) stateRootByNode.set(pathId, rootId)
+  }
+
   const componentDescendants = new Map<NodeId, Set<NodeId>>()
   const descendantsOf = (componentId: NodeId) => {
     const cached = componentDescendants.get(componentId)
     if (cached) return cached
     const descendants = new Set<NodeId>()
     const queue = [componentId]
-    while (queue.length > 0) {
-      const current = queue.shift()!
+    for (let index = 0; index < queue.length; index += 1) {
+      const current = queue[index]!
       for (const childId of childrenByParent.get(current) ?? []) {
         descendants.add(childId)
         queue.push(childId)
@@ -2009,7 +2102,13 @@ export function validateDocument(value: unknown): DocumentValidationResult {
       !validInteractions(
         node.interactions,
         document,
-        stateDefinitionsForNode(document, node.id),
+        (() => {
+          const rootId = stateRootByNode.get(node.id)
+          const root = rootId ? document.nodes[rootId] : undefined
+          return root?.type === 'page' || root?.type === 'component'
+            ? root.states ?? {}
+            : {}
+        })(),
       )
     ) {
       pushIssue(issues, `${path}.interactions`, 'Interactions are invalid')
@@ -2192,50 +2291,63 @@ export function validateDocument(value: unknown): DocumentValidationResult {
   }
 
   for (const [id] of entries) {
-    const seen = new Set<NodeId>()
-    let current: NodeId | null = id
-    while (current) {
-      if (seen.has(current)) {
-        pushIssue(issues, `nodes.${id}.parentId`, 'Node hierarchy contains a cycle')
-        break
-      }
-      seen.add(current)
-      current = document.nodes[current]?.parentId ?? null
+    if (reachesHierarchyCycle.get(id)) {
+      pushIssue(issues, `nodes.${id}.parentId`, 'Node hierarchy contains a cycle')
     }
   }
 
   const componentEdges = new Map<NodeId, NodeId[]>()
-  for (const component of Object.values(document.nodes).filter(
-    (node): node is ComponentNode => node.type === 'component',
-  )) {
-    const edges: NodeId[] = []
-    const queue = [component.id]
-    while (queue.length > 0) {
-      const parentId = queue.shift()!
-      for (const childId of childrenByParent.get(parentId) ?? []) {
-        const child = document.nodes[childId]
-        if (!child) continue
-        if (child.type === 'instance') edges.push(child.componentId)
-        else queue.push(child.id)
-      }
-    }
-    componentEdges.set(component.id, edges)
+  for (const node of Object.values(document.nodes)) {
+    if (node.type === 'component') componentEdges.set(node.id, [])
   }
-  for (const componentId of componentEdges.keys()) {
-    const seen = new Set<NodeId>()
-    const active = new Set<NodeId>()
-    const visit = (id: NodeId): boolean => {
-      if (active.has(id)) return true
-      if (seen.has(id)) return false
-      seen.add(id)
-      active.add(id)
-      for (const next of componentEdges.get(id) ?? []) {
-        if (visit(next)) return true
-      }
-      active.delete(id)
-      return false
+  for (const node of Object.values(document.nodes)) {
+    if (node.type !== 'instance') continue
+    const rootId = stateRootByNode.get(node.id)
+    if (rootId && document.nodes[rootId]?.type === 'component') {
+      componentEdges.get(rootId)?.push(node.componentId)
     }
-    if (visit(componentId)) {
+  }
+
+  // Determine which components can reach a recursive instance cycle with one
+  // iterative DFS. The previous fresh recursive DFS per component repeated the
+  // same graph work and could overflow the call stack on adversarial input.
+  const componentVisitState = new Map<NodeId, 'active' | 'done'>()
+  const reachesComponentCycle = new Map<NodeId, boolean>()
+  for (const componentId of componentEdges.keys()) {
+    if (componentVisitState.get(componentId) === 'done') continue
+    const stack: Array<{
+      id: NodeId
+      edgeIndex: number
+      reachesCycle: boolean
+    }> = [{ id: componentId, edgeIndex: 0, reachesCycle: false }]
+    componentVisitState.set(componentId, 'active')
+    while (stack.length > 0) {
+      const frame = stack.at(-1)!
+      const edges = componentEdges.get(frame.id) ?? []
+      if (frame.edgeIndex < edges.length) {
+        const next = edges[frame.edgeIndex++]!
+        if (!componentEdges.has(next)) continue
+        const state = componentVisitState.get(next)
+        if (state === 'active') {
+          frame.reachesCycle = true
+        } else if (state === 'done') {
+          if (reachesComponentCycle.get(next)) frame.reachesCycle = true
+        } else {
+          componentVisitState.set(next, 'active')
+          stack.push({ id: next, edgeIndex: 0, reachesCycle: false })
+        }
+        continue
+      }
+      componentVisitState.set(frame.id, 'done')
+      reachesComponentCycle.set(frame.id, frame.reachesCycle)
+      stack.pop()
+      if (frame.reachesCycle && stack.length > 0) {
+        stack.at(-1)!.reachesCycle = true
+      }
+    }
+  }
+  for (const [componentId, reachesCycle] of reachesComponentCycle) {
+    if (reachesCycle) {
       pushIssue(issues, `nodes.${componentId}`, 'Component instances contain a recursive cycle')
     }
   }
