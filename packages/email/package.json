@@ -1,0 +1,25 @@
+{
+  "name": "@loora/email",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./templates/*": "./src/templates/*.tsx"
+  },
+  "scripts": {
+    "test": "bun test"
+  },
+  "dependencies": {
+    "@opencoredev/email-sdk": "1.0.0",
+    "@react-email/render": "^2.1.0",
+    "react": "^19.2.7",
+    "react-dom": "^19.2.7"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.3.14",
+    "@types/node": "^22.20.1",
+    "@types/react": "^19.2.17",
+    "@types/react-dom": "^19.2.3",
+    "typescript": "catalog:"
+  }
+}

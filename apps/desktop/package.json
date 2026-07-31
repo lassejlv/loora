@@ -1,0 +1,10 @@
+{
+  "name": "@loora/desktop",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "deno task --config deno.json dev",
+    "build": "deno task --config deno.json build",
+    "check": "deno task --config deno.json check"
+  }
+}

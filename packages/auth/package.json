@@ -9,6 +9,7 @@
   "dependencies": {
     "@loora/billing": "workspace:*",
     "@loora/db": "workspace:*",
+    "@loora/email": "workspace:*",
     "@polar-sh/better-auth": "1.8.4",
     "better-auth": "catalog:",
     "drizzle-orm": "catalog:"

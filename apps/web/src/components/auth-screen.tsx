@@ -25,8 +25,10 @@ export function AuthScreen() {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [acceptedLegal, setAcceptedLegal] = useState(false)
+  const [forgotPassword, setForgotPassword] = useState(false)
   const [pending, setPending] = useState(false)
   const [error, setError] = useState('')
+  const [notice, setNotice] = useState('')
   const [googleOAuthEnabled, setGoogleOAuthEnabled] = useState(false)
 
   useEffect(() => {
@@ -50,9 +52,17 @@ export function AuthScreen() {
             <p className="mb-4 text-lg font-semibold tracking-tight">
               loora<span className="text-cx-accent">.</span>
             </p>
-            <DialogTitle>{mode === 'sign-in' ? 'Welcome back' : 'Create your account'}</DialogTitle>
+            <DialogTitle>
+              {forgotPassword
+                ? 'Reset your password'
+                : mode === 'sign-in'
+                  ? 'Welcome back'
+                  : 'Create your account'}
+            </DialogTitle>
             <DialogDescription>
-              {mode === 'sign-in'
+              {forgotPassword
+                ? 'We will send a secure reset link if an account exists.'
+                : mode === 'sign-in'
                 ? 'Sign in to open your canvas.'
                 : 'Start designing with your own workspace.'}
             </DialogDescription>
@@ -63,13 +73,17 @@ export function AuthScreen() {
               value={mode}
               onValueChange={(value) => {
                 setMode(value as 'sign-in' | 'sign-up')
+                setForgotPassword(false)
                 setError('')
+                setNotice('')
               }}
             >
-              <TabsList className="mb-4 grid w-full grid-cols-2 rounded-lg p-1">
-                <TabsTab value="sign-in">Login</TabsTab>
-                <TabsTab value="sign-up">Sign up</TabsTab>
-              </TabsList>
+              {!forgotPassword && (
+                <TabsList className="mb-4 grid w-full grid-cols-2 rounded-lg p-1">
+                  <TabsTab value="sign-in">Login</TabsTab>
+                  <TabsTab value="sign-up">Sign up</TabsTab>
+                </TabsList>
+              )}
               <TabsPanel value={mode}>
                 <form
                   className="flex flex-col gap-3"
@@ -77,9 +91,14 @@ export function AuthScreen() {
                     event.preventDefault()
                     setPending(true)
                     setError('')
+                    setNotice('')
 
-                    const result =
-                      mode === 'sign-in'
+                    const result = forgotPassword
+                      ? await authClient.requestPasswordReset({
+                          email,
+                          redirectTo: '/reset-password',
+                        })
+                      : mode === 'sign-in'
                         ? await authClient.signIn.email({ email, password })
                         : await authClient.signUp.email({
                             name,
@@ -90,10 +109,16 @@ export function AuthScreen() {
                           })
 
                     if (result.error) setError(result.error.message ?? 'Authentication failed')
+                    else if (forgotPassword) {
+                      setNotice('Check your inbox for a password reset link.')
+                    } else if (mode === 'sign-up') {
+                      setNotice('Check your inbox to verify your email and finish signing up.')
+                      setPassword('')
+                    }
                     setPending(false)
                   }}
                 >
-                  {mode === 'sign-up' && (
+                  {mode === 'sign-up' && !forgotPassword && (
                     <Input
                       aria-label="Name"
                       autoComplete="name"
@@ -114,18 +139,20 @@ export function AuthScreen() {
                     onChange={(event) => setEmail(event.target.value)}
                     required
                   />
-                  <Input
-                    aria-label="Password"
-                    autoComplete={mode === 'sign-in' ? 'current-password' : 'new-password'}
-                    minLength={8}
-                    placeholder="Password"
-                    type="password"
-                    className="rounded-lg"
-                    value={password}
-                    onChange={(event) => setPassword(event.target.value)}
-                    required
-                  />
-                  {mode === 'sign-up' && (
+                  {!forgotPassword && (
+                    <Input
+                      aria-label="Password"
+                      autoComplete={mode === 'sign-in' ? 'current-password' : 'new-password'}
+                      minLength={8}
+                      placeholder="Password"
+                      type="password"
+                      className="rounded-lg"
+                      value={password}
+                      onChange={(event) => setPassword(event.target.value)}
+                      required
+                    />
+                  )}
+                  {mode === 'sign-up' && !forgotPassword && (
                     <Label className="items-start gap-2 py-1 text-xs leading-5">
                       <Checkbox
                         aria-label="Accept Terms of Service and Privacy Policy"
@@ -156,15 +183,36 @@ export function AuthScreen() {
                     </Label>
                   )}
                   {error && <p className="text-sm text-destructive-foreground">{error}</p>}
+                  {notice && <p className="text-sm text-muted-foreground">{notice}</p>}
                   <Button
                     className="mt-1 rounded-lg"
                     disabled={pending || (mode === 'sign-up' && !acceptedLegal)}
                     type="submit"
                   >
-                    {pending ? 'Working…' : mode === 'sign-in' ? 'Login' : 'Create account'}
+                    {pending
+                      ? 'Working…'
+                      : forgotPassword
+                        ? 'Send reset link'
+                        : mode === 'sign-in'
+                          ? 'Login'
+                          : 'Create account'}
                   </Button>
+                  {mode === 'sign-in' && (
+                    <Button
+                      className="self-center"
+                      type="button"
+                      variant="link"
+                      onClick={() => {
+                        setForgotPassword((value) => !value)
+                        setError('')
+                        setNotice('')
+                      }}
+                    >
+                      {forgotPassword ? 'Back to login' : 'Forgot password?'}
+                    </Button>
+                  )}
                 </form>
-                {googleOAuthEnabled ? (
+                {googleOAuthEnabled && !forgotPassword ? (
                   <>
                     <div className="my-4 flex items-center gap-3" aria-hidden="true">
                       <span className="h-px flex-1 bg-border" />

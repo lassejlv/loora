@@ -21,6 +21,7 @@ Use `LOORA_BENCHMARK_TARGET=canvas` with
 ## Monorepo layout
 
 - `apps/web` — the TanStack Start app (canvas, agent panel, routes)
+- `apps/desktop` — the Deno Desktop shell for `https://loora.design`
 - `apps/mcp` — the remote MCP server (`mcp.loora.design`)
 - `packages/db` — Drizzle schema, Neon client, migrations
 - `packages/auth` — Better Auth, preview access, billing, and GitHub integration

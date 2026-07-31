@@ -15,6 +15,7 @@ import { Route as McpRouteImport } from './routes/mcp'
 import { Route as McpConsentRouteImport } from './routes/mcp-consent'
 import { Route as PricingRouteImport } from './routes/pricing'
 import { Route as PrivacyRouteImport } from './routes/privacy'
+import { Route as ResetPasswordRouteImport } from './routes/reset-password'
 import { Route as TermsRouteImport } from './routes/terms'
 import { Route as DotwellKnownOauthAuthorizationServerRouteImport } from './routes/[.]well-known.oauth-authorization-server'
 import { Route as ApiCanvasEventsRouteImport } from './routes/api.canvas-events'
@@ -68,6 +69,11 @@ const PricingRoute = PricingRouteImport.update({
 const PrivacyRoute = PrivacyRouteImport.update({
   id: '/privacy',
   path: '/privacy',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ResetPasswordRoute = ResetPasswordRouteImport.update({
+  id: '/reset-password',
+  path: '/reset-password',
   getParentRoute: () => rootRouteImport,
 } as any)
 const TermsRoute = TermsRouteImport.update({
@@ -199,6 +205,7 @@ export interface FileRoutesByFullPath {
   '/mcp-consent': typeof McpConsentRoute
   '/pricing': typeof PricingRoute
   '/privacy': typeof PrivacyRoute
+  '/reset-password': typeof ResetPasswordRoute
   '/terms': typeof TermsRoute
   '/.well-known/oauth-authorization-server': typeof DotwellKnownOauthAuthorizationServerRoute
   '/api/canvas-events': typeof ApiCanvasEventsRoute
@@ -231,6 +238,7 @@ export interface FileRoutesByTo {
   '/mcp-consent': typeof McpConsentRoute
   '/pricing': typeof PricingRoute
   '/privacy': typeof PrivacyRoute
+  '/reset-password': typeof ResetPasswordRoute
   '/terms': typeof TermsRoute
   '/.well-known/oauth-authorization-server': typeof DotwellKnownOauthAuthorizationServerRoute
   '/api/canvas-events': typeof ApiCanvasEventsRoute
@@ -264,6 +272,7 @@ export interface FileRoutesById {
   '/mcp-consent': typeof McpConsentRoute
   '/pricing': typeof PricingRoute
   '/privacy': typeof PrivacyRoute
+  '/reset-password': typeof ResetPasswordRoute
   '/terms': typeof TermsRoute
   '/.well-known/oauth-authorization-server': typeof DotwellKnownOauthAuthorizationServerRoute
   '/api/canvas-events': typeof ApiCanvasEventsRoute
@@ -298,6 +307,7 @@ export interface FileRouteTypes {
     | '/mcp-consent'
     | '/pricing'
     | '/privacy'
+    | '/reset-password'
     | '/terms'
     | '/.well-known/oauth-authorization-server'
     | '/api/canvas-events'
@@ -330,6 +340,7 @@ export interface FileRouteTypes {
     | '/mcp-consent'
     | '/pricing'
     | '/privacy'
+    | '/reset-password'
     | '/terms'
     | '/.well-known/oauth-authorization-server'
     | '/api/canvas-events'
@@ -362,6 +373,7 @@ export interface FileRouteTypes {
     | '/mcp-consent'
     | '/pricing'
     | '/privacy'
+    | '/reset-password'
     | '/terms'
     | '/.well-known/oauth-authorization-server'
     | '/api/canvas-events'
@@ -395,6 +407,7 @@ export interface RootRouteChildren {
   McpConsentRoute: typeof McpConsentRoute
   PricingRoute: typeof PricingRoute
   PrivacyRoute: typeof PrivacyRoute
+  ResetPasswordRoute: typeof ResetPasswordRoute
   TermsRoute: typeof TermsRoute
   DotwellKnownOauthAuthorizationServerRoute: typeof DotwellKnownOauthAuthorizationServerRoute
   ApiCanvasEventsRoute: typeof ApiCanvasEventsRoute
@@ -462,6 +475,13 @@ declare module '@tanstack/react-router' {
       path: '/privacy'
       fullPath: '/privacy'
       preLoaderRoute: typeof PrivacyRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/reset-password': {
+      id: '/reset-password'
+      path: '/reset-password'
+      fullPath: '/reset-password'
+      preLoaderRoute: typeof ResetPasswordRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/terms': {
@@ -654,6 +674,7 @@ const rootRouteChildren: RootRouteChildren = {
   McpConsentRoute: McpConsentRoute,
   PricingRoute: PricingRoute,
   PrivacyRoute: PrivacyRoute,
+  ResetPasswordRoute: ResetPasswordRoute,
   TermsRoute: TermsRoute,
   DotwellKnownOauthAuthorizationServerRoute:
     DotwellKnownOauthAuthorizationServerRoute,
@@ -682,3 +703,12 @@ const rootRouteChildren: RootRouteChildren = {
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
   ._addFileTypes<FileRouteTypes>()
+
+import type { getRouter } from './router.tsx'
+import type { createStart } from '@tanstack/react-start'
+declare module '@tanstack/react-start' {
+  interface Register {
+    ssr: true
+    router: Awaited<ReturnType<typeof getRouter>>
+  }
+}

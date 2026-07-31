@@ -9,6 +9,10 @@ import * as schema from '@loora/db/schema'
 import { applyCustomerStateWebhook } from '@loora/billing/billing'
 import { getPolarClient, getPolarRuntime } from '@loora/billing/polar'
 import {
+  sendAccountVerificationEmail,
+  sendPasswordResetEmail,
+} from '@loora/email'
+import {
   CURRENT_PRIVACY_VERSION,
   CURRENT_TERMS_VERSION,
 } from './legal-consent'
@@ -116,6 +120,29 @@ export const auth = betterAuth({
   },
   emailAndPassword: {
     enabled: true,
+    requireEmailVerification: true,
+    revokeSessionsOnPasswordReset: true,
+    sendResetPassword: async ({ user, url, token }) => {
+      void sendPasswordResetEmail({
+        email: user.email,
+        name: user.name,
+        token,
+        url,
+      }).catch(reportEmailFailure('password-reset'))
+    },
+  },
+  emailVerification: {
+    sendOnSignUp: true,
+    sendOnSignIn: true,
+    autoSignInAfterVerification: true,
+    sendVerificationEmail: async ({ user, url, token }) => {
+      void sendAccountVerificationEmail({
+        email: user.email,
+        name: user.name,
+        token,
+        url,
+      }).catch(reportEmailFailure('account-verification'))
+    },
   },
   plugins: [
     ...(polarRuntime.config
@@ -171,4 +198,13 @@ export async function getSession(request: Request) {
 export async function requireSession(request: Request) {
   const session = await getSession(request)
   return session ?? null
+}
+
+function reportEmailFailure(kind: 'account-verification' | 'password-reset') {
+  return () => {
+    console.error(JSON.stringify({
+      event: 'email.send_failed',
+      kind,
+    }))
+  }
 }

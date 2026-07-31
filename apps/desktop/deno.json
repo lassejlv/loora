@@ -1,0 +1,45 @@
+{
+  "name": "@loora/desktop",
+  "version": "0.1.0",
+  "exports": "./main.ts",
+  "compilerOptions": {
+    "lib": [
+      "deno.ns",
+      "deno.desktop",
+      "dom",
+      "dom.iterable",
+      "esnext"
+    ]
+  },
+  "fmt": {
+    "semiColons": false,
+    "singleQuote": true
+  },
+  "tasks": {
+    "dev": "deno desktop --hmr --no-npm main.ts",
+    "build": "deno run --allow-run build.ts",
+    "check": "deno check --desktop --no-npm main.ts && deno check --no-npm build.ts"
+  },
+  "desktop": {
+    "app": {
+      "name": "Loora",
+      "identifier": "design.loora.desktop",
+      "icons": {
+        "macos": [
+          {
+            "path": "../web/public/logo512.png",
+            "size": 512
+          }
+        ],
+        "windows": "../web/public/favicon.ico",
+        "linux": "../web/public/logo512.png"
+      }
+    },
+    "backend": "webview",
+    "output": {
+      "macos": "./dist/Loora.app",
+      "windows": "./dist/Loora",
+      "linux": "./dist/loora"
+    }
+  }
+}

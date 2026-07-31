@@ -1,5 +1,5 @@
 {
-  "include": ["apps/**/*.ts", "apps/**/*.tsx", "packages/**/*.ts"],
+  "include": ["apps/**/*.ts", "apps/**/*.tsx", "packages/**/*.ts", "packages/**/*.tsx"],
   "compilerOptions": {
     "target": "ES2022",
     "jsx": "react-jsx",
@@ -11,6 +11,8 @@
       "@loora/db/*": ["./packages/db/src/*"],
       "@loora/auth": ["./packages/auth/src/auth.ts"],
       "@loora/auth/*": ["./packages/auth/src/*"],
+      "@loora/email": ["./packages/email/src/index.ts"],
+      "@loora/email/*": ["./packages/email/src/*"],
       "@loora/canvas": ["./packages/canvas/src/index.ts"],
       "@loora/canvas/*": ["./packages/canvas/src/*"],
       "@loora/agent/*": ["./packages/agent/src/*"],
