@@ -1,5 +1,3 @@
-import { RedisClient } from 'bun'
-
 /**
  * Request rate limiting, shared by the web API routes and the MCP server.
  *
@@ -15,6 +13,24 @@ import { RedisClient } from 'bun'
  * direction that matters: a caller in a loop still gets stopped, and a Redis
  * outage never takes the API down with it.
  */
+
+/**
+ * Bun's Redis client is reached through the global rather than imported from
+ * `'bun'`. This module is pulled into the web app's Vite build, which cannot
+ * resolve that specifier — the same reason `storage.ts` reaches for
+ * `Bun.S3Client` this way. Without a Bun runtime there is no client, and the
+ * counting below falls back to memory.
+ */
+interface BunRedisClient {
+  connect(): Promise<unknown>
+  close(): void
+  send(command: string, args: string[]): Promise<unknown>
+  onclose: ((error: Error) => void) | null
+}
+
+declare const Bun:
+  | { RedisClient?: new (url: string) => BunRedisClient }
+  | undefined
 
 export interface RateLimitRule {
   /** How many requests one identity may make inside the window. */
@@ -56,8 +72,8 @@ function redisUrl() {
   return process.env.REDIS_RATELIMIT_URL?.trim() || null
 }
 
-let client: RedisClient | null = null
-let connection: Promise<RedisClient> | null = null
+let client: BunRedisClient | null = null
+let connection: Promise<BunRedisClient> | null = null
 let unavailableUntil = 0
 let warnedUnavailable = false
 
@@ -81,6 +97,10 @@ function withTimeout<T>(work: Promise<T>, ms: number, label: string) {
 async function connected(url: string) {
   if (client) return client
   if (connection) return connection
+  if (typeof Bun === 'undefined' || !Bun?.RedisClient) {
+    throw new Error('Bun.RedisClient is unavailable in this runtime')
+  }
+  const RedisClient = Bun.RedisClient
   connection = (async () => {
     const next = new RedisClient(url)
     next.onclose = () => {
