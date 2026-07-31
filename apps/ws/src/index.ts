@@ -22,7 +22,7 @@ try {
 const service = createRealtimeService(config)
 
 function shutdown(signal: string) {
-  console.info(`[loora-ws] ${signal} — closing ${service.sockets.size} socket(s)`)
+  console.info(`[loora-ws] ${signal} — closing ${service.connections.size} socket(s)`)
   void service.stop().finally(() => process.exit(0))
 }
 

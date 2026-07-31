@@ -1,7 +1,11 @@
 export interface WsConfig {
   port: number
-  /** Shared with the web app, which mints the connection tickets. */
-  ticketSecret: string
+  /**
+   * Shared with the web app, which mints the connection tickets. More than one
+   * during a rotation: the web app signs with the first, this service still
+   * accepts tickets signed with the one being retired.
+   */
+  ticketSecrets: string[]
   /** Shared with every service that publishes through `POST /publish`. */
   internalToken: string
   /** Absent means single-instance: rooms live in this process only. */
@@ -42,9 +46,13 @@ export function readWsConfig(
       'REALTIME_INTERNAL_TOKEN must be set to at least 32 characters.',
     )
   }
+  const previousSecret = env.REALTIME_TICKET_SECRET_PREVIOUS?.trim()
   return {
     port: Number(env.PORT ?? 4200),
-    ticketSecret,
+    ticketSecrets:
+      previousSecret && previousSecret !== ticketSecret
+        ? [ticketSecret, previousSecret]
+        : [ticketSecret],
     internalToken,
     redisUrl: env.REDIS_URL?.trim() || null,
     allowedOrigins:

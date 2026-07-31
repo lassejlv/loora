@@ -127,9 +127,14 @@ function claimsFrom(value: unknown, now: number): RealtimeTicketClaims | null {
   return claims as unknown as RealtimeTicketClaims
 }
 
+/**
+ * `secrets` may hold more than one key so a rotation has an overlap: the new
+ * key signs, the old one still verifies until the tickets it signed have all
+ * expired — sixty seconds — and can then be dropped.
+ */
 export async function verifyRealtimeTicket(
   token: string,
-  secret: string,
+  secrets: string | string[],
   now = Date.now(),
 ): Promise<RealtimeTicketClaims | null> {
   if (typeof token !== 'string' || token.length === 0 || token.length > 4_096) {
@@ -140,15 +145,18 @@ export async function verifyRealtimeTicket(
   const body = token.slice(0, separator)
   const signature = token.slice(separator + 1)
   let valid = false
-  try {
-    valid = await crypto.subtle.verify(
-      'HMAC',
-      await hmacKey(secret),
-      fromBase64Url(signature),
-      encoder.encode(body),
-    )
-  } catch {
-    return null
+  for (const secret of typeof secrets === 'string' ? [secrets] : secrets) {
+    try {
+      valid = await crypto.subtle.verify(
+        'HMAC',
+        await hmacKey(secret),
+        fromBase64Url(signature),
+        encoder.encode(body),
+      )
+    } catch {
+      return null
+    }
+    if (valid) break
   }
   if (!valid) return null
   try {

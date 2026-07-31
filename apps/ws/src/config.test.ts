@@ -15,7 +15,7 @@ describe('ws config', () => {
       }),
     ).toEqual({
       port: 4200,
-      ticketSecret: SECRET,
+      ticketSecrets: [SECRET],
       internalToken: SECRET,
       redisUrl: 'redis://localhost:6379',
       allowedOrigins: ['https://loora.design', 'http://localhost:3000'],
@@ -32,6 +32,25 @@ describe('ws config', () => {
     expect(config.redisUrl).toBeNull()
     expect(config.allowedOrigins).toEqual(['http://localhost:3000'])
     expect(config.port).toBe(4200)
+  })
+
+  test('accepts the secret being retired during a rotation', () => {
+    const previous = 'y'.repeat(32)
+    const config = readWsConfig({
+      REALTIME_TICKET_SECRET: SECRET,
+      REALTIME_TICKET_SECRET_PREVIOUS: previous,
+      REALTIME_INTERNAL_TOKEN: SECRET,
+    })
+
+    expect(config.ticketSecrets).toEqual([SECRET, previous])
+    // Setting both to the same value is a no-op, not a duplicate key.
+    expect(
+      readWsConfig({
+        REALTIME_TICKET_SECRET: SECRET,
+        REALTIME_TICKET_SECRET_PREVIOUS: SECRET,
+        REALTIME_INTERNAL_TOKEN: SECRET,
+      }).ticketSecrets,
+    ).toEqual([SECRET])
   })
 
   test('refuses to start without credentials it can trust', () => {

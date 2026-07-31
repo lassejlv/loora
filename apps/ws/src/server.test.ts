@@ -104,7 +104,7 @@ function publish(body: unknown, token = TOKEN) {
 beforeAll(() => {
   service = createRealtimeService({
     port: 0,
-    ticketSecret: SECRET,
+    ticketSecrets: [SECRET],
     internalToken: TOKEN,
     redisUrl: null,
     allowedOrigins: null,
@@ -361,6 +361,38 @@ describe('realtime service', () => {
     }
     expect(answered).toBe(true)
     await Promise.all(clients.slice(1).map((client) => client.close()))
+  })
+
+  test('counts what it turned away', async () => {
+    const before = service.counters.snapshot()
+
+    await fetch(`${origin}/canvas?ticket=nonsense`, {
+      headers: { Upgrade: 'websocket' },
+    })
+    await publish({ kind: 'event' }, 'wrong-token')
+    await publish({ kind: 'nonsense' })
+
+    const after = (await (await fetch(`${origin}/health`)).json()) as {
+      rejections: Record<string, number>
+    }
+    expect(after.rejections.ticketInvalid).toBe(before.ticketInvalid + 1)
+    expect(after.rejections.ingestUnauthorized).toBe(
+      before.ingestUnauthorized + 1,
+    )
+    expect(after.rejections.ingestInvalid).toBe(before.ingestInvalid + 1)
+  })
+
+  test('refuses an ingest body far larger than any event', async () => {
+    const response = await fetch(`${origin}/publish`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${TOKEN}`,
+      },
+      body: JSON.stringify({ kind: 'event', padding: 'x'.repeat(70_000) }),
+    })
+
+    expect(response.status).toBe(413)
   })
 
   test('refuses ingest without the internal token', async () => {

@@ -28,7 +28,7 @@ ws  <──pub/sub──>  redis                            between ws instances
 | `GET` | `/canvas` | Browser. Upgrades to a socket; the ticket rides the `Sec-WebSocket-Protocol` header (`?ticket=` still accepted). |
 | `POST` | `/publish` | Web / MCP, with `Authorization: Bearer $REALTIME_INTERNAL_TOKEN`. |
 | `POST` | `/state` | Web, same token. Room state for a tab connecting over SSE. |
-| `GET` | `/health` | Liveness: the process is up. Railway's deploy check uses this. |
+| `GET` | `/health` | Liveness plus counts of what was turned away — refused tickets, replays, throttled publishes, dropped messages. |
 | `GET` | `/ready` | Readiness: pings the bus and answers `503` when it cannot be reached, so a room that has quietly stopped being shared is visible. |
 
 ## Authentication
@@ -51,6 +51,15 @@ claims, so a client can say where its pointer is but never who it is.
   access can linger.
 - **Bounded fan-out.** One account may hold 20 sockets; past that the oldest is
   closed with `4002`, since the newest tab is the one somebody is looking at.
+- **Bounded ingest.** `/publish` and `/state` take 6,000 requests a minute and
+  bodies up to 64 KB. A publisher that is turned away falls back to Redis, so
+  the ceiling degrades rather than drops.
+
+### Rotating the ticket secret
+
+Put the new key in `REALTIME_TICKET_SECRET` on the web app and the old one in
+`REALTIME_TICKET_SECRET_PREVIOUS` here. Tickets live 60 seconds, so a minute
+later the old key can be dropped.
 
 ## Messages
 
@@ -72,6 +81,7 @@ Server → client: `ready` (room state on connect), then the shared
 |----------|---------|
 | `PORT` | Listen port (default `4200`). |
 | `REALTIME_TICKET_SECRET` | Shared with the web app; verifies tickets. ≥32 chars. |
+| `REALTIME_TICKET_SECRET_PREVIOUS` | Optional. The key being retired, still accepted while tickets signed with it expire. |
 | `REALTIME_INTERNAL_TOKEN` | Shared with web/MCP; guards `/publish` and `/state`. ≥32 chars. |
 | `REDIS_URL` | Optional. Without it the service is a single instance and rooms live in memory — fine for local development. |
 | `REALTIME_ALLOWED_ORIGINS` | Optional comma-separated allowlist; falls back to `BETTER_AUTH_URL`. |
