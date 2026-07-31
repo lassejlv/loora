@@ -123,12 +123,18 @@ export function ShareDialog({
   )
 }
 
+// The RPC client is a proxy that mints a fresh object on every property
+// access, so `orpc.share` must be read once here. Reading it inline as a
+// default argument would hand the component a new client identity on every
+// render, and the load effect would refetch forever.
+const shareClient = orpc.share as unknown as ShareClient
+
 export function ShareDialogContent({
   designId,
   onOpenChange,
   // Injected in tests. Module mocks are process-wide here, and mocking the
   // whole RPC client from one suite breaks every other suite that shares it.
-  client = orpc.share as unknown as ShareClient,
+  client = shareClient,
 }: {
   designId: string
   onOpenChange: (open: boolean) => void
