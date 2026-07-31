@@ -49,6 +49,25 @@ const CLOSE_GOING_AWAY = 1012
  */
 const TICKET_PROTOCOL = 'loora.realtime.v1'
 
+/**
+ * The session a presence frame is about, or `null` for anything else.
+ *
+ * Presence is the one event a client also sends, so its author already knows
+ * what it says. The substring check keeps the common path — canvas changes and
+ * agent activity — from paying for a parse.
+ */
+export function presenceAuthor(payload: string) {
+  if (!payload.includes('"presence.peer"')) return null
+  try {
+    const parsed = JSON.parse(payload) as { type?: unknown; sessionId?: unknown }
+    return parsed.type === 'presence.peer' && typeof parsed.sessionId === 'string'
+      ? parsed.sessionId
+      : null
+  } catch {
+    return null
+  }
+}
+
 export function ticketFromRequest(request: Request, url: URL) {
   const offered = (request.headers.get('sec-websocket-protocol') ?? '')
     .split(',')
@@ -73,9 +92,23 @@ export interface RealtimeService {
 export function createRealtimeService(config: WsConfig): RealtimeService {
   const sockets = new Set<ServerWebSocket<SocketData>>()
   const byUser = new Map<string, Set<ServerWebSocket<SocketData>>>()
+  const byChannel = new Map<string, Set<ServerWebSocket<SocketData>>>()
   const bus = createBus(config.redisUrl)
   const hub = new RealtimeHub(bus, (channel, payload) => {
-    server.publish(channel, payload)
+    // Everything else goes out through Bun's topic fan-out. A presence frame
+    // walks the room instead so its author can be skipped: a cursor at frame
+    // rate would otherwise spend a message per move telling a tab what it just
+    // said. Only the instance holding that socket finds a match, so the rest of
+    // the room is unaffected.
+    const author = presenceAuthor(payload)
+    if (author === null) {
+      server.publish(channel, payload)
+      return
+    }
+    for (const ws of byChannel.get(channel) ?? []) {
+      if (ws.data.claims.sessionId === author) continue
+      ws.send(payload)
+    }
   })
 
   const json = (body: unknown, status = 200) => Response.json(body, { status })
@@ -254,6 +287,9 @@ export function createRealtimeService(config: WsConfig): RealtimeService {
           }
         }
         ws.subscribe(ws.data.channel)
+        const room = byChannel.get(ws.data.channel) ?? new Set()
+        room.add(ws)
+        byChannel.set(ws.data.channel, room)
         try {
           await hub.join(ws.data.channel)
         } catch {
@@ -298,6 +334,11 @@ export function createRealtimeService(config: WsConfig): RealtimeService {
           if (mine.size === 0) byUser.delete(ws.data.claims.userId)
         }
         ws.unsubscribe(ws.data.channel)
+        const room = byChannel.get(ws.data.channel)
+        if (room) {
+          room.delete(ws)
+          if (room.size === 0) byChannel.delete(ws.data.channel)
+        }
         await hub.clearPresence(ws.data.channel, ws.data.claims.sessionId)
         await hub.leave(ws.data.channel)
       },

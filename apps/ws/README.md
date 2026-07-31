@@ -58,6 +58,10 @@ Client → server: `{"type":"presence","cursor":{"x":0,"y":0},"selection":[]}`
 and `{"type":"ping"}`. Nothing else is accepted; canvas changes and agent
 activity come from the server side through `/publish`.
 
+A presence frame is not echoed to the socket that sent it — its author already
+knows where its own cursor is, and at frame rate that echo was a message per
+move. Everything else fans out to the whole room.
+
 Server → client: `ready` (room state on connect), then the shared
 `@loora/realtime/events` shapes — `canvas.changed`, `agent.activity`,
 `presence.peer`, `presence.state` — plus `pong`.

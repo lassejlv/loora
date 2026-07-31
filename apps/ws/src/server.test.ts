@@ -251,6 +251,25 @@ describe('realtime service', () => {
     await other.close()
   })
 
+  test('does not echo a peer its own presence', async () => {
+    const client = await connect(await ticketFor({ sessionId: 'echo-author' }))
+    await client.next()
+    const other = await connect(await ticketFor({ sessionId: 'echo-watcher' }))
+    await other.next()
+
+    client.send({ type: 'presence', cursor: { x: 1, y: 2 }, selection: [] })
+    // Wait until the room has actually been told, so an echo — if there were
+    // one — would already be sitting in the author's queue ahead of this ping.
+    await expect(other.next()).resolves.toMatchObject({
+      type: 'presence.peer',
+      sessionId: 'echo-author',
+    })
+    client.send({ type: 'ping' })
+
+    await expect(client.next()).resolves.toMatchObject({ type: 'pong' })
+    await Promise.all([client.close(), other.close()])
+  })
+
   test('answers a heartbeat', async () => {
     const client = await connect(await ticketFor())
     await client.next()
@@ -360,22 +379,30 @@ describe('realtime service', () => {
     const client = await connect(await ticketFor())
     await client.next()
     client.send({ type: 'presence', cursor: null, selection: [] })
-    await client.next()
 
-    const response = await fetch(`${origin}/state`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${TOKEN}`,
-      },
-      body: JSON.stringify({
-        ownerUserId: 'owner-1',
-        target: { designId: 'design-1', draftId: null },
-      }),
-    })
+    // Nothing comes back to the author of a presence frame, so poll the room
+    // rather than waiting for an echo that no longer exists.
+    const readState = () =>
+      fetch(`${origin}/state`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${TOKEN}`,
+        },
+        body: JSON.stringify({
+          ownerUserId: 'owner-1',
+          target: { designId: 'design-1', draftId: null },
+        }),
+      })
+    let response = await readState()
+    let state = (await response.json()) as { peers: { userId: string }[] }
+    for (let attempt = 0; attempt < 20 && state.peers.length === 0; attempt += 1) {
+      await Bun.sleep(25)
+      response = await readState()
+      state = (await response.json()) as { peers: { userId: string }[] }
+    }
 
     expect(response.status).toBe(200)
-    const state = (await response.json()) as { peers: { userId: string }[] }
     expect(state.peers).toHaveLength(1)
     expect(state.peers[0]).toMatchObject({ userId: 'user-1' })
     await client.close()
