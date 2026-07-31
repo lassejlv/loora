@@ -347,7 +347,13 @@ export class CanvasSyncController {
   #flushing: Promise<void> | null = null
   #refreshing: Promise<void> | null = null
   #closed = false
-  readonly #sessionId = crypto.randomUUID()
+  /**
+   * The key this tab holds in the room. Proposed here, but the server decides:
+   * a ticket comes back with the key it minted, and the presence fallback
+   * answers with the one it scoped to this account. Both are adopted, because
+   * the room is keyed by it and this is how the tab recognises its own frames.
+   */
+  #sessionId: string = crypto.randomUUID()
   #peers = new Map<string, CanvasPeer>()
   #peerList: CanvasPeer[] = []
   #presence: { cursor: { x: number; y: number } | null; selection: string[] } = {
@@ -533,14 +539,33 @@ export class CanvasSyncController {
       ...(leaving ? { leaving: true } : {}),
     })
     try {
-      await fetch('/api/canvas-presence', {
+      const response = await fetch('/api/canvas-presence', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body,
         keepalive: leaving,
       })
+      if (response.ok && !leaving) {
+        const scoped = (await response.json()) as { sessionId?: unknown }
+        if (typeof scoped.sessionId === 'string') {
+          this.#adoptSessionId(scoped.sessionId)
+        }
+      }
     } catch {
       // Presence is decoration; losing a frame of it changes nothing.
+    }
+  }
+
+  /**
+   * The server decides which key this tab holds. Adopting it is what keeps the
+   * tab from drawing its own cursor as a peer.
+   */
+  #adoptSessionId(sessionId: string) {
+    if (sessionId.length === 0 || sessionId === this.#sessionId) return
+    this.#sessionId = sessionId
+    if (this.#peers.delete(sessionId)) {
+      this.#rebuildPeerList()
+      this.#emitPresence()
     }
   }
 
@@ -863,7 +888,8 @@ export class CanvasSyncController {
 
   async #connectSocket() {
     const attempt = ++this.#socketAttempt
-    let ticket: { url?: unknown; ticket?: unknown } | null = null
+    let ticket: { url?: unknown; ticket?: unknown; sessionId?: unknown } | null =
+      null
     try {
       const response = await fetch('/api/realtime-ticket', {
         method: 'POST',
@@ -871,7 +897,6 @@ export class CanvasSyncController {
         body: JSON.stringify({
           designId: this.target.designId,
           draftId: this.target.draftId,
-          sessionId: this.#sessionId,
         }),
       })
       // 503 is how the app says "no socket service here" — not a failure worth
@@ -888,6 +913,9 @@ export class CanvasSyncController {
       if (this.#transport === 'sse') this.#connectEventSource()
       else this.#retryRealtime()
       return
+    }
+    if (typeof ticket.sessionId === 'string' && ticket.sessionId.length > 0) {
+      this.#adoptSessionId(ticket.sessionId)
     }
 
     // The ticket rides the subprotocol rather than the query string: a browser
@@ -945,6 +973,7 @@ export class CanvasSyncController {
     if (!event) return
     if (event.type === 'pong') return
     if (event.type === 'ready') {
+      this.#adoptSessionId(event.sessionId)
       this.#realtimeConnected = true
       this.#socketFailures = 0
       this.#realtimeOpen()

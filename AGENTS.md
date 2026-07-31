@@ -177,7 +177,11 @@ One protocol, two transports, and one gate in front of both.
   stamps presence identity from those claims. Tickets are single use (`jti`
   claimed on the bus), travel in the `Sec-WebSocket-Protocol` header rather than
   the URL, and a socket is closed with `4001` after 15 minutes so the client
-  re-tickets. One account may hold 20 sockets; the oldest gives way with `4002`.
+  re-tickets. One account may hold 20 sockets; the oldest gives way with `4002`,
+  and an account may ask for 30 tickets a minute before it is turned away.
+  The key a peer holds in a room is minted server-side — from the ticket route
+  for a socket, scoped under the account for the SSE fallback — so nobody can
+  claim a peer's key and overwrite or clear their cursor.
 - `/api/canvas-events` (SSE) plus `/api/canvas-presence` remain the fallback,
   used when no socket service is configured or a socket cannot be established.
   Both transports carry identical events. Presence uses one of them at a time:

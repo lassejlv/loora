@@ -11,21 +11,23 @@ import {
   publishCanvasPresence,
 } from '@loora/db/canvas-realtime'
 import { resolveDesignAccess } from '@loora/db/design-access'
-
-const MAX_SELECTION = 64
+import {
+  normalizePresenceInput,
+  scopePresenceSessionId,
+} from '@loora/realtime/events'
 
 function record(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === 'object' && !Array.isArray(value)
 }
 
-function coordinate(value: unknown) {
-  return typeof value === 'number' && Number.isFinite(value) && Math.abs(value) < 1e7
-}
-
 /**
+ * The fallback presence path, used only when a client cannot hold a socket.
+ *
  * A client reports only where it is, never who it is. Identity, colour and role
  * are stamped from the session here, so a peer cannot publish itself as someone
- * else or promote itself to an editor in the face pile.
+ * else or promote itself to an editor in the face pile — and the key it
+ * occupies in the room is scoped to the account, so one person can only ever
+ * overwrite their own tabs.
  */
 export async function canvasPresenceResponse(request: Request) {
   const session = await requireSession(request)
@@ -45,16 +47,17 @@ export async function canvasPresenceResponse(request: Request) {
     typeof body.draftId === 'string' && body.draftId.trim()
       ? body.draftId.trim()
       : null
-  const sessionId = typeof body.sessionId === 'string' ? body.sessionId : ''
+  const clientId = typeof body.sessionId === 'string' ? body.sessionId : ''
   if (
     designId.length === 0 ||
     designId.length > 128 ||
     (draftId !== null && draftId.length > 128) ||
-    sessionId.length === 0 ||
-    sessionId.length > 128
+    clientId.length === 0 ||
+    clientId.length > 128
   ) {
     return new Response('Invalid presence payload', { status: 400 })
   }
+  const sessionId = scopePresenceSessionId(session.user.id, clientId)
 
   const access = await resolveDesignAccess(designId, {
     id: session.user.id,
@@ -68,18 +71,10 @@ export async function canvasPresenceResponse(request: Request) {
     return new Response(null, { status: 204 })
   }
 
-  const cursor =
-    record(body.cursor) && coordinate(body.cursor.x) && coordinate(body.cursor.y)
-      ? { x: body.cursor.x as number, y: body.cursor.y as number }
-      : null
-  const selection = Array.isArray(body.selection)
-    ? body.selection
-        .filter(
-          (id): id is string =>
-            typeof id === 'string' && id.length > 0 && id.length <= 128,
-        )
-        .slice(0, MAX_SELECTION)
-    : []
+  const { cursor, selection } = normalizePresenceInput(body) ?? {
+    cursor: null,
+    selection: [],
+  }
 
   const published = await publishCanvasPresence(access.ownerUserId, target, {
     sessionId,
@@ -92,8 +87,10 @@ export async function canvasPresenceResponse(request: Request) {
     selection,
     updatedAt: Date.now(),
   })
+  // The caller is told which key it ended up under so it can recognise its own
+  // frames coming back through the event stream.
   return published
-    ? new Response(null, { status: 204 })
+    ? Response.json({ sessionId }, { headers: { 'Cache-Control': 'no-store' } })
     : new Response('Presence is unavailable', { status: 503 })
 }
 

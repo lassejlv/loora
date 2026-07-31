@@ -22,8 +22,10 @@ import { designDraft } from '@loora/db/schema'
  * watch a document; keeping the checks in one place is what makes that true.
  */
 
+export type RealtimeSession = NonNullable<Awaited<ReturnType<typeof requireSession>>>
+
 export interface RealtimeAccess {
-  session: NonNullable<Awaited<ReturnType<typeof requireSession>>>
+  session: RealtimeSession
   ownerUserId: string
   role: 'owner' | 'edit' | 'view'
   designId: string
@@ -33,6 +35,28 @@ export interface RealtimeAccess {
 export type RealtimeAccessResult =
   | { ok: true; access: RealtimeAccess }
   | { ok: false; response: Response }
+
+export type RealtimeSessionResult =
+  | { ok: true; session: RealtimeSession }
+  | { ok: false; response: Response }
+
+/**
+ * Who is asking, before anything is looked up on their behalf. Split out from
+ * the access check so a caller can turn away a flood of requests from one
+ * account without paying for a design lookup per attempt.
+ */
+export async function requireRealtimeSession(
+  request: Request,
+): Promise<RealtimeSessionResult> {
+  const session = await requireSession(request)
+  if (!session) {
+    return { ok: false, response: new Response('Unauthorized', { status: 401 }) }
+  }
+  if (!hasAcceptedCurrentLegal(session.user)) {
+    return { ok: false, response: legalConsentRequiredResponse() }
+  }
+  return { ok: true, session }
+}
 
 function draftExists(ownerUserId: string, designId: string, draftId: string) {
   return db
@@ -53,14 +77,15 @@ export async function resolveRealtimeAccess(
   request: Request,
   input: { designId: string; draftId: string | null },
 ): Promise<RealtimeAccessResult> {
-  const session = await requireSession(request)
-  if (!session) {
-    return { ok: false, response: new Response('Unauthorized', { status: 401 }) }
-  }
-  if (!hasAcceptedCurrentLegal(session.user)) {
-    return { ok: false, response: legalConsentRequiredResponse() }
-  }
+  const authenticated = await requireRealtimeSession(request)
+  if (!authenticated.ok) return authenticated
+  return resolveRealtimeAccessForSession(authenticated.session, input)
+}
 
+export async function resolveRealtimeAccessForSession(
+  session: RealtimeSession,
+  input: { designId: string; draftId: string | null },
+): Promise<RealtimeAccessResult> {
   const designId = input.designId.trim()
   const draftId = input.draftId?.trim() || null
   if (

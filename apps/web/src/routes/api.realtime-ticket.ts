@@ -5,7 +5,10 @@ import {
   REALTIME_TICKET_TTL_MS,
   signRealtimeTicket,
 } from '@loora/realtime/ticket'
-import { resolveRealtimeAccess } from './-realtime-access'
+import {
+  requireRealtimeSession,
+  resolveRealtimeAccessForSession,
+} from './-realtime-access'
 
 /**
  * Mints a connection ticket for the WebSocket service.
@@ -20,6 +23,35 @@ import { resolveRealtimeAccess } from './-realtime-access'
 
 function record(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === 'object' && !Array.isArray(value)
+}
+
+/**
+ * Minting a ticket costs a design lookup, a plan check, and a branch check, so
+ * an account that asks in a loop should be turned away before any of that. One
+ * socket needs a ticket every 15 minutes plus a few on reconnects; this leaves
+ * room for a bad network without leaving room for a script.
+ *
+ * The count is per web instance, which is the right shape for what it protects:
+ * the work happens on the instance doing the counting.
+ */
+const TICKET_LIMIT = 30
+const TICKET_WINDOW_MS = 60_000
+const TICKET_TRACKED_USERS = 10_000
+const ticketRequests = new Map<string, { count: number; windowStart: number }>()
+
+export function allowTicketRequest(userId: string, now = Date.now()) {
+  const seen = ticketRequests.get(userId)
+  if (!seen || now - seen.windowStart >= TICKET_WINDOW_MS) {
+    if (ticketRequests.size >= TICKET_TRACKED_USERS) {
+      for (const [id, entry] of ticketRequests) {
+        if (now - entry.windowStart >= TICKET_WINDOW_MS) ticketRequests.delete(id)
+      }
+    }
+    ticketRequests.set(userId, { count: 1, windowStart: now })
+    return true
+  }
+  seen.count += 1
+  return seen.count <= TICKET_LIMIT
 }
 
 function realtimeConfig() {
@@ -40,12 +72,16 @@ export async function realtimeTicketResponse(request: Request) {
     return new Response('Invalid ticket request', { status: 400 })
   }
 
-  const sessionId = typeof body.sessionId === 'string' ? body.sessionId : ''
-  if (sessionId.length === 0 || sessionId.length > 128) {
-    return new Response('Invalid ticket request', { status: 400 })
+  const authenticated = await requireRealtimeSession(request)
+  if (!authenticated.ok) return authenticated.response
+  if (!allowTicketRequest(authenticated.session.user.id)) {
+    return new Response('Too many ticket requests', {
+      status: 429,
+      headers: { 'Retry-After': '60' },
+    })
   }
 
-  const resolved = await resolveRealtimeAccess(request, {
+  const resolved = await resolveRealtimeAccessForSession(authenticated.session, {
     designId: typeof body.designId === 'string' ? body.designId : '',
     draftId: typeof body.draftId === 'string' ? body.draftId : null,
   })
@@ -60,6 +96,10 @@ export async function realtimeTicketResponse(request: Request) {
   }
 
   const { session, ownerUserId, role, designId, draftId } = resolved.access
+  // The room key is minted here rather than taken from the caller. A client
+  // that chose it could claim a peer's key and overwrite — or on disconnect,
+  // clear — somebody else's cursor.
+  const sessionId = crypto.randomUUID()
   const issuedAt = Date.now()
   const expiresAt = issuedAt + REALTIME_TICKET_TTL_MS
   const ticket = await signRealtimeTicket(
@@ -84,7 +124,7 @@ export async function realtimeTicketResponse(request: Request) {
   )
 
   return Response.json(
-    { url: `${config.url}/canvas`, ticket, expiresAt },
+    { url: `${config.url}/canvas`, ticket, sessionId, expiresAt },
     { headers: { 'Cache-Control': 'no-store' } },
   )
 }

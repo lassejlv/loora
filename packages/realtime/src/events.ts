@@ -227,6 +227,17 @@ export function presenceColor(userId: string) {
   return PRESENCE_COLORS[(hash >>> 0) % PRESENCE_COLORS.length]!
 }
 
+/**
+ * The key a peer occupies in a room.
+ *
+ * A client picks the tab half; the account owns the rest. Without that scoping
+ * anyone with access to a design could claim a peer's key and overwrite — or on
+ * disconnect, clear — somebody else's cursor.
+ */
+export function scopePresenceSessionId(userId: string, clientId: string) {
+  return `${userId.slice(0, 64)}:${clientId.slice(0, 63)}`
+}
+
 export function isPresenceFresh(peer: CanvasPresencePeer, now: number) {
   return now - peer.updatedAt < PRESENCE_TTL_MS
 }
