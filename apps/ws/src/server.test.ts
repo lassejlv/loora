@@ -124,6 +124,23 @@ describe('realtime service', () => {
     expect(await response.json()).toMatchObject({ name: 'loora-ws', bus: 'memory' })
   })
 
+  test('reports readiness from the bus, not from being alive', async () => {
+    const response = await fetch(`${origin}/ready`)
+
+    expect(response.status).toBe(200)
+    expect(await response.json()).toMatchObject({ ready: true, bus: 'memory' })
+
+    // A bus that cannot be reached has to fail the check: the process is still
+    // up, but its rooms have stopped being shared.
+    const ping = service.bus.ping
+    service.bus.ping = async () => false
+    const unreachable = await fetch(`${origin}/ready`)
+    service.bus.ping = ping
+
+    expect(unreachable.status).toBe(503)
+    expect(await unreachable.json()).toMatchObject({ ready: false })
+  })
+
   test('refuses a socket without a valid ticket', async () => {
     const response = await fetch(`${origin}/canvas?ticket=nonsense`, {
       headers: { Upgrade: 'websocket' },

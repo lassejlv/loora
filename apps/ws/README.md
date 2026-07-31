@@ -28,7 +28,8 @@ ws  <──pub/sub──>  redis                            between ws instances
 | `GET` | `/canvas` | Browser. Upgrades to a socket; the ticket rides the `Sec-WebSocket-Protocol` header (`?ticket=` still accepted). |
 | `POST` | `/publish` | Web / MCP, with `Authorization: Bearer $REALTIME_INTERNAL_TOKEN`. |
 | `POST` | `/state` | Web, same token. Room state for a tab connecting over SSE. |
-| `GET` | `/health`, `/ready` | Platform checks. |
+| `GET` | `/health` | Liveness: the process is up. Railway's deploy check uses this. |
+| `GET` | `/ready` | Readiness: pings the bus and answers `503` when it cannot be reached, so a room that has quietly stopped being shared is visible. |
 
 ## Authentication
 

@@ -178,8 +178,12 @@ export function createRealtimeService(config: WsConfig): RealtimeService {
         })
       }
 
+      // Liveness says the process is up; readiness says the room is still
+      // shared. Without the bus this instance keeps serving sockets that can no
+      // longer see each other, which is worth failing a check over.
       if (request.method === 'GET' && url.pathname === '/ready') {
-        return json({ service: 'ws', ready: true, bus: bus.kind })
+        const ready = await bus.ping()
+        return json({ service: 'ws', ready, bus: bus.kind }, ready ? 200 : 503)
       }
 
       if (request.method === 'POST' && url.pathname === '/publish') {

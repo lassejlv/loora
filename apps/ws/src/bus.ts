@@ -36,6 +36,12 @@ export interface RealtimeBus {
    * bus rather than in one process's memory.
    */
   claimTicket(ticketId: string, ttlMs: number): Promise<boolean>
+  /**
+   * Whether the bus can still be reached. A service that keeps answering while
+   * its bus is gone looks healthy and quietly stops being a shared room, which
+   * is the failure this exists to make visible.
+   */
+  ping(): Promise<boolean>
   close(): void
 }
 
@@ -157,6 +163,11 @@ export class MemoryBus implements RealtimeBus {
     }
     if (this.#tickets.has(ticketId)) return false
     this.#tickets.set(ticketId, now + ttlMs)
+    return true
+  }
+
+  /** There is no hop to fail: the room is this process. */
+  async ping() {
     return true
   }
 
@@ -380,6 +391,15 @@ export class RedisBus implements RealtimeBus {
       ]),
     )
     return claimed === 'OK' || claimed === true
+  }
+
+  async ping() {
+    try {
+      const reply = await this.#command((client) => client.send('PING', []))
+      return reply === 'PONG' || reply === true
+    } catch {
+      return false
+    }
   }
 
   close() {
