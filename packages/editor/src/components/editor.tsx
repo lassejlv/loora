@@ -329,8 +329,30 @@ function CanvasShell({
   const [exportOpen, setExportOpen] = useState(false)
   const [htmlImportOpen, setHtmlImportOpen] = useState(false)
   const [commandMenuOpen, setCommandMenuOpen] = useState(false)
+  const [pasteNotice, setPasteNotice] = useState<string | null>(null)
+  const pasteNoticeTimer = useRef<number | null>(null)
   const [interactionMode, setInteractionMode] = useState<'select' | 'pan'>(
     'select',
+  )
+
+  const showPasteNotice = (message: string) => {
+    setPasteNotice(message)
+    if (pasteNoticeTimer.current !== null) {
+      window.clearTimeout(pasteNoticeTimer.current)
+    }
+    pasteNoticeTimer.current = window.setTimeout(() => {
+      setPasteNotice(null)
+      pasteNoticeTimer.current = null
+    }, 5_000)
+  }
+
+  useEffect(
+    () => () => {
+      if (pasteNoticeTimer.current !== null) {
+        window.clearTimeout(pasteNoticeTimer.current)
+      }
+    },
+    [],
   )
   // The widest breakpoint is the canvas page width. There is no preview
   // switcher in the chrome, so this is read once per document.
@@ -351,7 +373,7 @@ function CanvasShell({
   )
   const cameraKey = cameraStorageKey(controller.target)
   const initialCamera = useMemo(() => loadCamera(cameraKey), [cameraKey])
-  const actions = useCanvasEditorActions()
+  const actions = useCanvasEditorActions(showPasteNotice)
   const addPageAndFocus = () => {
     actions.addPage()
     window.requestAnimationFrame(() => {
@@ -947,6 +969,14 @@ function CanvasShell({
                 isMobile={isMobile}
               />
             </TooltipProvider>
+            {pasteNotice ? (
+              <div
+                role="status"
+                className="pointer-events-auto absolute inset-x-3 bottom-3 z-30 mx-auto max-w-md rounded-md border border-line bg-surface px-3 py-2 text-xs text-destructive-foreground shadow-panel-lg sm:inset-x-auto sm:right-3 sm:left-auto"
+              >
+                {pasteNotice}
+              </div>
+            ) : null}
           </div>
 
           {!isMobile ? (
@@ -1160,7 +1190,9 @@ function remapClonedNode(node: CanvasNode, ids: Map<string, string>) {
 /** Survives a clipboard the browser will not hand back (permissions, http). */
 let localClipboard = ''
 
-function useCanvasEditorActions(): CanvasEditorActions {
+function useCanvasEditorActions(
+  onPasteError?: (message: string) => void,
+): CanvasEditorActions {
   const document = useCanvasDocument()
   const selection = useCanvasSelection()
   const session = useCanvasSession()
@@ -1630,7 +1662,17 @@ function useCanvasEditorActions(): CanvasEditorActions {
       void saveImportedImages(placed.nodes)
     } catch (cause) {
       console.warn('[canvas] HTML clipboard import failed:', cause)
-      if (fallbackText.trim()) pasteFromText(fallbackText)
+      // Only fall back when plain text is our own canvas clipboard payload —
+      // Paper's text/plain is not a useful substitute for a failed HTML import.
+      if (parseClipboardPayload(fallbackText)) {
+        pasteFromText(fallbackText)
+        return
+      }
+      onPasteError?.(
+        cause instanceof Error
+          ? cause.message
+          : 'Could not paste the HTML snapshot',
+      )
     }
   }
 

@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'bun:test'
-import { buildHtmlImportDocument } from './canvas-html-import'
+import {
+  MAX_HTML_IMPORT_SOURCE_BYTES,
+  buildHtmlImportDocument,
+} from './canvas-html-import'
 
 describe('HTML import sandbox', () => {
   it('removes executable markup and blocks outbound resources', () => {
@@ -38,6 +41,22 @@ describe('HTML import sandbox', () => {
 
     expect(sandboxStyle?.textContent).toContain(
       'x-paper-html{display:inline-block}',
+    )
+  })
+
+  it('accepts Paper-sized HTML pastes under the source budget', () => {
+    // A couple of embedded images used to blow past the old 1 MB cap.
+    const chunk = 'a'.repeat(1_500_000)
+    const html = `<x-paper-html><div data-chunk="${chunk}">Card</div></x-paper-html>`
+    expect(html.length).toBeGreaterThan(1_000_000)
+    expect(html.length).toBeLessThan(MAX_HTML_IMPORT_SOURCE_BYTES)
+    expect(() => buildHtmlImportDocument(html)).not.toThrow()
+  })
+
+  it('rejects HTML pastes above the source budget', () => {
+    const html = `<div>${'a'.repeat(MAX_HTML_IMPORT_SOURCE_BYTES + 1)}</div>`
+    expect(() => buildHtmlImportDocument(html)).toThrow(
+      'HTML import is larger than 8 MB',
     )
   })
 })

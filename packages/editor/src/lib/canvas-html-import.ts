@@ -4,9 +4,20 @@ import {
   type HtmlCanvasSnapshot,
 } from '@loora/canvas/import'
 
-export const MAX_HTML_IMPORT_SOURCE_BYTES = 1_000_000
-export const MAX_CSS_IMPORT_SOURCE_BYTES = 500_000
-export const MAX_HTML_IMPORT_ELEMENTS = 5_000
+/** Paper snapshots often embed images as data URLs; 1 MB was too tight. */
+export const MAX_HTML_IMPORT_SOURCE_BYTES = 8_000_000
+export const MAX_CSS_IMPORT_SOURCE_BYTES = 2_000_000
+export const MAX_HTML_IMPORT_ELEMENTS = 20_000
+
+function formatByteLimit(bytes: number) {
+  if (bytes >= 1_000_000 && bytes % 1_000_000 === 0) {
+    return `${bytes / 1_000_000} MB`
+  }
+  if (bytes >= 1_000 && bytes % 1_000 === 0) {
+    return `${bytes / 1_000} KB`
+  }
+  return `${bytes.toLocaleString()} bytes`
+}
 
 export interface HtmlCssImportInput {
   html: string
@@ -136,10 +147,14 @@ function byteLength(value: string) {
  */
 export function buildHtmlImportDocument(html: string, css = '') {
   if (byteLength(html) > MAX_HTML_IMPORT_SOURCE_BYTES) {
-    throw new Error('HTML import is larger than 1 MB')
+    throw new Error(
+      `HTML import is larger than ${formatByteLimit(MAX_HTML_IMPORT_SOURCE_BYTES)}`,
+    )
   }
   if (byteLength(css) > MAX_CSS_IMPORT_SOURCE_BYTES) {
-    throw new Error('CSS import is larger than 500 KB')
+    throw new Error(
+      `CSS import is larger than ${formatByteLimit(MAX_CSS_IMPORT_SOURCE_BYTES)}`,
+    )
   }
   const parsed = new DOMParser().parseFromString(html, 'text/html')
   if (parsed.querySelectorAll('*').length > MAX_HTML_IMPORT_ELEMENTS) {
@@ -320,13 +335,44 @@ function nextFrame(view: Window) {
  * `decode` rejects for them — so this waits for an answer either way, and the
  * timeout keeps one stalled response from holding up the whole import.
  */
-function settleImages(sandbox: Document) {
+function settleImages(sandbox: Document, budgetMs: number) {
   const pending = [...sandbox.images].filter((image) => !image.complete)
   if (pending.length === 0) return Promise.resolve()
   return Promise.race([
     Promise.allSettled(pending.map((image) => image.decode())),
-    new Promise<void>((resolve) => window.setTimeout(resolve, 1_500)),
+    new Promise<void>((resolve) => window.setTimeout(resolve, budgetMs)),
   ]).then(() => undefined)
+}
+
+/**
+ * Large Paper snapshots blow past practical `srcdoc` sizes in Chromium. A blob
+ * URL keeps the same sandboxed document while staying reliable at multi-MB.
+ */
+function loadSandboxDocument(iframe: HTMLIFrameElement, source: string) {
+  const bytes = byteLength(source)
+  const loadBudgetMs = Math.min(30_000, Math.max(5_000, 5_000 + bytes / 2_000))
+  const objectUrl = URL.createObjectURL(
+    new Blob([source], { type: 'text/html;charset=utf-8' }),
+  )
+  const loaded = new Promise<void>((resolve, reject) => {
+    const timer = window.setTimeout(
+      () => reject(new Error('HTML import sandbox timed out')),
+      loadBudgetMs,
+    )
+    iframe.addEventListener(
+      'load',
+      () => {
+        window.clearTimeout(timer)
+        resolve()
+      },
+      { once: true },
+    )
+  })
+  iframe.src = objectUrl
+  return {
+    loaded,
+    revoke: () => URL.revokeObjectURL(objectUrl),
+  }
 }
 
 export async function importHtmlCssToCanvas(
@@ -354,30 +400,24 @@ export async function importHtmlCssToCanvas(
     'opacity:0',
   ].join(';')
   document.body.appendChild(iframe)
+  const { loaded, revoke } = loadSandboxDocument(iframe, source)
 
   try {
-    const loaded = new Promise<void>((resolve, reject) => {
-      const timer = window.setTimeout(
-        () => reject(new Error('HTML import sandbox timed out')),
-        5_000,
-      )
-      iframe.addEventListener('load', () => {
-        window.clearTimeout(timer)
-        resolve()
-      }, { once: true })
-    })
-    iframe.srcdoc = source
     await loaded
     const sandbox = iframe.contentDocument
     const view = iframe.contentWindow
     if (!sandbox?.body || !view) {
       throw new Error('HTML import sandbox could not be opened')
     }
+    const imageBudgetMs = Math.min(
+      8_000,
+      Math.max(1_500, 1_500 + sandbox.images.length * 250),
+    )
     await Promise.race([
       sandbox.fonts?.ready ?? Promise.resolve(),
       new Promise<void>((resolve) => window.setTimeout(resolve, 1_000)),
     ])
-    await settleImages(sandbox)
+    await settleImages(sandbox, imageBudgetMs)
     await nextFrame(view)
     await nextFrame(view)
 
@@ -403,6 +443,7 @@ export async function importHtmlCssToCanvas(
       root: body,
     })
   } finally {
+    revoke()
     iframe.remove()
   }
 }
