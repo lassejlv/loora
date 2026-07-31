@@ -285,6 +285,16 @@ export function createRealtimeService(config: WsConfig): RealtimeService {
     connections,
     stop: async () => {
       clearInterval(sweeper)
+      // Take these peers out of the room before the bus goes: a socket's own
+      // close handler runs too late to reach Redis, and without this the tabs
+      // still connected elsewhere would draw ghosts until the entries expire.
+      await Promise.all(
+        [...connections.all].map((socket) =>
+          hub
+            .clearPresence(socket.data.channel, socket.data.claims.sessionId)
+            .catch(() => undefined),
+        ),
+      )
       for (const socket of connections.all) {
         socket.close(CLOSE_GOING_AWAY, 'Restarting')
       }

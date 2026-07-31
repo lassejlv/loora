@@ -87,3 +87,13 @@ Server → client: `ready` (room state on connect), then the shared
 | `REALTIME_ALLOWED_ORIGINS` | Optional comma-separated allowlist; falls back to `BETTER_AUTH_URL`. |
 
 Local: `bun run --cwd apps/ws dev` (or `bun run dev:ws` from the root).
+
+## Tests
+
+Most of the suite runs against the in-memory bus, which is one process
+pretending to be a room. `redis-bus.test.ts` is the other half: it starts a
+`redis-server`, stands up two instances against it, and checks the three things
+only Redis decides — events crossing instances, presence being one shared room,
+and a ticket being spent across the deployment rather than once per process.
+Without the binary on PATH that file skips rather than pretending to have
+checked.

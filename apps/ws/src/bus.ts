@@ -322,11 +322,13 @@ export class RedisBus implements RealtimeBus {
   }
 
   async publish(channel: string, message: string) {
+    if (this.#closed) return false
     await this.#command((client) => client.publish(channel, message))
     return true
   }
 
   async writePresence(channel: string, peer: CanvasPresencePeer) {
+    if (this.#closed) return
     const key = presenceKey(channel)
     await this.#command(async (client) => {
       await client.send('HSET', [key, peer.sessionId, JSON.stringify(peer)])
@@ -335,12 +337,14 @@ export class RedisBus implements RealtimeBus {
   }
 
   async clearPresence(channel: string, sessionId: string) {
+    if (this.#closed) return
     await this.#command((client) =>
       client.send('HDEL', [presenceKey(channel), sessionId]),
     )
   }
 
   async readPresence(channel: string) {
+    if (this.#closed) return []
     const entries = await this.#command((client) =>
       client.send('HGETALL', [presenceKey(channel)]),
     )
@@ -354,6 +358,7 @@ export class RedisBus implements RealtimeBus {
     channel: string,
     activity: CanvasRealtimeActivity | null,
   ) {
+    if (this.#closed) return
     const key = activityKey(channel)
     await this.#command((client) =>
       activity
@@ -373,11 +378,15 @@ export class RedisBus implements RealtimeBus {
   }
 
   async readActivity(channel: string) {
+    if (this.#closed) return null
     const value = await this.#command((client) => client.get(activityKey(channel)))
     return liveActivity(value, Date.now())
   }
 
   async claimTicket(ticketId: string, ttlMs: number) {
+    // A shutting-down instance takes no new sockets; failing the claim is the
+    // fail-closed answer.
+    if (this.#closed) return false
     // SET NX is the whole guarantee: the first connection wins the key, every
     // later one finds it taken. A Redis that is unreachable fails the claim
     // rather than waving the connection through.
@@ -394,6 +403,7 @@ export class RedisBus implements RealtimeBus {
   }
 
   async ping() {
+    if (this.#closed) return false
     try {
       const reply = await this.#command((client) => client.send('PING', []))
       return reply === 'PONG' || reply === true
