@@ -15,6 +15,9 @@
     "./motion-presets": "./src/motion-presets.ts",
     "./style-css": "./src/style-css.ts"
   },
+  "scripts": {
+    "embed-preflight": "bun run scripts/embed-tailwind-preflight.ts"
+  },
   "peerDependencies": {
     "react": "^19.2.7",
     "react-dom": "^19.2.7"
@@ -27,5 +30,8 @@
     "react": "^19.2.7",
     "react-dom": "^19.2.7",
     "typescript": "catalog:"
+  },
+  "dependencies": {
+    "tailwindcss": "4.3.3"
   }
 }

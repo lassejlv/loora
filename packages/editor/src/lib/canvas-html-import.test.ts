@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'bun:test'
 import {
+  HTML_IMPORT_SANDBOX_BASE_CSS,
   MAX_HTML_IMPORT_SOURCE_BYTES,
   buildHtmlImportDocument,
 } from './canvas-html-import'
@@ -44,6 +45,20 @@ describe('HTML import sandbox', () => {
     expect(sandboxStyle?.textContent).toContain(
       'x-paper-html{display:inline-block}',
     )
+  })
+
+  it('embeds Tailwind Preflight so Paper pastes do not invent strokes', () => {
+    const output = buildHtmlImportDocument(
+      '<div style="border-style:solid;border-color:rgb(42,42,42)">Card</div>',
+    )
+    const parsed = new DOMParser().parseFromString(output, 'text/html')
+    const sandboxStyle = parsed.querySelector(
+      'style[data-loora-html-import="true"]',
+    )
+
+    expect(sandboxStyle?.textContent).toContain('border: 0 solid')
+    expect(HTML_IMPORT_SANDBOX_BASE_CSS).toContain('border: 0 solid')
+    expect(HTML_IMPORT_SANDBOX_BASE_CSS).toContain('list-style: none')
   })
 
   it('accepts Paper-sized HTML pastes under the source budget', () => {

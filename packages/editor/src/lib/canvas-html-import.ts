@@ -1,8 +1,11 @@
 import {
+  HTML_IMPORT_SANDBOX_BASE_CSS,
   convertHtmlSnapshotToCanvas,
   type HtmlCanvasImportResult,
   type HtmlCanvasSnapshot,
 } from '@loora/canvas/import'
+
+export { HTML_IMPORT_SANDBOX_BASE_CSS } from '@loora/canvas/import'
 
 /** Paper snapshots often embed images as data URLs; 1 MB was too tight. */
 export const MAX_HTML_IMPORT_SOURCE_BYTES = 8_000_000
@@ -243,7 +246,7 @@ export function buildHtmlImportDocument(html: string, css = '') {
   const styles = parsed.createElement('style')
   styles.dataset.looraHtmlImport = 'true'
   const safeCss = css.replace(/<\/style/gi, '<\\/style')
-  styles.textContent = `html,body{margin:0;min-height:100%;box-sizing:border-box}*,*::before,*::after{box-sizing:inherit}x-paper-html{display:inline-block}${safeCss}`
+  styles.textContent = `${HTML_IMPORT_SANDBOX_BASE_CSS}${safeCss}`
   parsed.head.appendChild(styles)
   return `<!doctype html>${parsed.documentElement.outerHTML}`
 }

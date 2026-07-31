@@ -21,6 +21,20 @@ import {
   defaultStyle,
   DEFAULT_ORDER_STEP,
 } from './model'
+import { TAILWIND_PREFLIGHT_CSS } from './tailwind-preflight'
+
+export { TAILWIND_PREFLIGHT_CSS, TAILWIND_PREFLIGHT_VERSION } from './tailwind-preflight'
+
+/**
+ * Base CSS injected into the HTML import sandbox. Official Tailwind Preflight
+ * plus Loora chrome so Paper snapshots measure with the same reset they were
+ * authored against (`border: 0 solid`, unstyled lists/buttons, etc.).
+ */
+export const HTML_IMPORT_SANDBOX_BASE_CSS = [
+  TAILWIND_PREFLIGHT_CSS,
+  'html,body{min-height:100%}',
+  'x-paper-html{display:inline-block}',
+].join('')
 
 export const MAX_HTML_IMPORT_NODES = 2_000
 
