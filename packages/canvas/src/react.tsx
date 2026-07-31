@@ -23,6 +23,10 @@ import {
   type RefObject,
 } from 'react'
 import {
+  motionStyleSheet,
+  nodeMotionDeclarations,
+} from './motion-css'
+import {
   type CanvasApplyResult,
   type CanvasTransaction,
   CanvasEngine,
@@ -91,6 +95,12 @@ export interface CanvasSurfaceProps extends Omit<HTMLAttributes<HTMLDivElement>,
   controlsRef?: Ref<CanvasSurfaceControls>
   initialCamera?: Partial<CanvasCamera>
   interactionMode?: 'select' | 'pan'
+  /**
+   * Whether hovers and animations play on the canvas. On by default, because a
+   * design that moves should move where it is being designed; off is for
+   * getting work done inside something that never stops pulsing.
+   */
+  motion?: boolean
   onCameraChange?: (camera: CanvasCamera) => void
   onSelectionChange?: (selection: NodeRef[]) => void
   pageWidth?: number
@@ -472,6 +482,19 @@ function nodeCss(
   isPageRoot = false,
 ): CSSProperties {
   const { layout, style } = node
+  // Transitions and self-starting animations are plain declarations, so they
+  // ride the inline style the renderer already builds. Only pointer states need
+  // a real stylesheet.
+  const motion = Object.fromEntries(
+    nodeMotionDeclarations(document, node).map((declaration) => {
+      const separator = declaration.indexOf(':')
+      const property = declaration.slice(0, separator)
+      return [
+        property.replace(/-([a-z])/g, (_, letter: string) => letter.toUpperCase()),
+        declaration.slice(separator + 1),
+      ]
+    }),
+  ) as CSSProperties
   const css: CSSProperties = {
     boxSizing: 'border-box',
     position: layout.position === 'absolute' || isPageRoot ? 'absolute' : 'relative',
@@ -554,7 +577,7 @@ function nodeCss(
     css.textTransform = style.typography.transform
   }
   if (node.type === 'shape' && node.shape === 'ellipse') css.borderRadius = '50%'
-  return css
+  return { ...css, ...motion }
 }
 
 function useChildren(parentId: NodeId | null) {
@@ -1566,6 +1589,34 @@ function RootNodes({ width }: { width: number }) {
     })
 }
 
+/**
+ * The motion stylesheet for what is on the canvas.
+ *
+ * Hover cannot be an inline style, so pointer states arrive as real CSS rules
+ * scoped to each node id — the same rules the exporter writes, from the same
+ * generator, which is what keeps the canvas honest about what you will get.
+ *
+ * The whole sheet sits behind `[data-loora-motion="on"]`, so a surface can turn
+ * motion off while you are working without the document knowing anything about
+ * it.
+ */
+function CanvasMotionStyles() {
+  const { engine } = useCanvasContext()
+  useSyncExternalStore(
+    engine.subscribe.bind(engine),
+    () => engine.revision,
+    () => engine.revision,
+  )
+  const document = engine.document
+  const sheet = motionStyleSheet(
+    document,
+    Object.values(document.nodes),
+    (node) =>
+      `[data-loora-motion="on"] [data-loora-node="${node.id.replace(/["\\]/g, '')}"]`,
+  )
+  return sheet ? <style>{sheet}</style> : null
+}
+
 function CanvasTokenStyles() {
   const { engine } = useCanvasContext()
   useSyncExternalStore(
@@ -1587,6 +1638,7 @@ export function CanvasSurface({
   controlsRef,
   initialCamera,
   interactionMode = 'select',
+  motion = true,
   onCameraChange,
   onSelectionChange,
   pageWidth = 1440,
@@ -2750,6 +2802,7 @@ export function CanvasSurface({
       tabIndex={0}
       data-loora-canvas-surface
       data-loora-interaction-mode={interactionMode}
+      data-loora-motion={motion ? 'on' : 'off'}
       onDragOver={onDragOver}
       onDrop={onDropped}
       onPointerDown={onPointerDown}
@@ -2768,6 +2821,7 @@ export function CanvasSurface({
       } as CSSProperties}
     >
       <CanvasTokenStyles />
+      <CanvasMotionStyles />
       <div
         ref={sceneRef}
         data-loora-canvas-scene

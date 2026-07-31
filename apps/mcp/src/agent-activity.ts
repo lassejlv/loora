@@ -29,6 +29,8 @@ const TOOL_LABELS: Record<string, string> = {
   createComponent: 'Creating a component',
   createInstance: 'Placing a component',
   setTokens: 'Updating tokens',
+  setAnimations: 'Defining animations',
+  animateNodes: 'Animating elements',
   renameDesign: 'Renaming the design',
   listVersions: 'Reading version history',
   listBranches: 'Reading branches',

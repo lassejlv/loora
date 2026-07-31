@@ -6,6 +6,7 @@ import {
   type CanvasStylePatch,
   type CanvasLayout,
   type CanvasRuntimeSchema,
+  type CanvasAnimation,
   type CanvasTheme,
   type DesignToken,
   type NodeId,
@@ -20,7 +21,7 @@ import {
 } from './model'
 
 export interface CanvasFieldPrecondition {
-  scope: 'node' | 'token' | 'theme'
+  scope: 'node' | 'token' | 'theme' | 'animation'
   id: string
   path: string
   hash: string
@@ -48,6 +49,8 @@ export type CanvasOperation =
   | { type: 'token.delete'; id: string }
   | { type: 'theme.upsert'; theme: CanvasTheme }
   | { type: 'theme.delete'; id: string }
+  | { type: 'animation.upsert'; animation: CanvasAnimation }
+  | { type: 'animation.delete'; id: string }
 
 export interface CanvasTransaction {
   id: string
@@ -69,6 +72,8 @@ const operationTypes = new Set<CanvasOperation['type']>([
   'token.delete',
   'theme.upsert',
   'theme.delete',
+  'animation.upsert',
+  'animation.delete',
 ])
 
 const operationKeys: Record<CanvasOperation['type'], Set<string>> = {
@@ -87,6 +92,8 @@ const operationKeys: Record<CanvasOperation['type'], Set<string>> = {
   'token.delete': new Set(['type', 'id']),
   'theme.upsert': new Set(['type', 'theme']),
   'theme.delete': new Set(['type', 'id']),
+  'animation.upsert': new Set(['type', 'animation']),
+  'animation.delete': new Set(['type', 'id']),
 }
 
 function record(value: unknown): value is Record<string, unknown> {
@@ -125,6 +132,9 @@ const mutationPatchKeys = new Set<keyof NodeMutationPatch>([
   'alt',
   'interactions',
   'variant',
+  'visualStates',
+  'transition',
+  'animations',
   'order',
   'viewport',
   'variants',
@@ -266,7 +276,9 @@ export function parseCanvasTransaction(value: unknown): CanvasTransaction {
           Object.keys(precondition).some(
             (key) => !['scope', 'id', 'path', 'hash'].includes(key),
           ) ||
-          !['node', 'token', 'theme'].includes(String(precondition.scope)) ||
+          !['node', 'token', 'theme', 'animation'].includes(
+            String(precondition.scope),
+          ) ||
           typeof precondition.id !== 'string' ||
           precondition.id.length === 0 ||
           precondition.id.length > 200 ||
@@ -469,21 +481,29 @@ export function withTransactionPreconditions(
       })
       continue
     }
-    const isTheme =
-      operation.type === 'theme.upsert' ||
-      operation.type === 'theme.delete'
+    const scope: CanvasFieldPrecondition['scope'] = operation.type.startsWith('theme.')
+      ? 'theme'
+      : operation.type.startsWith('animation.')
+        ? 'animation'
+        : 'token'
     const id =
       operation.type === 'token.upsert'
         ? operation.token.id
         : operation.type === 'theme.upsert'
           ? operation.theme.id
-          : operation.id
+          : operation.type === 'animation.upsert'
+            ? operation.animation.id
+            : operation.id
     preconditions.push({
-      scope: isTheme ? 'theme' : 'token',
+      scope,
       id,
       path: '',
       hash: valueHash(
-        isTheme ? document.themes[id] : document.tokens[id],
+        scope === 'theme'
+          ? document.themes[id]
+          : scope === 'animation'
+            ? document.animations?.[id]
+            : document.tokens[id],
       ),
     })
   }
@@ -510,7 +530,9 @@ function verifyPreconditions(
         ? document.nodes[precondition.id]
         : precondition.scope === 'token'
           ? document.tokens[precondition.id]
-          : document.themes[precondition.id]
+          : precondition.scope === 'animation'
+            ? document.animations?.[precondition.id]
+            : document.themes[precondition.id]
     const actualHash = valueHash(valueAtPath(target, precondition.path))
     if (actualHash !== precondition.hash) {
       conflicts.push({ transactionId: transaction.id, precondition, actualHash })
@@ -571,6 +593,26 @@ function patchNode(
         : { ...node.responsive, ...patch.responsive }
       : node.responsive,
   } as CanvasNode
+  // Motion fields are optional, so they are assigned rather than spread: a key
+  // left sitting at `undefined` is not serializable and the document check
+  // rejects it. Visual states merge per state, so setting a hover leaves a
+  // focus alone; `replace` still swaps the whole set, which is what keeps the
+  // patch invertible.
+  if (patch.visualStates) {
+    next.visualStates = replaceFields.has('visualStates')
+      ? patch.visualStates
+      : { ...node.visualStates, ...patch.visualStates }
+  } else if (node.visualStates !== undefined) {
+    next.visualStates = node.visualStates
+  } else {
+    delete next.visualStates
+  }
+  if (patch.transition) next.transition = patch.transition
+  else if (node.transition !== undefined) next.transition = node.transition
+  else delete next.transition
+  if (patch.animations) next.animations = patch.animations
+  else if (node.animations !== undefined) next.animations = node.animations
+  else delete next.animations
   if (patch.metadata) {
     // Honouring `replace` here is what makes a metadata patch invertible: the
     // inverse restores the previous object wholesale instead of merging the
@@ -791,6 +833,27 @@ export function applyTransaction(
         delete document.tokens[operation.id]
         inverseOperations.unshift({ type: 'token.upsert', token: clone(previous) })
         changedTokenIds.add(operation.id)
+        break
+      }
+      case 'animation.upsert': {
+        const animations = (document.animations ??= {})
+        const previous = animations[operation.animation.id]
+        animations[operation.animation.id] = clone(operation.animation)
+        inverseOperations.unshift(
+          previous
+            ? { type: 'animation.upsert', animation: clone(previous) }
+            : { type: 'animation.delete', id: operation.animation.id },
+        )
+        break
+      }
+      case 'animation.delete': {
+        const previous = document.animations?.[operation.id]
+        if (!previous) throw new Error(`Animation ${operation.id} does not exist`)
+        delete document.animations![operation.id]
+        inverseOperations.unshift({
+          type: 'animation.upsert',
+          animation: clone(previous),
+        })
         break
       }
       case 'theme.upsert': {

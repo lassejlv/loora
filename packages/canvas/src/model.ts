@@ -1,3 +1,21 @@
+import {
+  isCanvasAnimation,
+  isCanvasMotionTransform,
+  isCanvasNodeAnimation,
+  isCanvasTransition,
+  MAX_ANIMATIONS,
+  MAX_NODE_ANIMATIONS,
+  VISUAL_STATES,
+  type CanvasAnimation,
+  type CanvasMotionTransform,
+  type CanvasNodeAnimation,
+  type CanvasTransition,
+  type AnimationId,
+  type VisualStateName,
+} from './motion'
+
+export * from './motion'
+
 export const CANVAS_SCHEMA_VERSION = 2 as const
 export const MAX_CANVAS_NODES = 25_000
 export const DEFAULT_ORDER_STEP = 1024
@@ -168,6 +186,21 @@ export type CanvasStylePatch = Partial<Omit<CanvasStyle, 'typography'>> & {
   typography?: Partial<CanvasTypography>
 }
 
+/**
+ * What a node looks like while a pointer is on it, held down, or focused.
+ *
+ * Narrower than a node patch on purpose: a hover may restyle and move a node,
+ * it may not rewrite its text or reparent it. The transform is separate from
+ * the style because it is the half that costs nothing to animate — it never
+ * reflows the page, which is what lets a hover run at frame rate.
+ */
+export interface CanvasVisualState {
+  style?: CanvasStylePatch
+  transform?: CanvasMotionTransform
+}
+
+export type CanvasVisualStates = Partial<Record<VisualStateName, CanvasVisualState>>
+
 export interface NodePatch {
   name?: string
   hidden?: boolean
@@ -182,6 +215,9 @@ export interface NodePatch {
   alt?: string
   interactions?: CanvasInteraction[]
   variant?: string
+  visualStates?: CanvasVisualStates
+  transition?: CanvasTransition
+  animations?: CanvasNodeAnimation[]
 }
 
 export interface NodeMutationPatch extends NodePatch {
@@ -240,6 +276,12 @@ export interface CanvasNodeBase {
   style: CanvasStyle
   responsive: ResponsiveOverrides
   interactions: CanvasInteraction[]
+  /** How this node looks under a pointer. Absent means it does not react. */
+  visualStates?: CanvasVisualStates
+  /** How it travels between those looks. */
+  transition?: CanvasTransition
+  /** Document animations this node plays, and what starts them. */
+  animations?: CanvasNodeAnimation[]
   metadata?: Record<string, unknown>
 }
 
@@ -338,6 +380,11 @@ export interface CanvasDocument {
   tokens: Record<TokenId, DesignToken>
   themes: Record<ThemeId, CanvasTheme>
   activeThemeId: ThemeId
+  /**
+   * Named motion, referenced by nodes. Optional because every document written
+   * before motion existed simply has none.
+   */
+  animations?: Record<AnimationId, CanvasAnimation>
   metadata: {
     createdAt: number
     updatedAt: number
@@ -1142,6 +1189,39 @@ function validStateDefinitions(
   )
 }
 
+function validVisualStates(value: unknown, document: CanvasDocument) {
+  if (!isRecord(value)) return false
+  const names = Object.keys(value)
+  if (names.length === 0 || names.length > VISUAL_STATES.length) return false
+  return names.every((name) => {
+    if (!(VISUAL_STATES as readonly string[]).includes(name)) return false
+    const state = value[name]
+    if (!isRecord(state)) return false
+    if (Object.keys(state).some((key) => !['style', 'transform'].includes(key))) {
+      return false
+    }
+    if (state.style !== undefined && !validStylePatch(state.style, document)) {
+      return false
+    }
+    if (state.transform !== undefined && !isCanvasMotionTransform(state.transform)) {
+      return false
+    }
+    return state.style !== undefined || state.transform !== undefined
+  })
+}
+
+/**
+ * A node may only play animations the document defines, so a reference cannot
+ * outlive what it points at.
+ */
+function validNodeAnimations(value: unknown, document: CanvasDocument) {
+  if (!Array.isArray(value) || value.length > MAX_NODE_ANIMATIONS) return false
+  const defined = document.animations ?? {}
+  return value.every(
+    (use) => isCanvasNodeAnimation(use) && defined[use.animationId] !== undefined,
+  )
+}
+
 const interactionTriggers = new Set<CanvasEventTrigger>([
   'click',
   'double-click',
@@ -1302,6 +1382,9 @@ const patchKeys = new Set([
   'alt',
   'interactions',
   'variant',
+  'visualStates',
+  'transition',
+  'animations',
 ])
 
 function validNodePatch(
@@ -1379,6 +1462,15 @@ function validNodePatch(
   ) {
     return false
   }
+  if (value.visualStates !== undefined && !validVisualStates(value.visualStates, document)) {
+    return false
+  }
+  if (value.transition !== undefined && !isCanvasTransition(value.transition)) {
+    return false
+  }
+  if (value.animations !== undefined && !validNodeAnimations(value.animations, document)) {
+    return false
+  }
   return !(
     value.variant !== undefined &&
     (typeof value.variant !== 'string' || value.variant.length > 200)
@@ -1394,6 +1486,9 @@ const fastMutationKeys = new Set([
   'style',
   'responsive',
   'interactions',
+  'visualStates',
+  'transition',
+  'animations',
   'metadata',
   'order',
 ])
@@ -1512,6 +1607,7 @@ export function validateDocument(value: unknown): DocumentValidationResult {
           'tokens',
           'themes',
           'activeThemeId',
+          'animations',
           'metadata',
         ].includes(key),
     )
@@ -1546,6 +1642,19 @@ export function validateDocument(value: unknown): DocumentValidationResult {
   }
   if (!value.themes[value.activeThemeId]) {
     pushIssue(issues, 'activeThemeId', 'Active theme does not exist')
+  }
+  if (value.animations !== undefined) {
+    if (!isRecord(value.animations)) {
+      pushIssue(issues, 'animations', 'Animations must be an object')
+    } else if (Object.keys(value.animations).length > MAX_ANIMATIONS) {
+      pushIssue(issues, 'animations', `A document holds at most ${MAX_ANIMATIONS} animations`)
+    } else {
+      for (const [id, animation] of Object.entries(value.animations)) {
+        if (!isCanvasAnimation(animation) || animation.id !== id) {
+          pushIssue(issues, `animations.${id}`, 'Animation is invalid')
+        }
+      }
+    }
   }
   if (!isRecord(value.metadata)) {
     pushIssue(issues, 'metadata', 'Metadata must be an object')
@@ -1688,6 +1797,9 @@ export function validateDocument(value: unknown): DocumentValidationResult {
     'style',
     'responsive',
     'interactions',
+    'visualStates',
+    'transition',
+    'animations',
     'metadata',
   ]
   const specificNodeKeys: Record<CanvasNodeType, string[]> = {
@@ -1901,6 +2013,25 @@ export function validateDocument(value: unknown): DocumentValidationResult {
       )
     ) {
       pushIssue(issues, `${path}.interactions`, 'Interactions are invalid')
+    }
+    if (
+      node.visualStates !== undefined &&
+      !validVisualStates(node.visualStates, document)
+    ) {
+      pushIssue(issues, `${path}.visualStates`, 'Visual states are invalid')
+    }
+    if (node.transition !== undefined && !isCanvasTransition(node.transition)) {
+      pushIssue(issues, `${path}.transition`, 'Transition is invalid')
+    }
+    if (
+      node.animations !== undefined &&
+      !validNodeAnimations(node.animations, document)
+    ) {
+      pushIssue(
+        issues,
+        `${path}.animations`,
+        'Animations must reference animations this document defines',
+      )
     }
     for (const interaction of node.interactions) {
       if (!isRecord(interaction) || !Array.isArray(interaction.actions)) {

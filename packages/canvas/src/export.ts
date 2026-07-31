@@ -1,10 +1,8 @@
 import {
   type CanvasAction,
-  type CanvasColor,
   type CanvasDocument,
   type CanvasLength,
   type CanvasNode,
-  type CanvasPaint,
   type CanvasStyle,
   type InstanceNode,
   type NodeId,
@@ -52,6 +50,17 @@ function escapeAttribute(value: string) {
   return escapeHtml(value).replaceAll('`', '&#96;')
 }
 
+import {
+  colorValue,
+  escapeCssString,
+  fontFamilyValue,
+  paintValue,
+} from './style-css'
+import {
+  motionStyleSheet,
+  nodeMotionDeclarations,
+} from './motion-css'
+
 function className(id: string) {
   return `loora-${[...id]
     .map((character) =>
@@ -60,69 +69,6 @@ function className(id: string) {
         : `_u${character.codePointAt(0)!.toString(16)}_`,
     )
     .join('')}`
-}
-
-function escapeCssString(value: string) {
-  return [...value]
-    .map((character) => {
-      const code = character.codePointAt(0)!
-      if (character === '\\' || character === '"' || code < 32 || code === 127) {
-        return `\\${code.toString(16)} `
-      }
-      return character
-    })
-    .join('')
-}
-
-const genericFontFamilies = new Set([
-  'serif',
-  'sans-serif',
-  'monospace',
-  'cursive',
-  'fantasy',
-  'system-ui',
-  'ui-serif',
-  'ui-sans-serif',
-  'ui-monospace',
-  'ui-rounded',
-  'math',
-  'emoji',
-  'fangsong',
-  'inherit',
-  'initial',
-  'revert',
-  'unset',
-])
-
-/**
- * A family is a list, not a single name. Quoting the whole string collapsed
- * `"Helvetica Neue", Arial, sans-serif` — what an HTML import records — into one
- * unusable family, so each entry is quoted on its own and generic keywords are
- * left bare.
- */
-function fontFamilyValue(family: string) {
-  const families = family
-    .split(',')
-    .map((part) => part.trim())
-    .filter(Boolean)
-    .map((part) => {
-      if (/^"[^"]*"$/.test(part) || /^'[^']*'$/.test(part)) return part
-      if (genericFontFamilies.has(part.toLowerCase())) return part
-      return `"${part.replaceAll('"', '').replaceAll("'", '')}"`
-    })
-  return families.length > 0 ? families.join(', ') : JSON.stringify(family)
-}
-
-function colorValue(_document: CanvasDocument, color: CanvasColor) {
-  if (typeof color === 'string') return color
-  return `var(--loora-token-${color.token.replace(/[^a-zA-Z0-9_-]/g, '-')})`
-}
-
-function paintValue(document: CanvasDocument, paint: CanvasPaint) {
-  if (paint.type === 'solid') return colorValue(document, paint.color)
-  return `linear-gradient(${paint.angle}deg, ${paint.stops
-    .map((stop) => `${colorValue(document, stop.color)} ${stop.offset * 100}%`)
-    .join(', ')})`
 }
 
 function lengthValue(length: CanvasLength, axis: 'width' | 'height') {
@@ -507,7 +453,10 @@ function cssForNode(
     instance && patched.type === 'component'
       ? asInstanceComponentRoot(patched)
       : patched
-  const base = `${selector}{${styleDeclarations(document, styled)}}`
+  const motion = nodeMotionDeclarations(document, styled)
+  const base = `${selector}{${[styleDeclarations(document, styled), ...motion]
+    .filter(Boolean)
+    .join(';')}}`
   const pageBase =
     node.type === 'page'
       ? `${selector}{position:relative;left:0;top:0;width:100%;height:auto;min-height:${node.viewport.minHeight}px}`
@@ -569,7 +518,16 @@ function collectCss(document: CanvasDocument, index: CanvasChildIndex) {
       }
     }
   }
-  return output.join('\n')
+  // Keyframes and pointer states come last so a hover rule outranks the base
+  // rule it overrides — they share a specificity, and later wins.
+  output.push(
+    motionStyleSheet(
+      document,
+      Object.values(document.nodes),
+      (node) => `.${className(node.id)}`,
+    ),
+  )
+  return output.filter(Boolean).join('\n')
 }
 
 export function compileCanvas(

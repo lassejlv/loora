@@ -102,6 +102,7 @@ Dependency-light canvas core. **Must never** import db, RPC, auth, web, drafts, 
 | `@loora/canvas/engine` | Typed transactions, indexes, undo/redo, preconditions, rebase, subscriptions |
 | `@loora/canvas/merge` | Neutral left/right semantic merge |
 | `@loora/canvas/react` | DOM/SVG renderer, surface, overlays, hooks |
+| `@loora/canvas/motion` | Transitions, keyframe animations, easings, and the CSS they generate |
 | `@loora/canvas/export` | One-way HTML, JSX, Tailwind, React/TSX, JSON, PNG compile |
 | `@loora/canvas/import` | HTML/CSS snapshot conversion into validated structured nodes |
 
@@ -202,7 +203,7 @@ These are easy to break and expensive to fix. Treat them as hard rules.
 
 Keep MCP tools and handoff consumers aligned on the shared `@loora/agent` vocabulary:
 
-`createPage` · `insertNodes` · `patchNodes` · `moveNodes` · `deleteNodes` · `readNode` · `readTree` · `searchNodes` · `createComponent` · `createInstance` · `setTokens` · `viewNode` · `viewPage` · `viewCanvas`
+`createPage` · `insertNodes` · `patchNodes` · `moveNodes` · `deleteNodes` · `readNode` · `readTree` · `searchNodes` · `createComponent` · `createInstance` · `setTokens` · `setAnimations` · `animateNodes` · `viewNode` · `viewPage` · `viewCanvas`
 
 Implementation: `packages/agent/src/canvas-tools.ts` (and MCP server wiring in `apps/mcp/src/`).
 
@@ -249,6 +250,39 @@ and `REALTIME_INTERNAL_TOKEN` on web and MCP; `REALTIME_TICKET_SECRET`,
 - Legacy designs without a Canvas document are unsupported in the editor; there is no automatic first-open conversion flow.
 - The old public-link renderer (`element-frame.tsx`, an iframe/Babel/Tailwind
   per-element React-root pipeline) is gone. Do not bring that shape back.
+
+### Motion
+
+Two ideas, kept apart.
+
+- A **transition** is how a node travels between looks. It lives on the node
+  (`transition`), and it applies to whatever its **visual states**
+  (`visualStates`: `hover`, `press`, `focus`) change. A visual state carries a
+  style patch and a transform — narrower than a node patch on purpose: a hover
+  may restyle and move a node, it may not rewrite its text.
+- An **animation** is a named keyframe sequence held once on the document
+  (`document.animations`), like a token, and referenced by any number of nodes
+  (`animations: [{ animationId, trigger }]`). Triggers are `load`, `in-view`,
+  `always`, `hover`, `press`.
+
+Keyframes move opacity and transform only. Both composite without touching
+layout, which is what keeps an animated canvas smooth and the exported CSS
+honest about what a browser can run.
+
+`@loora/canvas/motion-css` generates the CSS, and both the editor renderer and
+the exporter read from it — a hover that lifts a card on the canvas is the same
+rule in the download. Every motion stylesheet ends with a
+`prefers-reduced-motion` block that turns it all off. The canvas surface takes a
+`motion` prop so the editor can stop motion while somebody is working, without
+the document knowing.
+
+Presets carry the common asks: `@loora/canvas/motion` has `fade-in`,
+`fade-in-up`, `fade-in-down`, `slide-in-left`, `slide-in-right`, `scale-in`,
+`pulse`, `float`, `spin`; `@loora/canvas/motion-presets` has hover looks —
+`lift`, `grow`, `shrink`, `fade`, `nudge-right` — each bringing its own
+transition. Agents reach them through `setAnimations` (define, by preset name or
+full keyframes) and `animateNodes` (apply, with an optional `stagger` so a list
+arrives one item at a time).
 
 ### HTML/CSS import
 
@@ -309,6 +343,7 @@ History uses Conventional Commits with scopes when useful:
 | Goal | Start here |
 |------|------------|
 | Node types, validation, document shape | `packages/canvas/src/model.ts` |
+| Transitions, animations, hover states | `packages/canvas/src/motion.ts` (+ `motion-css.ts`, `motion-presets.ts`) |
 | Transactions, undo, conflict preconditions | `packages/canvas/src/engine.ts` |
 | Draft merge semantics | `packages/canvas/src/merge.ts` (+ RPC draft procedures) |
 | Editor chrome / tools / panels | `packages/editor/src/components/` |

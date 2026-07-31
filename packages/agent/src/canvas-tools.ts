@@ -27,7 +27,18 @@ import {
   type ResponsiveOverrides,
   type SemanticTag,
   type TextRun,
+  type CanvasVisualState,
 } from '@loora/canvas/model'
+import {
+  motionPreset,
+  MOTION_PRESET_NAMES,
+  type CanvasAnimation,
+} from '@loora/canvas/motion'
+import {
+  hoverPreset,
+  HOVER_PRESET_NAMES,
+  type HoverPresetName,
+} from '@loora/canvas/motion-presets'
 
 const lengthSchema = z.union([
   z.object({ unit: z.literal('px'), value: z.number().finite() }),
@@ -362,6 +373,88 @@ const nodePatchFields = {
   variant: z.string().max(128).optional(),
 }
 
+/* -------------------------------------------------------------------------- */
+/* Motion                                                                     */
+/* -------------------------------------------------------------------------- */
+
+export const easingSchema = z.union([
+  z.enum(['linear', 'ease', 'ease-in', 'ease-out', 'ease-in-out']),
+  z.object({
+    cubicBezier: z.tuple([
+      z.number().min(0).max(1),
+      z.number().min(-10).max(10),
+      z.number().min(0).max(1),
+      z.number().min(-10).max(10),
+    ]),
+  }),
+])
+
+export const transitionSchema = z.object({
+  duration: z.number().finite().min(0).max(60_000),
+  delay: z.number().finite().min(0).max(60_000).optional(),
+  easing: easingSchema.default('ease-out'),
+  properties: z
+    .array(z.enum(['all', 'opacity', 'transform', 'colors', 'size', 'shadow', 'border']))
+    .min(1)
+    .max(7)
+    .optional(),
+})
+
+export const motionTransformSchema = z
+  .object({
+    x: z.number().finite().min(-100_000).max(100_000).optional(),
+    y: z.number().finite().min(-100_000).max(100_000).optional(),
+    scale: z.number().finite().min(0).max(100).optional(),
+    scaleX: z.number().finite().min(0).max(100).optional(),
+    scaleY: z.number().finite().min(0).max(100).optional(),
+    rotate: z.number().finite().min(-3_600).max(3_600).optional(),
+    skewX: z.number().finite().min(-3_600).max(3_600).optional(),
+    skewY: z.number().finite().min(-3_600).max(3_600).optional(),
+  })
+  .refine((value) => Object.keys(value).length > 0, {
+    message: 'A transform has to move something',
+  })
+
+export const keyframeSchema = z
+  .object({
+    offset: z.number().min(0).max(1),
+    opacity: z.number().min(0).max(1).optional(),
+    transform: motionTransformSchema.optional(),
+  })
+  .refine((frame) => frame.opacity !== undefined || frame.transform !== undefined, {
+    message: 'A keyframe has to set an opacity or a transform',
+  })
+
+export const animationSchema = z.object({
+  id: z.string().regex(/^[a-zA-Z0-9_-]{1,128}$/),
+  name: z.string().trim().min(1).max(200),
+  keyframes: z.array(keyframeSchema).min(2).max(40),
+  duration: z.number().finite().min(1).max(60_000),
+  delay: z.number().finite().min(0).max(60_000).optional(),
+  easing: easingSchema.default('ease-out'),
+  iterations: z.union([z.number().int().min(1).max(1_000), z.literal('infinite')]).default(1),
+  direction: z
+    .enum(['normal', 'reverse', 'alternate', 'alternate-reverse'])
+    .default('normal'),
+  fill: z.enum(['none', 'forwards', 'backwards', 'both']).default('both'),
+})
+
+export const visualStateSchema = z
+  .object({
+    style: canvasStylePatchSchema.optional(),
+    transform: motionTransformSchema.optional(),
+  })
+  .refine((state) => state.style !== undefined || state.transform !== undefined, {
+    message: 'A visual state has to change a style or a transform',
+  })
+
+export const nodeAnimationSchema = z.object({
+  animationId: z.string().min(1).max(128),
+  trigger: z.enum(['load', 'in-view', 'always', 'hover', 'press']).default('load'),
+  delay: z.number().finite().min(0).max(60_000).optional(),
+  once: z.boolean().optional(),
+})
+
 export const canvasNodePatchSchema = z.object({
   ...nodePatchFields,
   order: z.number().finite().optional(),
@@ -395,6 +488,15 @@ export const canvasNodePatchSchema = z.object({
     .optional(),
   fit: z.enum(['cover', 'contain', 'fill']).optional(),
   componentId: z.string().min(1).max(128).optional(),
+  visualStates: z
+    .object({
+      hover: visualStateSchema.optional(),
+      press: visualStateSchema.optional(),
+      focus: visualStateSchema.optional(),
+    })
+    .optional(),
+  transition: transitionSchema.optional(),
+  animations: z.array(nodeAnimationSchema).max(8).optional(),
   responsive: z.record(z.string(), z.object(nodePatchFields)).optional(),
   metadata: z.record(z.string(), z.unknown()).optional(),
 })
@@ -606,6 +708,47 @@ export const setTokensInputSchema = z.object({
     .default([]),
   tokens: z.array(tokenSchema).min(1).max(1_000),
 })
+
+
+export const setAnimationsInputSchema = z
+  .object({
+    presets: z.array(z.enum(MOTION_PRESET_NAMES as [string, ...string[]])).max(20).default([]),
+    animations: z.array(animationSchema).max(50).default([]),
+    remove: z.array(z.string().min(1).max(128)).max(50).default([]),
+  })
+  .refine(
+    (input) =>
+      input.presets.length > 0 || input.animations.length > 0 || input.remove.length > 0,
+    { message: 'Nothing to do: pass presets, animations, or ids to remove' },
+  )
+
+export const animateNodesInputSchema = z
+  .object({
+    refs: z.array(nodeRefSchema).min(1).max(200),
+    play: z.array(nodeAnimationSchema).max(8).optional(),
+    hover: z
+      .union([
+        z.enum(HOVER_PRESET_NAMES as [string, ...string[]]),
+        visualStateSchema,
+      ])
+      .optional(),
+    press: visualStateSchema.optional(),
+    focus: visualStateSchema.optional(),
+    transition: transitionSchema.optional(),
+    /** Per-node step in milliseconds, so a list can arrive one item at a time. */
+    stagger: z.number().finite().min(0).max(5_000).optional(),
+    clear: z.boolean().default(false),
+  })
+  .refine(
+    (input) =>
+      input.clear ||
+      input.play !== undefined ||
+      input.hover !== undefined ||
+      input.press !== undefined ||
+      input.focus !== undefined ||
+      input.transition !== undefined,
+    { message: 'Nothing to do: pass motion to apply, or clear: true' },
+  )
 
 export const readNodeInputSchema = z.object({ ref: nodeRefSchema })
 export const readTreeInputSchema = z.object({
@@ -1174,6 +1317,82 @@ export function tokenOperations(
     ...themes.map((theme) => ({ type: 'theme.upsert' as const, theme })),
     ...tokens.map((token) => ({ type: 'token.upsert' as const, token })),
   ]
+}
+
+
+/**
+ * Document animations, from presets or explicit definitions. Presets keep the
+ * common ask to one word; a full definition is there when the motion is the
+ * point rather than the decoration.
+ */
+export function animationOperations(input: {
+  presets?: string[]
+  animations?: CanvasAnimation[]
+  remove?: string[]
+}): CanvasOperation[] {
+  const defined = new Map<string, CanvasAnimation>()
+  for (const preset of input.presets ?? []) {
+    const animation = motionPreset(preset as Parameters<typeof motionPreset>[0])
+    defined.set(animation.id, animation)
+  }
+  // An explicit definition wins over a preset of the same id, because it is the
+  // more specific thing the caller asked for.
+  for (const animation of input.animations ?? []) defined.set(animation.id, animation)
+  return [
+    ...(input.remove ?? []).map((id) => ({ type: 'animation.delete' as const, id })),
+    ...[...defined.values()].map((animation) => ({
+      type: 'animation.upsert' as const,
+      animation,
+    })),
+  ]
+}
+
+export type AnimateNodesInput = z.infer<typeof animateNodesInputSchema>
+
+/**
+ * Motion onto nodes. A named hover brings its own transition, so "make these
+ * cards lift" is one call; an explicit transition still wins if the caller
+ * passed one. A stagger walks the refs in the order they were given, which is
+ * what turns a list into an entrance rather than a flash.
+ */
+export function animateNodesOperations(input: AnimateNodesInput): CanvasOperation[] {
+  const preset =
+    typeof input.hover === 'string'
+      ? hoverPreset(input.hover as HoverPresetName)
+      : null
+  const hover = preset ? preset.state : (input.hover as CanvasVisualState | undefined)
+  const visualStates = {
+    ...(hover ? { hover } : {}),
+    ...(input.press ? { press: input.press as CanvasVisualState } : {}),
+    ...(input.focus ? { focus: input.focus as CanvasVisualState } : {}),
+  }
+  const transition = input.transition ?? preset?.transition
+
+  return input.refs.map((ref, index) => {
+    if (input.clear) {
+      return {
+        type: 'node.patch' as const,
+        id: ref.nodeId,
+        patch: {},
+        unset: ['visualStates', 'transition', 'animations'],
+      }
+    }
+    const play = input.play?.map((use) => ({
+      ...use,
+      ...(input.stagger
+        ? { delay: (use.delay ?? 0) + index * input.stagger }
+        : {}),
+    }))
+    return {
+      type: 'node.patch' as const,
+      id: ref.nodeId,
+      patch: {
+        ...(Object.keys(visualStates).length > 0 ? { visualStates } : {}),
+        ...(transition ? { transition } : {}),
+        ...(play ? { animations: play } : {}),
+      },
+    }
+  })
 }
 
 export function createCanvasAgentTools({

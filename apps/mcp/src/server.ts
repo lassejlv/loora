@@ -22,6 +22,9 @@ import {
   createPageInputSchema,
   createPageTransaction,
   deleteNodesInputSchema,
+  animateNodesInputSchema,
+  animateNodesOperations,
+  animationOperations,
   insertDescriptorOperations,
   insertNodesInputSchema,
   moveNodesInputSchema,
@@ -34,6 +37,7 @@ import {
   searchCanvasNodes,
   searchNodesInputSchema,
   semanticTree,
+  setAnimationsInputSchema,
   setTokensInputSchema,
   sourceContainerForRef,
   tokenOperations,
@@ -745,6 +749,66 @@ export function createLooraServer(
           themeIds: args.themes.map((theme) => theme.id),
           tokenIds: args.tokens.map((token) => token.id),
           revision: result.revision,
+        }
+      },
+    ),
+  )
+
+  server.registerTool(
+    'setAnimations',
+    {
+      description:
+        'Define named motion the design can reuse: pass preset names for the common ones (fade-in, fade-in-up, scale-in, slide-in-left, slide-in-right, pulse, float, spin) or full keyframe definitions, and remove ones no longer used. Point nodes at them with animateNodes.',
+      inputSchema: { ...targetShape, ...setAnimationsInputSchema.shape },
+    },
+    tool('setAnimations',
+      async (args: z.infer<typeof setAnimationsInputSchema> & {
+        designId: string
+        draftId?: string
+      }) => {
+        const operations = animationOperations(args)
+        const result = await applyCanvasTransactions(userId, args, [
+          {
+            id: canvasId('tx'),
+            label: 'MCP updated animations',
+            operations,
+          },
+        ])
+        return {
+          animationIds: operations.flatMap((operation) =>
+            operation.type === 'animation.upsert' ? [operation.animation.id] : [],
+          ),
+          removedIds: args.remove,
+          revision: result.revision,
+        }
+      },
+    ),
+  )
+
+  server.registerTool(
+    'animateNodes',
+    {
+      description:
+        'Give nodes motion. `hover` takes a preset (lift, grow, shrink, fade, nudge-right) or an explicit style and transform, and brings its own transition; `play` attaches animations defined by setAnimations, with a trigger of load, in-view, always, hover or press. `stagger` spaces a list out so it arrives one item at a time. Pass clear: true to take all motion off.',
+      inputSchema: { ...targetShape, ...animateNodesInputSchema.shape },
+    },
+    tool('animateNodes',
+      async (args: z.infer<typeof animateNodesInputSchema> & {
+        designId: string
+        draftId?: string
+      }) => {
+        const result = await applyCanvasTransactions(userId, args, [
+          {
+            id: canvasId('tx'),
+            label: args.clear ? 'MCP cleared motion' : 'MCP animated nodes',
+            operations: animateNodesOperations(args),
+          },
+        ])
+        return {
+          nodeIds: args.refs.map((ref) => ref.nodeId),
+          cleared: args.clear,
+          revision: result.revision,
+          changedNodeIds: result.changedNodeIds,
         }
       },
     ),
