@@ -380,6 +380,119 @@ describe('Canvas React surface', () => {
     expect(engine.getNode('frame')?.layout.y).toBe(10)
   })
 
+  it('draws where a reorder would land, and refuses the slot it came from', async () => {
+    const document = createCanvasDocument('Drop line fixture', 'drop-line')
+    document.nodes.page = createPageNode('Home', {
+      id: 'page',
+      layout: { ...defaultLayout(1_440, 900), mode: 'flex', direction: 'column' },
+    })
+    for (const [index, id] of ['first', 'second', 'third'].entries()) {
+      document.nodes[id] = createFrameNode(id, {
+        id,
+        parentId: 'page',
+        order: (index + 1) * 1_024,
+        layout: { ...defaultLayout(), position: 'flow' },
+      })
+    }
+    const engine = new CanvasEngine(document)
+    const view = render(
+      <CanvasProvider engine={engine}>
+        <CanvasSurface pageWidth={1_440} initialCamera={{ x: 0, y: 0, zoom: 1 }} />
+      </CanvasProvider>,
+    )
+    const surface = view.container.querySelector<HTMLElement>(
+      '[data-loora-canvas-surface]',
+    )!
+    surface.setPointerCapture = () => undefined
+    const element = (id: string) =>
+      view.container.querySelector<HTMLElement>(`[data-loora-node="${id}"]`)!
+    stubRect(element('page'), { left: 0, top: 0, width: 400, height: 300 })
+    stubRect(element('first'), { left: 0, top: 0, width: 400, height: 100 })
+    stubRect(element('second'), { left: 0, top: 100, width: 400, height: 100 })
+    stubRect(element('third'), { left: 0, top: 200, width: 400, height: 100 })
+    const dropLine = view.container.querySelector<SVGLineElement>(
+      '[data-loora-drop-line]',
+    )!
+
+    withHits([element('first'), element('page')], () => {
+      fireEvent.pointerDown(surface, { button: 0, clientX: 20, clientY: 50 })
+      fireEvent.pointerMove(surface, { button: 0, clientX: 20, clientY: 260 })
+    })
+    // Past the middle of the last sibling, so the line sits under it.
+    await waitFor(() => expect(dropLine.style.display).toBe('block'))
+    expect(dropLine.getAttribute('y1')).toBe('300')
+
+    withHits([element('first'), element('page')], () => {
+      fireEvent.pointerMove(surface, { button: 0, clientX: 20, clientY: 40 })
+    })
+    // Back in its own slot: nothing would change, and the drag says so.
+    await waitFor(() => expect(dropLine.style.display).toBe('none'))
+    expect(surface.style.cursor).toBe('not-allowed')
+
+    withHits([element('first'), element('page')], () => {
+      fireEvent.pointerUp(surface, { button: 0, clientX: 20, clientY: 40 })
+    })
+    expect(surface.style.cursor).toBe('')
+  })
+
+  it('detaches a flow child from its arranging parent when the drop is modified', () => {
+    const document = createCanvasDocument('Detach fixture', 'detach')
+    document.nodes.page = createPageNode('Home', {
+      id: 'page',
+      layout: { ...defaultLayout(400, 600), mode: 'flex', direction: 'column' },
+    })
+    // The only child of an arranging parent: a plain drag can only reorder it,
+    // and there is nothing to reorder it against.
+    document.nodes.card = createFrameNode('Card', {
+      id: 'card',
+      parentId: 'page',
+      order: 1_024,
+      layout: { ...defaultLayout(), position: 'flow' },
+    })
+    const engine = new CanvasEngine(document)
+    const view = render(
+      <CanvasProvider engine={engine}>
+        <CanvasSurface pageWidth={400} initialCamera={{ x: 0, y: 0, zoom: 1 }} />
+      </CanvasProvider>,
+    )
+    const surface = view.container.querySelector<HTMLElement>(
+      '[data-loora-canvas-surface]',
+    )!
+    surface.setPointerCapture = () => undefined
+    const element = (id: string) =>
+      view.container.querySelector<HTMLElement>(`[data-loora-node="${id}"]`)!
+    stubRect(element('page'), { left: 100, top: 100, width: 400, height: 600 })
+    stubRect(element('card'), { left: 100, top: 100, width: 400, height: 200 })
+
+    withHits([element('card'), element('page')], () => {
+      fireEvent.pointerDown(surface, { button: 0, clientX: 150, clientY: 150 })
+      fireEvent.pointerMove(surface, { button: 0, clientX: 200, clientY: 190 })
+      fireEvent.pointerUp(surface, { button: 0, clientX: 200, clientY: 190 })
+    })
+    expect(engine.getNode('card')?.layout.position).toBe('flow')
+
+    withHits([element('card'), element('page')], () => {
+      fireEvent.pointerDown(surface, { button: 0, clientX: 150, clientY: 150 })
+      fireEvent.pointerMove(surface, {
+        button: 0,
+        clientX: 200,
+        clientY: 190,
+        metaKey: true,
+      })
+      fireEvent.pointerUp(surface, {
+        button: 0,
+        clientX: 200,
+        clientY: 190,
+        metaKey: true,
+      })
+    })
+    expect(engine.getNode('card')?.layout).toMatchObject({
+      position: 'absolute',
+      x: 50,
+      y: 40,
+    })
+  })
+
   it('reorders a flow child inside an arranging parent instead of ejecting it', () => {
     const document = createCanvasDocument('Drag fixture', 'drag')
     document.nodes.page = createPageNode('Home', {

@@ -660,6 +660,94 @@ function dropIndex(
   return index
 }
 
+/**
+ * A drag that starts on a flow child of a parent that arranges its own
+ * children. Measured once on pointer-down: the siblings do not move while the
+ * dragged node rides a preview transform.
+ */
+interface ArrangedDrag {
+  parentId: NodeId
+  axis: 'row' | 'column' | 'grid'
+  siblings: DropSibling[]
+  currentIndex: number
+  parentRect: DOMRect
+}
+
+/**
+ * Whether this pointer state asks for the node to leave its parent's flow. Read
+ * on move and on release, not on press, so the gesture can start as a plain
+ * drag and become a detach mid-flight.
+ */
+function detachesFromFlow(event: { metaKey: boolean; ctrlKey: boolean }) {
+  return event.metaKey || event.ctrlKey
+}
+
+function arrangedDrag(
+  engine: CanvasEngine,
+  registry: CanvasDomRegistry,
+  ref: NodeRef,
+  source: CanvasNode,
+  parentNode: CanvasNode | null,
+  parentElement: HTMLElement | SVGElement | null,
+): ArrangedDrag | null {
+  if (
+    ref.instancePath.length > 0 ||
+    !source.parentId ||
+    !parentNode ||
+    !parentElement ||
+    source.layout.position === 'absolute' ||
+    (parentNode.layout.mode !== 'flex' && parentNode.layout.mode !== 'grid')
+  ) {
+    return null
+  }
+  const siblings = engine
+    .getChildren(source.parentId)
+    .filter((node) => node.id !== source.id)
+    .map((node) => ({
+      order: node.order,
+      rect: registry.get(nodeRefFor(node.id))?.getBoundingClientRect() ?? null,
+    }))
+    .filter((entry): entry is DropSibling => entry.rect !== null)
+  return {
+    parentId: source.parentId,
+    axis:
+      parentNode.layout.mode === 'grid'
+        ? 'grid'
+        : parentNode.layout.direction ?? 'row',
+    siblings,
+    currentIndex: siblings.filter((sibling) => sibling.order < source.order)
+      .length,
+    parentRect: parentElement.getBoundingClientRect(),
+  }
+}
+
+interface DropLine {
+  x1: number
+  y1: number
+  x2: number
+  y2: number
+}
+
+/** Where the node would land, in viewport space, so the drop is never silent. */
+function dropLineFor(arrange: ArrangedDrag, index: number): DropLine | null {
+  const { siblings, axis, parentRect } = arrange
+  const last = siblings.length - 1
+  const rect = siblings[Math.min(index, last)]?.rect
+  if (!rect) return null
+  const across = axis !== 'column'
+  const edge =
+    index > last
+      ? across
+        ? rect.right
+        : rect.bottom
+      : across
+        ? rect.left
+        : rect.top
+  return across
+    ? { x1: edge, y1: parentRect.top, x2: edge, y2: parentRect.bottom }
+    : { x1: parentRect.left, y1: edge, x2: parentRect.right, y2: edge }
+}
+
 /** An order that lands the node between its new neighbours. */
 function orderAtIndex(siblings: DropSibling[], index: number) {
   const before = siblings[index - 1]?.order
@@ -1185,6 +1273,7 @@ function SelectionOverlay({
   marqueeRef,
   verticalGuideRef,
   horizontalGuideRef,
+  dropLineRef,
 }: {
   sceneRef: RefObject<HTMLDivElement | null>
   cameraRef: MutableRefObject<CanvasCamera>
@@ -1192,6 +1281,7 @@ function SelectionOverlay({
   marqueeRef: RefObject<SVGRectElement | null>
   verticalGuideRef: RefObject<SVGLineElement | null>
   horizontalGuideRef: RefObject<SVGLineElement | null>
+  dropLineRef: RefObject<SVGLineElement | null>
 }) {
   const { engine, registry, session, readOnly, transact } = useCanvasContext()
   useSyncExternalStore(session.subscribe, () => session.revision, () => session.revision)
@@ -1450,6 +1540,18 @@ function SelectionOverlay({
         stroke="#e056fd"
         strokeWidth="1"
         strokeDasharray="4 3"
+        style={{ display: 'none' }}
+      />
+      <line
+        ref={dropLineRef}
+        data-loora-drop-line
+        x1="0"
+        x2="0"
+        y1="0"
+        y2="0"
+        stroke="#e056fd"
+        strokeWidth="2"
+        strokeLinecap="round"
         style={{ display: 'none' }}
       />
       <rect
@@ -1724,6 +1826,8 @@ export function CanvasSurface({
     snapY: number[]
     guideX: number | null
     guideY: number | null
+    arrange: ArrangedDrag | null
+    dropLine: DropLine | null
     containment: {
       x: DragRange | null
       y: DragRange | null
@@ -1751,12 +1855,14 @@ export function CanvasSurface({
   const marqueeElementRef = useRef<SVGRectElement | null>(null)
   const verticalGuideRef = useRef<SVGLineElement | null>(null)
   const horizontalGuideRef = useRef<SVGLineElement | null>(null)
+  const dropLineRef = useRef<SVGLineElement | null>(null)
   const frame = useRef<number | null>(null)
   const cameraCompositingTimer = useRef<ReturnType<typeof setTimeout> | null>(
     null,
   )
 
   const hideGuides = () => {
+    if (dropLineRef.current) dropLineRef.current.style.display = 'none'
     if (verticalGuideRef.current) {
       verticalGuideRef.current.style.display = 'none'
     }
@@ -2333,6 +2439,15 @@ export function CanvasSurface({
       ]),
       guideX: null,
       guideY: null,
+      arrange: arrangedDrag(
+        engine,
+        registry,
+        selected,
+        source,
+        parentNode,
+        parentElement,
+      ),
+      dropLine: null,
       containment: parentRect
         ? {
             x: containedRange(
@@ -2465,6 +2580,24 @@ export function CanvasSurface({
           ? activeDrag.startRect.bottom + rangeY.max
           : ySnap?.position ?? null
       : ySnap?.position ?? null
+    // A reorder has no preview of its own — the node rides under the pointer
+    // either way — so say where it would land, and say when it would land
+    // nowhere.
+    if (activeDrag.arrange && !detachesFromFlow(event)) {
+      const index = dropIndex(
+        activeDrag.arrange.siblings,
+        { x: event.clientX, y: event.clientY },
+        activeDrag.arrange.axis,
+      )
+      const unchanged = index === activeDrag.arrange.currentIndex
+      activeDrag.dropLine = unchanged
+        ? null
+        : dropLineFor(activeDrag.arrange, index)
+      event.currentTarget.style.cursor = unchanged ? 'not-allowed' : ''
+    } else {
+      activeDrag.dropLine = null
+      event.currentTarget.style.cursor = ''
+    }
     schedule(() => {
       if (!drag.current) return
       ;(drag.current.element as HTMLElement).style.transform =
@@ -2490,6 +2623,16 @@ export function CanvasSurface({
           const y = drag.current.guideY - surfaceRect.top
           horizontalGuideRef.current.setAttribute('y1', String(y))
           horizontalGuideRef.current.setAttribute('y2', String(y))
+        }
+      }
+      if (dropLineRef.current) {
+        const line = drag.current.dropLine
+        dropLineRef.current.style.display = line ? 'block' : 'none'
+        if (line && surfaceRect) {
+          dropLineRef.current.setAttribute('x1', String(line.x1 - surfaceRect.left))
+          dropLineRef.current.setAttribute('x2', String(line.x2 - surfaceRect.left))
+          dropLineRef.current.setAttribute('y1', String(line.y1 - surfaceRect.top))
+          dropLineRef.current.setAttribute('y2', String(line.y2 - surfaceRect.top))
         }
       }
     })
@@ -2570,6 +2713,8 @@ export function CanvasSurface({
     const current = drag.current
     drag.current = null
     if (!current) return
+    event.currentTarget.style.cursor =
+      spaceHeld.current || interactionMode === 'pan' ? 'grab' : ''
     ;(current.element as HTMLElement).style.transform = current.originalTransform
     // The preview left the overlay offset; put it back on the resting box in
     // case this drop commits nothing.
@@ -2662,37 +2807,17 @@ export function CanvasSurface({
       }
     }
     const parentId = current.source.parentId
-    const parentNode = parentId ? engine.getNode(parentId) : null
-    const arranged = parentNode?.layout.mode === 'flex' || parentNode?.layout.mode === 'grid'
 
-    // Inside a parent that arranges its own children, a drag reorders.
-    if (
-      current.ref.instancePath.length === 0 &&
-      parentId &&
-      parentNode &&
-      arranged &&
-      current.source.layout.position !== 'absolute'
-    ) {
-      const siblings = engine
-        .getChildren(parentId)
-        .filter((node) => node.id !== current.source.id)
-        .map((node) => ({
-          order: node.order,
-          rect: registry.get(nodeRefFor(node.id))?.getBoundingClientRect() ?? null,
-        }))
-        .filter((entry): entry is DropSibling => entry.rect !== null)
-      const axis =
-        parentNode.layout.mode === 'grid'
-          ? 'grid'
-          : (parentNode.layout.direction ?? 'row')
+    // Inside a parent that arranges its own children, a drag reorders. Holding
+    // the platform modifier through the drop pulls the node out of the flow
+    // instead, and lands it where it was released.
+    if (current.arrange && !detachesFromFlow(event)) {
+      const { siblings, axis, currentIndex } = current.arrange
       const index = dropIndex(
         siblings,
         { x: current.clientX, y: current.clientY },
         axis,
       )
-      const currentIndex = siblings.filter(
-        (sibling) => sibling.order < current.source.order,
-      ).length
       if (index === currentIndex) return
       transact({
         id: canvasId('tx'),
@@ -2702,7 +2827,7 @@ export function CanvasSurface({
           {
             type: 'node.move',
             id: current.source.id,
-            parentId,
+            parentId: current.arrange.parentId,
             order: orderAtIndex(siblings, index),
           },
         ],
@@ -2910,6 +3035,7 @@ export function CanvasSurface({
         marqueeRef={marqueeElementRef}
         verticalGuideRef={verticalGuideRef}
         horizontalGuideRef={horizontalGuideRef}
+        dropLineRef={dropLineRef}
       />
     </div>
   )
