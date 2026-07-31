@@ -18,6 +18,7 @@ Postgres · Better Auth · Polar billing (plan access) · oRPC · Railway
 apps/web          TanStack Start app (UI, API route handlers, canvas editor shell)
 apps/mcp          Remote MCP server (Streamable HTTP, OAuth resource server)
 apps/ws           Realtime WebSocket service (rooms, presence, MCP agent events)
+packages/ui       Shared design-system primitives, icon barrel, `cn` (`@loora/ui`)
 packages/canvas   Canvas model, engine, merge, React surface, import, export
 packages/db       Drizzle schema, Neon client, migrations (`@loora/db`)
 packages/rpc      oRPC `appRouter`, storage, history, handoff (`@loora/rpc`)
@@ -32,9 +33,10 @@ packages/billing  Polar plan access / entitlements (`@loora/billing`)
 | Path | Purpose |
 |------|---------|
 | `src/routes/` | File-based routes + API handlers. `routeTree.gen.ts` is generated — never hand-edit. |
-| `src/components/` | App UI. Canvas editor shell: `components/canvas/`. Primitives: `components/ui/`. |
+| `src/components/` | App UI. Canvas editor shell: `components/canvas/`. Primitives come from `@loora/ui`. |
 | `src/lib/` | Client helpers (oRPC client, canvas runtime/clipboard, designs, theme, URL state). |
-| `src/hooks/`, `src/test/` | Hooks, JSDOM test preload. |
+| `src/test/` | JSDOM test preload. |
+| `src/styles.css` | Tailwind entry and design tokens. It `@source`s `packages/ui/src` so shared-primitive classes are scanned. |
 | `public/` | Static assets. |
 
 **Key routes**
@@ -55,6 +57,21 @@ packages/billing  Polar plan access / entitlements (`@loora/billing`)
 | GitHub connect + callback routes | OAuth |
 
 Legacy `/?design=`, `/?d=`, `/app/design?id=`, and `?draft=` links redirect into the canonical editor route.
+
+### `packages/ui` (`@loora/ui`)
+
+Presentational design-system layer. **Must never** import db, RPC, auth, billing, canvas, or anything from `apps/web` — it holds no product state and runs no data fetching.
+
+| Export | Role |
+|--------|------|
+| `@loora/ui/<name>` | One primitive per file, e.g. `@loora/ui/button`, `@loora/ui/dialog` (`src/components/<name>.tsx`) |
+| `@loora/ui/utils` | `cn` (clsx + tailwind-merge) |
+| `@loora/ui/icons` | The hugeicons barrel — the only place `@hugeicons/*` is imported |
+| `@loora/ui/hooks/*` | Presentational hooks, e.g. `@loora/ui/hooks/use-media-query` |
+
+Design tokens stay in `apps/web/src/styles.css`; the package ships classes, not
+a theme. `apps/web/components.json` points the shadcn CLI here, so generated
+primitives land in the package rather than the app.
 
 ### `packages/canvas` (`@loora/canvas`)
 
@@ -221,7 +238,7 @@ HTML/CSS import computes a sandboxed DOM snapshot and converts supported layout 
 - TypeScript/TSX, strict types, **two-space indent**, **single quotes**, **no semicolons** (match handwritten code).
 - `PascalCase` components · `camelCase` functions/vars · **kebab-case** filenames (`preview-access-screen.tsx`).
 - Prefer **named exports**.
-- Imports: `#/` for `apps/web/src/*`; `@loora/canvas|db|rpc|agent|auth|billing` (and subpath exports) across packages.
+- Imports: `#/` for `apps/web/src/*`; `@loora/ui|canvas|db|rpc|agent|auth|billing` (and subpath exports) across packages.
 - Keep server credentials, DB access, and provider secrets out of client components.
 - No repo-wide formatter/linter — match neighbors; run `bunx tsc --noEmit` before submitting.
 - Do not hand-edit generated files (`routeTree.gen.ts`, Drizzle snapshots you didn't intend to regenerate).
@@ -272,8 +289,9 @@ History uses Conventional Commits with scopes when useful:
 | Transactions, undo, conflict preconditions | `packages/canvas/src/engine.ts` |
 | Draft merge semantics | `packages/canvas/src/merge.ts` (+ RPC draft procedures) |
 | Editor chrome / tools / panels | `apps/web/src/components/canvas/` |
+| Shared primitives, icons, `cn` | `packages/ui/src/` |
 | Client sync / runtime | `apps/web/src/lib/canvas-*.ts` |
-| API procedures | `packages/rpc/src/router.ts` (+ focused modules beside it) |
+| API procedures | One module per namespace in `packages/rpc/src/` (`canvas-procedures.ts`, `branches.ts`, `versions.ts`, `admin.ts`, …); `router.ts` only assembles them, and shared gates live in `procedures.ts` |
 | Shared MCP canvas tools / layout repair | `packages/agent/src/` |
 | MCP tools / transport | `apps/mcp/src/` |
 | Realtime transport, rooms, presence | `apps/ws/src/` (protocol in `packages/realtime/src/`) |
