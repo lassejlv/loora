@@ -29,8 +29,6 @@ export const PLANS = [
       '1,000,000 MCP calls / week',
       '90 days of version history',
       'Unlimited branches',
-      'In-app agent access',
-      'Image generation',
     ],
     cta: 'Go Pro',
     featured: true,
@@ -42,8 +40,7 @@ export const PLANS = [
  * they live in the cards instead — everything listed here is genuinely shared.
  */
 export const PLAN_INCLUDES = [
-  { capability: 'Canvas editor', detail: 'Infinite canvas, components, tokens, breakpoints' },
+  { capability: 'Canvas editor', detail: 'Pages, components, tokens, breakpoints' },
   { capability: 'MCP server', detail: 'Drive the same document from Claude or Cursor' },
   { capability: 'Exports', detail: 'HTML/CSS, React/TSX, JSON, and PNG captures' },
-  { capability: 'Integrations', detail: 'GitHub read access' },
 ] as const

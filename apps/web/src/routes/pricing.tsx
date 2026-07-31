@@ -4,7 +4,7 @@ import { PLAN_INCLUDES, PLANS } from '#/components/landing/plans'
 import { LandingShell } from '#/components/landing/site-shell'
 
 const DESCRIPTION =
-  'Free is $0/month with 50 design files, 1 GB of assets, 200 MCP calls a week, 2 days of version history, and 1 open branch per design. Pro is $20/month — or $200 a year, two months off — for unlimited files, 100 GB, 1M MCP calls a week, 90-day history, unlimited branches, the in-app agent, and image generation.'
+  'Free is $0/month with 50 design files, 1 GB of assets, 200 MCP calls a week, 2 days of version history, and 1 open branch per design. Pro is $20/month, or $200 a year, for unlimited files, 100 GB, 1M MCP calls a week, 90-day history, and unlimited branches.'
 
 export const Route = createFileRoute('/pricing')({
   ssr: false,
@@ -42,8 +42,8 @@ function PricingContent() {
       </h1>
 
       <p className="mt-6 text-muted-foreground">
-        Start free and keep the whole editor. Pro lifts the limits and adds the in-app agent, so the
-        only thing you are ever paying for is capacity — not credits, and not per generation.
+        Start free and keep the whole editor. Pro raises the limits: more files, more storage, more
+        MCP calls, and a longer history window. Capacity is the only thing you pay for.
       </p>
 
       {/* Hairline grid: the parent border carries the outer rule, `gap-px` over a
@@ -107,8 +107,8 @@ function PricingContent() {
 
       <h2 className="mt-14 text-[15px] font-semibold">On both plans</h2>
       <p className="mt-4 text-muted-foreground">
-        Free is the whole editor, not a demo of it. Branches and the longer history window are the
-        two things Pro adds outright; everything below ships on either plan.
+        Free is the whole editor, not a demo of it. Pro raises the numbers in the cards above;
+        everything below ships on either plan.
       </p>
 
       <ul className="mt-6 grid gap-px border border-border bg-border sm:grid-cols-2">
@@ -122,14 +122,14 @@ function PricingContent() {
 
       <h2 className="mt-14 text-[15px] font-semibold">Billing</h2>
       <p className="mt-4 text-muted-foreground">
-        Free needs no card and does not expire. Pro is $20/month, or $200 billed yearly — ten
-        months for twelve — and you can upgrade, change, or cancel it from the billing screen in the
-        app at any time. Subscriptions run through Polar.
+        Free needs no card and does not expire. Pro is $20/month, or $200 billed yearly, and you can
+        upgrade, change, or cancel it from the billing screen in the app. Subscriptions run through
+        Polar.
       </p>
       <p className="mt-4 text-muted-foreground">
         MCP calls are counted per week and reset weekly. Asset storage is the total size of the
         images and files in your account. Version history is a rolling window: 2 days on Free, 90
-        days on Pro. Nothing is billed per generation — an external agent you connect over{' '}
+        days on Pro. An external agent you connect over{' '}
         <a
           href="https://mcp.loora.design"
           target="_blank"

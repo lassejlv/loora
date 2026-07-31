@@ -12,6 +12,10 @@ import { Td, TableScroll, Th } from '#/components/landing/table'
 
 const ENDPOINT = 'https://mcp.loora.design/mcp'
 
+const SKILL_REPO = 'https://github.com/lassejlv/loora/tree/main/skills/loora-design-guide'
+
+const SKILL_INSTALL = `npx skills add ${SKILL_REPO}`
+
 const DESCRIPTION =
   'Connect Claude, Codex, Cursor, or opencode to your Loora canvas over MCP. Remote streamable HTTP endpoint, OAuth sign-in, no API key to paste.'
 
@@ -155,8 +159,8 @@ function McpContent() {
 
       <p className="mt-6 text-muted-foreground">
         Loora runs a remote MCP server over streamable HTTP. Point your agent at one URL and sign in
-        with your Loora account — there is no API key to generate, paste, or rotate, and the agent
-        edits the same document you have open in the browser.
+        with your Loora account. There is no API key to paste, and the agent works on the same
+        document you have open in the browser.
       </p>
 
       <CodeBlock label="endpoint" code={ENDPOINT} />
@@ -210,8 +214,8 @@ function McpContent() {
 
       <h2 className="mt-14 text-[15px] font-semibold">What the agent gets</h2>
       <p className="mt-4 text-muted-foreground">
-        Not a text box. The server exposes the same typed operations the editor uses, so every call
-        commits a validated canvas transaction that you can inspect, undo, or branch away from.
+        The server exposes the same typed operations the editor uses. Every call commits a validated
+        canvas transaction, so you can inspect it, undo it, or branch away from it.
       </p>
 
       <TableScroll label="MCP tools">
@@ -230,6 +234,29 @@ function McpContent() {
           ))}
         </tbody>
       </TableScroll>
+
+      <h2 className="mt-14 text-[15px] font-semibold">Add the design guide skill</h2>
+      <p className="mt-4 text-muted-foreground">
+        The tools tell an agent what it can do, not how to design. The design guide skill covers
+        that: set tokens and components before sections, screenshot the result and look at it, work
+        on a branch when the change is speculative.
+      </p>
+
+      <CodeBlock label="terminal" code={SKILL_INSTALL} />
+
+      <p className="mt-4 text-[13px] text-muted-foreground">
+        Add <code className="text-foreground">-g</code> to install it for every project instead of
+        this one. Works with Claude Code and Codex.{' '}
+        <a
+          href={SKILL_REPO}
+          target="_blank"
+          rel="noreferrer"
+          className="underline-offset-2 hover:underline"
+          style={link}
+        >
+          Read it on GitHub →
+        </a>
+      </p>
 
       <h2 className="mt-14 text-[15px] font-semibold">A good first run</h2>
       <ol className="mt-4 flex list-none flex-col gap-2 text-[13px] text-muted-foreground">

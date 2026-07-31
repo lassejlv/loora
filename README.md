@@ -1,10 +1,18 @@
-![Loora — The agent design harness](./readme-banner.png)
+![Loora](./readme-banner.png)
 
 # Loora
 
-Loora is a canvas-based design tool where an AI agent helps you build and refine UI and UX. Draw and arrange elements on an infinite canvas, then chat with the agent to generate, edit, and arrange components — or hand off to your own ChatGPT account. Designs are saved with full version history and can be exported in several formats.
+A canvas design tool your agent can edit. Arrange structured UI nodes on the canvas; connect Claude, Codex, Cursor, or opencode over MCP and it works on the same document. Branches, version history, and one-way export to HTML, React/TSX, JSON, and PNG.
 
-Built with Bun, TanStack Start, Drizzle ORM, Better Auth, Polar billing, and a remote MCP server.
+Bun · TanStack Start · Drizzle + Neon · Better Auth · Polar · oRPC.
+
+## Design guide skill
+
+Teaches an agent how to use the canvas tools well. Add `-g` to install it for every project.
+
+```bash
+npx skills add https://github.com/lassejlv/loora/tree/main/skills/loora-design-guide
+```
 
 ## API latency benchmark
 
@@ -22,13 +30,19 @@ Use `LOORA_BENCHMARK_TARGET=canvas` with
 
 ## Monorepo layout
 
-- `apps/web` — the TanStack Start app (canvas, agent panel, routes)
-- `apps/desktop` — the Deno Desktop shell for `https://loora.design`
+- `apps/web` — the TanStack Start app (routes, API handlers, editor shell)
 - `apps/mcp` — the remote MCP server (`mcp.loora.design`)
-- `packages/db` — Drizzle schema, Neon client, migrations
-- `packages/auth` — Better Auth, preview access, billing, and GitHub integration
-- `packages/agent` — model catalog, prompts, tools, usage accounting, agent runtime
+- `apps/ws` — the realtime service (`ws.loora.design`)
+- `apps/desktop` — the Deno Desktop shell for `https://loora.design`
+- `packages/canvas` — document model, engine, merge, renderer, import, export
+- `packages/editor` — the editor shell, panels, and client sync
+- `packages/ui` — shared design-system primitives
+- `packages/agent` — the shared canvas tool vocabulary for MCP and handoff
 - `packages/rpc` — the oRPC router, storage, handoff tokens, version history
+- `packages/db` — Drizzle schema, Neon client, migrations
+- `packages/auth` — Better Auth, preview access, GitHub
+- `packages/billing` — Polar plans and entitlements
+- `packages/realtime` — wire protocol, connection tickets, ingest client
 
 ## License
 
