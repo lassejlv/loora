@@ -16,6 +16,7 @@ import {
   design,
   designDraft,
   designVersion,
+  user,
 } from '@loora/db/schema'
 import {
   CanvasEngine,
@@ -98,6 +99,25 @@ export async function listDesigns(userId: string) {
   }))
 }
 
+/**
+ * A design reads as missing for two very different reasons: it was deleted, or
+ * this connection is authorized as a different Loora account than the one that
+ * owns it — a second account, or a re-authorization, leaves every tool call
+ * saying "not found" with nothing pointing at why. Name the account.
+ */
+async function accountLabel(userId: string) {
+  const [account] = await db
+    .select({ email: user.email })
+    .from(user)
+    .where(eq(user.id, userId))
+    .limit(1)
+  return account?.email ?? userId
+}
+
+async function missingDesignMessage(userId: string, designId: string) {
+  return `Design "${designId}" not found for the connected Loora account (${await accountLabel(userId)}). It was deleted, or it belongs to another account.`
+}
+
 export async function getCanvasTarget(
   userId: string,
   target: CanvasTarget,
@@ -129,7 +149,7 @@ export async function getCanvasTarget(
       .limit(1)
     if (!found) {
       throw new Error(
-        `Draft "${target.draftId}" not found in design "${target.designId}"`,
+        `Draft "${target.draftId}" not found in design "${target.designId}" for the connected Loora account (${await accountLabel(userId)}).`,
       )
     }
     if (found.canvasVersion !== CANVAS_SCHEMA_VERSION || !found.document) {
@@ -159,7 +179,7 @@ export async function getCanvasTarget(
     .from(design)
     .where(and(eq(design.id, target.designId), eq(design.userId, userId)))
     .limit(1)
-  if (!found) throw new Error(`Design "${target.designId}" not found`)
+  if (!found) throw new Error(await missingDesignMessage(userId, target.designId))
   if (found.canvasVersion !== CANVAS_SCHEMA_VERSION || !found.document) {
     throw new CanvasUnavailableError(target.designId)
   }
