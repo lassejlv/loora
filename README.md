@@ -28,4 +28,17 @@ Use `LOORA_BENCHMARK_TARGET=canvas` with
 - `packages/agent` — model catalog, prompts, tools, usage accounting, agent runtime
 - `packages/rpc` — the oRPC router, storage, handoff tokens, version history
 
-License: see [LICENSE](./LICENSE).
+## License
+
+Copyright (C) 2026 Lasse Vestergaard
+
+Loora is free software: you can redistribute it and/or modify it under the
+terms of the **GNU Affero General Public License** as published by the Free
+Software Foundation, either version 3 of the License, or (at your option) any
+later version.
+
+See [LICENSE](./LICENSE) for the full license text.
+
+You may fork, modify, and self-host Loora (including for business use). If you
+modify the software and provide it to users over a network, AGPL-3.0 requires
+you to offer the corresponding source to those users under the same license.

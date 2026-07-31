@@ -118,7 +118,7 @@ Support is available at [support@loora.design](mailto:support@loora.design). We 
 
 The Service—including software, branding, documentation, and UI not comprising your User Content—is owned by us or our licensors. These Terms do not transfer ownership of the Service to you.
 
-Open-source components are licensed under their respective licenses (see the project LICENSE and dependency licenses).
+The Loora source code is licensed under the GNU Affero General Public License v3.0 or later (see the project [LICENSE](../../LICENSE)). Third-party open-source components are licensed under their respective licenses.
 
 If you provide feedback or suggestions about the Service, you grant us a perpetual, royalty-free license to use that feedback to improve the Service without obligation to you.
 

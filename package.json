@@ -1,5 +1,6 @@
 {
   "name": "loora",
+  "license": "AGPL-3.0-or-later",
   "devDependencies": {
     "typescript": "catalog:",
     "vite": "^8.1.5"
