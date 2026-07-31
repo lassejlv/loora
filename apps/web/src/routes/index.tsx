@@ -8,10 +8,10 @@ import { usePalette } from '#/components/landing/palette'
 import { LandingShell } from '#/components/landing/site-shell'
 import { resolveLegacyLandingRedirect } from '#/lib/legacy-landing-redirect'
 
-const TITLE = 'loora — The agent design harness'
+const TITLE = 'loora — Design files your agent can edit'
 
 const DESCRIPTION =
-  'An infinite canvas of real, structured UI — open to your own agent over MCP. Design in the browser, drive it from your editor, ship the design.'
+  'A canvas design tool with an MCP server built in. Connect your agent and it works on the same file you have open. Branches, version history, and export to HTML and React.'
 
 /** Repeated on every inline link on the page; the color comes from the palette. */
 const LINK = 'underline-offset-2 hover:underline'
@@ -81,23 +81,23 @@ function Intro() {
         <span aria-hidden="true" style={link}>
           |
         </span>
-        <span>The agent design harness.</span>
+        <span>Design files your agent can edit.</span>
       </h1>
 
       <p className="mt-6 text-muted-foreground">
-        Loora is an infinite canvas of structured, responsive UI — and it is open to the agent you
-        already use. Connect Claude, Codex, Cursor, or opencode over{' '}
+        Loora is a canvas design tool. Connect Claude, Codex, Cursor, or opencode over{' '}
         <Link to="/mcp" className={LINK} style={link}>
           MCP
         </Link>{' '}
-        and it edits the same document you do.
+        and it works on the file you have open, while you have it open.
       </p>
       <p className="mt-4 text-muted-foreground">
-        Every element is editable structured UI, never a code blob. Arrange it by hand, fork a{' '}
+        Everything on the canvas is a real element with real layout, type, and color. Move things by
+        hand, fork a{' '}
         <Link to="/features" hash="branches" className={LINK} style={link}>
           branch
-        </Link>
-        , merge when it&apos;s right, then export.
+        </Link>{' '}
+        to try something, merge it when it works, then export.
       </p>
 
       <p className="mt-6">
@@ -165,13 +165,9 @@ function HowItWorks() {
   return (
     <Section title="How it works">
       <p className="mt-4 text-muted-foreground">
-        Add the Loora MCP server to your agent once. From then on it can read the canvas and insert,
-        patch, move, and delete nodes through the same typed transactions the editor uses — so
-        nothing it makes is a black box you have to accept whole.
-      </p>
-      <p className="mt-4 text-muted-foreground">
-        Design tools arrange. Chat tools dump. Loora is the surface in between: your agent builds on
-        an infinite canvas, and you rearrange, branch, and ship the design.
+        Add the Loora MCP server to your agent once. After that it can read the canvas and insert,
+        patch, move, and delete nodes through the same typed transactions the editor uses. Its work
+        lands as elements you can select, adjust, and undo.
       </p>
       <p className="mt-4">
         <Link to="/mcp" className={LINK} style={link}>
