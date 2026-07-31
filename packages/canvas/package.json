@@ -9,7 +9,11 @@
     "./merge": "./src/merge.ts",
     "./react": "./src/react.tsx",
     "./export": "./src/export.ts",
-    "./import": "./src/import.ts"
+    "./import": "./src/import.ts",
+    "./motion": "./src/motion.ts",
+    "./motion-css": "./src/motion-css.ts",
+    "./motion-presets": "./src/motion-presets.ts",
+    "./style-css": "./src/style-css.ts"
   },
   "peerDependencies": {
     "react": "^19.2.7",
