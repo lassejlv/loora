@@ -7,7 +7,8 @@ import { polar, portal, webhooks } from '@polar-sh/better-auth'
 import { db } from '@loora/db'
 import * as schema from '@loora/db/schema'
 import { applyCustomerStateWebhook } from '@loora/billing/billing'
-import { getPolarClient, getPolarRuntime } from '@loora/billing/polar'
+import { getPolarClient } from '@loora/billing/polar-client'
+import { getPolarRuntime } from '@loora/billing/polar'
 import {
   sendAccountVerificationEmail,
   sendPasswordResetEmail,

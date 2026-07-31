@@ -6,6 +6,7 @@ import {
   compileTailwindComponent,
 } from '@loora/canvas/export'
 import {
+  buildChildIndex,
   canvasId,
   createInstanceNode,
   defaultLayout,
@@ -65,7 +66,6 @@ import {
   proposeDraft,
 } from './designs'
 import { trackAgentActivity } from './agent-activity'
-import { renderCanvasScreenshot } from './screenshot'
 import {
   McpUsageLimitError,
   McpUsageUnavailableError,
@@ -229,9 +229,13 @@ export function exportCanvasCode(
 export function createLooraServer(
   userId: string,
   usage: McpUsageController,
-  plan: LimitsPlan,
+  planSource: LimitsPlan | (() => Promise<LimitsPlan>),
 ) {
   const server = new McpServer({ name: 'loora', version: '0.3.0' })
+  const currentPlan = () =>
+    typeof planSource === 'function'
+      ? planSource()
+      : Promise.resolve(planSource)
 
   /**
    * Every design-scoped call announces itself before it runs and settles when
@@ -480,9 +484,12 @@ export function createLooraServer(
       }) => {
         const found = await getCanvasTarget(userId, args)
         const created = createPageTransaction(found.document, args)
-        const result = await applyCanvasTransactions(userId, args, [
-          created.transaction,
-        ])
+        const result = await applyCanvasTransactions(
+          userId,
+          args,
+          [created.transaction],
+          found,
+        )
         return {
           pageId: created.pageId,
           refs: created.refs,
@@ -512,13 +519,16 @@ export function createLooraServer(
           parent.id,
           args.nodes,
         )
-        const result = await applyCanvasTransactions(userId, args, [
-          {
+        const result = await applyCanvasTransactions(
+          userId,
+          args,
+          [{
             id: canvasId('tx'),
             label: 'MCP inserted nodes',
             operations: built.operations,
-          },
-        ])
+          }],
+          found,
+        )
         return {
           refs: built.refs,
           nodeIds: built.nodeIds,
@@ -542,16 +552,19 @@ export function createLooraServer(
         draftId?: string
       }) => {
         const found = await getCanvasTarget(userId, args)
-        const result = await applyCanvasTransactions(userId, args, [
-          {
+        const result = await applyCanvasTransactions(
+          userId,
+          args,
+          [{
             id: canvasId('tx'),
             label: 'MCP updated nodes',
             operations: patchOperationsForChanges(
               found.document,
               args.changes,
             ),
-          },
-        ])
+          }],
+          found,
+        )
         return {
           revision: result.revision,
           changedNodeIds: result.changedNodeIds,
@@ -572,7 +585,9 @@ export function createLooraServer(
         draftId?: string
       }) => {
         const found = await getCanvasTarget(userId, args)
+        const childIndex = buildChildIndex(found.document)
         const offsets = new Map<string, number>()
+        const lastOrders = new Map<string, number>()
         const operations = args.changes.map((change) => {
           const node = found.document.nodes[change.nodeId]
           if (!node) throw new Error(`Node "${change.nodeId}" not found`)
@@ -580,19 +595,31 @@ export function createLooraServer(
           const key = change.parentId ?? '$root'
           const offset = offsets.get(key) ?? 0
           offsets.set(key, offset + 1)
+          let lastOrder = lastOrders.get(key)
+          if (lastOrder === undefined) {
+            lastOrder =
+              orderedChildren(
+                found.document,
+                change.parentId,
+                childIndex,
+              ).at(-1)?.order ?? 0
+            lastOrders.set(key, lastOrder)
+          }
           return {
             type: 'node.move' as const,
             id: change.nodeId,
             parentId: change.parentId,
             order:
               change.order ??
-              (orderedChildren(found.document, change.parentId).at(-1)?.order ?? 0) +
-                (offset + 1) * 1024,
+              lastOrder + (offset + 1) * 1024,
           }
         })
-        const result = await applyCanvasTransactions(userId, args, [
-          { id: canvasId('tx'), label: 'MCP moved nodes', operations },
-        ])
+        const result = await applyCanvasTransactions(
+          userId,
+          args,
+          [{ id: canvasId('tx'), label: 'MCP moved nodes', operations }],
+          found,
+        )
         return {
           revision: result.revision,
           changedNodeIds: result.changedNodeIds,
@@ -629,16 +656,19 @@ export function createLooraServer(
           if (!node) throw new Error(`Node "${id}" not found`)
           if (node.locked) throw new Error(`Node "${node.name}" is locked`)
         }
-        const result = await applyCanvasTransactions(userId, args, [
-          {
+        const result = await applyCanvasTransactions(
+          userId,
+          args,
+          [{
             id: canvasId('tx'),
             label: 'MCP deleted nodes',
             operations: nodeIds.map((id) => ({
               type: 'node.delete' as const,
               id,
             })),
-          },
-        ])
+          }],
+          found,
+        )
         return {
           deletedNodeIds: nodeIds,
           revision: result.revision,
@@ -662,9 +692,12 @@ export function createLooraServer(
       }) => {
         const found = await getCanvasTarget(userId, args)
         const created = createComponentTransaction(found.document, args)
-        const result = await applyCanvasTransactions(userId, args, [
-          created.transaction,
-        ])
+        const result = await applyCanvasTransactions(
+          userId,
+          args,
+          [created.transaction],
+          found,
+        )
         return {
           componentId: created.componentId,
           refs: created.refs,
@@ -710,13 +743,16 @@ export function createLooraServer(
             overrides: {},
           },
         )
-        const result = await applyCanvasTransactions(userId, args, [
-          {
+        const result = await applyCanvasTransactions(
+          userId,
+          args,
+          [{
             id: canvasId('tx'),
             label: `MCP created ${component.name} instance`,
             operations: [{ type: 'node.insert', node }],
-          },
-        ])
+          }],
+          found,
+        )
         return {
           instanceId: node.id,
           revision: result.revision,
@@ -899,6 +935,7 @@ export function createLooraServer(
           throw new Error('Choose either pageId or ref, not both')
         }
         const found = await getCanvasTarget(userId, args)
+        const { renderCanvasScreenshot } = await import('./screenshot')
         const screenshot = await renderCanvasScreenshot(
           userId,
           found.document,
@@ -1019,8 +1056,10 @@ export function createLooraServer(
         name: z.string().trim().min(1).max(MAX_NAME_LENGTH),
       },
     },
-    tool('createDesign', async ({ name }: { name: string }) =>
-      createDesign(userId, name, plan),
+    tool(
+      'createDesign',
+      async ({ name }: { name: string }) =>
+        createDesign(userId, name, await currentPlan()),
     ),
   )
 
@@ -1073,8 +1112,15 @@ export function createLooraServer(
         name: z.string().trim().min(1).max(MAX_NAME_LENGTH),
       },
     },
-    tool('createBranch', (args: { designId: string; name: string }) =>
-      createDraft(userId, args.designId, args.name, plan),
+    tool(
+      'createBranch',
+      async (args: { designId: string; name: string }) =>
+        createDraft(
+          userId,
+          args.designId,
+          args.name,
+          await currentPlan(),
+        ),
     ),
   )
 
@@ -1133,7 +1179,7 @@ export function createLooraServer(
       },
     },
     tool('applyBranch',
-      (args: {
+      async (args: {
         designId: string
         draftId: string
         expectedMainRevision: number
@@ -1147,6 +1193,7 @@ export function createLooraServer(
           args.expectedMainRevision,
           args.expectedDraftRevision,
           args.resolutions,
+          await currentPlan(),
         ),
     ),
   )
@@ -1176,8 +1223,14 @@ export function createLooraServer(
     },
     tool(
       'listVersions',
-      (args: { designId: string; draftId?: string; limit: number }) =>
-        listVersions(userId, args.designId, args.limit, args.draftId, plan),
+      async (args: { designId: string; draftId?: string; limit: number }) =>
+        listVersions(
+          userId,
+          args.designId,
+          args.limit,
+          args.draftId,
+          await currentPlan(),
+        ),
     ),
   )
 

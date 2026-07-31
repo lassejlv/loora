@@ -18,6 +18,7 @@ import { readCanvasNodeRef } from '@loora/agent/canvas-tools'
 import { s3 } from '@loora/rpc/storage'
 import { assetIdFromSrc } from '@loora/rpc/asset-url'
 import { BoundedConcurrencyGate } from './concurrency'
+import { IdleResource } from './idle-resource'
 
 const BLANK_IMAGE =
   'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7'
@@ -53,8 +54,8 @@ function integerEnvironment(
 }
 
 const screenshotGate = new BoundedConcurrencyGate(
-  integerEnvironment('MCP_SCREENSHOT_CONCURRENCY', 2, 1, 8),
-  integerEnvironment('MCP_SCREENSHOT_QUEUE_LIMIT', 8, 0, 100),
+  integerEnvironment('MCP_SCREENSHOT_CONCURRENCY', 1, 1, 8),
+  integerEnvironment('MCP_SCREENSHOT_QUEUE_LIMIT', 2, 0, 100),
   integerEnvironment('MCP_SCREENSHOT_QUEUE_TIMEOUT_MS', 20_000, 1_000, 120_000),
 )
 
@@ -164,11 +165,8 @@ function chromiumExecutable() {
   return candidates.find((candidate) => existsSync(candidate)) ?? null
 }
 
-let browserPromise: Promise<Browser> | null = null
-
-async function browser() {
-  if (browserPromise) return browserPromise
-  browserPromise = (async () => {
+const screenshotBrowser = new IdleResource(
+  async () => {
     const executablePath = chromiumExecutable()
     if (!executablePath) {
       throw new Error(
@@ -181,15 +179,17 @@ async function browser() {
       args: ['--disable-dev-shm-usage', '--no-sandbox'],
     })
     launched.on('disconnected', () => {
-      browserPromise = null
+      screenshotBrowser.invalidate(launched)
     })
     return launched
-  })().catch((error) => {
-    browserPromise = null
-    throw error
-  })
-  return browserPromise
-}
+  },
+  integerEnvironment(
+    'MCP_SCREENSHOT_IDLE_TIMEOUT_MS',
+    60_000,
+    5_000,
+    30 * 60_000,
+  ),
+)
 
 function screenshotTarget(
   document: CanvasDocument,
@@ -224,7 +224,8 @@ function screenshotTarget(
   }
 }
 
-async function renderCanvasScreenshotInternal(
+async function renderCanvasScreenshotWithBrowser(
+  activeBrowser: Browser,
   userId: string,
   source: CanvasDocument,
   options: CanvasScreenshotOptions = {},
@@ -238,7 +239,6 @@ async function renderCanvasScreenshotInternal(
     width,
     title: prepared.document.name,
   })
-  const activeBrowser = await browser()
   const context = await activeBrowser.newContext({
     viewport: { width, height: 900 },
     deviceScaleFactor: pixelRatio,
@@ -330,6 +330,21 @@ async function renderCanvasScreenshotInternal(
   } finally {
     await context.close()
   }
+}
+
+function renderCanvasScreenshotInternal(
+  userId: string,
+  source: CanvasDocument,
+  options: CanvasScreenshotOptions = {},
+) {
+  return screenshotBrowser.run((activeBrowser) =>
+    renderCanvasScreenshotWithBrowser(
+      activeBrowser,
+      userId,
+      source,
+      options,
+    ),
+  )
 }
 
 export function renderCanvasScreenshot(

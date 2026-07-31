@@ -1,6 +1,5 @@
-import { randomUUID } from 'node:crypto'
 import type { BillingPlan } from './billing-policy'
-import { getPolarClient, getPolarRuntime } from './polar'
+import { getPolarRuntime } from './polar'
 
 export type McpUsagePlan = BillingPlan | 'admin' | 'disabled'
 
@@ -112,13 +111,39 @@ export function mcpUsageSnapshot(
   }
 }
 
+async function loadPolarMcpRuntime() {
+  const { config } = getPolarRuntime()
+  if (!config) throw new McpUsageUnavailableError()
+  const [
+    { PolarCore },
+    { eventsIngest },
+    { metersQuantities },
+  ] = await Promise.all([
+    import('@polar-sh/sdk/core.js'),
+    import('@polar-sh/sdk/funcs/eventsIngest.js'),
+    import('@polar-sh/sdk/funcs/metersQuantities.js'),
+  ])
+  const client = new PolarCore({
+    accessToken: config.accessToken,
+    server: config.server,
+    timeoutMs: 4_000,
+  })
+  return { client, eventsIngest, metersQuantities }
+}
+
+let polarMcpRuntime: ReturnType<typeof loadPolarMcpRuntime> | undefined
+
+function getPolarMcpRuntime() {
+  return polarMcpRuntime ??= loadPolarMcpRuntime()
+}
+
 function polarMcpUsageMeter(): McpUsageMeter {
   const { config } = getPolarRuntime()
   if (!config) throw new McpUsageUnavailableError()
-  const polar = getPolarClient()
   return {
     async readTotal({ userId, periodStart, periodEnd }) {
-      const result = await polar.meters.quantities({
+      const { client, metersQuantities } = await getPolarMcpRuntime()
+      const result = await metersQuantities(client, {
         id: config.mcpMeterId,
         startTimestamp: periodStart,
         endTimestamp: periodEnd,
@@ -126,10 +151,12 @@ function polarMcpUsageMeter(): McpUsageMeter {
         timezone: 'UTC',
         externalCustomerId: userId,
       })
-      return result.total
+      if (!result.ok) throw result.error
+      return result.value.total
     },
     async record({ userId, eventId, timestamp, plan }) {
-      const result = await polar.events.ingest({
+      const { client, eventsIngest } = await getPolarMcpRuntime()
+      const result = await eventsIngest(client, {
         events: [{
           name: MCP_USAGE_EVENT,
           externalId: `loora:mcp:${eventId}`,
@@ -142,7 +169,8 @@ function polarMcpUsageMeter(): McpUsageMeter {
           },
         }],
       })
-      return result.inserted > 0
+      if (!result.ok) throw result.error
+      return result.value.inserted > 0
     },
   }
 }
@@ -205,7 +233,7 @@ export function createMcpUsageService(
       try {
         const inserted = await meter().record({
           userId,
-          eventId: randomUUID(),
+          eventId: crypto.randomUUID(),
           timestamp: now,
           plan,
         })

@@ -1,9 +1,9 @@
 import { eq } from 'drizzle-orm'
 import { db } from '@loora/db'
-import { user } from '@loora/db/schema'
+import { billingEntitlement, user } from '@loora/db/schema'
 import { canUseApp } from '@loora/auth/preview-access'
 import { hasAcceptedCurrentLegal } from '@loora/auth/legal-consent'
-import { authorizeBilling } from '@loora/billing/billing'
+import { authorizeBillingFromEntitlement } from '@loora/billing/billing'
 import { resolveMcpUsagePlan } from '@loora/billing/mcp-usage'
 
 export class AccessDeniedError extends Error {}
@@ -12,13 +12,41 @@ export class AccessDeniedError extends Error {}
 // valid OAuth token is not enough, the user also needs preview access and an
 // active plan.
 export async function requireAppAccess(userId: string) {
-  const [account] = await db.select().from(user).where(eq(user.id, userId)).limit(1)
-  if (!account) throw new AccessDeniedError('Unknown user.')
+  const [found] = await db
+    .select({
+      account: {
+        id: user.id,
+        isAdmin: user.isAdmin,
+        previewAccess: user.previewAccess,
+        acceptedTerms: user.acceptedTerms,
+        acceptedPrivacy: user.acceptedPrivacy,
+        termsAcceptedAt: user.termsAcceptedAt,
+        privacyAcceptedAt: user.privacyAcceptedAt,
+        termsVersion: user.termsVersion,
+        privacyVersion: user.privacyVersion,
+      },
+      entitlement: {
+        accessGranted: billingEntitlement.accessGranted,
+        plan: billingEntitlement.plan,
+        subscriptionStatus: billingEntitlement.subscriptionStatus,
+        currentPeriodEnd: billingEntitlement.currentPeriodEnd,
+        trialEnd: billingEntitlement.trialEnd,
+      },
+    })
+    .from(user)
+    .leftJoin(
+      billingEntitlement,
+      eq(billingEntitlement.userId, user.id),
+    )
+    .where(eq(user.id, userId))
+    .limit(1)
+  if (!found) throw new AccessDeniedError('Unknown user.')
+  const { account, entitlement } = found
   if (!hasAcceptedCurrentLegal(account)) {
     throw new AccessDeniedError('The current Terms of Service and Privacy Policy must be accepted.')
   }
   if (!canUseApp(account)) throw new AccessDeniedError('Preview access is required.')
-  const billing = await authorizeBilling(account)
+  const billing = authorizeBillingFromEntitlement(account, entitlement)
   if (!billing.access) {
     throw new AccessDeniedError('An active Loora plan is required.')
   }

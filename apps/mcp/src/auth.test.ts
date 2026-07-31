@@ -61,4 +61,24 @@ describe('createMcpSessionVerifier', () => {
       authorization: 'Bearer test-token',
     }))).toBeNull()
   })
+
+  it('stops waiting when the auth server exceeds its timeout', async () => {
+    let aborted = false
+    const verifier = createMcpSessionVerifier(
+      'https://loora.test',
+      (_input, init) =>
+        new Promise<Response>((_resolve, reject) => {
+          init?.signal?.addEventListener('abort', () => {
+            aborted = true
+            reject(init.signal?.reason)
+          }, { once: true })
+        }),
+      10,
+    )
+
+    expect(await verifier.getSession(new Headers({
+      authorization: 'Bearer test-token',
+    }))).toBeNull()
+    expect(aborted).toBe(true)
+  })
 })

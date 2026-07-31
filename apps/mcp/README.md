@@ -37,10 +37,14 @@ Optional:
 - `LOORA_MCP_USER` — stdio mode only: email or id of the acting user
 - `PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH` — optional local Chromium override;
   the Railway image installs Chromium at `/usr/bin/chromium`
-- `MCP_SCREENSHOT_CONCURRENCY` — concurrent Chromium captures, defaults to `2`
+- `MCP_SCREENSHOT_CONCURRENCY` — concurrent Chromium captures, defaults to `1`
 - `MCP_SCREENSHOT_QUEUE_LIMIT` — queued captures before returning busy,
-  defaults to `8`
+  defaults to `2`
 - `MCP_SCREENSHOT_QUEUE_TIMEOUT_MS` — maximum queue wait, defaults to `20000`
+- `MCP_SCREENSHOT_IDLE_TIMEOUT_MS` — close Chromium after this much screenshot
+  inactivity, defaults to `60000`
+- `MCP_AUTH_TIMEOUT_MS` — maximum wait for remote token verification, defaults
+  to `5000`
 
 Polar is not required for the process to start. Set
 `REQUIRE_POLAR_BILLING=false` to run tools without plan checks or MCP usage

@@ -43,13 +43,6 @@ import {
   requireOpenBranchRoomForPlan,
 } from '@loora/billing/enforce-plan-limits'
 import type { LimitsPlan } from '@loora/billing/plan-limits'
-import { requireAppAccess } from './access'
-
-/** Re-resolve plan on every capacity check so long-lived stdio sessions pick up upgrades. */
-async function livePlan(userId: string): Promise<LimitsPlan> {
-  const { mcpPlan } = await requireAppAccess(userId)
-  return mcpPlan
-}
 
 export const MAX_NAME_LENGTH = 200
 
@@ -75,6 +68,17 @@ export interface CanvasTarget {
   draftId?: string | null
 }
 
+export interface CanvasTargetSnapshot {
+  id: string
+  name: string
+  draftId: string | null
+  draftName: string | null
+  status: 'active' | 'proposed' | 'applied' | 'closed'
+  document: CanvasDocument
+  revision: number
+  updatedAt: Date
+}
+
 export async function listDesigns(userId: string) {
   const rows = await db
     .select({
@@ -97,16 +101,7 @@ export async function listDesigns(userId: string) {
 export async function getCanvasTarget(
   userId: string,
   target: CanvasTarget,
-): Promise<{
-  id: string
-  name: string
-  draftId: string | null
-  draftName: string | null
-  status: 'active' | 'proposed' | 'applied' | 'closed'
-  document: CanvasDocument
-  revision: number
-  updatedAt: Date
-}> {
+): Promise<CanvasTargetSnapshot> {
   if (target.draftId) {
     const [found] = await db
       .select({
@@ -184,6 +179,7 @@ async function applyCanvasTransactionsInternal(
   userId: string,
   target: CanvasTarget,
   transactions: CanvasTransaction[],
+  initialTarget?: CanvasTargetSnapshot,
 ) {
   const parsed = transactions.map(parseCanvasTransaction)
   if (parsed.length === 0) throw new Error('At least one transaction is required')
@@ -192,9 +188,21 @@ async function applyCanvasTransactionsInternal(
   ) {
     throw new Error('A transaction batch cannot contain duplicate ids')
   }
+  if (
+    initialTarget &&
+    (
+      initialTarget.id !== target.designId ||
+      initialTarget.draftId !== (target.draftId ?? null)
+    )
+  ) {
+    throw new Error('The initial Canvas target does not match the mutation target')
+  }
 
+  let firstTarget = initialTarget
   for (let attempt = 0; attempt < 3; attempt += 1) {
-    const found = await getCanvasTarget(userId, target)
+    const usedInitialTarget = firstTarget !== undefined
+    const found = firstTarget ?? await getCanvasTarget(userId, target)
+    firstTarget = undefined
     if (found.status !== 'active') {
       throw new Error(`Draft "${target.draftId}" is read-only`)
     }
@@ -216,9 +224,12 @@ async function applyCanvasTransactionsInternal(
     const seen = new Set(existing.map((row) => row.transactionId))
     const pending = parsed.filter((transaction) => !seen.has(transaction.id))
     if (pending.length === 0) {
+      const current = usedInitialTarget
+        ? await getCanvasTarget(userId, target)
+        : found
       return {
-        document: found.document,
-        revision: found.revision,
+        document: current.document,
+        revision: current.revision,
         transactionIds: ids,
         changedNodeIds: [] as string[],
         idempotent: true,
@@ -325,11 +336,13 @@ export async function applyCanvasTransactions(
   userId: string,
   target: CanvasTarget,
   transactions: CanvasTransaction[],
+  initialTarget?: CanvasTargetSnapshot,
 ) {
   const result = await applyCanvasTransactionsInternal(
     userId,
     target,
-    transactions.map(parseCanvasTransaction),
+    transactions,
+    initialTarget,
   )
   if (!result.idempotent) {
     void publishCanvasRealtimeEvent(userId, target, {
@@ -344,9 +357,9 @@ export async function applyCanvasTransactions(
 export async function createDesign(
   userId: string,
   name: string,
-  _plan?: LimitsPlan,
+  plan: LimitsPlan,
 ) {
-  await requireDesignFileRoomForPlan(userId, await livePlan(userId))
+  await requireDesignFileRoomForPlan(userId, plan)
   const id = newDesignId()
   const document = createCanvasDocument(name, id)
   const [created] = await db
@@ -411,11 +424,11 @@ export async function listVersions(
   userId: string,
   designId: string,
   limit: number,
-  draftId?: string | null,
-  _plan?: LimitsPlan,
+  draftId: string | null | undefined,
+  plan: LimitsPlan,
 ) {
   // Soft-filter only — never hard-prune on list (avoids Free-default data loss).
-  const cutoff = historyCutoffForPlan(await livePlan(userId))
+  const cutoff = historyCutoffForPlan(plan)
   const rows = await db
     .select({
       id: designVersion.id,
@@ -467,9 +480,9 @@ export async function createDraft(
   userId: string,
   designId: string,
   name: string,
-  _plan?: LimitsPlan,
+  plan: LimitsPlan,
 ) {
-  await requireOpenBranchRoomForPlan(userId, designId, await livePlan(userId))
+  await requireOpenBranchRoomForPlan(userId, designId, plan)
   const main = await getCanvasTarget(userId, { designId })
   const [created] = await db
     .insert(designDraft)
@@ -621,6 +634,7 @@ export async function applyDraft(
   expectedMainRevision: number,
   expectedDraftRevision: number,
   resolutions: BranchMergeResolutions,
+  plan: LimitsPlan,
 ) {
   const source = await draftMergeSource(userId, designId, draftId)
   if (
@@ -711,7 +725,7 @@ export async function applyDraft(
       .returning({ id: designDraft.id })
     if (!archived) throw new Error('The draft changed while applying')
   })
-  void pruneExpiredHistoryForPlan(userId, await livePlan(userId)).catch((error) => {
+  void pruneExpiredHistoryForPlan(userId, plan).catch((error) => {
     console.error('[history] prune failed:', error)
   })
   return {

@@ -2,6 +2,7 @@ import { z } from 'zod'
 import type { CanvasOperation, CanvasTransaction } from '@loora/canvas/engine'
 import {
   DEFAULT_ORDER_STEP,
+  buildChildIndex,
   canvasId,
   createComponentNode,
   createFrameNode,
@@ -1223,6 +1224,7 @@ export function semanticTree(
   root: NodeId | NodeRef | null = null,
   depth = 6,
 ) {
+  const childIndex = buildChildIndex(document)
   const visitNode = (
     source: CanvasNode,
     ref: NodeRef,
@@ -1238,7 +1240,7 @@ export function semanticTree(
     const children =
       level >= depth
         ? []
-        : orderedChildren(document, childParentId).map((child) =>
+        : orderedChildren(document, childParentId, childIndex).map((child) =>
             visitNode(
               child,
               { nodeId: child.id, instancePath: childPath },
@@ -1280,7 +1282,7 @@ export function semanticTree(
     if (!source) return null
     return visitNode(source, ref, 1)
   }
-  return orderedChildren(document, null).map((node) =>
+  return orderedChildren(document, null, childIndex).map((node) =>
     visitNode(node, { nodeId: node.id, instancePath: [] }, 1),
   )
 }

@@ -8,7 +8,7 @@ import {
   normalizeCustomerState,
   type BillingPlan,
 } from './billing-policy'
-import { getPolarClient, getPolarRuntime } from './polar'
+import { getPolarRuntime } from './polar'
 
 const CACHE_MAX_AGE_MS = 5 * 60 * 1000
 const REFRESH_RATE_LIMIT_MS = 10 * 1000
@@ -39,6 +39,13 @@ export function subscriptionRequiredResponse() {
 }
 
 type BillingUser = { id: string; isAdmin?: boolean | null }
+type BillingAccessEntitlement = {
+  accessGranted: boolean
+  plan: string | null
+  subscriptionStatus: string | null
+  currentPeriodEnd: Date | null
+  trialEnd: Date | null
+}
 
 export async function getCachedEntitlement(userId: string) {
   const [row] = await db
@@ -98,6 +105,7 @@ export async function applyCustomerStateWebhook(state: CustomerState, eventAt: D
 }
 
 export async function refreshEntitlement(userId: string) {
+  const { getPolarClient } = await import('./polar-client')
   const state = await getPolarClient().customers.getStateExternal({ externalId: userId })
   return applyCustomerState(userId, state)
 }
@@ -128,8 +136,13 @@ async function clearEntitlement(userId: string) {
   return saved
 }
 
-export async function authorizeBilling(user: BillingUser) {
-  const { required } = getPolarRuntime()
+export function authorizeBillingFromEntitlement<
+  Entitlement extends BillingAccessEntitlement,
+>(
+  user: BillingUser,
+  entitlement: Entitlement | null,
+  required = getPolarRuntime().required,
+) {
   if (!required) {
     return {
       access: true,
@@ -146,13 +159,24 @@ export async function authorizeBilling(user: BillingUser) {
       entitlement: null,
     }
   }
-  const entitlement = await getCachedEntitlement(user.id)
   return {
     access: cachedEntitlementGrantsAccess(entitlement),
     trial: entitlementIsTrial(entitlement),
     source: 'cache' as const,
     entitlement,
   }
+}
+
+export async function authorizeBilling(user: BillingUser) {
+  const { required } = getPolarRuntime()
+  if (!required || user.isAdmin === true) {
+    return authorizeBillingFromEntitlement(user, null, required)
+  }
+  return authorizeBillingFromEntitlement(
+    user,
+    await getCachedEntitlement(user.id),
+    required,
+  )
 }
 
 function statusFromEntitlement(
@@ -229,6 +253,7 @@ export async function createPlanCheckout(
 ) {
   const { config } = getPolarRuntime()
   if (!config) throw new Error('Polar is not configured')
+  const { getPolarClient } = await import('./polar-client')
   const products = plan === 'free'
     ? [config.freeProductId]
     : interval === 'year'
