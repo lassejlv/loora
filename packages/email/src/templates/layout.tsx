@@ -78,7 +78,7 @@ export function LooraEmailLayout({
           textAlign: 'center',
         }}
       >
-        Loora · The canvas for structured interface design
+        Loora
       </EmailText>
     </ShadcnEmail>
   )
