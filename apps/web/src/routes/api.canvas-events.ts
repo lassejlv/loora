@@ -7,7 +7,15 @@ import {
   type CanvasRealtimeEvent,
   type CanvasRealtimeSubscription,
 } from '@loora/db/canvas-realtime'
-import { resolveRealtimeAccess } from './-realtime-access'
+import {
+  rateLimit,
+  rateLimits,
+  tooManyRequestsResponse,
+} from '@loora/rpc/rate-limit'
+import {
+  requireRealtimeSession,
+  resolveRealtimeAccessForSession,
+} from './-realtime-access'
 
 const encoder = new TextEncoder()
 const eventHeaders = {
@@ -24,7 +32,20 @@ function eventData(event: CanvasRealtimeEvent) {
 
 export async function canvasEventsResponse(request: Request) {
   const search = new URL(request.url).searchParams
-  const resolved = await resolveRealtimeAccess(request, {
+  const authenticated = await requireRealtimeSession(request)
+  if (!authenticated.ok) return authenticated.response
+  // Counted before the design lookup: a client reconnecting in a loop should
+  // cost this instance a counter increment, not a round of access checks and
+  // a subscription.
+  const decision = await rateLimit(
+    'canvas-events',
+    `user:${authenticated.session.user.id}`,
+    rateLimits.canvasEvents,
+  )
+  if (!decision.ok) {
+    return tooManyRequestsResponse(decision, 'Too many event stream connections')
+  }
+  const resolved = await resolveRealtimeAccessForSession(authenticated.session, {
     designId: search.get('designId') ?? '',
     draftId: search.get('draftId'),
   })

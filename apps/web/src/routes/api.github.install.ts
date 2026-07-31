@@ -8,11 +8,24 @@ import {
   legalConsentRequiredResponse,
 } from '@loora/auth/legal-consent'
 import { createGitHubInstallFlow, getGitHubStatus } from '@loora/auth/github'
+import {
+  callerIdentity,
+  rateLimit,
+  rateLimits,
+  tooManyRequestsResponse,
+} from '@loora/rpc/rate-limit'
 
 export const Route = createFileRoute('/api/github/install')({
   server: {
     handlers: {
       GET: async ({ request }) => {
+        const decision = await rateLimit(
+          'github',
+          callerIdentity(request.headers),
+          rateLimits.github,
+        )
+        if (!decision.ok) return tooManyRequestsResponse(decision)
+
         const session = await requireSession(request)
         if (!session) return Response.json({ error: 'Unauthorized' }, { status: 401 })
         if (!hasAcceptedCurrentLegal(session.user)) return legalConsentRequiredResponse()

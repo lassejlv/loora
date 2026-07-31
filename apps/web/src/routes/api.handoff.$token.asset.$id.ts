@@ -5,11 +5,24 @@ import { db } from '@loora/db'
 import { asset } from '@loora/db/schema'
 import { getHandoffDesign, referencedAssetIds } from '@loora/rpc/handoff'
 import { s3 } from '@loora/rpc/storage'
+import {
+  callerIdentity,
+  rateLimit,
+  rateLimits,
+  tooManyRequestsResponse,
+} from '@loora/rpc/rate-limit'
 
 export const Route = createFileRoute('/api/handoff/$token/asset/$id')({
   server: {
     handlers: {
-      GET: async ({ params }) => {
+      GET: async ({ request, params }) => {
+        const decision = await rateLimit(
+          'handoff-asset',
+          callerIdentity(request.headers),
+          rateLimits.handoff,
+        )
+        if (!decision.ok) return tooManyRequestsResponse(decision)
+
         const handoff = await getHandoffDesign(params.token)
         if (
           !handoff ||

@@ -11,6 +11,11 @@ import {
   legalConsentRequiredResponse,
 } from '@loora/auth/legal-consent'
 import { s3 } from '@loora/rpc/storage'
+import {
+  rateLimit,
+  rateLimits,
+  tooManyRequestsResponse,
+} from '@loora/rpc/rate-limit'
 
 export const Route = createFileRoute('/api/asset/$id')({
   server: {
@@ -18,6 +23,15 @@ export const Route = createFileRoute('/api/asset/$id')({
       GET: async ({ request, params }) => {
         const session = await requireSession(request)
         if (!session) return new Response('Unauthorized', { status: 401 })
+        // Serving an asset means a row read and, usually, a bucket fetch, so
+        // the count comes before either of them.
+        const decision = await rateLimit(
+          'asset',
+          `user:${session.user.id}`,
+          rateLimits.asset,
+        )
+        if (!decision.ok) return tooManyRequestsResponse(decision)
+
         if (!hasAcceptedCurrentLegal(session.user)) return legalConsentRequiredResponse()
         if (!canUseApp(session.user)) return previewAccessRequiredResponse()
         if (!(await authorizeBilling(session.user)).access) return subscriptionRequiredResponse()

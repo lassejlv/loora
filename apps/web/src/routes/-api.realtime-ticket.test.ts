@@ -32,16 +32,14 @@ describe('Realtime ticket endpoint', () => {
     expect(response.status).toBe(400)
   })
 
-  it('turns an account away once it asks for tickets in a loop', () => {
+  it('turns an account away once it asks for tickets in a loop', async () => {
     const user = `user-${Math.random()}`
-    const now = 1_700_000_000_000
 
-    const allowed = Array.from({ length: 30 }, () =>
-      allowTicketRequest(user, now),
-    )
-    expect(allowed.every(Boolean)).toBe(true)
-    expect(allowTicketRequest(user, now)).toBe(false)
-    // The window rolls and the account is served again.
-    expect(allowTicketRequest(user, now + 60_000)).toBe(true)
+    for (let attempt = 0; attempt < 30; attempt += 1) {
+      expect((await allowTicketRequest(user)).ok).toBe(true)
+    }
+    const refused = await allowTicketRequest(user)
+    expect(refused.ok).toBe(false)
+    expect(refused.retryAfterSeconds).toBe(60)
   })
 })

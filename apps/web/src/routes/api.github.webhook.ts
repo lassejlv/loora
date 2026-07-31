@@ -5,12 +5,27 @@ import {
   processGitHubWebhook,
   verifyGitHubWebhook,
 } from '@loora/auth/github'
+import {
+  callerIdentity,
+  rateLimit,
+  rateLimits,
+  tooManyRequestsResponse,
+} from '@loora/rpc/rate-limit'
 
 export const Route = createFileRoute('/api/github/webhook')({
   server: {
     handlers: {
       POST: async ({ request }) => {
         if (!githubEnabled) return new Response('Not found', { status: 404 })
+        // Deliveries are signed, so this is a ceiling on unsigned noise rather
+        // than a gate: verifying a forged body is cheap, but not free.
+        const decision = await rateLimit(
+          'github-webhook',
+          callerIdentity(request.headers),
+          rateLimits.githubWebhook,
+        )
+        if (!decision.ok) return tooManyRequestsResponse(decision)
+
         const rawBody = await request.text()
         if (!await verifyGitHubWebhook(rawBody, request.headers.get('x-hub-signature-256'))) {
           return new Response('Invalid signature', { status: 401 })

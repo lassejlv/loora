@@ -15,6 +15,11 @@ import {
   normalizePresenceInput,
   scopePresenceSessionId,
 } from '@loora/realtime/events'
+import {
+  rateLimit,
+  rateLimits,
+  tooManyRequestsResponse,
+} from '@loora/rpc/rate-limit'
 
 function record(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === 'object' && !Array.isArray(value)
@@ -33,6 +38,15 @@ export async function canvasPresenceResponse(request: Request) {
   const session = await requireSession(request)
   if (!session) return new Response('Unauthorized', { status: 401 })
   if (!hasAcceptedCurrentLegal(session.user)) return legalConsentRequiredResponse()
+
+  // Presence is decoration: a dropped frame costs a stale cursor, so the
+  // ceiling can sit well above what a pointer that never stops sends.
+  const decision = await rateLimit(
+    'canvas-presence',
+    `user:${session.user.id}`,
+    rateLimits.canvasPresence,
+  )
+  if (!decision.ok) return tooManyRequestsResponse(decision, 'Too much presence traffic')
 
   let body: unknown
   try {

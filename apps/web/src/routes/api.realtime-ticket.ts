@@ -6,6 +6,11 @@ import {
   signRealtimeTicket,
 } from '@loora/realtime/ticket'
 import {
+  rateLimit,
+  rateLimits,
+  tooManyRequestsResponse,
+} from '@loora/rpc/rate-limit'
+import {
   requireRealtimeSession,
   resolveRealtimeAccessForSession,
 } from './-realtime-access'
@@ -28,30 +33,11 @@ function record(value: unknown): value is Record<string, unknown> {
 /**
  * Minting a ticket costs a design lookup, a plan check, and a branch check, so
  * an account that asks in a loop should be turned away before any of that. One
- * socket needs a ticket every 15 minutes plus a few on reconnects; this leaves
- * room for a bad network without leaving room for a script.
- *
- * The count is per web instance, which is the right shape for what it protects:
- * the work happens on the instance doing the counting.
+ * socket needs a ticket every 15 minutes plus a few on reconnects; the limit
+ * leaves room for a bad network without leaving room for a script.
  */
-const TICKET_LIMIT = 30
-const TICKET_WINDOW_MS = 60_000
-const TICKET_TRACKED_USERS = 10_000
-const ticketRequests = new Map<string, { count: number; windowStart: number }>()
-
-export function allowTicketRequest(userId: string, now = Date.now()) {
-  const seen = ticketRequests.get(userId)
-  if (!seen || now - seen.windowStart >= TICKET_WINDOW_MS) {
-    if (ticketRequests.size >= TICKET_TRACKED_USERS) {
-      for (const [id, entry] of ticketRequests) {
-        if (now - entry.windowStart >= TICKET_WINDOW_MS) ticketRequests.delete(id)
-      }
-    }
-    ticketRequests.set(userId, { count: 1, windowStart: now })
-    return true
-  }
-  seen.count += 1
-  return seen.count <= TICKET_LIMIT
+export function allowTicketRequest(userId: string) {
+  return rateLimit('realtime-ticket', `user:${userId}`, rateLimits.realtimeTicket)
 }
 
 function realtimeConfig() {
@@ -74,11 +60,9 @@ export async function realtimeTicketResponse(request: Request) {
 
   const authenticated = await requireRealtimeSession(request)
   if (!authenticated.ok) return authenticated.response
-  if (!allowTicketRequest(authenticated.session.user.id)) {
-    return new Response('Too many ticket requests', {
-      status: 429,
-      headers: { 'Retry-After': '60' },
-    })
+  const decision = await allowTicketRequest(authenticated.session.user.id)
+  if (!decision.ok) {
+    return tooManyRequestsResponse(decision, 'Too many ticket requests')
   }
 
   const resolved = await resolveRealtimeAccessForSession(authenticated.session, {

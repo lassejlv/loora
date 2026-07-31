@@ -10,6 +10,12 @@ import {
   requestIdFromHeaders,
   withRequestTimingHeaders,
 } from '@loora/rpc/request-timing'
+import {
+  callerIdentity,
+  rateLimit,
+  rateLimits,
+  tooManyRequestsResponse,
+} from '@loora/rpc/rate-limit'
 
 const handler = new RPCHandler(appRouter, {
   interceptors: [onError((error) => console.error('[orpc]', error))],
@@ -21,6 +27,17 @@ async function handle(request: Request) {
   const sessionStartedAt = performance.now()
   const session = await getSession(request)
   const sessionMs = elapsedMilliseconds(sessionStartedAt)
+
+  // Counted after the session resolves so a signed-in user is counted as
+  // themselves rather than as whatever address they share with an office.
+  const userId = session?.user.id ?? null
+  const decision = await rateLimit(
+    userId ? 'rpc' : 'rpc-anonymous',
+    callerIdentity(request.headers, userId),
+    userId ? rateLimits.rpc : rateLimits.rpcAnonymous,
+  )
+  if (!decision.ok) return tooManyRequestsResponse(decision)
+
   const handlerStartedAt = performance.now()
   const { response } = await handler.handle(request, {
     prefix: '/api/rpc',

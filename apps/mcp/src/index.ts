@@ -16,6 +16,13 @@ import {
   requestIdFromHeaders,
   serverTimingHeader,
 } from '@loora/rpc/request-timing'
+import {
+  callerIdentity,
+  rateLimit,
+  rateLimitHeaders,
+  rateLimits,
+  type RateLimitDecision,
+} from '@loora/rpc/rate-limit'
 import { createLooraServer } from './server'
 import { AccessDeniedError, requireAppAccess } from './access'
 import { createMcpSessionVerifier } from './auth'
@@ -44,6 +51,19 @@ function sendJson(res: ServerResponse, status: number, body: unknown, headers: R
   res.end(JSON.stringify(body))
 }
 
+function sendTooManyRequests(res: ServerResponse, decision: RateLimitDecision) {
+  sendJson(
+    res,
+    429,
+    {
+      jsonrpc: '2.0',
+      error: { code: -32000, message: 'Too many requests. Try again shortly.' },
+      id: null,
+    },
+    rateLimitHeaders(decision),
+  )
+}
+
 function sendUnauthorized(res: ServerResponse, message: string) {
   const wwwAuthenticate = `Bearer resource_metadata="${PUBLIC_URL}/.well-known/oauth-protected-resource"`
   sendJson(
@@ -64,15 +84,45 @@ async function handleMcp(
     if (typeof value === 'string') headers.set(key, value)
     else if (Array.isArray(value)) for (const item of value) headers.append(key, item)
   }
+  // Before the token is looked up, so a caller in a loop costs a counter
+  // increment rather than a session query per attempt.
+  const address = callerIdentity(headers)
+  const byAddress = await rateLimit('mcp-address', address, rateLimits.mcpAddress)
+  if (!byAddress.ok) {
+    sendTooManyRequests(res, byAddress)
+    return
+  }
+
   const authStartedAt = performance.now()
   const session = await mcpSessionVerifier.getSession(headers)
   phases.auth = elapsedMilliseconds(authStartedAt)
   if (!session) {
+    const anonymous = await rateLimit(
+      'mcp-anonymous',
+      address,
+      rateLimits.mcpAnonymous,
+    )
+    if (!anonymous.ok) {
+      sendTooManyRequests(res, anonymous)
+      return
+    }
     res.setHeader(
       'Server-Timing',
       serverTimingHeader([{ name: 'auth', durationMs: phases.auth }]),
     )
     sendUnauthorized(res, 'Unauthorized: Authentication required')
+    return
+  }
+
+  // Per account, so one agent cannot spend the burst budget of every agent
+  // behind the same address.
+  const byAccount = await rateLimit(
+    'mcp',
+    `user:${session.userId}`,
+    rateLimits.mcp,
+  )
+  if (!byAccount.ok) {
+    sendTooManyRequests(res, byAccount)
     return
   }
 

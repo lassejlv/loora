@@ -242,6 +242,22 @@ and `REALTIME_INTERNAL_TOKEN` on web and MCP; `REALTIME_TICKET_SECRET`,
 `REALTIME_INTERNAL_TOKEN`, and optional `REDIS_URL` /
 `REALTIME_ALLOWED_ORIGINS` on `apps/ws`.
 
+### Rate limiting
+
+`@loora/rpc/rate-limit` is the one limiter, used by the web API routes and the
+MCP server. `rateLimit(bucket, identity, rule)` counts a fixed window in Redis
+(`REDIS_RATELIMIT_URL`, separate from the realtime one) with a single `EVAL`
+per check, and falls back to counting in this process's memory when that Redis
+is unset or unreachable — with a cooldown, so an outage never adds a connect
+timeout to a request. Every limit lives in the `rateLimits` table in that
+module; add a new one there rather than inlining numbers at a call site.
+
+Count a signed-in caller as `user:<id>` and everyone else by address
+(`callerIdentity`, which reads `x-forwarded-for` left-to-right). Check before
+the expensive work — session lookups, design access, bucket reads — not after.
+Limits are sized from what the editor actually sends at its busiest; a limit
+that trips during ordinary work is worse than none.
+
 ### Persistence & legacy compatibility
 
 - Designs, drafts, draft bases, and versions keep legacy payload columns for rollback and expiring-link compatibility alongside nullable Canvas documents and `canvasVersion`.
