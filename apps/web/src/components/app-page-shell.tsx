@@ -7,7 +7,7 @@ import {
   type AppSection,
 } from '#/components/app-navigation'
 import { AppSettingsDialog } from '#/components/settings-dialog'
-import { UpgradeToProButton } from '#/components/upgrade-to-pro'
+import { UpgradeToProButton } from '@loora/editor/upgrade-to-pro'
 import { clearWelcomeSeen } from '#/components/welcome-dialog'
 
 export function AppPageShell({

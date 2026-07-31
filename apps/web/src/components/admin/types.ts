@@ -1,4 +1,4 @@
-import type { orpc } from '#/lib/orpc-client'
+import type { orpc } from '@loora/rpc/client'
 
 export type AdminOverview = Awaited<ReturnType<typeof orpc.admin.overview>>
 export type AdminUser = Awaited<ReturnType<typeof orpc.admin.listUsers>>[number]

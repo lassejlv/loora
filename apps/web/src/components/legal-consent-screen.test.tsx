@@ -5,7 +5,7 @@ const legalConsent = mock()
 const acceptLegal = mock()
 const signOut = mock()
 
-mock.module('#/lib/orpc-client', () => ({
+mock.module('@loora/rpc/client', () => ({
   orpc: { auth: { legalConsent, acceptLegal } },
 }))
 mock.module('@loora/auth/client', () => ({

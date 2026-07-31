@@ -9,7 +9,7 @@ const create = mock()
 const rename = mock()
 const getPreferences = mock()
 
-mock.module('#/lib/orpc-client', () => ({
+mock.module('@loora/rpc/client', () => ({
   orpc: {
     design: { list, listShared, delete: deleteDesign },
     canvas: { create, rename },

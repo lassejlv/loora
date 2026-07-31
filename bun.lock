@@ -40,10 +40,10 @@
         "@loora/billing": "workspace:*",
         "@loora/canvas": "workspace:*",
         "@loora/db": "workspace:*",
+        "@loora/editor": "workspace:*",
         "@loora/realtime": "workspace:*",
         "@loora/rpc": "workspace:*",
         "@loora/ui": "workspace:*",
-        "@orpc/client": "^1.14.8",
         "@orpc/server": "^1.14.8",
         "@tailwindcss/vite": "^4.3.3",
         "@tanstack/react-devtools": "latest",
@@ -159,6 +159,30 @@
         "postgres": "^3.4.9",
       },
     },
+    "packages/editor": {
+      "name": "@loora/editor",
+      "dependencies": {
+        "@loora/auth": "workspace:*",
+        "@loora/canvas": "workspace:*",
+        "@loora/db": "workspace:*",
+        "@loora/rpc": "workspace:*",
+        "@loora/ui": "workspace:*",
+        "@tanstack/react-router": "latest",
+      },
+      "devDependencies": {
+        "@testing-library/react": "^16.3.2",
+        "@types/bun": "^1.3.14",
+        "@types/react": "^19.2.17",
+        "@types/react-dom": "^19.2.3",
+        "react": "^19.2.7",
+        "react-dom": "^19.2.7",
+        "typescript": "catalog:",
+      },
+      "peerDependencies": {
+        "react": "^19.2.7",
+        "react-dom": "^19.2.7",
+      },
+    },
     "packages/email": {
       "name": "@loora/email",
       "dependencies": {
@@ -190,6 +214,7 @@
         "@loora/billing": "workspace:*",
         "@loora/canvas": "workspace:*",
         "@loora/db": "workspace:*",
+        "@orpc/client": "^1.14.8",
         "@orpc/server": "^1.14.8",
         "drizzle-orm": "catalog:",
         "zod": "catalog:",
@@ -472,6 +497,8 @@
     "@loora/db": ["@loora/db@workspace:packages/db"],
 
     "@loora/desktop": ["@loora/desktop@workspace:apps/desktop"],
+
+    "@loora/editor": ["@loora/editor@workspace:packages/editor"],
 
     "@loora/email": ["@loora/email@workspace:packages/email"],
 

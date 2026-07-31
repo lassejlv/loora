@@ -5,6 +5,7 @@
 /* The shared component library lives outside this app, so Tailwind has to be
    told to scan it as well — `source('../')` only covers apps/web. */
 @source '../../../packages/ui/src';
+@source '../../../packages/editor/src';
 @plugin '@tailwindcss/typography';
 
 @import 'tw-animate-css';

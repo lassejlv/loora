@@ -15,6 +15,7 @@
     "@loora/billing": "workspace:*",
     "@loora/canvas": "workspace:*",
     "@loora/db": "workspace:*",
+    "@orpc/client": "^1.14.8",
     "@orpc/server": "^1.14.8",
     "drizzle-orm": "catalog:",
     "zod": "catalog:"

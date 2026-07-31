@@ -3,7 +3,7 @@ import { UnplugIcon } from '@loora/ui/icons'
 import { CheckIcon, CopyIcon, RefreshCwIcon } from '@loora/ui/icons'
 import { Button } from '@loora/ui/button'
 import { IntegrationCard, IntegrationStatus } from '#/components/integration-card'
-import { orpc } from '#/lib/orpc-client'
+import { orpc } from '@loora/rpc/client'
 
 type McpSession = Awaited<ReturnType<typeof orpc.mcp.sessions>>[number]
 

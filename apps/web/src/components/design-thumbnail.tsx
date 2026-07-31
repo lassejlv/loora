@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import type { CanvasDocument } from '@loora/canvas/model'
-import { CanvasDocumentPreview } from '#/components/canvas-preview'
-import { orpc } from '#/lib/orpc-client'
+import { CanvasDocumentPreview } from '@loora/editor/canvas-preview'
+import { orpc } from '@loora/rpc/client'
 
 /** Documents are fetched once per revision and shared across remounts. */
 const documentCache = new Map<string, CanvasDocument | null>()

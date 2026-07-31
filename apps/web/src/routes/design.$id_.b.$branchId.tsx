@@ -1,6 +1,7 @@
 import { createFileRoute, redirect } from '@tanstack/react-router'
 import { AccountGate } from '#/components/account-gate'
-import { CanvasApp } from '#/components/canvas/app'
+import { CanvasApp } from '@loora/editor/app'
+import { renderEditorSettings } from '#/components/editor-settings-slot'
 import { designValidateSearch } from '#/lib/url-state'
 
 export const Route = createFileRoute('/design/$id_/b/$branchId')({
@@ -28,6 +29,7 @@ function BranchDesignPage() {
         key={`${id}:${branchId}`}
         designId={id}
         branchId={branchId}
+        renderSettings={renderEditorSettings}
       />
     </AccountGate>
   )

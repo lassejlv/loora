@@ -29,7 +29,7 @@ import {
   TableHeader,
   TableRow,
 } from '@loora/ui/table'
-import { orpc } from '#/lib/orpc-client'
+import { orpc } from '@loora/rpc/client'
 import { cn } from '@loora/ui/utils'
 import type { AdminUser, AdminUserFilter } from '#/components/admin/types'
 

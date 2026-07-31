@@ -64,7 +64,7 @@ const setPreviewAccess = mock(async () => ({ userId: 'user-2', previewAccess: tr
 const approvePendingPreviewAccess = mock(async () => ({ granted: 2 }))
 const revokeDesignLinks = mock(async () => ({ revokedLinks: 1 }))
 
-mock.module('#/lib/orpc-client', () => ({
+mock.module('@loora/rpc/client', () => ({
   orpc: {
     admin: {
       overview: mock(async () => overview),

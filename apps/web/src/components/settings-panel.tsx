@@ -14,13 +14,13 @@ import {
 import { Button } from '@loora/ui/button'
 import { Tabs, TabsList, TabsPanel, TabsTab } from '@loora/ui/tabs'
 import { authClient } from '@loora/auth/client'
-import { orpc } from '#/lib/orpc-client'
-import { PanelShell } from '#/components/panel-shell'
+import { orpc } from '@loora/rpc/client'
+import { PanelShell } from '@loora/ui/panel-shell'
 import { ShortcutsSettings } from '#/components/shortcuts-settings'
 import { clearWelcomeSeen } from '#/components/welcome-dialog'
 import { AppearanceSettings } from '#/components/appearance-settings'
 import { editorSearchParams, type SettingsTab } from '#/lib/url-state'
-import type { ShortcutConfig } from '#/lib/shortcuts'
+import type { ShortcutConfig } from '@loora/editor/lib/shortcuts'
 
 function DeleteAccountSection() {
   const [deleting, setDeleting] = useState(false)

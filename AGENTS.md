@@ -19,6 +19,7 @@ apps/web          TanStack Start app (UI, API route handlers, canvas editor shel
 apps/mcp          Remote MCP server (Streamable HTTP, OAuth resource server)
 apps/ws           Realtime WebSocket service (rooms, presence, MCP agent events)
 packages/ui       Shared design-system primitives, icon barrel, `cn` (`@loora/ui`)
+packages/editor   Canvas editor shell, panels, client sync (`@loora/editor`)
 packages/canvas   Canvas model, engine, merge, React surface, import, export
 packages/db       Drizzle schema, Neon client, migrations (`@loora/db`)
 packages/rpc      oRPC `appRouter`, storage, history, handoff (`@loora/rpc`)
@@ -33,10 +34,10 @@ packages/billing  Polar plan access / entitlements (`@loora/billing`)
 | Path | Purpose |
 |------|---------|
 | `src/routes/` | File-based routes + API handlers. `routeTree.gen.ts` is generated — never hand-edit. |
-| `src/components/` | App UI. Canvas editor shell: `components/canvas/`. Primitives come from `@loora/ui`. |
+| `src/components/` | App shell, auth, dashboard, settings, billing, landing. The editor comes from `@loora/editor`, primitives from `@loora/ui`. |
 | `src/lib/` | Client helpers (oRPC client, canvas runtime/clipboard, designs, theme, URL state). |
 | `src/test/` | JSDOM test preload. |
-| `src/styles.css` | Tailwind entry and design tokens. It `@source`s `packages/ui/src` so shared-primitive classes are scanned. |
+| `src/styles.css` | Tailwind entry and design tokens. It `@source`s `packages/ui/src` and `packages/editor/src` so their classes are scanned. |
 | `public/` | Static assets. |
 
 **Key routes**
@@ -73,6 +74,24 @@ Design tokens stay in `apps/web/src/styles.css`; the package ships classes, not
 a theme. `apps/web/components.json` points the shadcn CLI here, so generated
 primitives land in the package rather than the app.
 
+### `packages/editor` (`@loora/editor`)
+
+The `/design` surface: the editor shell and every panel that hangs off it, plus
+the client half of canvas sync.
+
+| Export | Role |
+|--------|------|
+| `@loora/editor/app` | `CanvasApp` — the whole editor, mounted by the design routes |
+| `@loora/editor/<name>` | Panels and dialogs: `editor`, `branches`, `history`, `export-panel`, `layers-panel`, `properties-panel`, `share-dialog`, `assets-panel`, `canvas-preview`, … |
+| `@loora/editor/lib/canvas-client` | `CanvasSyncController` — optimistic apply, batching, rebase, realtime |
+| `@loora/editor/lib/*` | Clipboard, HTML paste/import, code copy, capture, shortcuts, design list helpers |
+
+It depends on `@loora/canvas`, `@loora/ui`, `@loora/rpc` (client) and
+`@loora/auth`, and **must never** import from `apps/web`. Where the editor needs
+a product surface it does not own, the app passes it in: `CanvasApp` takes
+`renderSettings` so the settings dialog body (account, billing, appearance)
+stays in `apps/web`. Add a slot rather than an import back into the app.
+
 ### `packages/canvas` (`@loora/canvas`)
 
 Dependency-light canvas core. **Must never** import db, RPC, auth, web, drafts, or branch concepts. Branches are product targets owned by web/RPC/MCP.
@@ -86,7 +105,7 @@ Dependency-light canvas core. **Must never** import db, RPC, auth, web, drafts, 
 | `@loora/canvas/export` | One-way HTML, JSX, Tailwind, React/TSX, JSON, PNG compile |
 | `@loora/canvas/import` | HTML/CSS snapshot conversion into validated structured nodes |
 
-Web editor UI lives in `apps/web/src/components/canvas/` (branch panel, sync target, history, export, layers, properties). Keep branch/sync controllers outside the canvas package. There is no in-app agent panel.
+Editor UI lives in `packages/editor` (branch panel, sync target, history, export, layers, properties). Keep branch/sync controllers outside the canvas package. There is no in-app agent panel.
 
 ### `packages/agent` (`@loora/agent`)
 
@@ -100,6 +119,9 @@ Shared canvas mutation vocabulary for MCP (and handoff consumers), not models or
 `auth` · `preferences` · `billing` · `design` · `canvas` · `draft` · `handoff` · `history` · `asset` · `github` · `mcp` · `admin`
 
 Most product mutations go through oRPC. External agents use MCP or handoff — there is no `/api/chat` streaming path.
+
+The browser client is `@loora/rpc/client` (`orpc`). It imports `appRouter` as a
+type only, so no server implementation follows it into the bundle.
 
 ### `apps/mcp`
 
@@ -288,9 +310,9 @@ History uses Conventional Commits with scopes when useful:
 | Node types, validation, document shape | `packages/canvas/src/model.ts` |
 | Transactions, undo, conflict preconditions | `packages/canvas/src/engine.ts` |
 | Draft merge semantics | `packages/canvas/src/merge.ts` (+ RPC draft procedures) |
-| Editor chrome / tools / panels | `apps/web/src/components/canvas/` |
+| Editor chrome / tools / panels | `packages/editor/src/components/` |
 | Shared primitives, icons, `cn` | `packages/ui/src/` |
-| Client sync / runtime | `apps/web/src/lib/canvas-*.ts` |
+| Client sync / runtime | `packages/editor/src/lib/canvas-*.ts` |
 | API procedures | One module per namespace in `packages/rpc/src/` (`canvas-procedures.ts`, `branches.ts`, `versions.ts`, `admin.ts`, …); `router.ts` only assembles them, and shared gates live in `procedures.ts` |
 | Shared MCP canvas tools / layout repair | `packages/agent/src/` |
 | MCP tools / transport | `apps/mcp/src/` |

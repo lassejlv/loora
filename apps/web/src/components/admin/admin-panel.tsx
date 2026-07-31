@@ -5,7 +5,7 @@ import { Button } from '@loora/ui/button'
 import { AdminDesigns } from '#/components/admin/designs'
 import { AdminStats } from '#/components/admin/stats'
 import { AdminUsers } from '#/components/admin/users'
-import { orpc } from '#/lib/orpc-client'
+import { orpc } from '@loora/rpc/client'
 import type { AdminOverview } from '#/components/admin/types'
 
 /**

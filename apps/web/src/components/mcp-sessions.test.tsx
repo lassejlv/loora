@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, mock, test } from 'bun:test'
 const sessions = mock()
 const revoke = mock()
 
-mock.module('#/lib/orpc-client', () => ({
+mock.module('@loora/rpc/client', () => ({
   orpc: { mcp: { sessions, revoke } },
 }))
 

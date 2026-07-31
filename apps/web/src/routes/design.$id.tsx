@@ -1,6 +1,7 @@
 import { createFileRoute, redirect } from '@tanstack/react-router'
 import { AccountGate } from '#/components/account-gate'
-import { CanvasApp } from '#/components/canvas/app'
+import { CanvasApp } from '@loora/editor/app'
+import { renderEditorSettings } from '#/components/editor-settings-slot'
 import { designValidateSearch } from '#/lib/url-state'
 
 export const Route = createFileRoute('/design/$id')({
@@ -25,7 +26,7 @@ function DesignPage() {
   return (
     <AccountGate designId={id}>
       {/* Remount on switch so the sync controller opens the new target cleanly. */}
-      <CanvasApp key={id} designId={id} />
+      <CanvasApp key={id} designId={id} renderSettings={renderEditorSettings} />
     </AccountGate>
   )
 }

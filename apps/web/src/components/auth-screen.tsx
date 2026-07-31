@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { authClient } from '@loora/auth/client'
-import { orpc } from '#/lib/orpc-client'
+import { orpc } from '@loora/rpc/client'
 import { Button } from '@loora/ui/button'
 import { Checkbox } from '@loora/ui/checkbox'
 import { Input } from '@loora/ui/input'

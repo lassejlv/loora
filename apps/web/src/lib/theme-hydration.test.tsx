@@ -33,6 +33,11 @@ describe('theme hydration', () => {
         <main>Loora</main>
       </RootDocument>,
     )
+    // document.write swaps in a brand new <html>, and Testing Library's
+    // `screen` captured the original <body> when it was imported. Keep the
+    // original element so it can go back afterwards, or every suite that runs
+    // after this one queries a detached body and finds nothing.
+    const originalHtml = document.documentElement
     document.open()
     document.write(`<!doctype html>${markup}`)
     document.close()
@@ -75,7 +80,9 @@ describe('theme hydration', () => {
       root?.unmount()
       console.error = originalConsoleError
       window.localStorage.removeItem('loora:theme')
-      document.documentElement.className = ''
+      document.replaceChild(originalHtml, document.documentElement)
+      originalHtml.className = ''
+      document.body.innerHTML = ''
     }
   })
 })

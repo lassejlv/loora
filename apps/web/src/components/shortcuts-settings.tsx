@@ -11,7 +11,7 @@ import {
   resolveBuiltIn,
   type BuiltInShortcutId,
   type ShortcutConfig,
-} from '#/lib/shortcuts'
+} from '@loora/editor/lib/shortcuts'
 import { cn } from '@loora/ui/utils'
 
 export function ShortcutsSettings({

@@ -1,8 +1,8 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import { authClient } from '@loora/auth/client'
-import { orpc } from '#/lib/orpc-client'
+import { orpc } from '@loora/rpc/client'
 import { readAccessVerdict, writeAccessVerdict } from '#/lib/access-cache'
-import { CanvasApp } from '#/components/canvas/app'
+import { CanvasApp } from '@loora/editor/app'
 import { AuthScreen } from '#/components/auth-screen'
 import { PreviewAccessScreen } from '#/components/preview-access-screen'
 import { SubscriptionScreen } from '#/components/subscription-screen'
@@ -32,6 +32,7 @@ export function AccountGate({
   designId?: string
 }) {
   const { data: session, isPending } = authClient.useSession()
+  const [hasResolvedSession, setHasResolvedSession] = useState(() => !isPending)
   const [welcomeOpen, setWelcomeOpen] = useState(() => !hasSeenWelcome())
   const userId = session?.user.id
   const gateKey = designId ? `share:${designId}` : ''
@@ -40,6 +41,10 @@ export function AccountGate({
   const [guest, setGuest] = useState(() =>
     gateKey && userId ? readAccessVerdict(gateKey, userId) : false,
   )
+
+  useEffect(() => {
+    if (!isPending) setHasResolvedSession(true)
+  }, [isPending])
 
   useEffect(() => {
     if (!designId || !userId) return
@@ -60,7 +65,7 @@ export function AccountGate({
     }
   }, [designId, userId])
 
-  if (isPending) {
+  if (isPending && !hasResolvedSession) {
     return (
       <main className="grid min-h-screen place-items-center bg-cx-canvas">
         <p className="cx-shimmer text-sm">Opening your canvas…</p>

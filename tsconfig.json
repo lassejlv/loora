@@ -19,6 +19,11 @@
       "@loora/realtime/*": ["./packages/realtime/src/*"],
       "@loora/rpc": ["./packages/rpc/src/router.ts"],
       "@loora/rpc/*": ["./packages/rpc/src/*"],
+      "@loora/editor/lib/canvas-capture": [
+        "./packages/editor/src/lib/canvas-capture.tsx"
+      ],
+      "@loora/editor/lib/*": ["./packages/editor/src/lib/*.ts"],
+      "@loora/editor/*": ["./packages/editor/src/components/*.tsx"],
       "@loora/ui/utils": ["./packages/ui/src/lib/utils.ts"],
       "@loora/ui/icons": ["./packages/ui/src/icons/index.tsx"],
       "@loora/ui/hooks/*": ["./packages/ui/src/hooks/*.ts"],

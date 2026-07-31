@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { LogOutIcon } from '@loora/ui/icons'
 import { authClient } from '@loora/auth/client'
-import { orpc } from '#/lib/orpc-client'
+import { orpc } from '@loora/rpc/client'
 import { Button } from '@loora/ui/button'
 import { Checkbox } from '@loora/ui/checkbox'
 import { Label } from '@loora/ui/label'

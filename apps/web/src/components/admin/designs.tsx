@@ -3,7 +3,7 @@ import { ExternalLinkIcon, SearchIcon } from '@loora/ui/icons'
 import { Badge } from '@loora/ui/badge'
 import { Button } from '@loora/ui/button'
 import { Input } from '@loora/ui/input'
-import { orpc } from '#/lib/orpc-client'
+import { orpc } from '@loora/rpc/client'
 import type { AdminDesign } from '#/components/admin/types'
 
 function formatDate(value: Date | string) {

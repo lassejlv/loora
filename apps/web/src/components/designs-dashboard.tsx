@@ -20,7 +20,7 @@ import {
 } from '#/components/app-navigation'
 import { DesignThumbnail } from '#/components/design-thumbnail'
 import { AppSettingsDialog } from '#/components/settings-dialog'
-import { UpgradeToProButton } from '#/components/upgrade-to-pro'
+import { UpgradeToProButton } from '@loora/editor/upgrade-to-pro'
 import { clearWelcomeSeen } from '#/components/welcome-dialog'
 import { Button } from '@loora/ui/button'
 import {
@@ -42,9 +42,9 @@ import {
 import { Input } from '@loora/ui/input'
 import { Skeleton } from '@loora/ui/skeleton'
 import { Spinner } from '@loora/ui/spinner'
-import { orpc } from '#/lib/orpc-client'
-import { createDesign, relativeTime, type DesignSummary } from '#/lib/designs'
-import { formatChord } from '#/lib/shortcuts'
+import { orpc } from '@loora/rpc/client'
+import { createDesign, relativeTime, type DesignSummary } from '@loora/editor/lib/designs'
+import { formatChord } from '@loora/editor/lib/shortcuts'
 import { cn } from '@loora/ui/utils'
 
 const VIEW_STORAGE_KEY = 'loora:files-view'

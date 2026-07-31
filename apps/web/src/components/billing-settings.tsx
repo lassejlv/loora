@@ -2,8 +2,8 @@ import { useEffect, useState } from 'react'
 import { authClient } from '@loora/auth/client'
 import { MCP_WEEKLY_INCLUDED } from '@loora/billing/mcp-usage'
 import { Button } from '@loora/ui/button'
-import { PanelLoading } from '#/components/panel-shell'
-import { orpc } from '#/lib/orpc-client'
+import { PanelLoading } from '@loora/ui/panel-shell'
+import { orpc } from '@loora/rpc/client'
 
 type BillingStatus = Awaited<ReturnType<typeof orpc.billing.status>>
 type McpUsageResponse = Awaited<ReturnType<typeof orpc.billing.mcpUsage>>

@@ -5,7 +5,7 @@ import { withNuqsTestingAdapter } from 'nuqs/adapters/testing'
 
 const TabsContext = createContext('')
 
-mock.module('#/lib/orpc-client', () => ({
+mock.module('@loora/rpc/client', () => ({
   orpc: {
     auth: { deleteAccount: mock() },
   },
@@ -40,7 +40,7 @@ mock.module('@loora/ui/tabs', () => ({
 // `mock.module` is process-global, so this stub is what every later test file
 // in the run sees too — the canvas panels render their header buttons through
 // PanelShell. Keep the shape of the real thing: title, actions, close, body.
-mock.module('#/components/panel-shell', () => ({
+mock.module('@loora/ui/panel-shell', () => ({
   PanelShell: ({
     title,
     actions,

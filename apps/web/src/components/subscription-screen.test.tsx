@@ -6,7 +6,7 @@ const refresh = mock()
 const checkout = mock()
 const signOut = mock()
 
-mock.module('#/lib/orpc-client', () => ({
+mock.module('@loora/rpc/client', () => ({
   orpc: { billing: { status, refresh, checkout } },
 }))
 mock.module('@loora/auth/client', () => ({

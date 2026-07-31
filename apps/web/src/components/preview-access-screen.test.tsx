@@ -5,7 +5,7 @@ const previewAccess = mock()
 const requestPreviewAccess = mock()
 const signOut = mock()
 
-mock.module('#/lib/orpc-client', () => ({
+mock.module('@loora/rpc/client', () => ({
   orpc: { auth: { previewAccess, requestPreviewAccess } },
 }))
 mock.module('@loora/auth/client', () => ({

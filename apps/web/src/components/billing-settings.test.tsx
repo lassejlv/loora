@@ -5,7 +5,7 @@ const status = mock()
 const mcpUsage = mock()
 const portal = mock()
 
-mock.module('#/lib/orpc-client', () => ({
+mock.module('@loora/rpc/client', () => ({
   orpc: {
     billing: { status, mcpUsage },
   },
