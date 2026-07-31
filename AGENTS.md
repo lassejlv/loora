@@ -101,8 +101,8 @@ verifies it. See `apps/ws/README.md` for endpoints and configuration.
 - Schema: `packages/db/src/schema.ts`
 - Migrations: `packages/db/drizzle/` (commit SQL **and** `meta/` snapshots)
 - Notable tables: `design`, `designDraft`, `designVersion`, `canvasTransaction`, `asset`, auth/OAuth (incl. `oauth_*` MCP tables), `billingEntitlement`, and GitHub bindings. The `publish_link` and
-  `publish_egress` tables are dead: nothing reads or writes them, and they are
-  waiting on a migration to drop.
+  `publish_egress` tables are no longer read or written by product code. Leave
+  them in place — do not write a migration that drops them.
 
 Legacy helpers remain in `@loora/db/canvas` and `@loora/db/drafts` for rollback and expiring-link compatibility.
 
