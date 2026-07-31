@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type DragEvent } from 'react'
-import { PanelBottomIcon, PanelRightIcon } from '#/components/icons'
+import { PanelBottomIcon, PanelRightIcon } from '@loora/ui/icons'
 import {
   BringToFrontIcon,
   ComponentIcon,
@@ -7,7 +7,7 @@ import {
   PlusIcon,
   SendToBackIcon,
   TypeIcon,
-} from '#/components/icons'
+} from '@loora/ui/icons'
 import {
   ChevronDownIcon,
   ChevronRightIcon,
@@ -17,7 +17,7 @@ import {
   GripVerticalIcon,
   LockIcon,
   UnlockIcon,
-} from '#/components/icons'
+} from '@loora/ui/icons'
 import {
   useCanvasDocument,
   useCanvasReadOnly,
@@ -38,9 +38,9 @@ import {
   type CanvasOperation,
 } from '@loora/canvas/engine'
 import { PanelShell } from '#/components/panel-shell'
-import { Button } from '#/components/ui/button'
-import { Input } from '#/components/ui/input'
-import { cn } from '#/lib/utils'
+import { Button } from '@loora/ui/button'
+import { Input } from '@loora/ui/input'
+import { cn } from '@loora/ui/utils'
 
 export type CanvasReorderDirection = 'forward' | 'front' | 'backward' | 'back'
 export type CanvasPanelPosition = 'left' | 'right' | 'bottom'

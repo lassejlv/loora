@@ -1,24 +1,24 @@
 import { useEffect, useMemo, useState } from 'react'
-import { HistoryIcon, RotateCcwIcon } from '#/components/icons'
+import { HistoryIcon, RotateCcwIcon } from '@loora/ui/icons'
 import type { CanvasDocument } from '@loora/canvas/model'
 import { diffDocuments } from '@loora/canvas/merge'
 import { useCanvasDocument } from '@loora/canvas/react'
 import { orpc } from '#/lib/orpc-client'
 import { CanvasDocumentPreview } from '#/components/canvas-preview'
 import { PanelEmpty, PanelLoading } from '#/components/panel-shell'
-import { Badge } from '#/components/ui/badge'
-import { Button } from '#/components/ui/button'
+import { Badge } from '@loora/ui/badge'
+import { Button } from '@loora/ui/button'
 import {
   Dialog,
   DialogDescription,
   DialogHeader,
   DialogPopup,
   DialogTitle,
-} from '#/components/ui/dialog'
-import { Input } from '#/components/ui/input'
-import { Spinner } from '#/components/ui/spinner'
+} from '@loora/ui/dialog'
+import { Input } from '@loora/ui/input'
+import { Spinner } from '@loora/ui/spinner'
 import { relativeTime } from '#/lib/designs'
-import { cn } from '#/lib/utils'
+import { cn } from '@loora/ui/utils'
 import { DiffChips } from './diff-chips'
 import type { CanvasEditorController } from './editor'
 

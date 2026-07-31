@@ -2,7 +2,7 @@
 
 import { Tabs as TabsPrimitive } from "@base-ui/react/tabs";
 import type React from "react";
-import { cn } from "#/lib/utils.ts";
+import { cn } from "../lib/utils.ts";
 
 export type TabsVariant = "default" | "underline";
 

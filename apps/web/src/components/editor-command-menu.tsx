@@ -1,5 +1,5 @@
 import type { ElementType } from 'react'
-import { CheckIcon } from '#/components/icons'
+import { CheckIcon } from '@loora/ui/icons'
 import {
   Command,
   CommandCollection,
@@ -14,7 +14,7 @@ import {
   CommandList,
   CommandPanel,
   CommandShortcut,
-} from '#/components/ui/command'
+} from '@loora/ui/command'
 
 export interface EditorCommand {
   id: string

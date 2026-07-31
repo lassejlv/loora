@@ -19,6 +19,7 @@ COPY packages/agent/package.json packages/agent/
 COPY packages/canvas/package.json packages/canvas/
 COPY packages/realtime/package.json packages/realtime/
 COPY packages/rpc/package.json packages/rpc/
+COPY packages/ui/package.json packages/ui/
 RUN bun install --frozen-lockfile
 
 FROM oven/bun:canary-slim AS runtime

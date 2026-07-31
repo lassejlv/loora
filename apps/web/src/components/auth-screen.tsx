@@ -1,10 +1,10 @@
 import { useEffect, useState } from 'react'
 import { authClient } from '@loora/auth/client'
 import { orpc } from '#/lib/orpc-client'
-import { Button } from '#/components/ui/button'
-import { Checkbox } from '#/components/ui/checkbox'
-import { Input } from '#/components/ui/input'
-import { Label } from '#/components/ui/label'
+import { Button } from '@loora/ui/button'
+import { Checkbox } from '@loora/ui/checkbox'
+import { Input } from '@loora/ui/input'
+import { Label } from '@loora/ui/label'
 import {
   Dialog,
   DialogDescription,
@@ -12,8 +12,8 @@ import {
   DialogPanel,
   DialogPopup,
   DialogTitle,
-} from '#/components/ui/dialog'
-import { Tabs, TabsList, TabsPanel, TabsTab } from '#/components/ui/tabs'
+} from '@loora/ui/dialog'
+import { Tabs, TabsList, TabsPanel, TabsTab } from '@loora/ui/tabs'
 import {
   clearPendingLegalConsent,
   markPendingLegalConsent,

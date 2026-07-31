@@ -1,4 +1,4 @@
-import { cn } from '#/lib/utils'
+import { cn } from '@loora/ui/utils'
 
 /**
  * Added / removed / edited counts, in the diff colours the rest of the editor

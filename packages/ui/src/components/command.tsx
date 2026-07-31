@@ -1,9 +1,9 @@
 "use client";
 
 import { Dialog as CommandDialogPrimitive } from "@base-ui/react/dialog";
-import { SearchIcon } from "#/components/icons";
+import { SearchIcon } from "../icons/index.tsx";
 import type * as React from "react";
-import { cn } from "#/lib/utils.ts";
+import { cn } from "../lib/utils.ts";
 import {
   Autocomplete,
   AutocompleteCollection,
@@ -14,7 +14,7 @@ import {
   AutocompleteItem,
   AutocompleteList,
   AutocompleteSeparator,
-} from "#/components/ui/autocomplete.tsx";
+} from "./autocomplete.tsx";
 
 export const CommandDialog: typeof CommandDialogPrimitive.Root =
   CommandDialogPrimitive.Root;

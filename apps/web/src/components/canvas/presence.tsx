@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import { useCanvasSelection } from '@loora/canvas/react'
 import type { CanvasPeer } from '#/lib/canvas-client'
 import type { CanvasEditorController } from './editor'
-import { cn } from '#/lib/utils'
+import { cn } from '@loora/ui/utils'
 
 const EMPTY_PEERS: CanvasPeer[] = []
 

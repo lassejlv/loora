@@ -1,11 +1,11 @@
 "use client";
 
 import { Autocomplete as AutocompletePrimitive } from "@base-ui/react/autocomplete";
-import { ChevronsUpDownIcon, XIcon } from "#/components/icons";
+import { ChevronsUpDownIcon, XIcon } from "../icons/index.tsx";
 import type React from "react";
-import { cn } from "#/lib/utils.ts";
-import { Input } from "#/components/ui/input.tsx";
-import { ScrollArea } from "#/components/ui/scroll-area.tsx";
+import { cn } from "../lib/utils.ts";
+import { Input } from "./input.tsx";
+import { ScrollArea } from "./scroll-area.tsx";
 
 export const Autocomplete: typeof AutocompletePrimitive.Root =
   AutocompletePrimitive.Root;

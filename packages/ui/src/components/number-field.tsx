@@ -1,11 +1,11 @@
 "use client";
 
 import { NumberField as NumberFieldPrimitive } from "@base-ui/react/number-field";
-import { PlusIcon } from "#/components/icons";
-import { MinusIcon } from "#/components/icons";
+import { PlusIcon } from "../icons/index.tsx";
+import { MinusIcon } from "../icons/index.tsx";
 import * as React from "react";
-import { cn } from "#/lib/utils.ts";
-import { Label } from "#/components/ui/label.tsx";
+import { cn } from "../lib/utils.ts";
+import { Label } from "./label.tsx";
 
 export const NumberFieldContext: React.Context<{
   fieldId: string;

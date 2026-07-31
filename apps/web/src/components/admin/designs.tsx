@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { ExternalLinkIcon, SearchIcon } from '#/components/icons'
-import { Badge } from '#/components/ui/badge'
-import { Button } from '#/components/ui/button'
-import { Input } from '#/components/ui/input'
+import { ExternalLinkIcon, SearchIcon } from '@loora/ui/icons'
+import { Badge } from '@loora/ui/badge'
+import { Button } from '@loora/ui/button'
+import { Input } from '@loora/ui/input'
 import { orpc } from '#/lib/orpc-client'
 import type { AdminDesign } from '#/components/admin/types'
 

@@ -2,11 +2,11 @@
 
 import { mergeProps } from "@base-ui/react/merge-props";
 import { useRender } from "@base-ui/react/use-render";
-import { ChevronLeftIcon, ChevronRightIcon } from "#/components/icons";
-import { MoreHorizontalIcon } from "#/components/icons";
+import { ChevronLeftIcon, ChevronRightIcon } from "../icons/index.tsx";
+import { MoreHorizontalIcon } from "../icons/index.tsx";
 import type * as React from "react";
-import { cn } from "#/lib/utils.ts";
-import { type Button, buttonVariants } from "#/components/ui/button.tsx";
+import { cn } from "../lib/utils.ts";
+import { type Button, buttonVariants } from "./button.tsx";
 
 export function Pagination({
   className,

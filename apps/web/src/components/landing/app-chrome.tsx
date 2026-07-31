@@ -6,7 +6,7 @@ import {
   Share2Icon,
   SquareIcon,
   TypeIcon,
-} from '#/components/icons'
+} from '@loora/ui/icons'
 
 /**
  * The editor around the canvas. Static on purpose — it frames the demo so the

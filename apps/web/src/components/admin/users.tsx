@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { formatStorageBytes } from '@loora/billing/plan-limits'
-import { EllipsisIcon, SearchIcon } from '#/components/icons'
+import { EllipsisIcon, SearchIcon } from '@loora/ui/icons'
 import {
   AlertDialog,
   AlertDialogClose,
@@ -10,17 +10,17 @@ import {
   AlertDialogPopup,
   AlertDialogTitle,
   AlertDialogTrigger,
-} from '#/components/ui/alert-dialog'
-import { Badge } from '#/components/ui/badge'
-import { Button } from '#/components/ui/button'
+} from '@loora/ui/alert-dialog'
+import { Badge } from '@loora/ui/badge'
+import { Button } from '@loora/ui/button'
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
-} from '#/components/ui/dropdown-menu'
-import { Input } from '#/components/ui/input'
+} from '@loora/ui/dropdown-menu'
+import { Input } from '@loora/ui/input'
 import {
   Table,
   TableBody,
@@ -28,9 +28,9 @@ import {
   TableHead,
   TableHeader,
   TableRow,
-} from '#/components/ui/table'
+} from '@loora/ui/table'
 import { orpc } from '#/lib/orpc-client'
-import { cn } from '#/lib/utils'
+import { cn } from '@loora/ui/utils'
 import type { AdminUser, AdminUserFilter } from '#/components/admin/types'
 
 const FILTERS: { value: AdminUserFilter; label: string }[] = [

@@ -2,7 +2,7 @@
 
 import { Avatar as AvatarPrimitive } from "@base-ui/react/avatar";
 import type React from "react";
-import { cn } from "#/lib/utils.ts";
+import { cn } from "../lib/utils.ts";
 
 export function Avatar({
   className,

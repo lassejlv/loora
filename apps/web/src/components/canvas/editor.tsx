@@ -24,7 +24,7 @@ import {
   Undo2Icon,
   ZoomInIcon,
   ZoomOutIcon,
-} from '#/components/icons'
+} from '@loora/ui/icons'
 import {
   CopyIcon,
   DownloadIcon,
@@ -37,7 +37,7 @@ import {
   PlusIcon,
   SettingsIcon,
   SlidersHorizontalIcon,
-} from '#/components/icons'
+} from '@loora/ui/icons'
 import {
   CanvasProvider,
   CanvasSurface,
@@ -104,13 +104,13 @@ import {
   type EditorCommandGroup,
 } from '#/components/editor-command-menu'
 import { SettingsPanel } from '#/components/settings-panel'
-import { Button } from '#/components/ui/button'
+import { Button } from '@loora/ui/button'
 import {
   Tooltip,
   TooltipPopup,
   TooltipProvider,
   TooltipTrigger,
-} from '#/components/ui/tooltip'
+} from '@loora/ui/tooltip'
 import { orpc } from '#/lib/orpc-client'
 import { compileCanvasCode, type CanvasCodeFormat } from '#/lib/canvas-code-copy'
 import { copyText } from '#/lib/copy-text'
@@ -132,9 +132,9 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
-} from '#/components/ui/dropdown-menu'
-import { Drawer, DrawerPopup } from '#/components/ui/drawer'
-import { useIsMobile } from '#/hooks/use-media-query'
+} from '@loora/ui/dropdown-menu'
+import { Drawer, DrawerPopup } from '@loora/ui/drawer'
+import { useIsMobile } from '@loora/ui/hooks/use-media-query'
 import {
   cacheShortcuts,
   formatBuiltInChord,
@@ -145,7 +145,7 @@ import {
   type BuiltInShortcutId,
   type ShortcutConfig,
 } from '#/lib/shortcuts'
-import { Dialog, DialogPopup } from '#/components/ui/dialog'
+import { Dialog, DialogPopup } from '@loora/ui/dialog'
 
 const INSPECTOR_MIN_WIDTH = 220
 const INSPECTOR_MAX_WIDTH = 420

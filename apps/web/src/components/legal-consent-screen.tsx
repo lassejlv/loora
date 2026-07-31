@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useState } from 'react'
-import { LogOutIcon } from '#/components/icons'
+import { LogOutIcon } from '@loora/ui/icons'
 import { authClient } from '@loora/auth/client'
 import { orpc } from '#/lib/orpc-client'
-import { Button } from '#/components/ui/button'
-import { Checkbox } from '#/components/ui/checkbox'
-import { Label } from '#/components/ui/label'
+import { Button } from '@loora/ui/button'
+import { Checkbox } from '@loora/ui/checkbox'
+import { Label } from '@loora/ui/label'
 import {
   clearPendingLegalConsent,
   hasPendingLegalConsent,
@@ -16,7 +16,7 @@ import {
   DialogPanel,
   DialogPopup,
   DialogTitle,
-} from '#/components/ui/dialog'
+} from '@loora/ui/dialog'
 
 interface LegalConsentScreenProps {
   children: React.ReactNode

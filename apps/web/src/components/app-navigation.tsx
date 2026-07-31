@@ -8,15 +8,15 @@ import {
   LogOutIcon,
   SettingsIcon,
   SunIcon,
-} from '#/components/icons'
+} from '@loora/ui/icons'
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
-} from '#/components/ui/dropdown-menu'
-import { cn } from '#/lib/utils'
+} from '@loora/ui/dropdown-menu'
+import { cn } from '@loora/ui/utils'
 
 export type AppSection =
   | 'recents'

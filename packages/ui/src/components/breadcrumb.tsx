@@ -2,10 +2,10 @@
 
 import { mergeProps } from "@base-ui/react/merge-props";
 import { useRender } from "@base-ui/react/use-render";
-import { ChevronRightIcon as ChevronRight } from "#/components/icons";
-import { MoreHorizontal } from "#/components/icons";
+import { ChevronRightIcon as ChevronRight } from "../icons/index.tsx";
+import { MoreHorizontal } from "../icons/index.tsx";
 import type * as React from "react";
-import { cn } from "#/lib/utils.ts";
+import { cn } from "../lib/utils.ts";
 
 export function Breadcrumb({
   ...props

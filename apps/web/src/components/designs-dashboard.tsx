@@ -7,12 +7,12 @@ import {
   ListIcon,
   PencilIcon,
   Trash2Icon,
-} from '#/components/icons'
+} from '@loora/ui/icons'
 import {
   LayoutGridIcon,
   SearchIcon,
   XIcon,
-} from '#/components/icons'
+} from '@loora/ui/icons'
 import { authClient } from '@loora/auth/client'
 import {
   AppAccountMenu,
@@ -22,7 +22,7 @@ import { DesignThumbnail } from '#/components/design-thumbnail'
 import { AppSettingsDialog } from '#/components/settings-dialog'
 import { UpgradeToProButton } from '#/components/upgrade-to-pro'
 import { clearWelcomeSeen } from '#/components/welcome-dialog'
-import { Button } from '#/components/ui/button'
+import { Button } from '@loora/ui/button'
 import {
   Dialog,
   DialogDescription,
@@ -31,21 +31,21 @@ import {
   DialogPanel,
   DialogPopup,
   DialogTitle,
-} from '#/components/ui/dialog'
+} from '@loora/ui/dialog'
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
-} from '#/components/ui/dropdown-menu'
-import { Input } from '#/components/ui/input'
-import { Skeleton } from '#/components/ui/skeleton'
-import { Spinner } from '#/components/ui/spinner'
+} from '@loora/ui/dropdown-menu'
+import { Input } from '@loora/ui/input'
+import { Skeleton } from '@loora/ui/skeleton'
+import { Spinner } from '@loora/ui/spinner'
 import { orpc } from '#/lib/orpc-client'
 import { createDesign, relativeTime, type DesignSummary } from '#/lib/designs'
 import { formatChord } from '#/lib/shortcuts'
-import { cn } from '#/lib/utils'
+import { cn } from '@loora/ui/utils'
 
 const VIEW_STORAGE_KEY = 'loora:files-view'
 

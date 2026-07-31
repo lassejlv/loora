@@ -1,12 +1,12 @@
 "use client";
 
 import { Toast } from "@base-ui/react/toast";
-import { CircleCheckIcon } from "#/components/icons";
-import { CircleAlertIcon, InfoIcon, TriangleAlertIcon } from "#/components/icons";
+import { CircleCheckIcon } from "../icons/index.tsx";
+import { CircleAlertIcon, InfoIcon, TriangleAlertIcon } from "../icons/index.tsx";
 import type React from "react";
-import { cn } from "#/lib/utils.ts";
-import { buttonVariants } from "#/components/ui/button.tsx";
-import { Spinner } from "#/components/ui/spinner.tsx";
+import { cn } from "../lib/utils.ts";
+import { buttonVariants } from "./button.tsx";
+import { Spinner } from "./spinner.tsx";
 
 const TOAST_ICONS = {
   error: CircleAlertIcon,

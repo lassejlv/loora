@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
-import { UnplugIcon } from '#/components/icons'
-import { CheckIcon, CopyIcon, RefreshCwIcon } from '#/components/icons'
-import { Button } from '#/components/ui/button'
+import { UnplugIcon } from '@loora/ui/icons'
+import { CheckIcon, CopyIcon, RefreshCwIcon } from '@loora/ui/icons'
+import { Button } from '@loora/ui/button'
 import { IntegrationCard, IntegrationStatus } from '#/components/integration-card'
 import { orpc } from '#/lib/orpc-client'
 

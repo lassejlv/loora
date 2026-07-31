@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useQueryStates } from 'nuqs'
-import { LogOutIcon } from '#/components/icons'
+import { LogOutIcon } from '@loora/ui/icons'
 import {
   AlertDialog,
   AlertDialogClose,
@@ -10,9 +10,9 @@ import {
   AlertDialogPopup,
   AlertDialogTitle,
   AlertDialogTrigger,
-} from '#/components/ui/alert-dialog'
-import { Button } from '#/components/ui/button'
-import { Tabs, TabsList, TabsPanel, TabsTab } from '#/components/ui/tabs'
+} from '@loora/ui/alert-dialog'
+import { Button } from '@loora/ui/button'
+import { Tabs, TabsList, TabsPanel, TabsTab } from '@loora/ui/tabs'
 import { authClient } from '@loora/auth/client'
 import { orpc } from '#/lib/orpc-client'
 import { PanelShell } from '#/components/panel-shell'

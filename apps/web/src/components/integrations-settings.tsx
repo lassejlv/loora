@@ -1,7 +1,7 @@
 import { useQueryStates } from 'nuqs'
 import { GitHubAccount } from '#/components/github-account'
 import { McpSessions } from '#/components/mcp-sessions'
-import { Tabs, TabsList, TabsPanel, TabsTab } from '#/components/ui/tabs'
+import { Tabs, TabsList, TabsPanel, TabsTab } from '@loora/ui/tabs'
 import {
   integrationsSearchParams,
   type IntegrationTab,

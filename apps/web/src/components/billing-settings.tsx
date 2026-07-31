@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { authClient } from '@loora/auth/client'
 import { MCP_WEEKLY_INCLUDED } from '@loora/billing/mcp-usage'
-import { Button } from '#/components/ui/button'
+import { Button } from '@loora/ui/button'
 import { PanelLoading } from '#/components/panel-shell'
 import { orpc } from '#/lib/orpc-client'
 

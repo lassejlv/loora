@@ -1,6 +1,6 @@
 import { useReducedMotion } from 'motion/react'
 import { motion } from 'motion/react'
-import { Button } from '#/components/ui/button'
+import { Button } from '@loora/ui/button'
 import {
   Dialog,
   DialogDescription,
@@ -9,7 +9,7 @@ import {
   DialogPanel,
   DialogPopup,
   DialogTitle,
-} from '#/components/ui/dialog'
+} from '@loora/ui/dialog'
 import { fadeUp, uiTransition } from '#/lib/motion'
 
 export const WELCOME_STORAGE_KEY = 'loora:welcome-seen'

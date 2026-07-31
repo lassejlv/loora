@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Dialog, DialogPopup } from '#/components/ui/dialog'
+import { Dialog, DialogPopup } from '@loora/ui/dialog'
 import { SettingsPanel } from '#/components/settings-panel'
 import { orpc } from '#/lib/orpc-client'
 import {

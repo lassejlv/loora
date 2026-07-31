@@ -13,10 +13,10 @@
   "iconLibrary": "hugeicons",
   "aliases": {
     "components": "#/components",
-    "utils": "#/lib/utils",
-    "ui": "#/components/ui",
+    "utils": "@loora/ui/utils",
+    "ui": "@loora/ui",
     "lib": "#/lib",
-    "hooks": "#/hooks"
+    "hooks": "@loora/ui/hooks"
   },
   "registries": {
     "@coss": "https://coss.com/ui/r/{name}.json"

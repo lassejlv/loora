@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { authClient } from '@loora/auth/client'
-import { Button } from '#/components/ui/button'
+import { Button } from '@loora/ui/button'
 import {
   Dialog,
   DialogDescription,
@@ -9,9 +9,9 @@ import {
   DialogPanel,
   DialogPopup,
   DialogTitle,
-} from '#/components/ui/dialog'
+} from '@loora/ui/dialog'
 import { orpc } from '#/lib/orpc-client'
-import { cn } from '#/lib/utils'
+import { cn } from '@loora/ui/utils'
 
 type BillingStatus = Awaited<ReturnType<typeof orpc.billing.status>>
 type ProInterval = 'month' | 'year'

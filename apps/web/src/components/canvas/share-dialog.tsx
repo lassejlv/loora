@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
-import { CheckIcon, Link2Icon, Trash2Icon, XIcon } from '#/components/icons'
-import { Button } from '#/components/ui/button'
+import { CheckIcon, Link2Icon, Trash2Icon, XIcon } from '@loora/ui/icons'
+import { Button } from '@loora/ui/button'
 import {
   Dialog,
   DialogDescription,
@@ -8,12 +8,12 @@ import {
   DialogPanel,
   DialogPopup,
   DialogTitle,
-} from '#/components/ui/dialog'
-import { Input } from '#/components/ui/input'
-import { Spinner } from '#/components/ui/spinner'
+} from '@loora/ui/dialog'
+import { Input } from '@loora/ui/input'
+import { Spinner } from '@loora/ui/spinner'
 import { orpc } from '#/lib/orpc-client'
 import { copyText } from '#/lib/copy-text'
-import { cn } from '#/lib/utils'
+import { cn } from '@loora/ui/utils'
 
 type ShareRole = 'view' | 'edit'
 type LinkAccess = 'restricted' | ShareRole

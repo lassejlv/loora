@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import { CanvasEngine } from '@loora/canvas/engine'
 import { CanvasNodeRenderer, CanvasProvider } from '@loora/canvas/react'
 import type { CanvasDocument, PageNode } from '@loora/canvas/model'
-import { cn } from '#/lib/utils'
+import { cn } from '@loora/ui/utils'
 
 const MAX_PAGES = 8
 const PADDING = 10

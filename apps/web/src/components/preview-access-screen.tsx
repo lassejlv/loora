@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useState } from 'react'
-import { LogOutIcon } from '#/components/icons'
+import { LogOutIcon } from '@loora/ui/icons'
 import { clearWelcomeSeen } from '#/components/welcome-dialog'
 import { authClient } from '@loora/auth/client'
 import { orpc } from '#/lib/orpc-client'
 import { readAccessVerdict, writeAccessVerdict } from '#/lib/access-cache'
-import { Button } from '#/components/ui/button'
+import { Button } from '@loora/ui/button'
 import {
   Dialog,
   DialogDescription,
@@ -12,7 +12,7 @@ import {
   DialogPanel,
   DialogPopup,
   DialogTitle,
-} from '#/components/ui/dialog'
+} from '@loora/ui/dialog'
 
 interface PreviewAccessScreenProps {
   userId: string

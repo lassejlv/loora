@@ -5,14 +5,14 @@ import {
   FolderIcon,
   PencilIcon,
   Trash2Icon,
-} from '#/components/icons'
+} from '@loora/ui/icons'
 import {
   CheckIcon,
   ChevronDownIcon,
   HistoryIcon,
   ImageIcon,
   RefreshCwIcon,
-} from '#/components/icons'
+} from '@loora/ui/icons'
 import { CanvasEngine, type CanvasTransaction } from '@loora/canvas/engine'
 import { CanvasEditor, type CanvasEditorController } from './editor'
 import {
@@ -29,9 +29,9 @@ import {
 import { createStarterCanvas } from '#/lib/canvas-fixtures'
 import { createDesign, type DesignSummary } from '#/lib/designs'
 import { orpc } from '#/lib/orpc-client'
-import { Button } from '#/components/ui/button'
-import { Share2Icon } from '#/components/icons'
-import { Input } from '#/components/ui/input'
+import { Button } from '@loora/ui/button'
+import { Share2Icon } from '@loora/ui/icons'
+import { Input } from '@loora/ui/input'
 import {
   Dialog,
   DialogDescription,
@@ -40,14 +40,14 @@ import {
   DialogPanel,
   DialogPopup,
   DialogTitle,
-} from '#/components/ui/dialog'
+} from '@loora/ui/dialog'
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
-} from '#/components/ui/dropdown-menu'
+} from '@loora/ui/dropdown-menu'
 
 function CanvasDocSwitcher({
   documents,

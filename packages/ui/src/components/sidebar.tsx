@@ -3,27 +3,27 @@
 import { mergeProps } from "@base-ui/react/merge-props";
 import { useRender } from "@base-ui/react/use-render";
 import { cva, type VariantProps } from "class-variance-authority";
-import { PanelLeftIcon } from "#/components/icons";
+import { PanelLeftIcon } from "../icons/index.tsx";
 import * as React from "react";
-import { useMediaQuery } from "#/hooks/use-media-query.ts";
-import { cn } from "#/lib/utils.ts";
-import { Button } from "#/components/ui/button.tsx";
-import { Input } from "#/components/ui/input.tsx";
-import { ScrollArea } from "#/components/ui/scroll-area.tsx";
-import { Separator } from "#/components/ui/separator.tsx";
+import { useMediaQuery } from "../hooks/use-media-query.ts";
+import { cn } from "../lib/utils.ts";
+import { Button } from "./button.tsx";
+import { Input } from "./input.tsx";
+import { ScrollArea } from "./scroll-area.tsx";
+import { Separator } from "./separator.tsx";
 import {
   Sheet,
   SheetDescription,
   SheetHeader,
   SheetPopup,
   SheetTitle,
-} from "#/components/ui/sheet.tsx";
-import { Skeleton } from "#/components/ui/skeleton.tsx";
+} from "./sheet.tsx";
+import { Skeleton } from "./skeleton.tsx";
 import {
   Tooltip,
   TooltipPopup,
   TooltipTrigger,
-} from "#/components/ui/tooltip.tsx";
+} from "./tooltip.tsx";
 
 const SIDEBAR_COOKIE_NAME: string = "sidebar_state";
 const SIDEBAR_COOKIE_MAX_AGE: number = 60 * 60 * 24 * 7;

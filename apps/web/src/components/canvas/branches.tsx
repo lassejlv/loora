@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { ListTreeIcon, PencilIcon, Trash2Icon } from '#/components/icons'
+import { ListTreeIcon, PencilIcon, Trash2Icon } from '@loora/ui/icons'
 import {
   CheckIcon,
   ChevronDownIcon,
@@ -8,25 +8,25 @@ import {
   PlusIcon,
   RotateCcwIcon,
   SendIcon,
-} from '#/components/icons'
+} from '@loora/ui/icons'
 import type { CanvasDocument } from '@loora/canvas/model'
 import { diffDocuments } from '@loora/canvas/merge'
 import { orpc } from '#/lib/orpc-client'
 import { CanvasDocumentPreview } from '#/components/canvas-preview'
 import { PanelEmpty } from '#/components/panel-shell'
-import { Badge } from '#/components/ui/badge'
-import { Button } from '#/components/ui/button'
+import { Badge } from '@loora/ui/badge'
+import { Button } from '@loora/ui/button'
 import { DiffChips } from './diff-chips'
-import { Input } from '#/components/ui/input'
-import { Spinner } from '#/components/ui/spinner'
-import { Textarea } from '#/components/ui/textarea'
+import { Input } from '@loora/ui/input'
+import { Spinner } from '@loora/ui/spinner'
+import { Textarea } from '@loora/ui/textarea'
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
-} from '#/components/ui/dropdown-menu'
+} from '@loora/ui/dropdown-menu'
 import {
   Dialog,
   DialogDescription,
@@ -35,9 +35,9 @@ import {
   DialogPanel,
   DialogPopup,
   DialogTitle,
-} from '#/components/ui/dialog'
+} from '@loora/ui/dialog'
 import { relativeTime } from '#/lib/designs'
-import { cn } from '#/lib/utils'
+import { cn } from '@loora/ui/utils'
 import type { CanvasSyncController } from '#/lib/canvas-client'
 
 export interface CanvasBranchSummary {

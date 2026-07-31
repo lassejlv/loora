@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { ImagePlusIcon, Trash2Icon } from '#/components/icons'
-import { LinkIcon, SearchIcon } from '#/components/icons'
-import { Button } from '#/components/ui/button'
+import { ImagePlusIcon, Trash2Icon } from '@loora/ui/icons'
+import { LinkIcon, SearchIcon } from '@loora/ui/icons'
+import { Button } from '@loora/ui/button'
 import {
   Dialog,
   DialogDescription,
@@ -9,12 +9,12 @@ import {
   DialogHeader,
   DialogPopup,
   DialogTitle,
-} from '#/components/ui/dialog'
-import { Input } from '#/components/ui/input'
-import { Skeleton } from '#/components/ui/skeleton'
+} from '@loora/ui/dialog'
+import { Input } from '@loora/ui/input'
+import { Skeleton } from '@loora/ui/skeleton'
 import { orpc } from '#/lib/orpc-client'
 import { relativeTime } from '#/lib/designs'
-import { cn } from '#/lib/utils'
+import { cn } from '@loora/ui/utils'
 
 export interface AssetMeta {
   id: string

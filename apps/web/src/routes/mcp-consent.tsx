@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react'
 import { createFileRoute } from '@tanstack/react-router'
 import { authClient } from '@loora/auth/client'
-import { Button } from '#/components/ui/button'
+import { Button } from '@loora/ui/button'
 
 // OAuth consent screen for MCP clients (Claude Code, Codex, opencode, …).
 // Better Auth redirects here with consent_code/client_id/scope query params;

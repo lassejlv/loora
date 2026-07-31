@@ -25,7 +25,7 @@ mock.module('@loora/auth/client', () => ({
     signOut: mock(),
   },
 }))
-mock.module('#/components/ui/tabs', () => ({
+mock.module('@loora/ui/tabs', () => ({
   Tabs: ({ value, children }: { value: string; children: ReactNode }) => (
     <TabsContext.Provider value={value}>{children}</TabsContext.Provider>
   ),
@@ -72,7 +72,7 @@ mock.module('#/components/panel-shell', () => ({
 mock.module('#/components/shortcuts-settings', () => ({
   ShortcutsSettings: () => <div>Keyboard shortcuts</div>,
 }))
-mock.module('#/components/ui/alert-dialog', () => ({
+mock.module('@loora/ui/alert-dialog', () => ({
   AlertDialog: ({ children }: { children: ReactNode }) => <div>{children}</div>,
   AlertDialogTrigger: () => null,
   AlertDialogClose: ({ children }: { children?: ReactNode }) => <>{children}</>,

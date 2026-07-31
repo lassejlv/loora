@@ -1,11 +1,11 @@
 "use client";
 
 import { Combobox as ComboboxPrimitive } from "@base-ui/react/combobox";
-import { ChevronsUpDownIcon, XIcon } from "#/components/icons";
+import { ChevronsUpDownIcon, XIcon } from "../icons/index.tsx";
 import * as React from "react";
-import { cn } from "#/lib/utils.ts";
-import { Input } from "#/components/ui/input.tsx";
-import { ScrollArea } from "#/components/ui/scroll-area.tsx";
+import { cn } from "../lib/utils.ts";
+import { Input } from "./input.tsx";
+import { ScrollArea } from "./scroll-area.tsx";
 
 export const ComboboxContext: React.Context<{
   chipsRef: React.RefObject<Element | null> | null;

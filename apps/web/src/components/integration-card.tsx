@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react'
-import { cn } from '#/lib/utils'
+import { cn } from '@loora/ui/utils'
 
 /** Flat integration section — used under the Integrations top nav, not as stacked cards. */
 export function IntegrationCard({

@@ -4,9 +4,9 @@ import {
   GithubIcon,
   PlusIcon,
   RefreshCwIcon,
-} from '#/components/icons'
-import { UnplugIcon } from '#/components/icons'
-import { Button } from '#/components/ui/button'
+} from '@loora/ui/icons'
+import { UnplugIcon } from '@loora/ui/icons'
+import { Button } from '@loora/ui/button'
 import { IntegrationCard, IntegrationStatus } from '#/components/integration-card'
 import { orpc } from '#/lib/orpc-client'
 

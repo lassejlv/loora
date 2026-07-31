@@ -3,11 +3,11 @@
 import { Dialog as SheetPrimitive } from "@base-ui/react/dialog";
 import { mergeProps } from "@base-ui/react/merge-props";
 import { useRender } from "@base-ui/react/use-render";
-import { XIcon } from "#/components/icons";
+import { XIcon } from "../icons/index.tsx";
 import type React from "react";
-import { cn } from "#/lib/utils.ts";
-import { Button } from "#/components/ui/button.tsx";
-import { ScrollArea } from "#/components/ui/scroll-area.tsx";
+import { cn } from "../lib/utils.ts";
+import { Button } from "./button.tsx";
+import { ScrollArea } from "./scroll-area.tsx";
 
 export const Sheet: typeof SheetPrimitive.Root = SheetPrimitive.Root;
 

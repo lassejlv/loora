@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
-import { PencilIcon, PlusIcon } from '#/components/icons'
-import { Button } from '#/components/ui/button'
+import { PencilIcon, PlusIcon } from '@loora/ui/icons'
+import { Button } from '@loora/ui/button'
 import {
   Dialog,
   DialogDescription,
@@ -9,9 +9,9 @@ import {
   DialogPanel,
   DialogPopup,
   DialogTitle,
-} from '#/components/ui/dialog'
-import { Input } from '#/components/ui/input'
-import { cn } from '#/lib/utils'
+} from '@loora/ui/dialog'
+import { Input } from '@loora/ui/input'
+import { cn } from '@loora/ui/utils'
 import {
   DARK_PRESET,
   deleteCustomTheme,

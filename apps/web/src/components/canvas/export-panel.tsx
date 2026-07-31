@@ -5,13 +5,13 @@ import {
   useState,
   type ReactNode,
 } from 'react'
-import { ClipboardIcon, CodeXmlIcon } from '#/components/icons'
+import { ClipboardIcon, CodeXmlIcon } from '@loora/ui/icons'
 import {
   CheckIcon,
   DownloadIcon,
   EyeIcon,
   Link2Icon,
-} from '#/components/icons'
+} from '@loora/ui/icons'
 import {
   compileJsxComponent,
   compileStandaloneHtml,
@@ -35,16 +35,16 @@ import {
 import { captureCanvasPng, captureNodePng } from '#/lib/canvas-capture'
 import { copyText } from '#/lib/copy-text'
 import { orpc } from '#/lib/orpc-client'
-import { Button } from '#/components/ui/button'
+import { Button } from '@loora/ui/button'
 import {
   Dialog,
   DialogHeader,
   DialogPopup,
   DialogTitle,
-} from '#/components/ui/dialog'
-import { Spinner } from '#/components/ui/spinner'
-import { Switch } from '#/components/ui/switch'
-import { cn } from '#/lib/utils'
+} from '@loora/ui/dialog'
+import { Spinner } from '@loora/ui/spinner'
+import { Switch } from '@loora/ui/switch'
+import { cn } from '@loora/ui/utils'
 import type { CanvasEditorController } from './editor'
 
 type ExportFormat =

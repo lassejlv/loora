@@ -39,7 +39,7 @@ import {
   StretchHorizontalIcon,
   Trash2Icon,
   Unlink2Icon,
-} from '#/components/icons'
+} from '@loora/ui/icons'
 import {
   AlignCenterIcon,
   AlignLeftIcon,
@@ -47,10 +47,10 @@ import {
   ChevronDownIcon,
   ChevronRightIcon,
   Link2Icon,
-} from '#/components/icons'
+} from '@loora/ui/icons'
 import { PanelEmpty, PanelShell } from '#/components/panel-shell'
-import { Button } from '#/components/ui/button'
-import { cn } from '#/lib/utils'
+import { Button } from '@loora/ui/button'
+import { cn } from '@loora/ui/utils'
 
 function operationFor(
   ref: NodeRef,

@@ -4,9 +4,9 @@ import { mergeProps } from "@base-ui/react/merge-props";
 import { Select as SelectPrimitive } from "@base-ui/react/select";
 import { useRender } from "@base-ui/react/use-render";
 import { cva, type VariantProps } from "class-variance-authority";
-import { ChevronDownIcon, ChevronsUpDownIcon, ChevronUpIcon } from "#/components/icons";
+import { ChevronDownIcon, ChevronsUpDownIcon, ChevronUpIcon } from "../icons/index.tsx";
 import type * as React from "react";
-import { cn } from "#/lib/utils.ts";
+import { cn } from "../lib/utils.ts";
 
 export const Select: typeof SelectPrimitive.Root = SelectPrimitive.Root;
 
