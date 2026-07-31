@@ -169,14 +169,41 @@ function clampByte(value: number) {
   return Math.min(255, Math.max(0, Math.round(value)))
 }
 
+function splitCssList(value: string) {
+  const parts: string[] = []
+  let depth = 0
+  let start = 0
+  for (let index = 0; index < value.length; index += 1) {
+    const character = value[index]
+    if (character === '(') depth += 1
+    else if (character === ')') depth = Math.max(0, depth - 1)
+    else if (character === ',' && depth === 0) {
+      parts.push(value.slice(start, index).trim())
+      start = index + 1
+    }
+  }
+  parts.push(value.slice(start).trim())
+  return parts.filter(Boolean)
+}
+
 /**
  * Paper emits `color(srgb …)` fills that fail Canvas validation. Convert the
  * common modern forms to rgb/rgba; leave already-valid colors alone.
  */
 export function normalizeCssColor(value: string | undefined): string | undefined {
   if (!value) return undefined
-  const trimmed = value.trim()
+  // Computed styles sometimes use NBSP / exotic spaces between tokens.
+  const trimmed = value.replace(/[\u00a0\u2000-\u200b\u202f\u205f\u3000]/g, ' ').trim()
   if (!trimmed || isTransparent(trimmed)) return trimmed
+
+  // light-dark(light, dark) — take the first resolvable color.
+  const lightDark = trimmed.match(/^light-dark\(\s*([\s\S]+)\)$/i)
+  if (lightDark) {
+    for (const part of splitCssList(lightDark[1]!)) {
+      const resolved = normalizeCssColor(part)
+      if (resolved && !isTransparent(resolved)) return resolved
+    }
+  }
 
   const srgb = trimmed.match(
     /^color\(\s*srgb\s+([+-]?\d*\.?\d+)\s+([+-]?\d*\.?\d+)\s+([+-]?\d*\.?\d+)(?:\s*\/\s*([+-]?\d*\.?\d+%?))?\s*\)$/i,
@@ -216,14 +243,18 @@ export function normalizeCssColor(value: string | undefined): string | undefined
         context.fillStyle = '#000000'
         context.fillStyle = trimmed
         const resolved = context.fillStyle
-        if (resolved && resolved !== '#000000') return resolved
+        if (resolved && resolved !== '#000000') {
+          return String(resolved).slice(0, 200)
+        }
         // fillStyle may keep #000000 for black inputs — verify by round-trip.
         if (/^(?:#000|#000000|black|rgb\(0,\s*0,\s*0\))$/i.test(trimmed)) {
-          return resolved
+          return String(resolved).slice(0, 200)
         }
         context.fillStyle = '#ffffff'
         context.fillStyle = trimmed
-        if (context.fillStyle !== '#ffffff') return context.fillStyle
+        if (context.fillStyle !== '#ffffff') {
+          return String(context.fillStyle).slice(0, 200)
+        }
       }
     } catch {
       // Fall through.
@@ -236,9 +267,33 @@ export function normalizeCssColor(value: string | undefined): string | undefined
   return undefined
 }
 
+/** True when a color string will pass Canvas `validColor`. */
+function isCanvasSafeColor(value: string) {
+  if (value.length > 200) return false
+  return (
+    /^#[0-9a-f]{3,8}$/i.test(value) ||
+    /^-?[a-z]+(?:-[a-z0-9]+)*$/i.test(value) ||
+    /^(?:rgb|rgba|hsl|hsla|oklab|oklch|lab|lch)\([0-9a-z.%+,\s/-]+\)$/i.test(
+      value,
+    ) ||
+    /^color\([0-9a-z.%+,\s/()-]+\)$/i.test(value) ||
+    /^color-mix\([0-9a-z.%+,\s/()#-]+\)$/i.test(value)
+  )
+}
+
+function safeImportedColor(
+  value: string | undefined,
+  fallback?: string,
+): string | undefined {
+  const normalized = normalizeCssColor(value)
+  if (!normalized || isTransparent(normalized)) return fallback
+  if (isCanvasSafeColor(normalized)) return normalized
+  return fallback
+}
+
 function solidPaint(color: string | undefined) {
-  const normalized = normalizeCssColor(color)
-  if (!normalized || isTransparent(normalized)) return []
+  const normalized = safeImportedColor(color)
+  if (!normalized) return []
   return [{ type: 'solid' as const, color: normalized }]
 }
 
@@ -296,7 +351,7 @@ function stroke(style: Record<string, string>): CanvasStyle['stroke'] {
   const sides = ['Top', 'Right', 'Bottom', 'Left'] as const
   const borders = sides.map((side) => ({
     width: numberStyle(style, `border${side}Width`),
-    color: normalizeCssColor(style[`border${side}Color`]),
+    color: safeImportedColor(style[`border${side}Color`]),
     style: style[`border${side}Style`],
   }))
   const first = borders[0]!
@@ -328,31 +383,29 @@ function stroke(style: Record<string, string>): CanvasStyle['stroke'] {
   }
 }
 
-function splitCssList(value: string) {
-  const parts: string[] = []
-  let depth = 0
-  let start = 0
-  for (let index = 0; index < value.length; index += 1) {
-    const character = value[index]
-    if (character === '(') depth += 1
-    else if (character === ')') depth = Math.max(0, depth - 1)
-    else if (character === ',' && depth === 0) {
-      parts.push(value.slice(start, index).trim())
-      start = index + 1
-    }
-  }
-  parts.push(value.slice(start).trim())
-  return parts.filter(Boolean)
-}
-
 function shadows(value: string | undefined): CanvasShadow[] {
   if (!value || value === 'none') return []
   const result: CanvasShadow[] = []
   for (const part of splitCssList(value).slice(0, 16)) {
     const rawColor = matchCssColorToken(part)
-    const color = normalizeCssColor(rawColor ?? undefined) ?? 'rgba(0, 0, 0, 0.2)'
+    // Skip named junk like `px` that matchCssColorToken can pull from length-only layers.
+    const looksLikeColor =
+      !!rawColor &&
+      (/^(?:rgba?|hsla?|oklab|oklch|lab|lch|color-mix|color)\(/i.test(rawColor) ||
+        rawColor.startsWith('#') ||
+        (/^[a-z-]+$/i.test(rawColor) &&
+          !['px', 'em', 'rem', 'pt', 'pc', 'in', 'cm', 'mm', 'vw', 'vh', 'deg', 'rad', 'turn', 'inset'].includes(
+            rawColor.toLowerCase(),
+          )))
+    const resolved = looksLikeColor
+      ? safeImportedColor(rawColor!)
+      : undefined
+    // Explicit transparent colors must stay droppable; only invent a fallback
+    // when the layer had lengths and no color token at all.
+    if (looksLikeColor && !resolved) continue
+    const color = resolved ?? 'rgba(0, 0, 0, 0.2)'
     const lengths = part
-      .replace(rawColor ?? '', '')
+      .replace(looksLikeColor && rawColor ? rawColor : '', '')
       .replace(/\binset\b/i, '')
       .match(/-?\d*\.?\d+(?:px)?/g)
       ?.map((item) => Number.parseFloat(item)) ?? []
@@ -386,7 +439,7 @@ function shadows(value: string | undefined): CanvasShadow[] {
 function parseGradientStops(body: string) {
   const stops: { offset: number; color: string }[] = []
   for (const part of splitCssList(body)) {
-    const color = normalizeCssColor(matchCssColorToken(part) ?? undefined)
+    const color = safeImportedColor(matchCssColorToken(part) ?? undefined)
     if (!color || isTransparent(color)) continue
     const percent = part.match(/(-?\d*\.?\d+)%/)
     const offset = percent
@@ -608,6 +661,16 @@ function frameStyle(style: Record<string, string>) {
   })
 }
 
+function sanitizeFontFamily(value: string | undefined) {
+  const raw = (value || 'Archivo').replace(/[\u00a0\u2000-\u200b]/g, ' ').trim()
+  // Drop characters Canvas `safeCssText` rejects; keep the stack otherwise.
+  const cleaned = raw
+    .replace(/[{};<>\\\u0000-\u001f\u007f]/g, '')
+    .trim()
+    .slice(0, 200)
+  return cleaned || 'Archivo'
+}
+
 function textStyle(style: Record<string, string>) {
   const fontSize = Math.max(1, numberStyle(style, 'fontSize', 16))
   const fills = solidPaint(style.color)
@@ -615,7 +678,7 @@ function textStyle(style: Record<string, string>) {
     fills: fills.length > 0 ? fills : [{ type: 'solid' as const, color: '#000000' }],
     opacity: opacity(style),
     typography: {
-      family: (style.fontFamily || 'Archivo').slice(0, 200),
+      family: sanitizeFontFamily(style.fontFamily),
       size: fontSize,
       weight: textWeight(style.fontWeight),
       lineHeight: textLineHeight(style, fontSize),
@@ -867,10 +930,10 @@ function vectorNode(
       strokeWidth?: number
     },
   ) => {
-    const fill = normalizeCssColor(
+    const fill = safeImportedColor(
       node.attributes.fill || node.style.fill || inherited.fill,
     )
-    const strokeColor = normalizeCssColor(
+    const strokeColor = safeImportedColor(
       node.attributes.stroke || node.style.stroke || inherited.stroke,
     )
     const ownStrokeWidth = Number.parseFloat(
@@ -1205,6 +1268,98 @@ function convertSnapshot(
   return id
 }
 
+function sanitizeImportedPaint(
+  paint: CanvasStyle['fills'][number],
+): CanvasStyle['fills'][number] | null {
+  if (paint.type === 'solid') {
+    if (typeof paint.color !== 'string') return null
+    const color = safeImportedColor(paint.color)
+    return color ? { type: 'solid', color } : null
+  }
+  const stops = paint.stops
+    .map((stop) => {
+      const color =
+        typeof stop.color === 'string'
+          ? safeImportedColor(stop.color)
+          : undefined
+      return color
+        ? { offset: stop.offset, color }
+        : null
+    })
+    .filter((stop): stop is { offset: number; color: string } => stop !== null)
+  if (stops.length < 2) return null
+  if (paint.type === 'linear-gradient') {
+    return { type: 'linear-gradient', angle: paint.angle, stops }
+  }
+  const size =
+    paint.size &&
+    paint.size.length > 0 &&
+    paint.size.length <= 100 &&
+    !/[{};<>\\\u0000-\u001f\u007f]/.test(paint.size)
+      ? paint.size
+      : undefined
+  return {
+    type: 'radial-gradient',
+    cx: paint.cx,
+    cy: paint.cy,
+    ...(size ? { size } : {}),
+    stops,
+  }
+}
+
+/**
+ * Last-chance cleanup before assertDocument so one unresolved live color
+ * (light-dark, -webkit-*, etc.) cannot abort an otherwise good Paper paste.
+ */
+function sanitizeImportedDocument(document: CanvasDocument) {
+  for (const node of Object.values(document.nodes)) {
+    const fills = node.style.fills
+      .map(sanitizeImportedPaint)
+      .filter((paint): paint is NonNullable<typeof paint> => paint !== null)
+    const shadows = node.style.shadows.filter((shadow) => {
+      if (typeof shadow.color !== 'string') return false
+      const color = safeImportedColor(shadow.color)
+      if (!color) return false
+      shadow.color = color
+      return true
+    })
+    let stroke = node.style.stroke
+    if (stroke) {
+      const color =
+        typeof stroke.color === 'string'
+          ? safeImportedColor(stroke.color)
+          : undefined
+      stroke = color ? { ...stroke, color } : undefined
+    }
+    node.style.fills = fills
+    node.style.shadows = shadows
+    if (stroke) node.style.stroke = stroke
+    else delete node.style.stroke
+    if (node.style.typography) {
+      node.style.typography = {
+        ...node.style.typography,
+        family: sanitizeFontFamily(node.style.typography.family),
+      }
+    }
+    if (node.type === 'vector') {
+      node.paths = node.paths.map((path) => {
+        const next = { ...path }
+        if (typeof path.fill === 'string') {
+          const fill = safeImportedColor(path.fill)
+          if (fill) next.fill = fill
+          else delete next.fill
+        }
+        if (typeof path.stroke === 'string') {
+          const strokeColor = safeImportedColor(path.stroke)
+          if (strokeColor) next.stroke = strokeColor
+          else delete next.stroke
+        }
+        return next
+      })
+    }
+  }
+}
+
 export function convertHtmlSnapshotToCanvas(
   input: HtmlCanvasImportInput,
 ): HtmlCanvasImportResult {
@@ -1249,6 +1404,7 @@ export function convertHtmlSnapshotToCanvas(
     )
   })
 
+  sanitizeImportedDocument(document)
   assertDocument(document)
   return {
     document,

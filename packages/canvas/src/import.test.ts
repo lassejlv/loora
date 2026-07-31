@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'bun:test'
-import { convertHtmlSnapshotToCanvas } from './import'
+import {
+  convertHtmlSnapshotToCanvas,
+  normalizeCssColor,
+} from './import'
 import { validateDocument } from './model'
 
 describe('HTML snapshot import', () => {
@@ -808,6 +811,71 @@ describe('HTML snapshot import', () => {
       type: 'image',
       fit: 'fill',
       metadata: expect.objectContaining({ importedAs: 'raster' }),
+    })
+  })
+
+  it('unwraps light-dark() and drops unresolvable live colors instead of failing', () => {
+    expect(normalizeCssColor('light-dark(rgb(18, 18, 18), rgb(250, 250, 250))')).toBe(
+      'rgb(18, 18, 18)',
+    )
+
+    const result = convertHtmlSnapshotToCanvas({
+      id: 'live-color-edge',
+      name: 'Live colors',
+      width: 400,
+      height: 200,
+      root: {
+        tag: 'body',
+        attributes: {},
+        style: { display: 'block' },
+        rect: { x: 0, y: 0, width: 400, height: 200 },
+        children: [{
+          tag: 'div',
+          attributes: { 'aria-label': 'Card' },
+          style: {
+            display: 'block',
+            backgroundColor: 'light-dark(rgb(18, 18, 18), rgb(250, 250, 250))',
+            color: '-webkit-focus-ring-color',
+            boxShadow: '0px 1px 2px -webkit-focus-ring-color',
+            opacity: '1',
+          },
+          rect: { x: 0, y: 0, width: 200, height: 100 },
+          children: [{
+            tag: 'p',
+            text: 'Hello',
+            attributes: {},
+            style: {
+              display: 'block',
+              color: 'light-dark(rgb(245, 245, 243), rgb(18, 18, 18))',
+              fontFamily: "'Geist Variable', Geist, ui-sans-serif, system-ui, sans-serif",
+              fontSize: '14px',
+              fontWeight: '400',
+              lineHeight: '20px',
+              letterSpacing: '0px',
+              textAlign: 'left',
+              opacity: '1',
+            },
+            rect: { x: 8, y: 8, width: 180, height: 20 },
+            children: [],
+          }],
+        }],
+      },
+    })
+
+    expect(validateDocument(result.document).ok).toBe(true)
+    const card = Object.values(result.document.nodes).find(
+      (node) => node.name === 'Card',
+    )
+    expect(card?.style.fills[0]).toMatchObject({
+      type: 'solid',
+      color: 'rgb(18, 18, 18)',
+    })
+    const text = Object.values(result.document.nodes).find(
+      (node) => node.type === 'text',
+    )
+    expect(text?.style.fills[0]).toMatchObject({
+      type: 'solid',
+      color: 'rgb(245, 245, 243)',
     })
   })
 })

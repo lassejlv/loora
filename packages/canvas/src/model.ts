@@ -867,7 +867,8 @@ function validColor(
   if (typeof value !== 'string' || value.length > 200) return false
   return (
     /^#[0-9a-f]{3,8}$/i.test(value) ||
-    /^[a-z]+$/i.test(value) ||
+    // Named + hyphenated system colors (CanvasText, -webkit-focus-ring-color).
+    /^-?[a-z]+(?:-[a-z0-9]+)*$/i.test(value) ||
     /^(?:rgb|rgba|hsl|hsla|oklab|oklch|lab|lch)\([0-9a-z.%+,\s/-]+\)$/i.test(
       value,
     ) ||
@@ -1113,15 +1114,26 @@ function validStylePatch(
   document: CanvasDocument,
   partial = true,
 ) {
-  if (!isRecord(value)) return false
-  if (Object.keys(value).some((key) => !styleKeys.has(key))) return false
+  return stylePatchFailure(value, document, partial) === null
+}
+
+function stylePatchFailure(
+  value: unknown,
+  document: CanvasDocument,
+  partial = true,
+): string | null {
+  if (!isRecord(value)) return 'Style must be an object'
+  const unknown = Object.keys(value).filter((key) => !styleKeys.has(key))
+  if (unknown.length > 0) {
+    return `Unknown style fields: ${unknown.slice(0, 5).join(', ')}`
+  }
   if (
     (!partial || value.fills !== undefined) &&
     (!Array.isArray(value.fills) ||
       value.fills.length > 16 ||
       !value.fills.every((fill) => validPaint(fill, document)))
   ) {
-    return false
+    return 'Style fills are invalid'
   }
   if (
     value.stroke !== undefined &&
@@ -1131,7 +1143,7 @@ function validStylePatch(
       (value.stroke.style !== undefined &&
         !['solid', 'dashed', 'dotted'].includes(String(value.stroke.style))))
   ) {
-    return false
+    return 'Style stroke is invalid'
   }
   if (
     (!partial || value.radius !== undefined) &&
@@ -1142,7 +1154,7 @@ function validStylePatch(
         value.radius.every(finite))
     )
   ) {
-    return false
+    return 'Style radius is invalid'
   }
   if (
     (!partial || value.shadows !== undefined) &&
@@ -1156,33 +1168,33 @@ function validStylePatch(
           (shadow.inset === undefined || typeof shadow.inset === 'boolean'),
       ))
   ) {
-    return false
+    return 'Style shadows are invalid'
   }
   if (
     (!partial || value.opacity !== undefined) &&
     (!finite(value.opacity) || value.opacity < 0 || value.opacity > 1)
   ) {
-    return false
+    return 'Style opacity is invalid'
   }
   if (
     (!partial || value.overflow !== undefined) &&
     !['visible', 'hidden', 'auto'].includes(String(value.overflow))
   ) {
-    return false
+    return 'Style overflow is invalid'
   }
   if (
     value.blendMode !== undefined &&
     (typeof value.blendMode !== 'string' || !blendModes.has(value.blendMode))
   ) {
-    return false
+    return 'Style blend mode is invalid'
   }
   if (
     value.typography !== undefined &&
     !validTypography(value.typography, partial)
   ) {
-    return false
+    return 'Style typography is invalid'
   }
-  return true
+  return null
 }
 
 function validStateValue(
@@ -2010,8 +2022,9 @@ export function validateDocument(value: unknown): DocumentValidationResult {
       pushIssue(issues, `${path}.style`, 'Style must be an object')
       continue
     }
-    if (!validStylePatch(node.style, document, false)) {
-      pushIssue(issues, `${path}.style`, 'Style contains invalid fields')
+    const styleFailure = stylePatchFailure(node.style, document, false)
+    if (styleFailure) {
+      pushIssue(issues, `${path}.style`, styleFailure)
     }
     if (![node.layout.x, node.layout.y, node.style.opacity].every(finite)) {
       pushIssue(issues, path, 'Geometry and opacity must be finite')
