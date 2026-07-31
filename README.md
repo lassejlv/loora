@@ -14,20 +14,6 @@ Teaches an agent how to use the canvas tools well. Add `-g` to install it for ev
 npx skills add https://github.com/lassejlv/loora/tree/main/skills/loora-design-guide
 ```
 
-## API latency benchmark
-
-The authenticated benchmark reports wall-clock and `Server-Timing` p50, p95,
-and p99 values without printing credentials. Configure the required
-`LOORA_BENCHMARK_*` values in the ignored local `.env`, then run:
-
-```bash
-bun run benchmark-api
-```
-
-Use `LOORA_BENCHMARK_TARGET=canvas` with
-`LOORA_BENCHMARK_SESSION_COOKIE`, or `LOORA_BENCHMARK_TARGET=mcp` with
-`LOORA_BENCHMARK_MCP_TOKEN`.
-
 ## Monorepo layout
 
 - `apps/web` — the TanStack Start app (routes, API handlers, editor shell)
