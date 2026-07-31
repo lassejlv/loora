@@ -1,6 +1,10 @@
-// Asset blob storage on Bun's built-in S3 client (Railway bucket), configured
-// from S3_* env vars. When the client is unavailable — no bucket configured or
-// a non-Bun runtime — callers fall back to base64 in the asset table's `data`.
+// Asset blob storage on Bun's built-in S3 client (R2 bucket), configured from
+// S3_* env vars. When the client is unavailable — no bucket configured or a
+// non-Bun runtime — callers fall back to base64 in the asset table's `data`.
+
+import { assetRouteUrl } from './asset-url'
+
+export { assetKey, assetRouteUrl, assetIdFromSrc } from './asset-url'
 
 interface BunS3File {
   arrayBuffer(): Promise<ArrayBuffer>
@@ -39,6 +43,17 @@ function createClient(): BunS3Client | null {
 
 export const s3 = createClient()
 
-export function assetKey(userId: string, assetId: string) {
-  return `assets/${userId}/${assetId}`
+// Public bucket domain (an R2 custom domain). With it set, image nodes point
+// straight at the object and the browser never round-trips through the app;
+// without it they keep going through the authenticated /api/asset route.
+const publicBase = process.env.S3_PUBLIC_URL?.trim().replace(/\/+$/, '') || null
+
+export function assetPublicUrl(storageKey: string | null | undefined) {
+  if (!publicBase || !storageKey) return null
+  return `${publicBase}/${storageKey.split('/').map(encodeURIComponent).join('/')}`
+}
+
+/** The URL an image node should carry for a stored asset. */
+export function assetUrl(assetId: string, storageKey: string | null | undefined) {
+  return assetPublicUrl(storageKey) ?? assetRouteUrl(assetId)
 }

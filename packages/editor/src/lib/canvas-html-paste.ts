@@ -7,6 +7,7 @@ import {
   type NodeRef,
   type PageNode,
 } from '@loora/canvas/model'
+import { assetIdFromSrc } from '@loora/rpc/asset-url'
 
 const MAX_FETCHED_IMAGE_BYTES = 5 * 1024 * 1024
 
@@ -102,10 +103,11 @@ export function placeHtmlImport(
 }
 
 export function importedImageNodes(nodes: CanvasNode[]) {
+  // Anything already stored as one of our assets — through the API route or a
+  // public bucket URL — is left alone; the rest gets uploaded.
   return nodes.filter(
     (node): node is ImageNode =>
-      node.type === 'image' &&
-      !node.src.startsWith('/api/asset/'),
+      node.type === 'image' && !assetIdFromSrc(node.src),
   )
 }
 

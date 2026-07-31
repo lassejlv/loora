@@ -2,6 +2,7 @@ import { and, eq, inArray } from 'drizzle-orm'
 import { db } from '@loora/db'
 import { asset, design, designDraft, user } from '@loora/db/schema'
 import { readHandoffToken } from './handoff-token'
+import { assetUrl } from './storage'
 import type { CanvasElement } from '@loora/db/canvas'
 import { authorizeBilling } from '@loora/billing/billing'
 import { canUseApp } from '@loora/auth/preview-access'
@@ -18,6 +19,10 @@ export function referencedAssetIds(
   const ids = new Set<string>()
   const source = JSON.stringify(sourceDocument)
   for (const match of source.matchAll(/\/api\/asset\/([a-zA-Z0-9_-]+)/g)) ids.add(match[1])
+  // Public bucket URLs: `<public base>/assets/<userId>/<assetId>`.
+  for (const match of source.matchAll(/\/assets\/[a-zA-Z0-9_-]+\/(a[0-9a-f]{32})/g)) {
+    ids.add(match[1])
+  }
   return ids
 }
 
@@ -126,7 +131,13 @@ export async function buildHandoffPayload(token: string, origin: string) {
   const assetIds = referencedAssetIds(found.document ?? found.shapes)
   const assets = assetIds.size
     ? await db
-        .select({ id: asset.id, name: asset.name, mediaType: asset.mediaType, size: asset.size })
+        .select({
+          id: asset.id,
+          name: asset.name,
+          mediaType: asset.mediaType,
+          size: asset.size,
+          storageKey: asset.storageKey,
+        })
         .from(asset)
         .where(and(eq(asset.userId, found.userId), inArray(asset.id, [...assetIds])))
     : []
@@ -135,9 +146,9 @@ export async function buildHandoffPayload(token: string, origin: string) {
     schema: 'loora.design-handoff',
     assets: assets
       .filter((item) => assetIds.has(item.id))
-      .map((item) => ({
+      .map(({ storageKey, ...item }) => ({
         ...item,
-        source: `/api/asset/${item.id}`,
+        source: assetUrl(item.id, storageKey),
         url: `${origin}/api/handoff/${encodeURIComponent(token)}/asset/${encodeURIComponent(item.id)}`,
       })),
   }

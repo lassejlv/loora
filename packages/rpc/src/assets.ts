@@ -7,7 +7,7 @@ import {
 import { z } from 'zod'
 import { db } from '@loora/db'
 import { asset } from '@loora/db/schema'
-import { assetKey, s3 } from './storage'
+import { assetKey, assetUrl, s3 } from './storage'
 import {
   ensureStorageRoom,
   protectedProcedure,
@@ -26,13 +26,18 @@ export const listAssets = protectedProcedure.handler(async ({ context }) => {
       name: asset.name,
       mediaType: asset.mediaType,
       size: asset.size,
+      storageKey: asset.storageKey,
       createdAt: asset.createdAt,
     })
     .from(asset)
     .where(eq(asset.userId, context.user.id))
     .orderBy(desc(asset.createdAt))
 
-  return assets.map(({ createdAt, ...a }) => ({ ...a, at: createdAt.getTime() }))
+  return assets.map(({ createdAt, storageKey, ...a }) => ({
+    ...a,
+    url: assetUrl(a.id, storageKey),
+    at: createdAt.getTime(),
+  }))
 })
 
 export const uploadAsset = protectedProcedure
@@ -72,7 +77,7 @@ export const uploadAsset = protectedProcedure
       })
       .returning({ id: asset.id, name: asset.name, mediaType: asset.mediaType, size: asset.size })
 
-    return saved
+    return { ...saved, url: assetUrl(id, storageKey) }
   })
 
 export const deleteAsset = protectedProcedure

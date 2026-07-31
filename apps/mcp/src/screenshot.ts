@@ -16,6 +16,7 @@ import {
 } from '@loora/canvas/model'
 import { readCanvasNodeRef } from '@loora/agent/canvas-tools'
 import { s3 } from '@loora/rpc/storage'
+import { assetIdFromSrc } from '@loora/rpc/asset-url'
 import { BoundedConcurrencyGate } from './concurrency'
 
 const BLANK_IMAGE =
@@ -73,27 +74,6 @@ export interface CanvasScreenshot {
   skippedImages: string[]
 }
 
-function localAssetId(source: string) {
-  const decode = (value: string) => {
-    try {
-      return decodeURIComponent(value)
-    } catch {
-      return null
-    }
-  }
-  if (source.startsWith('/api/asset/')) {
-    const id = source.slice('/api/asset/'.length)
-    return id && !id.includes('/') ? decode(id) : null
-  }
-  try {
-    const url = new URL(source)
-    const match = /^\/api\/asset\/([^/]+)$/.exec(url.pathname)
-    return match?.[1] ? decode(match[1]) : null
-  } catch {
-    return null
-  }
-}
-
 async function loadAssets(userId: string, ids: string[]) {
   if (ids.length === 0) return new Map<string, LoadedAsset>()
   const rows = await db
@@ -149,7 +129,7 @@ async function prepareDocument(userId: string, source: CanvasDocument) {
   const assetIds = [
     ...new Set(
       images
-        .map((node) => localAssetId(node.src))
+        .map((node) => assetIdFromSrc(node.src))
         .filter((id): id is string => Boolean(id)),
     ),
   ]
@@ -157,7 +137,7 @@ async function prepareDocument(userId: string, source: CanvasDocument) {
   const skippedImages: string[] = []
   for (const image of images) {
     if (image.src.startsWith('data:image/')) continue
-    const id = localAssetId(image.src)
+    const id = assetIdFromSrc(image.src)
     const loaded = id ? assets.get(id) : null
     if (loaded) {
       image.src = `data:${loaded.mediaType};base64,${loaded.data}`

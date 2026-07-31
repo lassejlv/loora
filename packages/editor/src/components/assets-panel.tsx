@@ -13,6 +13,7 @@ import {
 import { Input } from '@loora/ui/input'
 import { Skeleton } from '@loora/ui/skeleton'
 import { orpc } from '@loora/rpc/client'
+import { assetRouteUrl } from '@loora/rpc/asset-url'
 import { relativeTime } from '../lib/designs'
 import { cn } from '@loora/ui/utils'
 
@@ -21,8 +22,24 @@ export interface AssetMeta {
   name: string
   mediaType: string
   size: number
+  /**
+   * Where the bytes are served from: the public bucket URL when one is
+   * configured, otherwise the authenticated route. Absent on older payloads.
+   */
+  url?: string
   /** Upload time in ms; absent on older payloads. */
   at?: number
+}
+
+/** The src an image node (or an <img>) should carry for an asset. */
+export function assetSrc(asset: Pick<AssetMeta, 'id' | 'url'>) {
+  return asset.url ?? assetRouteUrl(asset.id)
+}
+
+/** Same URL, absolute — for the clipboard and drag payloads. */
+export function absoluteAssetSrc(asset: Pick<AssetMeta, 'id' | 'url'>) {
+  const src = assetSrc(asset)
+  return src.startsWith('/') ? `${window.location.origin}${src}` : src
 }
 
 /** Payload a canvas drop reads to place an asset it was handed. */
@@ -189,7 +206,7 @@ export function AssetsPanel({
   }
 
   const copyUrl = async (asset: AssetMeta) => {
-    const url = `${window.location.origin}/api/asset/${asset.id}`
+    const url = absoluteAssetSrc(asset)
     try {
       await navigator.clipboard?.writeText(url)
       setCopied(asset.id)
@@ -313,10 +330,7 @@ export function AssetsPanel({
                     // The canvas reads the structured payload; the URL is there
                     // for anything else the file lands on.
                     event.dataTransfer.setData(ASSET_DRAG_TYPE, JSON.stringify(asset))
-                    event.dataTransfer.setData(
-                      'text/plain',
-                      `${window.location.origin}/api/asset/${asset.id}`,
-                    )
+                    event.dataTransfer.setData('text/plain', absoluteAssetSrc(asset))
                     event.dataTransfer.effectAllowed = 'copy'
                     const image = event.currentTarget.querySelector('img')
                     if (image) event.dataTransfer.setDragImage(image, 24, 24)
@@ -330,7 +344,7 @@ export function AssetsPanel({
                   }}
                 >
                   <img
-                    src={`/api/asset/${asset.id}`}
+                    src={assetSrc(asset)}
                     alt={asset.name}
                     className="aspect-square w-full object-contain"
                     loading="lazy"

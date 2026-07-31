@@ -96,6 +96,7 @@ import {
   ASSET_DRAG_TYPE,
   AssetsPanel,
   MAX_ASSET_BYTES,
+  assetSrc,
   fileToBase64,
   type AssetMeta,
 } from './assets-panel'
@@ -1087,7 +1088,7 @@ function frameAsImage(
   return {
     ...base,
     type: 'image',
-    src: `/api/asset/${asset.id}`,
+    src: assetSrc(asset),
     alt: asset.name,
     fit: 'contain',
   }
@@ -1576,7 +1577,7 @@ function useCanvasEditorActions(): CanvasEditorActions {
           operations.push({
             type: 'node.patch',
             id: image.id,
-            patch: { src: `/api/asset/${saved.id}` },
+            patch: { src: assetSrc(saved) },
           })
         }
       } catch (cause) {
