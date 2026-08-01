@@ -216,6 +216,45 @@ describe('Canvas exports', () => {
     )
   })
 
+  it('shows a text node again at a breakpoint that unhides it', () => {
+    const document = fixture()
+    document.breakpoints = [
+      { id: 'mobile', name: 'Mobile', minWidth: 0, previewWidth: 390 },
+      { id: 'tablet', name: 'Tablet', minWidth: 768, previewWidth: 768 },
+      { id: 'desktop', name: 'Desktop', minWidth: 1200, previewWidth: 1440 },
+    ]
+    document.nodes.headline.responsive = {
+      mobile: { hidden: true },
+      tablet: { hidden: true },
+      desktop: { hidden: false },
+    }
+    const { css } = compileCanvas(document)
+
+    expect(css).toContain(
+      '@media(max-width:1199.98px){.loora-headline{display:none}}',
+    )
+    // An unbounded rule would keep hiding it past the desktop breakpoint.
+    expect(css).not.toContain('}.loora-headline{display:none}')
+  })
+
+  it('hides a node at one breakpoint only', () => {
+    const document = fixture()
+    document.breakpoints = [
+      { id: 'mobile', name: 'Mobile', minWidth: 0, previewWidth: 390 },
+      { id: 'tablet', name: 'Tablet', minWidth: 768, previewWidth: 768 },
+      { id: 'desktop', name: 'Desktop', minWidth: 1200, previewWidth: 1440 },
+    ]
+    document.nodes.headline.responsive = {
+      tablet: { hidden: true },
+      desktop: { hidden: false },
+    }
+    const { css } = compileCanvas(document)
+
+    expect(css).toContain(
+      '@media(min-width:768px) and (max-width:1199.98px){.loora-headline{display:none}}',
+    )
+  })
+
   it('exports a font stack as separate families', () => {
     const document = fixture()
     document.nodes.headline.style.typography!.family =

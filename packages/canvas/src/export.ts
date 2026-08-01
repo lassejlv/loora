@@ -203,8 +203,10 @@ function styleDeclarations(document: CanvasDocument, node: CanvasNode) {
       `text-transform:${typography.transform ?? 'none'}`,
     )
   }
-  // Must come last: flex/grid layout also emits a display declaration.
-  if (node.hidden) declarations.push('display:none')
+  // `hidden` is not emitted here. These rules stack in a min-width cascade, and
+  // a node that only carries `display` while hidden can never be shown again at
+  // a wider breakpoint. Hiding is emitted by `hiddenRules` as its own
+  // width-bounded rule instead.
   return declarations.join(';')
 }
 
@@ -570,6 +572,49 @@ function renderNode(
   return `<${tag} ${common}>${children}</${tag}>`
 }
 
+function widthQuery(start: number, end: number | undefined) {
+  const min = start > 0 ? `(min-width:${start}px)` : ''
+  // Just short of the next breakpoint, so the two ranges never both match.
+  const max = end === undefined ? '' : `(max-width:${end - 0.02}px)`
+  const query = [min, max].filter(Boolean).join(' and ')
+  return query ? `@media${query}` : ''
+}
+
+// One rule per contiguous run of widths where the node resolves hidden. A
+// single `display:none` in the shared min-width cascade would stick at every
+// wider breakpoint for any node that emits no other display — text, vectors,
+// shapes, images, anything laid out absolutely.
+function hiddenRules(
+  document: CanvasDocument,
+  node: CanvasNode,
+  breakpoints: CanvasDocument['breakpoints'],
+  selector: string,
+  instance?: InstanceNode,
+  variant?: string,
+) {
+  const starts = breakpoints.map((breakpoint) => breakpoint.minWidth)
+  if (starts[0] !== 0) starts.unshift(0)
+  const hidden = starts.map(
+    (start) =>
+      applyInstancePatches(
+        document,
+        resolveNodeAtWidth(document, node, start),
+        instance,
+        variant,
+      ).hidden === true,
+  )
+  const rules: string[] = []
+  for (let index = 0; index < starts.length; index += 1) {
+    if (!hidden[index] || (index > 0 && hidden[index - 1])) continue
+    let end = index + 1
+    while (end < starts.length && hidden[end]) end += 1
+    const query = widthQuery(starts[index], starts[end])
+    const rule = `${selector}{display:none}`
+    rules.push(query ? `${query}{${rule}}` : rule)
+  }
+  return rules
+}
+
 function cssForNode(
   document: CanvasDocument,
   node: CanvasNode,
@@ -614,7 +659,16 @@ function cssForNode(
       )
       return `@media(min-width:${breakpoint.minWidth}px){${selector}{${styleDeclarations(document, instance && responsive.type === 'component' ? asInstanceComponentRoot(responsive) : responsive)}}}`
     })
-  return [base, pageBase, ...responsive].join('')
+  // Last, so a hidden range outranks every rule that shares its specificity.
+  const hidden = hiddenRules(
+    document,
+    node,
+    breakpoints,
+    selector,
+    instance,
+    variant,
+  )
+  return [base, pageBase, ...responsive, ...hidden].join('')
 }
 
 function collectRenderedOccurrences(
