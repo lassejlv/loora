@@ -1,7 +1,0 @@
-Introducing Loora.
-
-A design tool your coding agent can actually use. Connect it over MCP and Claude Code edits the same file you do — real nodes, not screenshots.
-
-Version history, branches, one-way export to React/HTML.
-
-loora.design
