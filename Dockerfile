@@ -16,6 +16,8 @@ COPY packages/email/package.json packages/email/
 COPY packages/billing/package.json packages/billing/
 COPY packages/agent/package.json packages/agent/
 COPY packages/canvas/package.json packages/canvas/
+COPY packages/platform/package.json packages/platform/
+COPY packages/shell/package.json packages/shell/
 COPY packages/realtime/package.json packages/realtime/
 COPY packages/rpc/package.json packages/rpc/
 COPY packages/editor/package.json packages/editor/
@@ -57,6 +59,8 @@ COPY --from=deps /app/packages/email/node_modules ./packages/email/node_modules
 COPY --from=deps /app/packages/billing/node_modules ./packages/billing/node_modules
 COPY --from=deps /app/packages/agent/node_modules ./packages/agent/node_modules
 COPY --from=deps /app/packages/canvas/node_modules ./packages/canvas/node_modules
+COPY --from=deps /app/packages/platform/node_modules ./packages/platform/node_modules
+COPY --from=deps /app/packages/shell/node_modules ./packages/shell/node_modules
 COPY --from=deps /app/packages/realtime/node_modules ./packages/realtime/node_modules
 COPY --from=deps /app/packages/rpc/node_modules ./packages/rpc/node_modules
 COPY --from=deps /app/packages/editor/node_modules ./packages/editor/node_modules
@@ -68,6 +72,8 @@ COPY packages/email ./packages/email
 COPY packages/billing/package.json packages/billing/
 COPY packages/agent/package.json packages/agent/
 COPY packages/canvas ./packages/canvas
+COPY packages/platform ./packages/platform
+COPY packages/shell/package.json packages/shell/
 COPY packages/realtime ./packages/realtime
 COPY packages/rpc/package.json packages/rpc/
 COPY packages/editor/package.json packages/editor/

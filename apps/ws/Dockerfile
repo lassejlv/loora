@@ -17,6 +17,8 @@ COPY packages/email/package.json packages/email/
 COPY packages/billing/package.json packages/billing/
 COPY packages/agent/package.json packages/agent/
 COPY packages/canvas/package.json packages/canvas/
+COPY packages/platform/package.json packages/platform/
+COPY packages/shell/package.json packages/shell/
 COPY packages/realtime/package.json packages/realtime/
 COPY packages/rpc/package.json packages/rpc/
 COPY packages/editor/package.json packages/editor/

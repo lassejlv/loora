@@ -16,6 +16,8 @@ COPY packages/email/package.json packages/email/
 COPY packages/billing/package.json packages/billing/
 COPY packages/agent/package.json packages/agent/
 COPY packages/canvas/package.json packages/canvas/
+COPY packages/platform/package.json packages/platform/
+COPY packages/shell/package.json packages/shell/
 COPY packages/realtime/package.json packages/realtime/
 COPY packages/rpc/package.json packages/rpc/
 COPY packages/editor/package.json packages/editor/
@@ -43,6 +45,7 @@ COPY --from=deps /app/packages/email/node_modules ./packages/email/node_modules
 COPY --from=deps /app/packages/billing/node_modules ./packages/billing/node_modules
 COPY --from=deps /app/packages/agent/node_modules ./packages/agent/node_modules
 COPY --from=deps /app/packages/canvas/node_modules ./packages/canvas/node_modules
+COPY --from=deps /app/packages/platform/node_modules ./packages/platform/node_modules
 COPY --from=deps /app/packages/realtime/node_modules ./packages/realtime/node_modules
 COPY --from=deps /app/packages/rpc/node_modules ./packages/rpc/node_modules
 COPY package.json bun.lock bunfig.toml ./
@@ -53,6 +56,9 @@ COPY packages/email ./packages/email
 COPY packages/billing ./packages/billing
 COPY packages/agent ./packages/agent
 COPY packages/canvas ./packages/canvas
+# `@loora/rpc` names it as a dependency (its browser client reads the runtime
+# from it), so the symlink has to resolve even though no tool here imports it.
+COPY packages/platform ./packages/platform
 COPY packages/realtime ./packages/realtime
 COPY packages/rpc ./packages/rpc
 
