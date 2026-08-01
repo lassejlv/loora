@@ -20,12 +20,19 @@ export interface LooraRuntime {
   apiOrigin: string
   /** Origin a link handed to a browser points at. Empty means the document's. */
   appOrigin: string
+  /**
+   * Follows a link that belongs somewhere else — a checkout, an OAuth consent
+   * screen. A browser tab simply goes there; a desktop window must not, so it
+   * hands the URL to the process that can open a browser.
+   */
+  openExternal: (url: string) => void
 }
 
 let runtime: LooraRuntime = {
   platform: 'web',
   apiOrigin: '',
   appOrigin: '',
+  openExternal: (url) => window.location.assign(url),
 }
 
 /**
@@ -60,6 +67,11 @@ export function appOrigin() {
 /** `/api/rpc` against whichever origin serves the API for this client. */
 export function apiUrl(path: string) {
   return `${apiOrigin()}${path}`
+}
+
+/** Opens a URL that is not part of this app, wherever it belongs. */
+export function openExternal(url: string) {
+  runtime.openExternal(url)
 }
 
 /** The public URL of an in-app route, for a link that leaves the app. */

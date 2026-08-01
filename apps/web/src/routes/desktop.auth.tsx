@@ -4,6 +4,7 @@ import { authClient } from '@loora/auth/client'
 import { AuthScreen } from '@loora/shell/auth-screen'
 import { Button } from '@loora/ui/button'
 import { Spinner } from '@loora/ui/spinner'
+import { desktopCallbackUrl, parseDesktopHandoff } from '#/lib/desktop-handoff'
 
 /**
  * Where the desktop app sends a browser to sign in.
@@ -15,24 +16,10 @@ import { Spinner } from '@loora/ui/spinner'
  * app trades the code for the session and keeps it out of its own window.
  */
 
-function validPort(value: unknown) {
-  const port = Number(value)
-  return Number.isInteger(port) && port >= 1024 && port <= 65535 ? port : null
-}
-
-function validState(value: unknown) {
-  return typeof value === 'string' && /^[A-Za-z0-9_-]{16,64}$/.test(value)
-    ? value
-    : null
-}
-
 export const Route = createFileRoute('/desktop/auth')({
   component: DesktopAuthPage,
   ssr: false,
-  validateSearch: (search: Record<string, unknown>) => ({
-    port: validPort(search.port),
-    state: validState(search.state),
-  }),
+  validateSearch: parseDesktopHandoff,
 })
 
 function DesktopAuthPage() {
@@ -84,10 +71,7 @@ function DesktopAuthPage() {
       return
     }
     setHandedOver(true)
-    const callback = new URL(`http://127.0.0.1:${port}/callback`)
-    callback.searchParams.set('token', token)
-    callback.searchParams.set('state', state)
-    window.location.replace(callback.toString())
+    window.location.replace(desktopCallbackUrl({ port, state, token }))
   }
 
   return (

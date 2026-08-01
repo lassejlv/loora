@@ -91,6 +91,17 @@ describe('AccountGate', () => {
     expect(screen.queryByText('Opening your canvas…')).toBeNull()
   })
 
+  test('a client that signs in elsewhere renders its own screen instead', () => {
+    render(
+      <AccountGate renderSignedOut={() => <p>Sign in at loora.design</p>}>
+        <div>Editor</div>
+      </AccountGate>,
+    )
+
+    expect(screen.getByText('Sign in at loora.design')).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'Complete sign up' })).toBeNull()
+  })
+
   test('shows the loading state during the initial session lookup', () => {
     sessionState = { data: null, isPending: true }
 

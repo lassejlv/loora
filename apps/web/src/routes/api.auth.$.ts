@@ -38,6 +38,10 @@ const CREDENTIAL_PATHS = [
   '/two-factor/verify-otp',
   '/email-otp/send-verification-otp',
   '/email-otp/verify-email',
+  // The desktop hand-off. The code is 32 random characters and lives for two
+  // minutes, so guessing it is not the worry — but it is a credential being
+  // exchanged, and it is counted like one.
+  '/one-time-token/verify',
 ]
 
 function isCredentialPath(pathname: string) {

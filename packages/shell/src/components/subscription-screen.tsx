@@ -3,6 +3,7 @@ import { LogOutIcon } from '@loora/ui/icons'
 import { clearWelcomeSeen } from './welcome-dialog'
 import { authClient } from '@loora/auth/client'
 import { orpc } from '@loora/rpc/client'
+import { openExternal } from '@loora/platform'
 import { readAccessVerdict, writeAccessVerdict } from '../lib/access-cache'
 import { Button } from '@loora/ui/button'
 import {
@@ -89,7 +90,7 @@ export function SubscriptionScreen({ userId, children, preview, redirect }: Subs
       const checkout = await orpc.billing.checkout(
         plan === 'pro' ? { plan, interval } : { plan },
       )
-      const goToCheckout = redirect ?? ((url: string) => window.location.assign(url))
+      const goToCheckout = redirect ?? openExternal
       goToCheckout(checkout.url)
     } catch {
       setError(`Could not open ${plan === 'free' ? 'Free' : 'Pro'} checkout. Please retry.`)

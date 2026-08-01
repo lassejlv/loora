@@ -19,10 +19,12 @@ npx skills add https://github.com/lassejlv/loora/tree/main/skills/loora-design-g
 - `apps/web` — the TanStack Start app (routes, API handlers, editor shell)
 - `apps/mcp` — the remote MCP server (`mcp.loora.design`)
 - `apps/ws` — the realtime service (`ws.loora.design`)
-- `apps/desktop` — the Deno Desktop shell for `https://loora.design`
+- `apps/desktop` — the desktop app: a Deno Desktop host over a Vite build of the same interface
 - `packages/canvas` — document model, engine, merge, renderer, import, export
 - `packages/editor` — the editor shell, panels, and client sync
-- `packages/ui` — shared design-system primitives
+- `packages/shell` — dashboard, settings, and the signed-in gates, shared by web and desktop
+- `packages/platform` — which client this is, and where its API and links point
+- `packages/ui` — shared design-system primitives and design tokens
 - `packages/agent` — the shared canvas tool vocabulary for MCP and handoff
 - `packages/rpc` — the oRPC router, storage, handoff tokens, version history
 - `packages/db` — Drizzle schema, Neon client, migrations

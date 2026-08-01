@@ -15,11 +15,10 @@ const router = createRouter({
   scrollRestoration: true,
 })
 
-declare module '@tanstack/react-router' {
-  interface Register {
-    router: typeof router
-  }
-}
+// No `Register` augmentation here. The web app registers its router for the
+// whole project, and every route this window has is one of that app's — so
+// a `Link` in a shared package type-checks against one set of paths rather
+// than two that would have to be kept identical.
 
 const queryClient = new QueryClient({
   defaultOptions: {

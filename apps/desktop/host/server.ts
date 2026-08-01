@@ -1,6 +1,6 @@
 import { readConfig, type DesktopConfig } from './config.ts'
 import { beginSignIn, completeSignIn, signedIn, signOut } from './auth-flow.ts'
-import { hasRealtimeTarget, proxyApi, proxyRealtime } from './proxy.ts'
+import { hasRealtimeTarget, openExternal, proxyApi, proxyRealtime } from './proxy.ts'
 
 /**
  * The loopback server the window is pointed at.
@@ -92,6 +92,17 @@ export function startHost() {
       if (url.pathname === '/desktop/sign-in' && request.method === 'POST') {
         beginSignIn(config, port)
         return Response.json({ started: true })
+      }
+      // Checkout, OAuth consent, documentation: pages that belong in a
+      // browser rather than in this window.
+      if (url.pathname === '/desktop/open' && request.method === 'POST') {
+        const body = (await request.json().catch(() => null)) as { url?: unknown } | null
+        const target = typeof body?.url === 'string' ? body.url : ''
+        if (!/^https:\/\//.test(target)) {
+          return Response.json({ opened: false }, { status: 400 })
+        }
+        openExternal(target)
+        return Response.json({ opened: true })
       }
       if (url.pathname === '/desktop/sign-out' && request.method === 'POST') {
         await signOut(config)

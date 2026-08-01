@@ -5,8 +5,23 @@
     <title>Loora</title>
     <meta name="color-scheme" content="dark light" />
     <meta name="theme-color" content="#fafafa" />
-    <!-- The theme and interface-scale scripts are injected here at build time,
-         from the same source the web app renders them from. -->
+    <!-- Self-hosted, and byte-identical to what the web app loads. -->
+    <link rel="stylesheet" href="/vendor/fonts.css" />
+    <script>
+      // Dark before first paint, so the window never flashes white on the way
+      // in. The full restore — custom themes, interface scale — happens in
+      // `@loora/shell/lib/theme` once React is running; this is only the part
+      // that has to be done before there is anything to see.
+      try {
+        var stored = localStorage.getItem('loora:theme')
+        document.documentElement.classList.toggle(
+          'dark',
+          stored === 'dark' ||
+            ((stored === null || stored === 'system') &&
+              matchMedia('(prefers-color-scheme: dark)').matches),
+        )
+      } catch (error) {}
+    </script>
   </head>
   <body>
     <div id="root"></div>

@@ -1,5 +1,6 @@
 import { Link } from '@tanstack/react-router'
 import { authClient } from '@loora/auth/client'
+import { isDesktop } from '@loora/platform'
 import {
   ClockIcon,
   CreditCardIcon,
@@ -39,9 +40,16 @@ const adminNavigation = {
   icon: LockIcon,
 } as const
 
-/** Admin is staff-only, so the link only exists for accounts that have it. */
+/**
+ * Admin is staff-only, so the link only exists for accounts that have it.
+ *
+ * Neither section exists in the desktop app: a plan is bought and cancelled at
+ * loora.design, where a card form belongs, and moderation is a browser errand
+ * rather than something to carry into a design tool.
+ */
 function useNavigationItems() {
   const { data: session } = authClient.useSession()
+  if (isDesktop()) return navigation.filter((item) => item.section !== 'billing')
   return session?.user.isAdmin === true
     ? [...navigation, adminNavigation]
     : [...navigation]

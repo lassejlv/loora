@@ -84,6 +84,19 @@ async function rewriteTicket(response: Response, context: ProxyContext) {
   })
 }
 
+/** Shown when a navigation turned into something a browser has to finish. */
+function handedToBrowserPage() {
+  return new Response(
+    `<!doctype html><html lang="en"><head><meta charset="utf-8" />` +
+      `<title>Loora</title><style>html,body{margin:0;height:100%;display:grid;` +
+      `place-items:center;background:#09090b;color:#fafafa;` +
+      `font:14px/1.5 ui-sans-serif,system-ui}</style></head><body>` +
+      `<p>Continue in your browser — this window will go back.</p>` +
+      `<script>setTimeout(()=>history.back(),1200)</script></body></html>`,
+    { headers: { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' } },
+  )
+}
+
 export async function proxyApi(request: Request, context: ProxyContext) {
   const url = new URL(request.url)
   const target = new URL(
@@ -91,12 +104,20 @@ export async function proxyApi(request: Request, context: ProxyContext) {
     context.config.apiOrigin,
   )
 
+  // Read the body rather than streaming it on: a request this app makes is a
+  // transaction batch or an upload, both small, and a buffered body keeps the
+  // hop to plain HTTP/1.1 with a length the far end never has to guess.
+  const body =
+    request.method === 'GET' || request.method === 'HEAD'
+      ? null
+      : new Uint8Array(await request.arrayBuffer())
+
   let response: Response
   try {
     response = await fetch(target, {
       method: request.method,
       headers: forwardHeaders(request, context.config),
-      body: request.method === 'GET' || request.method === 'HEAD' ? null : request.body,
+      body,
       redirect: 'manual',
     })
   } catch (error) {
@@ -118,7 +139,11 @@ export async function proxyApi(request: Request, context: ProxyContext) {
     const destination = new URL(location, context.config.apiOrigin)
     if (destination.origin !== context.config.apiOrigin) {
       openExternal(destination.toString())
-      return Response.json({ openedExternally: destination.toString() })
+      // A fetch gets an answer it can read; a navigation gets a page, because
+      // the window is now looking at whatever this returns.
+      return request.headers.get('accept')?.includes('text/html')
+        ? handedToBrowserPage()
+        : Response.json({ openedExternally: destination.toString() })
     }
     const headers = new Headers(response.headers)
     headers.set('location', `${destination.pathname}${destination.search}`)
@@ -135,6 +160,11 @@ export async function proxyApi(request: Request, context: ProxyContext) {
   // carry lives in this process already.
   headers.delete('set-cookie')
   headers.delete('set-auth-token')
+  // `fetch` already decoded the body; leaving these two behind would tell the
+  // window to decode it a second time, and to expect a length that is now
+  // wrong.
+  headers.delete('content-encoding')
+  headers.delete('content-length')
   return new Response(response.body, { status: response.status, headers })
 }
 

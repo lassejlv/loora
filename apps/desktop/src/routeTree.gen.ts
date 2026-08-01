@@ -11,9 +11,7 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as AppIndexRouteImport } from './routes/app.index'
-import { Route as AppAdminRouteImport } from './routes/app.admin'
 import { Route as AppAppearanceRouteImport } from './routes/app.appearance'
-import { Route as AppBillingRouteImport } from './routes/app.billing'
 import { Route as AppIntegrationsRouteImport } from './routes/app.integrations'
 import { Route as DesignIdRouteImport } from './routes/design.$id'
 import { Route as DesignIdBBranchIdRouteImport } from './routes/design.$id_.b.$branchId'
@@ -28,19 +26,9 @@ const AppIndexRoute = AppIndexRouteImport.update({
   path: '/app/',
   getParentRoute: () => rootRouteImport,
 } as any)
-const AppAdminRoute = AppAdminRouteImport.update({
-  id: '/app/admin',
-  path: '/app/admin',
-  getParentRoute: () => rootRouteImport,
-} as any)
 const AppAppearanceRoute = AppAppearanceRouteImport.update({
   id: '/app/appearance',
   path: '/app/appearance',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const AppBillingRoute = AppBillingRouteImport.update({
-  id: '/app/billing',
-  path: '/app/billing',
   getParentRoute: () => rootRouteImport,
 } as any)
 const AppIntegrationsRoute = AppIntegrationsRouteImport.update({
@@ -61,9 +49,7 @@ const DesignIdBBranchIdRoute = DesignIdBBranchIdRouteImport.update({
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
-  '/app/admin': typeof AppAdminRoute
   '/app/appearance': typeof AppAppearanceRoute
-  '/app/billing': typeof AppBillingRoute
   '/app/integrations': typeof AppIntegrationsRoute
   '/design/$id': typeof DesignIdRoute
   '/app/': typeof AppIndexRoute
@@ -71,9 +57,7 @@ export interface FileRoutesByFullPath {
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
-  '/app/admin': typeof AppAdminRoute
   '/app/appearance': typeof AppAppearanceRoute
-  '/app/billing': typeof AppBillingRoute
   '/app/integrations': typeof AppIntegrationsRoute
   '/design/$id': typeof DesignIdRoute
   '/app': typeof AppIndexRoute
@@ -82,9 +66,7 @@ export interface FileRoutesByTo {
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
-  '/app/admin': typeof AppAdminRoute
   '/app/appearance': typeof AppAppearanceRoute
-  '/app/billing': typeof AppBillingRoute
   '/app/integrations': typeof AppIntegrationsRoute
   '/design/$id': typeof DesignIdRoute
   '/app/': typeof AppIndexRoute
@@ -94,9 +76,7 @@ export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | '/'
-    | '/app/admin'
     | '/app/appearance'
-    | '/app/billing'
     | '/app/integrations'
     | '/design/$id'
     | '/app/'
@@ -104,9 +84,7 @@ export interface FileRouteTypes {
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
-    | '/app/admin'
     | '/app/appearance'
-    | '/app/billing'
     | '/app/integrations'
     | '/design/$id'
     | '/app'
@@ -114,9 +92,7 @@ export interface FileRouteTypes {
   id:
     | '__root__'
     | '/'
-    | '/app/admin'
     | '/app/appearance'
-    | '/app/billing'
     | '/app/integrations'
     | '/design/$id'
     | '/app/'
@@ -125,9 +101,7 @@ export interface FileRouteTypes {
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
-  AppAdminRoute: typeof AppAdminRoute
   AppAppearanceRoute: typeof AppAppearanceRoute
-  AppBillingRoute: typeof AppBillingRoute
   AppIntegrationsRoute: typeof AppIntegrationsRoute
   DesignIdRoute: typeof DesignIdRoute
   AppIndexRoute: typeof AppIndexRoute
@@ -150,25 +124,11 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppIndexRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/app/admin': {
-      id: '/app/admin'
-      path: '/app/admin'
-      fullPath: '/app/admin'
-      preLoaderRoute: typeof AppAdminRouteImport
-      parentRoute: typeof rootRouteImport
-    }
     '/app/appearance': {
       id: '/app/appearance'
       path: '/app/appearance'
       fullPath: '/app/appearance'
       preLoaderRoute: typeof AppAppearanceRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/app/billing': {
-      id: '/app/billing'
-      path: '/app/billing'
-      fullPath: '/app/billing'
-      preLoaderRoute: typeof AppBillingRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/app/integrations': {
@@ -197,9 +157,7 @@ declare module '@tanstack/react-router' {
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
-  AppAdminRoute: AppAdminRoute,
   AppAppearanceRoute: AppAppearanceRoute,
-  AppBillingRoute: AppBillingRoute,
   AppIntegrationsRoute: AppIntegrationsRoute,
   DesignIdRoute: DesignIdRoute,
   AppIndexRoute: AppIndexRoute,

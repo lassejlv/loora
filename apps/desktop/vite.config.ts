@@ -5,26 +5,6 @@ import { fileURLToPath } from 'node:url'
 import viteReact from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 import { tanstackRouter } from '@tanstack/router-plugin/vite'
-import { THEME_INIT_SCRIPT } from '@loora/shell/lib/theme'
-import { UI_SCALE_INIT_SCRIPT } from '@loora/shell/lib/ui-scale'
-
-/**
- * The web app renders these two scripts into its document head so a dark
- * window never flashes white and a scaled interface never jumps. There is no
- * server rendering a head here, so they go in at build time — from the same
- * source, rather than a copy that drifts.
- */
-function bootScripts(): Plugin {
-  return {
-    name: 'loora:boot-scripts',
-    transformIndexHtml() {
-      return [
-        { tag: 'script', children: THEME_INIT_SCRIPT, injectTo: 'head' },
-        { tag: 'script', children: UI_SCALE_INIT_SCRIPT, injectTo: 'head' },
-      ]
-    },
-  }
-}
 
 const hostPort = process.env.LOORA_DESKTOP_PORT ?? '4300'
 const host = `http://127.0.0.1:${hostPort}`
@@ -52,7 +32,9 @@ function vendorFonts(): Plugin {
       })
     },
     async closeBundle() {
-      await cp(fontsDirectory, 'dist/app/vendor', { recursive: true })
+      await cp(fontsDirectory, fileURLToPath(new URL('./dist/app/vendor/', import.meta.url)), {
+        recursive: true,
+      })
     },
   }
 }
@@ -60,7 +42,6 @@ function vendorFonts(): Plugin {
 export default defineConfig({
   resolve: { tsconfigPaths: true },
   plugins: [
-    bootScripts(),
     vendorFonts(),
     tailwindcss(),
     tanstackRouter({ target: 'react', quoteStyle: 'single', autoCodeSplitting: true }),

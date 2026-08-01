@@ -1,6 +1,6 @@
-/* Self-hosted, and byte-identical to what the web app loads — the desktop
-   build copies them out of `apps/web/public/vendor`. */
-@import url('/vendor/fonts.css');
+/* The fonts are linked from index.html rather than imported here: they are
+   served as a plain file, copied out of `apps/web/public/vendor` by the build,
+   and inlining them through PostCSS would only make the bundle bigger. */
 @import 'tailwindcss' source('../');
 @plugin '@tailwindcss/typography';
 

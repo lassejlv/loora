@@ -22,9 +22,10 @@ export function DesktopGate({
   const session = useQuery({
     queryKey: ['desktop', 'session'],
     queryFn: readHostSession,
-    // Once signed in there is nothing to wait for; before that, the browser
-    // may hand a session over at any moment.
-    refetchInterval: (query) => (query.state.data?.signedIn ? false : 1_000),
+    // Waiting on a browser, the session may arrive at any moment. Once it has,
+    // the slow poll is what notices a sign-out — the host drops the token when
+    // the window signs out, and this is how the window finds out it worked.
+    refetchInterval: (query) => (query.state.data?.signedIn ? 5_000 : 1_000),
     refetchOnWindowFocus: true,
   })
 

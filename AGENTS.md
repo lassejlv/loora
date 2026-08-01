@@ -6,9 +6,12 @@ document through typed transactions. Designs have version history, isolated
 drafts/branches, one-way exports, and GitHub integration.
 There is no in-app chat agent — bring your own agent via MCP or handoff.
 
-**Stack:** Bun workspaces monorepo · TanStack Start / React 19 · Drizzle + Neon
-Postgres · Better Auth · Polar billing (plan access) · oRPC · Railway
-(Dockerfile).
+It ships as a web app and as a desktop app — the same interface, from the same
+packages, over a native window.
+
+**Stack:** Bun workspaces monorepo · TanStack Start / React 19 · Vite + Deno
+Desktop (desktop) · Drizzle + Neon Postgres · Better Auth · Polar billing (plan
+access) · oRPC · Railway (Dockerfile).
 
 ---
 
@@ -16,9 +19,12 @@ Postgres · Better Auth · Polar billing (plan access) · oRPC · Railway
 
 ```
 apps/web          TanStack Start app (UI, API route handlers, canvas editor shell)
+apps/desktop      Deno Desktop host + Vite interface for the desktop app
 apps/mcp          Remote MCP server (Streamable HTTP, OAuth resource server)
 apps/ws           Realtime WebSocket service (rooms, presence, MCP agent events)
-packages/ui       Shared design-system primitives, icon barrel, `cn` (`@loora/ui`)
+packages/ui       Shared design-system primitives, tokens, icon barrel, `cn` (`@loora/ui`)
+packages/shell    Signed-in product surfaces shared by web and desktop (`@loora/shell`)
+packages/platform Which client this is, and where its API and links point (`@loora/platform`)
 packages/editor   Canvas editor shell, panels, client sync (`@loora/editor`)
 packages/canvas   Canvas model, engine, merge, React surface, import, export
 packages/db       Drizzle schema, Neon client, migrations (`@loora/db`)
@@ -70,8 +76,12 @@ Presentational design-system layer. **Must never** import db, RPC, auth, billing
 | `@loora/ui/icons` | The hugeicons barrel — the only place `@hugeicons/*` is imported |
 | `@loora/ui/hooks/*` | Presentational hooks, e.g. `@loora/ui/hooks/use-media-query` |
 
-Design tokens stay in `apps/web/src/styles.css`; the package ships classes, not
-a theme. `apps/web/components.json` points the shadcn CLI here, so generated
+Design tokens live in `packages/ui/src/styles.css`, which both apps import —
+it also carries the `@source` lines for every package outside an app that ships
+classes. Each app's own entry stylesheet keeps only what is its own: the
+Tailwind import, its fonts, its sources.
+
+`apps/web/components.json` points the shadcn CLI here, so generated
 primitives land in the package rather than the app.
 
 ### `packages/editor` (`@loora/editor`)
@@ -91,6 +101,39 @@ It depends on `@loora/canvas`, `@loora/ui`, `@loora/rpc` (client) and
 a product surface it does not own, the app passes it in: `CanvasApp` takes
 `renderSettings` so the settings dialog body (account, billing, appearance)
 stays in `apps/web`. Add a slot rather than an import back into the app.
+
+### `packages/shell` (`@loora/shell`)
+
+Every signed-in product surface that is not the canvas: the account gate, the
+design browser, settings, integrations, the legal, preview, and plan screens,
+and the admin panel. Both apps mount these, so a route file in either one is
+a few lines that pick a surface and hand it a gate.
+
+| Export | Role |
+|--------|------|
+| `@loora/shell/<name>` | A surface, e.g. `@loora/shell/account-gate`, `@loora/shell/designs-dashboard` |
+| `@loora/shell/admin/*` | The staff panel |
+| `@loora/shell/lib/*` | Theme, interface scale, custom themes, access cache, URL state |
+
+It depends on `@loora/editor`, `@loora/ui`, `@loora/rpc`, `@loora/auth`, and
+`@loora/platform`, and **must never** import from an app. A surface that needs
+something only one client has takes a slot — `AccountGate` takes
+`renderSignedOut`, which is how the desktop app sends people to a browser
+instead of showing a password field.
+
+Marketing pages (`landing/`, the legal documents) stay in `apps/web`: they are
+that app's, and no window renders them.
+
+### `packages/platform` (`@loora/platform`)
+
+Four questions, one answer each, for code that runs in more than one client:
+which platform this is, which origin serves `/api`, which origin a link handed
+to a browser should name, and how to follow a link that leaves the app. It
+imports **nothing** — `@loora/rpc/client`, `@loora/auth/client`, the editor,
+and the shell all depend on it, so it can depend on none of them.
+
+The defaults are the web app's (own origin, own tab), so configuring nothing
+is correct there. `configureRuntime` is called once, before anything renders.
 
 ### `packages/canvas` (`@loora/canvas`)
 
@@ -136,6 +179,31 @@ calls, and collaborator cursors. It never opens the database: the web app runs
 the access checks and mints a short-lived signed ticket, and this service only
 verifies it. See `apps/ws/README.md` for endpoints and configuration.
 
+### `apps/desktop`
+
+A real application, not a wrapper around a website: a Deno Desktop window over
+the same interface the web serves, built by Vite from the same packages.
+
+- **The host** (`main.ts`, `host/`) runs under Deno. It serves a loopback HTTP
+  server, opens the window on it, and is the only thing that holds the session.
+  `/api/*` is proxied to `LOORA_API_ORIGIN` with `Authorization: Bearer` — so
+  the window needs no cookie, no CORS, and no credential of its own, and
+  images, the event stream, and oRPC behave as they do on the web. It also
+  holds the outbound realtime socket, rewriting the ticket's URL to its own
+  `/realtime`.
+- **The interface** (`src/`) is Vite + React on TanStack Router and Query,
+  mounting `@loora/shell`. Vite serves it in development (proxying `/api`,
+  `/desktop`, `/callback`, `/realtime` back to the host) and the host serves
+  the built files in a packaged app.
+- **Signing in** happens at loora.design, in a browser. The host opens
+  `/desktop/auth?port=…&state=…`, that page mints a one-time token from the
+  visitor's session, and the host trades it for a session token it writes to
+  the user's application data directory with mode `0600`.
+- Billing and admin are not in the desktop app, and anything that leaves it —
+  a checkout, an OAuth consent screen — opens in a browser.
+
+See `apps/desktop/README.md`.
+
 ### `packages/db`
 
 - Schema: `packages/db/src/schema.ts`
@@ -160,10 +228,13 @@ Root scripts (from repo root; env loaded from `.env` where needed):
 |---------|---------|
 | `bun install` | Install pinned Bun workspace deps |
 | `bun run dev` | Web app on `http://localhost:3000` |
+| `bun run dev:desktop` | Desktop app: Vite on `:1421`, host on `:4300`, window opens |
 | `bun run dev:ws` | Realtime WebSocket service on `:4200` |
 | `bun run dev:mcp` | Remote MCP server on `:4100` |
 | `bun run build` | Production bundle → `apps/web/.output/` |
 | `bun run start` | Serve production build |
+| `bun run build:desktop` | Desktop interface → `apps/desktop/dist/app`, then the app bundle |
+| `bun run check:desktop` | `deno check` on the desktop host + `tsc` on its interface |
 | `bun run test` | All `bun:test` suites with JSDOM preload |
 | `bun run generate-routes` | Regenerate TanStack route tree after route file changes |
 | `bun run db:generate` | Create migration from `schema.ts` changes |
@@ -360,6 +431,11 @@ History uses Conventional Commits with scopes when useful:
 - User-scoped data only through protected oRPC/MCP paths.
 - Validate image/interaction URLs, SVG paths, CSS-like values, metadata, geometry, overrides, and document size at the **canvas model** boundary.
 - Capability URLs must not leak into analytics. Handoff payloads use token-scoped asset routes.
+- A session token belongs to a server or to a process, never to a page. The
+  desktop app's host holds it (`Authorization: Bearer`, Better Auth's `bearer`
+  plugin) and hands the window only proxied responses; the one-time code that
+  starts a desktop session is single use, hashed at rest, and only ever posted
+  to loopback.
 - Review generated SQL before migrating shared environments.
 
 ---
@@ -373,6 +449,10 @@ History uses Conventional Commits with scopes when useful:
 | Transactions, undo, conflict preconditions | `packages/canvas/src/engine.ts` |
 | Draft merge semantics | `packages/canvas/src/merge.ts` (+ RPC draft procedures) |
 | Editor chrome / tools / panels | `packages/editor/src/components/` |
+| Dashboard, settings, gates, admin | `packages/shell/src/components/` |
+| Which client this is, API and link origins | `packages/platform/src/runtime.ts` |
+| Desktop window, session, API proxy | `apps/desktop/host/` |
+| Desktop routes and sign-in screen | `apps/desktop/src/` |
 | Shared primitives, icons, `cn` | `packages/ui/src/` |
 | Client sync / runtime | `packages/editor/src/lib/canvas-*.ts` |
 | API procedures | One module per namespace in `packages/rpc/src/` (`canvas-procedures.ts`, `branches.ts`, `versions.ts`, `admin.ts`, …); `router.ts` only assembles them, and shared gates live in `procedures.ts` |
