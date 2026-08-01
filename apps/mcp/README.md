@@ -42,7 +42,7 @@ Optional:
   defaults to `2`
 - `MCP_SCREENSHOT_QUEUE_TIMEOUT_MS` — maximum queue wait, defaults to `20000`
 - `MCP_SCREENSHOT_IDLE_TIMEOUT_MS` — close Chromium after this much screenshot
-  inactivity, defaults to `60000`
+  inactivity, defaults to `5000`
 - `MCP_AUTH_TIMEOUT_MS` — maximum wait for remote token verification, defaults
   to `5000`
 
@@ -96,7 +96,7 @@ services so Canvas changes and agent activity reach open editors immediately.
    transactions through the same engine as the web editor.
 3. Call `getScreenshot` after meaningful edits. It returns real `image/png`
    MCP content for a Page or NodeRef; outbound document URLs are blocked and
-   owned image assets are inlined.
+   owned image assets are served directly to the isolated browser in memory.
 4. Call `exportCode` with `tailwind`, `jsx`, or `html` when implementation code
    is needed. Tailwind output is JSX with literal utilities and no hidden
    generated stylesheet.
