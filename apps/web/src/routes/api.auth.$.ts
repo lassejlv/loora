@@ -13,10 +13,11 @@ import {
 } from '@loora/auth/legal-consent'
 import { requireMcpConsent } from '@loora/auth/mcp-consent'
 import {
-  callerIdentity,
+  clientAddress,
   rateLimit,
   rateLimits,
   tooManyRequestsResponse,
+  UNKNOWN_ADDRESS,
 } from '@loora/rpc/rate-limit'
 
 /**
@@ -46,10 +47,16 @@ function isCredentialPath(pathname: string) {
 async function handle(request: Request) {
   const pathname = new URL(request.url).pathname
 
-  const credential = isCredentialPath(pathname)
+  // A budget of twelve attempts belongs to one address. If no proxy named the
+  // caller, that budget would be shared by everyone signing in, and any one of
+  // them could spend it for the rest — so an unnamed caller falls back to the
+  // wide limit, which still stops a flood and cannot lock the product's users
+  // out of their own accounts.
+  const address = clientAddress(request.headers)
+  const credential = isCredentialPath(pathname) && address !== UNKNOWN_ADDRESS
   const decision = await rateLimit(
     credential ? 'auth-credentials' : 'auth',
-    callerIdentity(request.headers),
+    `ip:${address}`,
     credential ? rateLimits.authSensitive : rateLimits.auth,
   )
   if (!decision.ok) {

@@ -119,6 +119,25 @@ export const auth = betterAuth({
       },
     },
   },
+  advanced: {
+    /**
+     * Where the caller's address comes from, for Better Auth's own rate
+     * limiting and for the addresses it records on sessions.
+     *
+     * Its default is `x-forwarded-for`, and it refuses that header outright
+     * when it carries more than one entry — which behind Cloudflare and
+     * Railway it always does. The result was every caller sharing one bucket
+     * per path, so one busy client could turn sign-in away for everybody.
+     *
+     * Cloudflare overwrites `cf-connecting-ip` on every proxied request, so it
+     * holds exactly one entry and no client can set it. `x-forwarded-for`
+     * stays behind it for a deployment without Cloudflare in front; Better
+     * Auth's own single-entry rule is what keeps that fallback honest.
+     */
+    ipAddress: {
+      ipAddressHeaders: ['cf-connecting-ip', 'x-forwarded-for'],
+    },
+  },
   emailAndPassword: {
     enabled: true,
     requireEmailVerification: true,

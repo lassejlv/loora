@@ -7,6 +7,7 @@ import {
   rateLimits,
   resetRateLimitClient,
   tooManyRequestsResponse,
+  UNKNOWN_ADDRESS,
 } from './rate-limit'
 
 // No Redis in the suite: these cover the in-memory path every deployment falls
@@ -90,24 +91,56 @@ describe('rateLimit', () => {
 })
 
 describe('clientAddress', () => {
-  it('takes the left-most forwarded address, which the proxy appended to', () => {
-    const headers = new Headers({ 'x-forwarded-for': '203.0.113.7, 10.0.0.1' })
+  it('counts the address Cloudflare stamped, not the forwarded chain', () => {
+    const headers = new Headers({
+      'cf-connecting-ip': '203.0.113.7',
+      'x-forwarded-for': '198.51.100.4, 203.0.113.7',
+    })
     expect(clientAddress(headers)).toBe('203.0.113.7')
   })
 
-  it('falls back to the other proxy headers, then to a placeholder', () => {
-    expect(clientAddress(new Headers({ 'x-real-ip': '198.51.100.4' }))).toBe(
-      '198.51.100.4',
-    )
-    expect(clientAddress(new Headers())).toBe('unknown')
+  it('refuses a forwarded chain a caller could have contributed to', () => {
+    // The attack this closes: a caller who sends their own x-forwarded-for
+    // stays at the front of the chain, and one who varies it gets a fresh
+    // bucket per request.
+    const forged = new Headers({
+      'x-forwarded-for': '1.2.3.4, 203.0.113.7, 10.0.0.1',
+    })
+    expect(clientAddress(forged)).toBe(UNKNOWN_ADDRESS)
+    expect(clientAddress(new Headers())).toBe(UNKNOWN_ADDRESS)
+  })
+
+  it('takes a single-entry forwarded header, which no client added to', () => {
+    expect(
+      clientAddress(new Headers({ 'x-forwarded-for': ' 203.0.113.7 ' })),
+    ).toBe('203.0.113.7')
+  })
+
+  it('does not let a caller name themselves through cf-connecting-ip alone', () => {
+    // Cloudflare overwrites this header, so a value that arrives with one is
+    // Cloudflare's. Without Cloudflare there is no such header to trust — the
+    // point of the test is that nothing *else* is trusted in its place.
+    const headers = new Headers({ 'x-real-ip': '1.2.3.4' })
+    expect(clientAddress(headers)).toBe(UNKNOWN_ADDRESS)
   })
 })
 
 describe('callerIdentity', () => {
   it('counts a signed-in caller as themselves, not as their address', () => {
-    const headers = new Headers({ 'x-forwarded-for': '203.0.113.7' })
+    const headers = new Headers({ 'cf-connecting-ip': '203.0.113.7' })
     expect(callerIdentity(headers, 'user_1')).toBe('user:user_1')
     expect(callerIdentity(headers)).toBe('ip:203.0.113.7')
+  })
+
+  it('keeps two addresses in separate buckets', async () => {
+    const rule = { limit: 1, windowMs: 60_000 }
+    const bucket = `identity-${Math.random()}`
+    const first = new Headers({ 'cf-connecting-ip': '203.0.113.7' })
+    const second = new Headers({ 'cf-connecting-ip': '198.51.100.4' })
+
+    expect((await rateLimit(bucket, callerIdentity(first), rule)).ok).toBe(true)
+    expect((await rateLimit(bucket, callerIdentity(first), rule)).ok).toBe(false)
+    expect((await rateLimit(bucket, callerIdentity(second), rule)).ok).toBe(true)
   })
 })
 
