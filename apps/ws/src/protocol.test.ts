@@ -82,6 +82,14 @@ describe('ingest messages', () => {
     ).toMatchObject({ kind: 'event' })
     expect(
       parseIngestMessage({
+        kind: 'event',
+        ownerUserId: 'owner-1',
+        target,
+        event: { type: 'branch.changed', draftId: 'dr1', status: 'proposed' },
+      }),
+    ).toMatchObject({ kind: 'event' })
+    expect(
+      parseIngestMessage({
         kind: 'activity',
         ownerUserId: 'owner-1',
         target,

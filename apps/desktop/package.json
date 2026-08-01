@@ -6,11 +6,10 @@
     "#app/*": "./src/*"
   },
   "scripts": {
-    "dev": "bun run scripts/dev.ts",
-    "dev:app": "vite dev --port 1421 --strictPort",
+    "dev": "tauri dev",
     "build:app": "vite build",
-    "build": "bun run build:app && bun run scripts/package.ts",
-    "check": "deno task --config deno.json check && tsc --noEmit",
+    "build": "tauri build",
+    "check": "tsc --noEmit && cargo check --manifest-path src-tauri/Cargo.toml",
     "generate-routes": "tsr generate"
   },
   "dependencies": {
@@ -38,6 +37,7 @@
     "@types/react": "^19.2.17",
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^6.0.3",
+    "@tauri-apps/cli": "^2.11.4",
     "typescript": "catalog:",
     "vite": "^8.1.5"
   }

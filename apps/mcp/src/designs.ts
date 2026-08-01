@@ -31,11 +31,12 @@ import {
   type CanvasDocument,
 } from '@loora/canvas/model'
 import {
+  changedNodeIds,
   diffDocuments,
   mergeDocuments,
   type CanvasMergeConflict,
 } from '@loora/canvas/merge'
-import { publishCanvasRealtimeEvent } from '@loora/db/canvas-realtime'
+import { publishBranchChanged, publishCanvasRealtimeEvent } from '@loora/db/canvas-realtime'
 import { canvasTransactionPruneBefore } from '@loora/db/canvas-transactions'
 import {
   historyCutoffForPlan,
@@ -527,6 +528,7 @@ export async function createDraft(
       status: designDraft.status,
       revision: designDraft.revision,
     })
+  void publishBranchChanged(userId, designId, created.id, 'active')
   return created
 }
 
@@ -561,6 +563,7 @@ async function transitionDraft(
     )
     .returning({ id: designDraft.id, status: designDraft.status })
   if (!updated) throw new Error(`Draft "${draftId}" cannot transition to ${to}`)
+  void publishBranchChanged(userId, designId, updated.id, to)
   return updated
 }
 
@@ -748,9 +751,17 @@ export async function applyDraft(
   void pruneExpiredHistoryForPlan(userId, plan).catch((error) => {
     console.error('[history] prune failed:', error)
   })
+  const newRevision = source.main.revision + 1
+  const mergedNodeIds = changedNodeIds(source.main.document, merge.document)
+  void publishBranchChanged(userId, designId, draftId, 'applied')
+  void publishCanvasRealtimeEvent(userId, { designId }, {
+    type: 'canvas.changed',
+    revision: newRevision,
+    nodeIds: mergedNodeIds,
+  })
   return {
     applied: true as const,
-    revision: source.main.revision + 1,
+    revision: newRevision,
     versionId: appliedId,
     document: merge.document,
   }

@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "Core capability for the Loora desktop window",
+  "windows": ["main"],
+  "permissions": ["core:default"]
+}

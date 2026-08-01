@@ -34,7 +34,7 @@ ENV PORT=4100
 # returns real PNG pixels instead of a link that still needs a browser.
 USER root
 RUN apt-get update \
-  && apt-get install -y --no-install-recommends chromium fonts-liberation \
+  && apt-get install -y --no-install-recommends chromium fonts-liberation tini \
   && rm -rf /var/lib/apt/lists/*
 
 COPY --from=deps /app/node_modules ./node_modules
@@ -65,4 +65,5 @@ COPY packages/rpc ./packages/rpc
 USER bun
 EXPOSE 4100
 
+ENTRYPOINT ["/usr/bin/tini", "--"]
 CMD ["bun", "run", "apps/mcp/src/index.ts"]

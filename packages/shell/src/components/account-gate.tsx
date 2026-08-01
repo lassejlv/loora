@@ -39,7 +39,7 @@ export function AccountGate({
   const { data: session, isPending } = authClient.useSession()
   const [hasResolvedSession, setHasResolvedSession] = useState(() => !isPending)
   const [welcomeOpen, setWelcomeOpen] = useState(() => !hasSeenWelcome())
-  const userId = session?.user.id
+  const userId = session?.user?.id
   const gateKey = designId ? `share:${designId}` : ''
   // A returning guest skips straight in on the cached verdict; the server
   // re-checks on every request either way, so a stale yes only ever shows UI.
@@ -78,17 +78,12 @@ export function AccountGate({
     )
   }
 
-  if (!session) {
-    return (
-      <>
-        <div
-          aria-hidden="true"
-          className="pointer-events-none select-none"
-          inert
-        >
-          <CanvasApp preview />
-        </div>
-        {welcomeOpen ? (
+  // A token can come back without a user while the host is still settling the
+  // handoff — treat that the same as signed out so the gate never dereferences.
+  if (!session || !userId) {
+    if (welcomeOpen) {
+      return (
+        <main className="min-h-screen bg-cx-canvas">
           <WelcomeDialog
             open
             onOpenChange={(open) => {
@@ -98,10 +93,14 @@ export function AccountGate({
               }
             }}
           />
-        ) : (
-          renderSignedOut?.() ?? <AuthScreen />
-        )}
-      </>
+        </main>
+      )
+    }
+    if (renderSignedOut) return <>{renderSignedOut()}</>
+    return (
+      <main className="min-h-screen bg-cx-canvas">
+        <AuthScreen />
+      </main>
     )
   }
 
@@ -116,11 +115,11 @@ export function AccountGate({
   return (
     <LegalConsentScreen preview={<CanvasApp preview />}>
       <PreviewAccessScreen
-        userId={session.user.id}
+        userId={userId}
         preview={<CanvasApp preview />}
       >
         <SubscriptionScreen
-          userId={session.user.id}
+          userId={userId}
           preview={<CanvasApp preview />}
         >
           {children}

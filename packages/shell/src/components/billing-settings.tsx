@@ -166,7 +166,7 @@ export function BillingSettings() {
     />
   )
 
-  if (session?.user.isAdmin) {
+  if (session?.user?.isAdmin) {
     return (
       <div className="flex flex-col gap-5">
         <div>

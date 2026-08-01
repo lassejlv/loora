@@ -9,8 +9,8 @@ There is no in-app chat agent — bring your own agent via MCP or handoff.
 It ships as a web app and as a desktop app — the same interface, from the same
 packages, over a native window.
 
-**Stack:** Bun workspaces monorepo · TanStack Start / React 19 · Vite + Deno
-Desktop (desktop) · Drizzle + Neon Postgres · Better Auth · Polar billing (plan
+**Stack:** Bun workspaces monorepo · TanStack Start / React 19 · Vite + Tauri
+(desktop) · Drizzle + Neon Postgres · Better Auth · Polar billing (plan
 access) · oRPC · Railway (Dockerfile).
 
 ---
@@ -19,7 +19,7 @@ access) · oRPC · Railway (Dockerfile).
 
 ```
 apps/web          TanStack Start app (UI, API route handlers, canvas editor shell)
-apps/desktop      Deno Desktop host + Vite interface for the desktop app
+apps/desktop      Tauri host + Vite interface for the desktop app
 apps/mcp          Remote MCP server (Streamable HTTP, OAuth resource server)
 apps/ws           Realtime WebSocket service (rooms, presence, MCP agent events)
 packages/ui       Shared design-system primitives, tokens, icon barrel, `cn` (`@loora/ui`)
@@ -181,10 +181,10 @@ verifies it. See `apps/ws/README.md` for endpoints and configuration.
 
 ### `apps/desktop`
 
-A real application, not a wrapper around a website: a Deno Desktop window over
-the same interface the web serves, built by Vite from the same packages.
+A real application, not a wrapper around a website: a Tauri window over the
+same interface the web serves, built by Vite from the same packages.
 
-- **The host** (`main.ts`, `host/`) runs under Deno. It serves a loopback HTTP
+- **The host** (`src-tauri/`) runs under Rust. It serves a loopback HTTP
   server, opens the window on it, and is the only thing that holds the session.
   `/api/*` is proxied to `LOORA_API_ORIGIN` with `Authorization: Bearer` — so
   the window needs no cookie, no CORS, and no credential of its own, and
@@ -197,8 +197,8 @@ the same interface the web serves, built by Vite from the same packages.
   the built files in a packaged app.
 - **Signing in** happens at loora.design, in a browser. The host opens
   `/desktop/auth?port=…&state=…`, that page mints a one-time token from the
-  visitor's session, and the host trades it for a session token it writes to
-  the user's application data directory with mode `0600`.
+  visitor's session, and the host trades it for a session token stored in the
+  operating system credential service.
 - Billing and admin are not in the desktop app, and anything that leaves it —
   a checkout, an OAuth consent screen — opens in a browser.
 
@@ -234,7 +234,7 @@ Root scripts (from repo root; env loaded from `.env` where needed):
 | `bun run build` | Production bundle → `apps/web/.output/` |
 | `bun run start` | Serve production build |
 | `bun run build:desktop` | Desktop interface → `apps/desktop/dist/app`, then the app bundle |
-| `bun run check:desktop` | `deno check` on the desktop host + `tsc` on its interface |
+| `bun run check:desktop` | `cargo check` on the desktop host + `tsc` on its interface |
 | `bun run test` | All `bun:test` suites with JSDOM preload |
 | `bun run generate-routes` | Regenerate TanStack route tree after route file changes |
 | `bun run db:generate` | Create migration from `schema.ts` changes |
@@ -457,7 +457,7 @@ History uses Conventional Commits with scopes when useful:
 | Editor chrome / tools / panels | `packages/editor/src/components/` |
 | Dashboard, settings, gates, admin | `packages/shell/src/components/` |
 | Which client this is, API and link origins | `packages/platform/src/runtime.ts` |
-| Desktop window, session, API proxy | `apps/desktop/host/` |
+| Desktop window, session, API proxy | `apps/desktop/src-tauri/` |
 | Desktop routes and sign-in screen | `apps/desktop/src/` |
 | Shared primitives, icons, `cn` | `packages/ui/src/` |
 | Client sync / runtime | `packages/editor/src/lib/canvas-*.ts` |

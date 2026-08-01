@@ -9,6 +9,7 @@ import {
   type CanvasAnimation,
   type CanvasTheme,
   type DesignToken,
+  type ThemeId,
   type NodeId,
   type NodeMutationPatch,
   type NodePatch,
@@ -49,6 +50,7 @@ export type CanvasOperation =
   | { type: 'token.delete'; id: string }
   | { type: 'theme.upsert'; theme: CanvasTheme }
   | { type: 'theme.delete'; id: string }
+  | { type: 'theme.activate'; id: ThemeId }
   | { type: 'animation.upsert'; animation: CanvasAnimation }
   | { type: 'animation.delete'; id: string }
 
@@ -72,6 +74,7 @@ const operationTypes = new Set<CanvasOperation['type']>([
   'token.delete',
   'theme.upsert',
   'theme.delete',
+  'theme.activate',
   'animation.upsert',
   'animation.delete',
 ])
@@ -92,6 +95,7 @@ const operationKeys: Record<CanvasOperation['type'], Set<string>> = {
   'token.delete': new Set(['type', 'id']),
   'theme.upsert': new Set(['type', 'theme']),
   'theme.delete': new Set(['type', 'id']),
+  'theme.activate': new Set(['type', 'id']),
   'animation.upsert': new Set(['type', 'animation']),
   'animation.delete': new Set(['type', 'id']),
 }
@@ -263,6 +267,9 @@ export function parseCanvasTransaction(value: unknown): CanvasTransaction {
       throw new Error(`Canvas theme operation ${index} has no theme`)
     }
     if (operation.type === 'theme.delete' && typeof operation.id !== 'string') {
+      throw new Error(`Canvas theme operation ${index} has no theme id`)
+    }
+    if (operation.type === 'theme.activate' && typeof operation.id !== 'string') {
       throw new Error(`Canvas theme operation ${index} has no theme id`)
     }
   }
@@ -920,6 +927,16 @@ export function applyTransaction(
           type: 'theme.upsert',
           theme: clone(previous),
         })
+        changedThemeIds.add(operation.id)
+        break
+      }
+      case 'theme.activate': {
+        if (!document.themes[operation.id]) {
+          throw new Error(`Theme ${operation.id} does not exist`)
+        }
+        const previous = document.activeThemeId
+        document.activeThemeId = operation.id
+        inverseOperations.unshift({ type: 'theme.activate', id: previous })
         changedThemeIds.add(operation.id)
         break
       }

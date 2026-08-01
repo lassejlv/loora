@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 import {
   normalizePresenceInput,
+  parseCanvasRealtimeEvent,
   scopePresenceSessionId,
 } from './events'
 
@@ -37,5 +38,39 @@ describe('presence input', () => {
     const selection = Array.from({ length: 100 }, (_, index) => `node-${index}`)
 
     expect(normalizePresenceInput({ selection })?.selection).toHaveLength(64)
+  })
+})
+
+describe('parseCanvasRealtimeEvent', () => {
+  test('accepts a branch.changed event', () => {
+    const event = parseCanvasRealtimeEvent(
+      JSON.stringify({
+        type: 'branch.changed',
+        draftId: 'dr123',
+        status: 'proposed',
+        sentAt: Date.now(),
+      }),
+    )
+    expect(event).not.toBeNull()
+    expect(event?.type).toBe('branch.changed')
+  })
+
+  test('accepts a branch.changed event with null draftId', () => {
+    const event = parseCanvasRealtimeEvent(
+      JSON.stringify({
+        type: 'branch.changed',
+        draftId: null,
+        status: null,
+        sentAt: Date.now(),
+      }),
+    )
+    expect(event).not.toBeNull()
+  })
+
+  test('rejects a branch.changed event without sentAt', () => {
+    const event = parseCanvasRealtimeEvent(
+      JSON.stringify({ type: 'branch.changed', draftId: null, status: null }),
+    )
+    expect(event).toBeNull()
   })
 })

@@ -7,6 +7,7 @@ import tailwindcss from '@tailwindcss/vite'
 import { tanstackRouter } from '@tanstack/router-plugin/vite'
 
 const hostPort = process.env.LOORA_DESKTOP_PORT ?? '4300'
+const appPort = process.env.LOORA_DESKTOP_APP_PORT ?? '1421'
 const host = `http://127.0.0.1:${hostPort}`
 
 /** The web app owns the self-hosted fonts; this serves the same files. */
@@ -40,6 +41,7 @@ function vendorFonts(): Plugin {
 }
 
 export default defineConfig({
+  clearScreen: false,
   resolve: { tsconfigPaths: true },
   plugins: [
     vendorFonts(),
@@ -55,10 +57,19 @@ export default defineConfig({
     sourcemap: true,
   },
   server: {
-    port: Number(process.env.LOORA_DESKTOP_APP_PORT ?? 1421),
+    host: '127.0.0.1',
+    port: Number(appPort),
     strictPort: true,
-    // Everything the host owns: the API proxy, its own endpoints, the sign-in
-    // callback a browser lands on, and the realtime socket.
+    watch: { ignored: ['**/src-tauri/**'] },
+    // The Tauri window stays on the Rust host (:4300) and reverse-proxies this
+    // server. HMR still talks to Vite directly so the host does not have to
+    // bridge websockets.
+    hmr: {
+      protocol: 'ws',
+      host: '127.0.0.1',
+      port: Number(appPort),
+    },
+    // Kept for opening the interface in a regular browser during development.
     proxy: {
       '/api': { target: host, changeOrigin: false },
       '/desktop': { target: host, changeOrigin: false },

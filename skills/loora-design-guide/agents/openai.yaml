@@ -1,7 +1,7 @@
 interface:
   display_name: "Loora Design Guide"
-  short_description: "Build polished structured designs through Loora MCP"
-  default_prompt: "Use $loora-design-guide to build and visually verify a polished design in Loora."
+  short_description: "Build schema-safe structured designs in Loora"
+  default_prompt: "Use $loora-design-guide to build and verify a schema-safe structured design in Loora."
 dependencies:
   tools:
     - type: "mcp"

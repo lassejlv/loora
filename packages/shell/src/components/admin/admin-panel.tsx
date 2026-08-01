@@ -18,7 +18,8 @@ export function AdminPanel() {
   const [overview, setOverview] = useState<AdminOverview | null>(null)
   const [error, setError] = useState('')
   const [refreshing, setRefreshing] = useState(false)
-  const isAdmin = session?.user.isAdmin === true
+  const userId = session?.user?.id
+  const isAdmin = session?.user?.isAdmin === true
 
   const loadOverview = useCallback(async () => {
     try {
@@ -37,7 +38,7 @@ export function AdminPanel() {
     return <p className="text-xs text-muted-foreground">Checking access…</p>
   }
 
-  if (!isAdmin || !session?.user.id) {
+  if (!isAdmin || !userId) {
     return (
       <div className="rounded-md border border-line bg-surface p-4">
         <h2 className="text-sm font-semibold">Admin only</h2>
@@ -75,7 +76,7 @@ export function AdminPanel() {
       {overview ? <AdminStats overview={overview} /> : null}
 
       <AdminUsers
-        currentUserId={session.user.id}
+        currentUserId={userId}
         pendingRequests={overview?.users.pendingPreviewRequests ?? 0}
         onChanged={() => void loadOverview()}
       />

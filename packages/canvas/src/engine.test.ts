@@ -242,6 +242,42 @@ describe('Canvas transactions', () => {
     expect(engine.document).toEqual(before)
   })
 
+  it('activates a named theme as the persisted default', () => {
+    const engine = engineFixture()
+    engine.apply({
+      id: 'add-dark-theme',
+      label: 'Add dark theme',
+      operations: [
+        { type: 'theme.upsert', theme: { id: 'dark', name: 'Dark' } },
+      ],
+    })
+    const result = engine.apply({
+      id: 'activate-dark-theme',
+      label: 'Activate dark theme',
+      operations: [{ type: 'theme.activate', id: 'dark' }],
+    })
+
+    expect(result.changedThemeIds.has('dark')).toBe(true)
+    expect(engine.document.activeThemeId).toBe('dark')
+    engine.undo()
+    expect(engine.document.activeThemeId).toBe('default')
+    engine.redo()
+    expect(engine.document.activeThemeId).toBe('dark')
+  })
+
+  it('refuses to activate a theme that does not exist', () => {
+    const engine = engineFixture()
+    const before = structuredClone(engine.document)
+    expect(() =>
+      engine.apply({
+        id: 'activate-missing-theme',
+        label: 'Activate missing theme',
+        operations: [{ type: 'theme.activate', id: 'missing' }],
+      }),
+    ).toThrow()
+    expect(engine.document).toEqual(before)
+  })
+
   it('leaves the source untouched when final validation fails', () => {
     const engine = engineFixture()
     const before = structuredClone(engine.document)

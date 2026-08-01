@@ -26,7 +26,7 @@ export function AppPageShell({
 }) {
   const { data: session } = authClient.useSession()
   const [settingsOpen, setSettingsOpen] = useState(false)
-  const accountName = session?.user.name ?? session?.user.email ?? 'Account'
+  const accountName = session?.user?.name ?? session?.user?.email ?? 'Account'
 
   const signOut = async () => {
     clearWelcomeSeen()

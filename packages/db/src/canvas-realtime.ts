@@ -123,6 +123,33 @@ export async function publishCanvasRealtimeEvent(
   }
 }
 
+/**
+ * Notifies every viewer of a design — on Main and on the branch itself — that
+ * a branch's lifecycle changed (created, proposed, reopened, closed, applied).
+ *
+ * Goes to the Main channel so the branch list refreshes for anybody editing
+ * Main, and to the draft's own channel so the person on that branch sees it
+ * too. Viewers on a different branch pick it up on their next refresh.
+ */
+export async function publishBranchChanged(
+  userId: string,
+  designId: string,
+  draftId: string | null,
+  status: string | null,
+) {
+  const event: CanvasRealtimeEventInput = {
+    type: 'branch.changed',
+    draftId,
+    status,
+  }
+  await Promise.all([
+    publishCanvasRealtimeEvent(userId, { designId }, event),
+    draftId
+      ? publishCanvasRealtimeEvent(userId, { designId, draftId }, event)
+      : null,
+  ])
+}
+
 function presenceKey(userId: string, target: CanvasRealtimeTarget) {
   return `${canvasRealtimeChannel(userId, target)}:presence`
 }

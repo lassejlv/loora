@@ -85,7 +85,7 @@ export function UpgradeToProButton({
     }
   }, [])
 
-  if (!shouldOfferUpgrade(status, session?.user.isAdmin === true)) {
+  if (!shouldOfferUpgrade(status, session?.user?.isAdmin === true)) {
     return null
   }
 

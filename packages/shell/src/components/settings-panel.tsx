@@ -123,11 +123,11 @@ export function SettingsPanel({
           </div>
           <div className="flex items-center gap-3">
             <div className="flex size-10 items-center justify-center rounded-full bg-cx-accent/10 text-sm font-semibold text-cx-accent">
-              {(session?.user.name ?? session?.user.email ?? '?').slice(0, 1).toUpperCase()}
+              {(session?.user?.name ?? session?.user?.email ?? '?').slice(0, 1).toUpperCase()}
             </div>
             <div className="min-w-0">
-              <p className="truncate text-sm font-medium">{session?.user.name ?? '—'}</p>
-              <p className="truncate text-xs text-muted-foreground">{session?.user.email}</p>
+              <p className="truncate text-sm font-medium">{session?.user?.name ?? '—'}</p>
+              <p className="truncate text-xs text-muted-foreground">{session?.user?.email}</p>
             </div>
           </div>
           <div>

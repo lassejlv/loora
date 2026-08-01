@@ -17,3 +17,4 @@ outputs
 .claude
 .codex
 promo
+apps/desktop/src-tauri/target

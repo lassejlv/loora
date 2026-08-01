@@ -819,7 +819,7 @@ export function createLooraServer(
     'setTokens',
     {
       description:
-        'Create or update named visual themes and structured design tokens. Put per-theme token values in modes keyed by theme id, then use set-theme event actions to switch them at runtime.',
+        'Create or update named visual themes and structured design tokens (up to 100 themes and 1,000 tokens per call), and set the persisted default theme. Put per-theme token values in modes keyed by theme id; pass activeThemeId to choose the theme Main or this branch renders with by default — no runtime event needed. set-theme event actions can still switch themes at runtime.',
       inputSchema: { ...targetShape, ...setTokensInputSchema.shape },
     },
     tool('setTokens',
@@ -831,12 +831,17 @@ export function createLooraServer(
           {
             id: canvasId('tx'),
             label: 'MCP updated tokens',
-            operations: tokenOperations(args.tokens, args.themes),
+            operations: tokenOperations(
+              args.tokens,
+              args.themes,
+              args.activeThemeId,
+            ),
           },
         ])
         return {
           themeIds: args.themes.map((theme) => theme.id),
           tokenIds: args.tokens.map((token) => token.id),
+          ...(args.activeThemeId ? { activeThemeId: args.activeThemeId } : {}),
           revision: result.revision,
         }
       },

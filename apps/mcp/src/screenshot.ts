@@ -37,7 +37,7 @@ const SAFE_IMAGE_TYPES = new Set([
 ])
 
 interface LoadedAsset {
-  data: string
+  data: Buffer
   mediaType: string
 }
 
@@ -103,7 +103,10 @@ async function loadAssets(userId: string, ids: string[]) {
       continue
     }
     if (row.data) {
-      output.set(row.id, { data: row.data, mediaType: row.mediaType })
+      output.set(row.id, {
+        data: Buffer.from(row.data, 'base64'),
+        mediaType: row.mediaType,
+      })
       remainingBytes -= row.size
       continue
     }
@@ -114,7 +117,7 @@ async function loadAssets(userId: string, ids: string[]) {
     if (bytes.byteLength > MAX_ASSET_BYTES) continue
     if (bytes.byteLength > remainingBytes) continue
     output.set(row.id, {
-      data: Buffer.from(bytes).toString('base64'),
+      data: Buffer.from(bytes),
       mediaType: row.mediaType,
     })
     remainingBytes -= bytes.byteLength
@@ -135,19 +138,21 @@ async function prepareDocument(userId: string, source: CanvasDocument) {
     ),
   ]
   const assets = await loadAssets(userId, assetIds)
+  const assetsByUrl = new Map<string, LoadedAsset>()
   const skippedImages: string[] = []
   for (const image of images) {
     if (image.src.startsWith('data:image/')) continue
     const id = assetIdFromSrc(image.src)
     const loaded = id ? assets.get(id) : null
-    if (loaded) {
-      image.src = `data:${loaded.mediaType};base64,${loaded.data}`
+    if (id && loaded) {
+      image.src = `https://assets.loora.invalid/${encodeURIComponent(id)}`
+      assetsByUrl.set(image.src, loaded)
       continue
     }
     skippedImages.push(image.src)
     image.src = BLANK_IMAGE
   }
-  return { document, skippedImages }
+  return { assetsByUrl, document, skippedImages }
 }
 
 function chromiumExecutable() {
@@ -185,7 +190,7 @@ const screenshotBrowser = new IdleResource(
   },
   integerEnvironment(
     'MCP_SCREENSHOT_IDLE_TIMEOUT_MS',
-    60_000,
+    5_000,
     5_000,
     30 * 60_000,
   ),
@@ -244,7 +249,18 @@ async function renderCanvasScreenshotWithBrowser(
     deviceScaleFactor: pixelRatio,
   })
   try {
-    await context.route('**/*', (route) => route.abort())
+    await context.route('**/*', async (route) => {
+      const loaded = prepared.assetsByUrl.get(route.request().url())
+      if (!loaded) {
+        await route.abort()
+        return
+      }
+      await route.fulfill({
+        body: loaded.data,
+        contentType: loaded.mediaType,
+        status: 200,
+      })
+    })
     const page = await context.newPage()
     page.setDefaultTimeout(15_000)
     await page.setContent(html, { waitUntil: 'load' })

@@ -63,12 +63,19 @@ export type CanvasRealtimeEvent =
       peers: CanvasPresencePeer[]
       sentAt: number
     }
+  | {
+      type: 'branch.changed'
+      draftId: string | null
+      status: string | null
+      sentAt: number
+    }
 
 export type CanvasRealtimeEventInput =
   | Omit<Extract<CanvasRealtimeEvent, { type: 'canvas.changed' }>, 'sentAt'>
   | Omit<Extract<CanvasRealtimeEvent, { type: 'agent.activity' }>, 'sentAt'>
   | Omit<Extract<CanvasRealtimeEvent, { type: 'presence.peer' }>, 'sentAt'>
   | Omit<Extract<CanvasRealtimeEvent, { type: 'presence.state' }>, 'sentAt'>
+  | Omit<Extract<CanvasRealtimeEvent, { type: 'branch.changed' }>, 'sentAt'>
 
 /**
  * The channel a document's events travel on. Keyed by the owner rather than the
@@ -200,6 +207,16 @@ export function parseCanvasRealtimeEvent(
     Array.isArray(parsed.peers) &&
     parsed.peers.length <= MAX_PRESENCE_PEERS &&
     parsed.peers.every(isCanvasPresencePeer)
+  ) {
+    return parsed as unknown as CanvasRealtimeEvent
+  }
+  if (
+    parsed.type === 'branch.changed' &&
+    (parsed.draftId === null ||
+      (typeof parsed.draftId === 'string' &&
+        parsed.draftId.length > 0 &&
+        parsed.draftId.length <= 128)) &&
+    (parsed.status === null || typeof parsed.status === 'string')
   ) {
     return parsed as unknown as CanvasRealtimeEvent
   }

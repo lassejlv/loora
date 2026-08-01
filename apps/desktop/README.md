@@ -1,20 +1,20 @@
 # Loora for desktop
 
-A real desktop application: a [Deno Desktop](https://docs.deno.com/runtime/desktop/)
-window over the same interface the web app serves, built by Vite from the same
-packages (`@loora/shell`, `@loora/editor`, `@loora/ui`, `@loora/canvas`).
+A real [Tauri](https://v2.tauri.app/) application over the same interface the
+web app serves, built by Vite from the same packages (`@loora/shell`,
+`@loora/editor`, `@loora/ui`, `@loora/canvas`).
 
-Requires Deno 2.9 or newer, and Bun for the interface build.
+Requires Rust, the platform prerequisites for Tauri, and Bun.
 
 ```bash
-bun run dev:desktop     # Vite on :1421, host on :4300, window opens
-bun run check:desktop   # deno check on the host + tsc on the interface
-bun run build:desktop   # dist/app (interface), then dist/Loora.app
+bun run dev:desktop     # Tauri starts Vite and opens the native window
+bun run check:desktop   # tsc on the interface + cargo check on the host
+bun run build:desktop   # Vite interface + native Tauri bundle
 ```
 
 ## Two halves
 
-**The host** (`main.ts`, `host/`) runs under Deno. It serves a loopback HTTP
+**The host** (`src-tauri/`) runs under Rust. It serves a loopback HTTP
 server, opens the window on it, and is the only thing that ever holds the
 session. Everything the window asks for under `/api/*` is forwarded to
 loora.design with `Authorization: Bearer <session token>` attached, which is
@@ -24,9 +24,10 @@ exactly as they do on the web.
 
 **The interface** (`src/`, `index.html`, `vite.config.ts`) is a Vite + React
 single-page app on TanStack Router and Query, mounting the shared shell. In
-development it is served by Vite, which proxies `/api`, `/desktop`,
-`/callback`, and `/realtime` back to the host; in a packaged app it is built
-into `dist/app`, embedded in the executable, and served by the host.
+development Tauri starts Vite on `:1421` and the Rust host on `:4300`; the
+window stays on the host, which reverse-proxies the interface from Vite so
+sign-in and `/api` share one origin. In a packaged app the interface is built
+into `dist/app`, embedded in the bundle, and served by the host.
 
 ## Signing in
 
@@ -40,10 +41,10 @@ into `dist/app`, embedded in the executable, and served by the host.
    `/api/auth/one-time-token/verify`, and keeps the token that comes back in
    `set-auth-token`.
 
-That token is written to the user's application data directory with mode
-`0600` — `~/Library/Application Support/Loora/session.json` on macOS,
-`%APPDATA%\Loora` on Windows, `$XDG_DATA_HOME/loora` elsewhere. Signing out
-ends the session on the server and deletes the file.
+That token is stored in the operating system credential service: Keychain on
+macOS, Credential Manager on Windows, or Secret Service on Linux. An existing
+protected `session.json` from the Deno build is imported once and removed.
+Signing out ends the session on the server and deletes the credential.
 
 The `/desktop/*` endpoints are bound to `127.0.0.1`, so only this machine can
 reach them, and the hand-off additionally has to match the state string the
@@ -65,12 +66,8 @@ consent screen — is opened in a browser rather than followed in the window.
 
 ## Title bar
 
-The window keeps the platform's own title bar. macOS can drop the opaque strip
-and keep the traffic lights (`transparentTitlebar`), but they then float over
-the top-left of the canvas — where the editor puts its own controls — and
-`Deno.BrowserWindow` exposes no drag region to reserve space with.
-`transparentTitlebar` is creation-only, as are `frameless`, `transparent`, and
-`noActivate`.
+The window keeps the platform's own opaque title bar so traffic lights and
+window controls never overlap the editor's top-left canvas controls.
 
 ## Configuration
 
