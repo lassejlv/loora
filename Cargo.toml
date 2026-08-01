@@ -1,0 +1,15 @@
+[workspace]
+resolver = "2"
+members = ["crates/ws-server"]
+exclude = ["apps/desktop/src-tauri", "apps/mcp-rs"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "AGPL-3.0-or-later"
+publish = false
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = "debuginfo"

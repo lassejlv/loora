@@ -11,6 +11,7 @@
     "dev": "bun run --cwd apps/web dev",
     "dev:desktop": "bun run --cwd apps/desktop dev",
     "dev:ws": "bun run --cwd apps/ws dev",
+    "dev:ws:rust": "cargo run -p loora-ws-server",
     "dev:mcp": "bun run --cwd apps/mcp dev",
     "build": "bun run --cwd apps/web build",
     "build:desktop": "bun run --cwd apps/desktop build",

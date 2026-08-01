@@ -2,14 +2,12 @@
   "$schema": "https://railway.app/railway.schema.json",
   "build": {
     "builder": "DOCKERFILE",
-    "dockerfilePath": "apps/ws/Dockerfile",
+    "dockerfilePath": "crates/ws-server/Dockerfile",
     "watchPatterns": [
-      "apps/ws/**",
-      "packages/realtime/**",
-      "package.json",
-      "bun.lock",
-      "bunfig.toml",
-      "apps/ws/Dockerfile"
+      "crates/ws-server/**",
+      "Cargo.toml",
+      "Cargo.lock",
+      "apps/ws/railway.json"
     ]
   },
   "deploy": {

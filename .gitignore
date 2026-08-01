@@ -18,3 +18,4 @@ outputs
 .codex
 promo
 apps/desktop/src-tauri/target
+/target
