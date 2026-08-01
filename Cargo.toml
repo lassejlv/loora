@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/ws-server"]
+members = ["crates/ws-server", "crates/mcp-server"]
 exclude = ["apps/desktop/src-tauri", "apps/mcp-rs"]
 
 [workspace.package]

@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, test } from 'bun:test'
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js'
+import rustToolManifest from '../../../crates/mcp-server/src/tools.json'
 import {
   createCanvasDocument,
   createPageNode,
@@ -10,6 +11,7 @@ import {
 import {
   appUrl,
   createLooraServer,
+  createLooraToolExecutor,
   exportCanvasCode,
 } from './server'
 import type { McpUsageController } from './server'
@@ -55,6 +57,19 @@ function usageController(): McpUsageController {
 }
 
 describe('MCP agent workflow', () => {
+  test('executes the same registered handlers through the internal API boundary', async () => {
+    const execute = createLooraToolExecutor('user-test', usageController(), 'free')
+    const result = await execute('getUsage', {}) as {
+      content: Array<{ type: string; text: string }>
+    }
+    expect(result.content[0]?.type).toBe('text')
+    expect(JSON.parse(result.content[0]?.text ?? '{}')).toMatchObject({
+      metric: 'mcp_tool_calls',
+      used: 12,
+      remaining: 188,
+    })
+  })
+
   test('returns canonical Main and branch editor URLs', () => {
     process.env.LOORA_APP_URL = 'https://loora.test/'
 
@@ -193,6 +208,7 @@ describe('MCP agent workflow', () => {
     await client.connect(clientTransport)
     try {
       const { tools } = await client.listTools()
+      expect(tools as unknown).toEqual(rustToolManifest)
       expect(tools.length).toBeGreaterThanOrEqual(30)
       // The raw zod conversion inlined every shared shape into every tool
       // (~156KB total, patchNodes alone 43KB). The custom tools/list handler

@@ -2,6 +2,8 @@
   "name": "loora",
   "license": "AGPL-3.0-or-later",
   "devDependencies": {
+    "chromium-bidi": "14.0.0",
+    "playwright-core": "^1.61.1",
     "typescript": "catalog:",
     "vite": "^8.1.5"
   },
@@ -12,7 +14,8 @@
     "dev:desktop": "bun run --cwd apps/desktop dev",
     "dev:ws": "bun run --cwd apps/ws dev",
     "dev:ws:rust": "cargo run -p loora-ws-server",
-    "dev:mcp": "bun run --cwd apps/mcp dev",
+    "dev:mcp": "cargo run -p loora-mcp-server",
+    "dev:mcp:stdio": "cargo run -p loora-mcp-server -- --stdio",
     "build": "bun run --cwd apps/web build",
     "build:desktop": "bun run --cwd apps/desktop build",
     "check:desktop": "bun run --cwd apps/desktop check",

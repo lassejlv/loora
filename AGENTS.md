@@ -20,7 +20,7 @@ access) · oRPC · Railway (Dockerfile).
 ```
 apps/web          TanStack Start app (UI, API route handlers, canvas editor shell)
 apps/desktop      Tauri host + Vite interface for the desktop app
-apps/mcp          Remote MCP server (Streamable HTTP, OAuth resource server)
+crates/mcp-server Remote MCP transport (Streamable HTTP, OAuth resource server)
 apps/ws           Realtime WebSocket service (rooms, presence, MCP agent events)
 packages/ui       Shared design-system primitives, tokens, icon barrel, `cn` (`@loora/ui`)
 packages/shell    Signed-in product surfaces shared by web and desktop (`@loora/shell`)
@@ -167,9 +167,9 @@ Most product mutations go through oRPC. External agents use MCP or handoff — t
 The browser client is `@loora/rpc/client` (`orpc`). It imports `appRouter` as a
 type only, so no server implementation follows it into the bundle.
 
-### `apps/mcp`
+### `crates/mcp-server`
 
-Remote MCP at `mcp.loora.design` (local default port `4100`). OAuth 2.1 resource server; Better Auth on the web app is the authorization server. Shares DB + canvas transaction path via `@loora/agent/canvas-tools`. Stateless Streamable HTTP.
+Remote MCP at `mcp.loora.design` (local default port `4100`). This pure Rust service owns OAuth verification, rate limiting, and stateless Streamable HTTP/stdio transport. It sends authenticated tool calls over the private, shared-secret `POST /api/internal/mcp` web endpoint; `@loora/rpc/mcp-server` executes the same 33 canonical handlers previously hosted by `apps/mcp`, preserving CanvasEngine validation, persistence, Polar usage, realtime, exports, screenshots, and asset isolation. `apps/mcp` remains only as a TypeScript compatibility oracle during migration.
 
 ### `apps/ws`
 
@@ -245,13 +245,13 @@ Root scripts (from repo root; env loaded from `.env` where needed):
 | `bun run assets:backfill-urls` | Rewrite `/api/asset/…` references to the public bucket URL (dry run without `--apply`) |
 | `bun run polar:provision` | Provision Polar products |
 
-MCP local: `bun run --cwd apps/mcp dev` (or `start` / `stdio`).
+MCP local: `bun run dev:mcp` (or `bun run dev:mcp:stdio`). The web app must be running and both processes must share `MCP_INTERNAL_TOKEN`.
 
 **Always** use `bun run test`, not plain `bun test` — the root script preloads `apps/web/src/test/setup.ts` for DOM globals.
 
 Copy `.env.example` → `.env` before dev. Required pieces typically include `DATABASE_URL`, `BETTER_AUTH_SECRET`, `BETTER_AUTH_URL`; optional billing/OAuth/storage keys as needed.
 
-Deploy: Railway via root `Dockerfile` / `railway.json`, with `apps/mcp` and
+Deploy: Railway via root `Dockerfile` / `railway.json`, with `crates/mcp-server` and
 `apps/ws` carrying their own `Dockerfile` + `railway.json` for the MCP and
 realtime services.
 
@@ -282,7 +282,7 @@ Keep MCP tools and handoff consumers aligned on the shared `@loora/agent` vocabu
 
 `createPage` · `insertNodes` · `patchNodes` · `moveNodes` · `deleteNodes` · `readNode` · `readTree` · `searchNodes` · `createComponent` · `createInstance` · `setTokens` · `setAnimations` · `animateNodes` · `viewNode` · `viewPage` · `viewCanvas`
 
-Implementation: `packages/agent/src/canvas-tools.ts` (and MCP server wiring in `apps/mcp/src/`).
+Implementation: `packages/agent/src/canvas-tools.ts`, canonical MCP execution in `packages/rpc/src/mcp-server.ts`, and Rust transport in `crates/mcp-server/src/`.
 
 ### Realtime
 
@@ -463,7 +463,7 @@ History uses Conventional Commits with scopes when useful:
 | Client sync / runtime | `packages/editor/src/lib/canvas-*.ts` |
 | API procedures | One module per namespace in `packages/rpc/src/` (`canvas-procedures.ts`, `branches.ts`, `versions.ts`, `admin.ts`, …); `router.ts` only assembles them, and shared gates live in `procedures.ts` |
 | Shared MCP canvas tools / layout repair | `packages/agent/src/` |
-| MCP tools / transport | `apps/mcp/src/` |
+| MCP tools / transport | `packages/rpc/src/mcp-server.ts` / `crates/mcp-server/src/` |
 | Realtime transport, rooms, presence | `apps/ws/src/` (protocol in `packages/realtime/src/`) |
 | Schema / migrations | `packages/db/src/schema.ts` → `db:generate` |
 | Auth / OAuth integrations | `packages/auth/src/` |

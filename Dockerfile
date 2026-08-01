@@ -47,6 +47,14 @@ WORKDIR /app
 ENV NODE_ENV=production
 ENV HOST=0.0.0.0
 ENV PORT=3000
+ENV PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=/usr/bin/chromium
+
+# The internal MCP executor owns canonical screenshots after the Rust MCP
+# transport hands a tool call to the web service.
+USER root
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends chromium fonts-liberation tini \
+  && rm -rf /var/lib/apt/lists/*
 
 # The isolated linker stores real packages in node_modules/.bun and symlinks
 # into it from each workspace's node_modules, so the runtime stage must mirror
@@ -86,4 +94,5 @@ EXPOSE 3000
 
 # --smol trades GC frequency for a smaller heap; CPU sits near zero in
 # production so the tradeoff is free memory.
+ENTRYPOINT ["/usr/bin/tini", "--"]
 CMD ["sh", "-c", "bun run --cwd packages/db migrate:deploy && exec bun --smol run apps/web/.output/server/index.mjs"]

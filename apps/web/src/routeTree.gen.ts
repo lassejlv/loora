@@ -38,6 +38,7 @@ import { Route as ApiGithubInstallRouteImport } from './routes/api.github.instal
 import { Route as ApiGithubSetupRouteImport } from './routes/api.github.setup'
 import { Route as ApiGithubWebhookRouteImport } from './routes/api.github.webhook'
 import { Route as ApiHandoffTokenRouteImport } from './routes/api.handoff.$token'
+import { Route as ApiInternalMcpRouteImport } from './routes/api.internal.mcp'
 import { Route as ApiRpcSplatRouteImport } from './routes/api.rpc.$'
 import { Route as DesignIdBBranchIdRouteImport } from './routes/design.$id_.b.$branchId'
 import { Route as ApiHandoffTokenAssetIdRouteImport } from './routes/api.handoff.$token.asset.$id'
@@ -188,6 +189,11 @@ const ApiHandoffTokenRoute = ApiHandoffTokenRouteImport.update({
   path: '/api/handoff/$token',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiInternalMcpRoute = ApiInternalMcpRouteImport.update({
+  id: '/api/internal/mcp',
+  path: '/api/internal/mcp',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ApiRpcSplatRoute = ApiRpcSplatRouteImport.update({
   id: '/api/rpc/$',
   path: '/api/rpc/$',
@@ -234,6 +240,7 @@ export interface FileRoutesByFullPath {
   '/api/github/setup': typeof ApiGithubSetupRoute
   '/api/github/webhook': typeof ApiGithubWebhookRoute
   '/api/handoff/$token': typeof ApiHandoffTokenRouteWithChildren
+  '/api/internal/mcp': typeof ApiInternalMcpRoute
   '/api/rpc/$': typeof ApiRpcSplatRoute
   '/design/$id/b/$branchId': typeof DesignIdBBranchIdRoute
   '/api/handoff/$token/asset/$id': typeof ApiHandoffTokenAssetIdRoute
@@ -268,6 +275,7 @@ export interface FileRoutesByTo {
   '/api/github/setup': typeof ApiGithubSetupRoute
   '/api/github/webhook': typeof ApiGithubWebhookRoute
   '/api/handoff/$token': typeof ApiHandoffTokenRouteWithChildren
+  '/api/internal/mcp': typeof ApiInternalMcpRoute
   '/api/rpc/$': typeof ApiRpcSplatRoute
   '/design/$id/b/$branchId': typeof DesignIdBBranchIdRoute
   '/api/handoff/$token/asset/$id': typeof ApiHandoffTokenAssetIdRoute
@@ -303,6 +311,7 @@ export interface FileRoutesById {
   '/api/github/setup': typeof ApiGithubSetupRoute
   '/api/github/webhook': typeof ApiGithubWebhookRoute
   '/api/handoff/$token': typeof ApiHandoffTokenRouteWithChildren
+  '/api/internal/mcp': typeof ApiInternalMcpRoute
   '/api/rpc/$': typeof ApiRpcSplatRoute
   '/design/$id_/b/$branchId': typeof DesignIdBBranchIdRoute
   '/api/handoff/$token/asset/$id': typeof ApiHandoffTokenAssetIdRoute
@@ -339,6 +348,7 @@ export interface FileRouteTypes {
     | '/api/github/setup'
     | '/api/github/webhook'
     | '/api/handoff/$token'
+    | '/api/internal/mcp'
     | '/api/rpc/$'
     | '/design/$id/b/$branchId'
     | '/api/handoff/$token/asset/$id'
@@ -373,6 +383,7 @@ export interface FileRouteTypes {
     | '/api/github/setup'
     | '/api/github/webhook'
     | '/api/handoff/$token'
+    | '/api/internal/mcp'
     | '/api/rpc/$'
     | '/design/$id/b/$branchId'
     | '/api/handoff/$token/asset/$id'
@@ -407,6 +418,7 @@ export interface FileRouteTypes {
     | '/api/github/setup'
     | '/api/github/webhook'
     | '/api/handoff/$token'
+    | '/api/internal/mcp'
     | '/api/rpc/$'
     | '/design/$id_/b/$branchId'
     | '/api/handoff/$token/asset/$id'
@@ -442,6 +454,7 @@ export interface RootRouteChildren {
   ApiGithubSetupRoute: typeof ApiGithubSetupRoute
   ApiGithubWebhookRoute: typeof ApiGithubWebhookRoute
   ApiHandoffTokenRoute: typeof ApiHandoffTokenRouteWithChildren
+  ApiInternalMcpRoute: typeof ApiInternalMcpRoute
   ApiRpcSplatRoute: typeof ApiRpcSplatRoute
   DesignIdBBranchIdRoute: typeof DesignIdBBranchIdRoute
 }
@@ -651,6 +664,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiHandoffTokenRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/internal/mcp': {
+      id: '/api/internal/mcp'
+      path: '/api/internal/mcp'
+      fullPath: '/api/internal/mcp'
+      preLoaderRoute: typeof ApiInternalMcpRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/rpc/$': {
       id: '/api/rpc/$'
       path: '/api/rpc/$'
@@ -718,6 +738,7 @@ const rootRouteChildren: RootRouteChildren = {
   ApiGithubSetupRoute: ApiGithubSetupRoute,
   ApiGithubWebhookRoute: ApiGithubWebhookRoute,
   ApiHandoffTokenRoute: ApiHandoffTokenRouteWithChildren,
+  ApiInternalMcpRoute: ApiInternalMcpRoute,
   ApiRpcSplatRoute: ApiRpcSplatRoute,
   DesignIdBBranchIdRoute: DesignIdBBranchIdRoute,
 }

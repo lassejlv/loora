@@ -58,7 +58,6 @@
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^6.0.3",
     "jsdom": "^28.1.0",
-    "playwright-core": "^1.61.1",
     "typescript": "catalog:",
     "vite": "^8.1.5"
   }

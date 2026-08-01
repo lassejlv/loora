@@ -1,0 +1,29 @@
+[package]
+name = "loora-mcp-server"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+axum = "0.8"
+chrono = { version = "0.4", features = ["serde"] }
+dotenvy = "0.15"
+http = "1"
+jsonschema = { version = "0.40", default-features = false }
+rmcp = { version = "3.1", default-features = false, features = ["server", "transport-io", "transport-streamable-http-server"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+redis = { version = "0.32", features = ["aio", "connection-manager", "tokio-rustls-comp", "tls-rustls-webpki-roots"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+thiserror = "2"
+tokio = { version = "1", features = ["io-std", "io-util", "macros", "rt-multi-thread", "signal", "sync", "time"] }
+tokio-util = "0.7"
+tower-http = { version = "0.6", features = ["cors", "request-id", "trace"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+url = "2"
+
+[dev-dependencies]
+tower = { version = "0.5", features = ["util"] }
