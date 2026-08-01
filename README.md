@@ -17,8 +17,8 @@ npx skills add https://github.com/lassejlv/loora/tree/main/skills/loora-design-g
 ## Monorepo layout
 
 - `apps/web` — the TanStack Start app (routes, API handlers, editor shell)
-- `apps/mcp` — the remote MCP server (`mcp.loora.design`)
-- `apps/ws` — the realtime service (`ws.loora.design`)
+- `crates/mcp-server` — the Rust MCP transport (`mcp.loora.design`)
+- `crates/ws-server` — the Rust realtime service (`ws.loora.design`)
 - `apps/desktop` — the Tauri desktop app over a Vite build of the same interface
 - `packages/canvas` — document model, engine, merge, renderer, import, export
 - `packages/editor` — the editor shell, panels, and client sync

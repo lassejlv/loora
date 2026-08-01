@@ -21,7 +21,7 @@ access) · oRPC · Railway (Dockerfile).
 apps/web          TanStack Start app (UI, API route handlers, canvas editor shell)
 apps/desktop      Tauri host + Vite interface for the desktop app
 crates/mcp-server Remote MCP transport (Streamable HTTP, OAuth resource server)
-apps/ws           Realtime WebSocket service (rooms, presence, MCP agent events)
+crates/ws-server  Realtime WebSocket service (rooms, presence, MCP agent events)
 packages/ui       Shared design-system primitives, tokens, icon barrel, `cn` (`@loora/ui`)
 packages/shell    Signed-in product surfaces shared by web and desktop (`@loora/shell`)
 packages/platform Which client this is, and where its API and links point (`@loora/platform`)
@@ -169,15 +169,15 @@ type only, so no server implementation follows it into the bundle.
 
 ### `crates/mcp-server`
 
-Remote MCP at `mcp.loora.design` (local default port `4100`). This pure Rust service owns OAuth verification, rate limiting, and stateless Streamable HTTP/stdio transport. It sends authenticated tool calls over the private, shared-secret `POST /api/internal/mcp` web endpoint; `@loora/rpc/mcp-server` executes the same 33 canonical handlers previously hosted by `apps/mcp`, preserving CanvasEngine validation, persistence, Polar usage, realtime, exports, screenshots, and asset isolation. `apps/mcp` remains only as a TypeScript compatibility oracle during migration.
+Remote MCP at `mcp.loora.design` (local default port `4100`). This pure Rust service owns OAuth verification, rate limiting, and stateless Streamable HTTP/stdio transport. It sends authenticated tool calls over the private, shared-secret `POST /api/internal/mcp` web endpoint; `@loora/rpc/mcp-server` executes the 33 canonical handlers, preserving CanvasEngine validation, persistence, Polar usage, realtime, exports, screenshots, and asset isolation.
 
-### `apps/ws`
+### `crates/ws-server`
 
 Realtime service at `ws.loora.design` (local default port `4200`). One socket
 per open document; carries canvas invalidations, agent activity from MCP tool
 calls, and collaborator cursors. It never opens the database: the web app runs
 the access checks and mints a short-lived signed ticket, and this service only
-verifies it. See `apps/ws/README.md` for endpoints and configuration.
+verifies it. See `crates/ws-server/README.md` for endpoints and configuration.
 
 ### `apps/desktop`
 
@@ -252,7 +252,7 @@ MCP local: `bun run dev:mcp` (or `bun run dev:mcp:stdio`). The web app must be r
 Copy `.env.example` → `.env` before dev. Required pieces typically include `DATABASE_URL`, `BETTER_AUTH_SECRET`, `BETTER_AUTH_URL`; optional billing/OAuth/storage keys as needed.
 
 Deploy: Railway via root `Dockerfile` / `railway.json`, with `crates/mcp-server` and
-`apps/ws` carrying their own `Dockerfile` + `railway.json` for the MCP and
+`crates/ws-server` carrying their own `Dockerfile` + `railway.json` for the MCP and
 realtime services.
 
 A **new workspace package** has to be added to all three Dockerfiles. Each
@@ -291,7 +291,7 @@ One protocol, two transports, and one gate in front of both.
 - `@loora/realtime` holds the wire protocol (`canvas.changed`, `agent.activity`,
   `presence.peer`, `presence.state`), the HMAC connection tickets, and the
   ingest client. It imports nothing from db, auth, or canvas.
-- Browsers prefer a WebSocket to `apps/ws`. `/api/realtime-ticket` runs the
+- Browsers prefer a WebSocket to `crates/ws-server`. `/api/realtime-ticket` runs the
   same checks as the editor (session, legal consent, design access, preview
   access, plan) and signs a 60-second ticket; the socket service verifies it and
   stamps presence identity from those claims. Tickets are single use (`jti`
@@ -311,13 +311,13 @@ One protocol, two transports, and one gate in front of both.
   service's `/publish` when `REALTIME_INGEST_URL` is set and fall back to
   publishing on Redis, so a service missing one of the two still works.
 - Redis carries events between instances and holds room state (presence hash,
-  agent-activity key). Without it, `apps/ws` runs as a single instance with
+  agent-activity key). Without it, `crates/ws-server` runs as a single instance with
   rooms in memory — enough for local development.
 
 Env: `REALTIME_WS_URL` and `REALTIME_TICKET_SECRET` on web; `REALTIME_INGEST_URL`
 and `REALTIME_INTERNAL_TOKEN` on web and MCP; `REALTIME_TICKET_SECRET`,
 `REALTIME_INTERNAL_TOKEN`, and optional `REDIS_URL` /
-`REALTIME_ALLOWED_ORIGINS` on `apps/ws`.
+`REALTIME_ALLOWED_ORIGINS` on `crates/ws-server`.
 
 ### Rate limiting
 
@@ -464,7 +464,7 @@ History uses Conventional Commits with scopes when useful:
 | API procedures | One module per namespace in `packages/rpc/src/` (`canvas-procedures.ts`, `branches.ts`, `versions.ts`, `admin.ts`, …); `router.ts` only assembles them, and shared gates live in `procedures.ts` |
 | Shared MCP canvas tools / layout repair | `packages/agent/src/` |
 | MCP tools / transport | `packages/rpc/src/mcp-server.ts` / `crates/mcp-server/src/` |
-| Realtime transport, rooms, presence | `apps/ws/src/` (protocol in `packages/realtime/src/`) |
+| Realtime transport, rooms, presence | `crates/ws-server/src/` (protocol in `packages/realtime/src/`) |
 | Schema / migrations | `packages/db/src/schema.ts` → `db:generate` |
 | Auth / OAuth integrations | `packages/auth/src/` |
 | Plans / entitlements | `packages/billing/src/` |

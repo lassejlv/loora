@@ -3,7 +3,7 @@ import {
   agentActivityNodeIds,
   agentActivityTarget,
   trackAgentActivity,
-} from './agent-activity'
+} from './mcp-agent-activity'
 
 describe('Agent activity', () => {
   test('rings the nodes a call names, edited ones first', () => {

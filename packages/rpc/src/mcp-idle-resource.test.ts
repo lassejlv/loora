@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test'
-import { IdleResource } from './idle-resource'
+import { IdleResource } from './mcp-idle-resource'
 
 describe('IdleResource', () => {
   it('shares one launch and relaunches after an idle close', async () => {

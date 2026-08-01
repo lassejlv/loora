@@ -1,7 +1,7 @@
 # Loora MCP tool workflows
 
 Use this reference to select tools, preserve the correct target, and finish
-safely. Tool behavior is grounded in `apps/mcp/src/server.ts` and the shared
+safely. Tool behavior is grounded in `packages/rpc/src/mcp-server.ts` and the shared
 `@loora/agent/canvas-tools` schemas.
 
 ## Contents

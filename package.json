@@ -12,8 +12,7 @@
   "scripts": {
     "dev": "bun run --cwd apps/web dev",
     "dev:desktop": "bun run --cwd apps/desktop dev",
-    "dev:ws": "bun run --cwd apps/ws dev",
-    "dev:ws:rust": "cargo run -p loora-ws-server",
+    "dev:ws": "cargo run -p loora-ws-server",
     "dev:mcp": "cargo run -p loora-mcp-server",
     "dev:mcp:stdio": "cargo run -p loora-mcp-server -- --stdio",
     "build": "bun run --cwd apps/web build",

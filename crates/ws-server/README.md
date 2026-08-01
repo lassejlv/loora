@@ -1,8 +1,7 @@
 # `loora-ws-server`
 
-Rust implementation of the Loora realtime WebSocket service. It is wire-compatible
-with `apps/ws`: existing browser, web, MCP, desktop, Redis, and Railway configuration
-can point at this process without client changes.
+Rust implementation of the Loora realtime WebSocket service. The browser, web,
+MCP, desktop, Redis, and Railway configuration all use this process.
 
 ## Run
 
@@ -15,10 +14,10 @@ cargo run -p loora-ws-server
 or with the root shortcut:
 
 ```sh
-bun run dev:ws:rust
+bun run dev:ws
 ```
 
-The service exposes the same endpoints as `apps/ws`:
+The service exposes:
 
 | Method | Path | Purpose |
 |--------|------|---------|

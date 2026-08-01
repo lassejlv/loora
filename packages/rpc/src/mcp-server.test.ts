@@ -13,8 +13,8 @@ import {
   createLooraServer,
   createLooraToolExecutor,
   exportCanvasCode,
-} from './server'
-import type { McpUsageController } from './server'
+} from './mcp-server'
+import type { McpUsageController } from './mcp-server'
 
 const originalAppUrl = process.env.LOORA_APP_URL
 

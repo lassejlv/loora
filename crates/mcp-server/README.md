@@ -1,8 +1,7 @@
 # `loora-mcp-server`
 
-Pure Rust MCP transport for Loora. It replaces the public runtime in
-`apps/mcp` while preserving the same OAuth resource metadata, stateless
-Streamable HTTP endpoint, stdio mode, and 33-tool catalog.
+Pure Rust MCP transport for Loora. It preserves the OAuth resource metadata,
+stateless Streamable HTTP endpoint, stdio mode, and 33-tool catalog.
 
 Tool execution is intentionally delegated to the private
 `/api/internal/mcp` web endpoint. That endpoint uses the canonical TypeScript

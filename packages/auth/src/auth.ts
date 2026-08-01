@@ -192,7 +192,7 @@ export const auth = betterAuth({
     // and token endpoints under /api/auth/mcp/*; unauthenticated authorize
     // requests land on the app root, and the flow resumes once a session
     // exists. The resource server validates the issued tokens against the
-    // same database (apps/mcp).
+    // same database through the Rust MCP resource server.
     mcp({
       loginPage: '/',
       oidcConfig: {

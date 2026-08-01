@@ -5,8 +5,8 @@
  * session cookie and cannot set an Authorization header on a WebSocket. The web
  * app — which already owns session, plan, and design-access checks — mints a
  * short-lived signed ticket instead, and the socket service only verifies the
- * signature. That keeps every access decision in one place and keeps `apps/ws`
- * free of the database.
+ * signature. That keeps every access decision in one place and keeps the
+ * realtime service free of the database.
  *
  * Identity travels inside the ticket. A client can therefore never publish
  * itself as somebody else, or promote itself from viewer to editor: the socket

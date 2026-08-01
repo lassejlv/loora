@@ -2,7 +2,7 @@ import { describe, expect, it } from 'bun:test'
 import {
   BoundedConcurrencyGate,
   ConcurrencyLimitError,
-} from './concurrency'
+} from './mcp-concurrency'
 
 describe('BoundedConcurrencyGate', () => {
   it('runs only the configured number of tasks at once', async () => {

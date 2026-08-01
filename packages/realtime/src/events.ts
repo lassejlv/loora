@@ -5,7 +5,7 @@
  * them out, the web app that renders them, the MCP server that emits them, and
  * the Redis bus that carries them between service instances. Keeping the
  * definitions here — free of database, auth, and canvas imports — is what lets
- * `apps/ws` stay a small process that never opens a database connection.
+ * the Rust socket service stay a small process that never opens a database connection.
  */
 
 export interface CanvasRealtimeTarget {

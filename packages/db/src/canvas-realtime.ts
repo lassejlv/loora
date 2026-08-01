@@ -26,7 +26,7 @@ import {
  * that talks to infrastructure. Publishes prefer the WebSocket service's ingest
  * endpoint when one is configured — that service owns the room state and the
  * Redis bus — and fall back to publishing on Redis directly so a deployment
- * without `apps/ws` keeps working.
+ * without the socket service keeps working.
  */
 
 export {
