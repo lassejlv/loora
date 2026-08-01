@@ -253,8 +253,18 @@ timeout to a request. Every limit lives in the `rateLimits` table in that
 module; add a new one there rather than inlining numbers at a call site.
 
 Count a signed-in caller as `user:<id>` and everyone else by address
-(`callerIdentity`, which reads `x-forwarded-for` left-to-right). Check before
-the expensive work — session lookups, design access, bucket reads — not after.
+(`callerIdentity`). **Never key a limit on the left-most `x-forwarded-for`
+entry.** Proxies append to that header rather than replace it, so the front of
+the chain is whatever the caller sent, and a caller who varies it gets a fresh
+bucket per request. Cloudflare fronts `loora.design` and `mcp.loora.design` and
+overwrites `cf-connecting-ip`, so `clientAddress` counts that, accepts a
+single-entry `x-forwarded-for` as a fallback, and calls everything else
+`unknown`. Better Auth resolves the caller through the same header
+(`advanced.ipAddress.ipAddressHeaders` in `packages/auth/src/auth.ts`) — keep
+the two in step.
+
+Check before the expensive work — session lookups, design access, bucket
+reads — not after.
 Limits are sized from what the editor actually sends at its busiest; a limit
 that trips during ordinary work is worse than none.
 
