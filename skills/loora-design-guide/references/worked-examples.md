@@ -3,7 +3,8 @@
 These examples illustrate structure and sequencing. Replace all design, branch,
 Page, node, component, breakpoint, token, and asset IDs with values returned by
 the current MCP session. Tool schemas shown by the connected server are
-authoritative.
+authoritative. Read `mcp-schema.md` first; these examples demonstrate complete
+tool envelopes, not every accepted field.
 
 ## Contents
 
@@ -13,6 +14,7 @@ authoritative.
 - [Add interaction state](#add-interaction-state)
 - [Add restrained motion](#add-restrained-motion)
 - [Refine through screenshots](#refine-through-screenshots)
+- [Add a dark theme on a branch](#add-a-dark-theme-on-a-branch)
 - [Complete a branch review](#complete-a-branch-review)
 
 ## Create a responsive Page foundation
@@ -695,6 +697,177 @@ Render narrow:
 
 Check both the PNG and `skippedImages`. Finish by calling `viewPage` to return
 the canonical editor URL.
+
+Without image vision, still run both screenshots to exercise the renderer and
+record their computed width, height, revision, target, and skipped images. Then
+verify the Page hierarchy and effective layout fields with `readTree`, inspect
+changed nodes with `readNode`, and report the result as structural/render-only.
+Do not claim that contrast, clipping, hierarchy, or aesthetic quality was
+visually checked.
+
+## Add a dark theme on a branch
+
+Create an isolated branch before changing a shared visual system:
+
+`createBranch`
+
+```json
+{
+  "designId": "DESIGN_ID",
+  "name": "Dark theme"
+}
+```
+
+Save the returned `id` as `BRANCH_ID`. Use it as `draftId` on every later read
+and write. Call `getDesignContext` on that branch and copy the complete existing
+token definitions before adding modes; `setTokens` replaces each token object
+that it upserts.
+
+Suppose the existing base values below came from that context. Add the theme and
+preserve each base value and any pre-existing modes while adding `dark`:
+
+`setTokens`
+
+```json
+{
+  "designId": "DESIGN_ID",
+  "draftId": "BRANCH_ID",
+  "themes": [
+    { "id": "dark", "name": "Dark" }
+  ],
+  "tokens": [
+    {
+      "id": "canvas",
+      "name": "Canvas",
+      "type": "color",
+      "value": "#f4f3ef",
+      "modes": {
+        "dark": "#151614"
+      }
+    },
+    {
+      "id": "surface",
+      "name": "Surface",
+      "type": "color",
+      "value": "#ffffff",
+      "modes": {
+        "dark": "#20221f"
+      }
+    },
+    {
+      "id": "text",
+      "name": "Text",
+      "type": "color",
+      "value": "#1b1d1a",
+      "modes": {
+        "dark": "#f1f2ed"
+      }
+    }
+  ]
+}
+```
+
+If the context has no existing `light` theme, include
+`{ "id": "light", "name": "Light" }` in the same `themes` array. Tokens
+without an explicit light mode fall back to their base `value`.
+
+Read the exact Page root and theme-control node. A real Light/Dark toggle needs
+Page state: the control toggles a boolean, and Page `state-change` rules select
+the corresponding named theme. The example below assumes `light` is an existing
+theme ID and that both reads returned empty `states`/`interactions`. If they did
+not, preserve every existing record/array entry and append these because
+`states` and `interactions` are complete assignments:
+
+`patchNodes`
+
+```json
+{
+  "designId": "DESIGN_ID",
+  "draftId": "BRANCH_ID",
+  "changes": [
+    {
+      "ref": {
+        "nodeId": "PAGE_ID",
+        "instancePath": []
+      },
+      "patch": {
+        "states": {
+          "darkMode": {
+            "id": "darkMode",
+            "name": "Dark mode",
+            "type": "boolean",
+            "initial": false
+          }
+        },
+        "interactions": [
+          {
+            "trigger": "state-change",
+            "stateId": "darkMode",
+            "when": [
+              {
+                "stateId": "darkMode",
+                "operator": "equals",
+                "value": true
+              }
+            ],
+            "actions": [
+              {
+                "type": "set-theme",
+                "themeId": "dark"
+              }
+            ]
+          },
+          {
+            "trigger": "state-change",
+            "stateId": "darkMode",
+            "when": [
+              {
+                "stateId": "darkMode",
+                "operator": "equals",
+                "value": false
+              }
+            ],
+            "actions": [
+              {
+                "type": "set-theme",
+                "themeId": "light"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "ref": {
+        "nodeId": "THEME_TOGGLE_ID",
+        "instancePath": []
+      },
+      "patch": {
+        "interactions": [
+          {
+            "trigger": "click",
+            "actions": [
+              {
+                "type": "toggle-state",
+                "stateId": "darkMode"
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}
+```
+
+Call `getDesignContext` again with `draftId` and verify the `dark` theme plus all
+token modes. Call `readNode` on the Page and toggle; verify the state record,
+both conditional theme actions, and the toggle action. Render the default
+composition, but do not claim the dark pixels were checked: `getScreenshot`
+cannot select a temporary runtime theme. Dark-mode visual verification requires
+actually exercising the interaction in Loora with a human or vision-capable
+client. Finally call `compareBranch` and present the branch URL; do not propose
+or apply unless authorized.
 
 ## Complete a branch review
 

@@ -18,6 +18,7 @@ import {
   parseCanvasDocument,
 } from '@loora/canvas/model'
 import {
+  changedNodeIds,
   diffDocuments,
   mergeDocuments,
   type CanvasMergeConflict,
@@ -27,6 +28,10 @@ import {
   mergeCanvas,
   type MergeChoice,
 } from '@loora/db/drafts'
+import {
+  publishBranchChanged,
+  publishCanvasRealtimeEvent,
+} from '@loora/db/canvas-realtime'
 import {
   documentDiff,
   draftIdSchema,
@@ -261,6 +266,7 @@ export const createDraft = protectedProcedure
       })
       .returning()
 
+    void publishBranchChanged(context.user.id, input.designId, created.id, 'active')
     return {
       ...created,
       proposedAt: null,
@@ -347,6 +353,7 @@ export const renameDraft = protectedProcedure
       )
       .returning({ id: designDraft.id, name: designDraft.name })
     if (!updated) throw new ORPCError('CONFLICT', { message: 'Only active drafts can be renamed.' })
+    void publishBranchChanged(context.user.id, input.designId, updated.id, 'active')
     return updated
   })
 
@@ -378,6 +385,7 @@ export const proposeDraft = protectedProcedure
       )
       .returning({ id: designDraft.id, status: designDraft.status, proposedAt: designDraft.proposedAt })
     if (!updated) throw new ORPCError('CONFLICT', { message: 'Only active drafts can be proposed.' })
+    void publishBranchChanged(context.user.id, input.designId, updated.id, 'proposed')
     return { ...updated, proposedAt: updated.proposedAt?.getTime() ?? null }
   })
 
@@ -413,6 +421,7 @@ export const reopenDraft = protectedProcedure
         message: 'Only proposed or discarded drafts can be reopened.',
       })
     }
+    void publishBranchChanged(context.user.id, input.designId, updated.id, 'active')
     return updated
   })
 
@@ -433,6 +442,7 @@ export const closeDraft = protectedProcedure
       )
       .returning({ id: designDraft.id, status: designDraft.status, closedAt: designDraft.closedAt })
     if (!updated) throw new ORPCError('CONFLICT', { message: 'This draft is already archived.' })
+    void publishBranchChanged(context.user.id, input.designId, updated.id, 'closed')
     return { ...updated, closedAt: updated.closedAt?.getTime() ?? null }
   })
 
@@ -588,9 +598,19 @@ export const applyDraft = protectedProcedure
     })
 
     scheduleHistoryPrune(context.user)
+    const newRevision = input.expectedMainRevision + 1
+    const mergedNodeIds = documentMerge
+      ? changedNodeIds(comparison.mainDocument!, documentMerge.document)
+      : []
+    void publishBranchChanged(context.user.id, input.designId, input.id, 'applied')
+    void publishCanvasRealtimeEvent(context.user.id, { designId: input.designId }, {
+      type: 'canvas.changed',
+      revision: newRevision,
+      nodeIds: mergedNodeIds,
+    })
     return {
       applied: true as const,
-      revision: input.expectedMainRevision + 1,
+      revision: newRevision,
       versionId: appliedId,
       canvasVersion: documentMerge ? CANVAS_SCHEMA_VERSION : comparison.canvasVersion,
       document: documentMerge?.document ?? null,

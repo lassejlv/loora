@@ -7,6 +7,7 @@ safely. Tool behavior is grounded in `apps/mcp/src/server.ts` and the shared
 ## Contents
 
 - [Target model](#target-model)
+- [Capability gate](#capability-gate)
 - [Tool map](#tool-map)
 - [Create a new design](#create-a-new-design)
 - [Edit an existing design](#edit-an-existing-design)
@@ -44,6 +45,25 @@ read-only. Main stays writable unless product access prevents it.
 
 Use a deeper `readTree` only for the area being edited. Use `readNode` when the
 complete source/effective node is required.
+
+## Capability gate
+
+Inspect the callable tool surface before any write. A healthy general authoring
+session needs `createPage`, `insertNodes`, and `patchNodes`; component, theme,
+motion, and branch requests need their corresponding tools as well. A tool may
+exist in Loora's source but still be absent from a stale or mismatched MCP
+manifest/session.
+
+If a required authoring tool is absent:
+
+1. Do not call `createDesign`; that produces only an empty record.
+2. Do not substitute exported code, browser clicks, or an unrelated tool.
+3. Report the exact missing tool names and that no Canvas mutation was made.
+4. Retry only after the MCP manifest/session is refreshed or the user supplies
+   another valid authoring surface.
+
+If the tool is callable but its nested schema displays as `unknown`, follow
+`mcp-schema.md`. That is a client schema-display problem, not a missing tool.
 
 ## Tool map
 
@@ -101,16 +121,18 @@ complete source/effective node is required.
 
 ## Create a new design
 
-1. Call `createDesign` with a concise product-oriented name.
-2. Call `setTokens` if the design will reuse a visual system.
-3. Create truly repeated building blocks with `createComponent`.
-4. Call `createPage` with the Page shell and initial hierarchy. A new design is
+1. Pass the capability gate for the planned authoring work.
+2. Call `createDesign` with a concise product-oriented name.
+3. Call `setTokens` if the design will reuse a visual system.
+4. Create truly repeated building blocks with `createComponent`.
+5. Call `createPage` with the Page shell and initial hierarchy. A new design is
    empty; `createPage` is required before inserting ordinary nodes.
-5. Continue with section-sized `insertNodes` calls.
-6. Apply motion only after the static layout is sound.
-7. Call `getScreenshot` for the Page and inspect it.
-8. Patch the largest visual issues, then render again.
-9. Return the canonical URL from `viewPage`, `viewCanvas`, or mutation context.
+6. Continue with section-sized `insertNodes` calls.
+7. Apply motion only after the static layout is sound.
+8. Call `getScreenshot` for the Page and inspect it using the appropriate
+   vision or non-vision path below.
+9. Patch the largest verified issues, then render again.
+10. Return the canonical URL from `viewPage`, `viewCanvas`, or mutation context.
 
 Prefer a single Page creation payload containing header, main content, and
 section skeletons over dozens of one-node insertions. Split elaborate content
@@ -206,6 +228,36 @@ Render after:
 
 Inspect the returned metadata as well as the PNG. Record `skippedImages`; a
 composition can render while an image was omitted.
+
+### With image vision
+
+Inspect the actual PNG using the rubric in `design-craft.md`. Check composition,
+hierarchy, alignment, wrapping, contrast, clipping, responsive behavior, image
+crops, and control affordances. Fix the largest visible issue and render again.
+
+### Without image vision
+
+Do not pretend to inspect pixels. Use a structural/render verification pass:
+
+1. Call `getScreenshot` at the intended desktop and narrow widths to exercise
+   the real renderer. Confirm it returns without error; record rendered
+   `width`, `height`, `revision`, target IDs, and `skippedImages`.
+2. Call `readTree` on the Page at sufficient depth. Confirm semantic reading
+   order, node presence, exact NodeRefs, container `mode`, `position`, and
+   effective `width`/`height` metadata.
+3. Call `readNode` for changed containers, text, instances, and controls.
+   Confirm source/effective layout, style, token references, responsive
+   records, interactions, variants, and instance overrides.
+4. Confirm breakpoint IDs and patches structurally through `getDesignContext`
+   and `readNode`. A narrow screenshot succeeding proves renderability, not
+   that the narrow composition looks good.
+5. Report verification as **structural/render-only**. Explicitly leave pixel
+   hierarchy, contrast, clipping, and aesthetic quality unverified, and return
+   the canonical Loora URL for human or vision-capable review.
+
+Screenshot bounds are computed render metadata, but they do not reveal every
+descendant's geometry. `readTree` reports effective layout intent, not a full
+browser box model. Keep that limitation explicit.
 
 ## Efficiency and limits
 

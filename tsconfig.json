@@ -1,9 +1,6 @@
 {
   "include": ["apps/**/*.ts", "apps/**/*.tsx", "packages/**/*.ts", "packages/**/*.tsx"],
-  // The desktop host runs under Deno, against Deno's own libs, and is checked
-  // by `deno check` in that app's own task. Type-checking it here would only
-  // report that `Deno` is not a name this project knows.
-  "exclude": ["apps/desktop/main.ts", "apps/desktop/host", "apps/desktop/dist"],
+  "exclude": ["apps/desktop/dist"],
   "compilerOptions": {
     "target": "ES2022",
     "jsx": "react-jsx",

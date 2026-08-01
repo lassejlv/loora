@@ -165,6 +165,12 @@ type CanvasRealtimeMessage =
       peers: CanvasPeer[]
       sentAt: number
     }
+  | {
+      type: 'branch.changed'
+      draftId: string | null
+      status: string | null
+      sentAt: number
+    }
 
 function isPeer(value: unknown): value is CanvasPeer {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false
@@ -249,6 +255,13 @@ export function parseCanvasRealtimeMessage(
     return parsed as CanvasRealtimeMessage
   }
   if (event.type === 'pong') return parsed as CanvasRealtimeMessage
+  if (
+    event.type === 'branch.changed' &&
+    (event.draftId === null || typeof event.draftId === 'string') &&
+    (event.status === null || typeof event.status === 'string')
+  ) {
+    return parsed as CanvasRealtimeMessage
+  }
   if (event.type !== 'agent.activity') return null
   if (event.activity === null) return parsed as CanvasRealtimeMessage
   return isAgentActivity(event.activity)
@@ -340,6 +353,7 @@ export class CanvasSyncController {
   #remoteChangeSequence = 0
   #listeners = new Set<Listener>()
   #presenceListeners = new Set<Listener>()
+  #branchListeners = new Set<Listener>()
   #timer: ReturnType<typeof setTimeout> | null = null
   #refreshTimer: ReturnType<typeof setTimeout> | null = null
   #activityTimer: ReturnType<typeof setTimeout> | null = null
@@ -638,6 +652,18 @@ export class CanvasSyncController {
     this.#presenceListeners.add(listener)
     return () => {
       this.#presenceListeners.delete(listener)
+    }
+  }
+
+  /**
+   * Branch lifecycle changes arrive over realtime too, so the branch list
+   * refreshes when an MCP agent or another tab creates, proposes, closes, or
+   * applies a branch. Has its own listeners for the same reason presence does.
+   */
+  subscribeBranches = (listener: Listener) => {
+    this.#branchListeners.add(listener)
+    return () => {
+      this.#branchListeners.delete(listener)
     }
   }
 
@@ -1065,6 +1091,10 @@ export class CanvasSyncController {
       this.#setAgentActivity(event.activity)
       return
     }
+    if (event.type === 'branch.changed') {
+      this.#emitBranches()
+      return
+    }
     if (event.type === 'presence.state') {
       this.#setPeers(event.peers)
       return
@@ -1217,5 +1247,9 @@ export class CanvasSyncController {
 
   #emitPresence() {
     for (const listener of this.#presenceListeners) listener()
+  }
+
+  #emitBranches() {
+    for (const listener of this.#branchListeners) listener()
   }
 }

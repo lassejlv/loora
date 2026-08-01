@@ -46,7 +46,38 @@ const lengthSchema = z.union([
   z.object({ unit: z.literal('percent'), value: z.number().finite() }),
   z.object({ unit: z.literal('fill') }),
   z.object({ unit: z.literal('hug') }),
-])
+]).describe(
+  'Dimension object: {"unit":"px","value":number}, {"unit":"percent","value":number}, {"unit":"fill"} (take remaining space in a flex container), or {"unit":"hug"} (fit content). Always an object, never a bare number.',
+)
+
+/**
+ * Some MCP clients serialize structured arguments as JSON text rather than
+ * nested objects/arrays. Accept both forms: a string that holds a JSON object
+ * or array is decoded and validated exactly like its native form; anything
+ * else falls through to the schema's own error.
+ */
+function jsonText<T extends z.ZodType>(schema: T): T {
+  return z.union([
+    schema,
+    z
+      .string()
+      .refine(
+        (text) => {
+          const trimmed = text.trim()
+          if (!trimmed.startsWith('{') && !trimmed.startsWith('[')) return false
+          try {
+            JSON.parse(trimmed)
+            return true
+          } catch {
+            return false
+          }
+        },
+        { message: 'Expected a JSON object or array' },
+      )
+      .transform((text): unknown => JSON.parse(text))
+      .pipe(schema as unknown as z.ZodType<unknown>),
+  ]) as unknown as T
+}
 
 const safeCssColor = /^(?:#[0-9a-f]{3,8}|[a-z]+|(?:rgb|rgba|hsl|hsla|oklab|oklch|lab|lch)\([0-9a-z.%+,\s/-]+\))$/i
 
@@ -72,12 +103,14 @@ const typographySchema = z.object({
   size: z.number().positive().max(1_000),
   weight: z.number().min(1).max(1_000),
   lineHeight: z.number().positive().max(20),
-  letterSpacing: z.number().finite().min(-100).max(1_000),
-  align: z.enum(['left', 'center', 'right', 'justify']),
+  letterSpacing: z.number().finite().min(-100).max(1_000).default(0),
+  align: z.enum(['left', 'center', 'right', 'justify']).default('left'),
   wrap: z.boolean().optional(),
   decoration: z.enum(['none', 'underline', 'line-through']).optional(),
   transform: z.enum(['none', 'uppercase', 'lowercase', 'capitalize']).optional(),
-})
+}).describe(
+  'Complete typography for a text node. Required when set: family, size (px), weight (100-900), lineHeight (multiplier). letterSpacing (px, default 0) and align (default left) are optional.',
+)
 
 export const canvasLayoutPatchSchema = z.object({
   position: z.enum(['flow', 'absolute']).optional(),
@@ -509,10 +542,10 @@ export const canvasNodePatchSchema = z.object({
   metadata: z.record(z.string(), z.unknown()).optional(),
 })
 
-export const nodeRefSchema = z.object({
+export const nodeRefSchema = jsonText(z.object({
   nodeId: z.string().min(1).max(128),
   instancePath: z.array(z.string().min(1).max(128)).max(32).default([]),
-})
+}))
 
 export interface CanvasNodeDescriptor {
   ref?: string
@@ -638,58 +671,61 @@ export const createPageInputSchema = z.object({
   y: z.number().finite().default(0),
   width: z.number().finite().positive().max(100_000).default(1440),
   minHeight: z.number().finite().positive().max(100_000).default(900),
-  layout: canvasLayoutPatchSchema.optional(),
-  style: canvasStylePatchSchema.optional(),
-  states: stateDefinitionsSchema.default({}),
-  children: z.array(canvasNodeDescriptorSchema).max(5_000).default([]),
+  layout: jsonText(canvasLayoutPatchSchema).optional(),
+  style: jsonText(canvasStylePatchSchema).optional(),
+  states: jsonText(stateDefinitionsSchema).default({}),
+  children: jsonText(z.array(canvasNodeDescriptorSchema).max(5_000)).default([]),
 })
 
 export const insertNodesInputSchema = z.object({
   parent: nodeRefSchema,
-  nodes: z.array(canvasNodeDescriptorSchema).min(1).max(5_000),
+  nodes: jsonText(z.array(canvasNodeDescriptorSchema).min(1).max(5_000)),
 })
 
 export const patchNodesInputSchema = z.object({
-  changes: z
-    .array(z.object({ ref: nodeRefSchema, patch: canvasNodePatchSchema }))
-    .min(1)
-    .max(1_000),
+  changes: jsonText(
+    z.array(z.object({ ref: nodeRefSchema, patch: canvasNodePatchSchema }))
+      .min(1)
+      .max(1_000),
+  ),
 })
 
 export const moveNodesInputSchema = z.object({
-  changes: z
-    .array(
+  changes: jsonText(
+    z.array(
       z.object({
         nodeId: z.string().min(1).max(128),
         parentId: z.string().min(1).max(128).nullable(),
         order: z.number().finite().optional(),
       }),
     )
-    .min(1)
-    .max(1_000),
+      .min(1)
+      .max(1_000),
+  ),
 })
 
 export const deleteNodesInputSchema = z.object({
-  nodeIds: z.array(z.string().min(1).max(128)).min(1).max(1_000),
+  nodeIds: jsonText(z.array(z.string().min(1).max(128)).min(1).max(1_000)),
 })
 
 export const createComponentInputSchema = z.object({
   name: z.string().trim().min(1).max(200),
   width: z.number().finite().positive().max(100_000).default(320),
   height: z.number().finite().positive().max(100_000).default(200),
-  variants: z
-    .array(z.string().trim().min(1).max(128))
-    .min(1)
-    .max(100)
-    .refine(
-      (variants) => new Set(variants).size === variants.length,
-      'Variant names must be unique',
-    )
-    .default(['default']),
-  layout: canvasLayoutPatchSchema.optional(),
-  style: canvasStylePatchSchema.optional(),
-  states: stateDefinitionsSchema.default({}),
-  children: z.array(canvasNodeDescriptorSchema).max(5_000).default([]),
+  variants: jsonText(
+    z
+      .array(z.string().trim().min(1).max(128))
+      .min(1)
+      .max(100)
+      .refine(
+        (variants) => new Set(variants).size === variants.length,
+        'Variant names must be unique',
+      ),
+  ).default(['default']),
+  layout: jsonText(canvasLayoutPatchSchema).optional(),
+  style: jsonText(canvasStylePatchSchema).optional(),
+  states: jsonText(stateDefinitionsSchema).default({}),
+  children: jsonText(z.array(canvasNodeDescriptorSchema).max(5_000)).default([]),
 })
 
 export const createInstanceInputSchema = z.object({
@@ -697,8 +733,8 @@ export const createInstanceInputSchema = z.object({
   componentId: z.string().min(1).max(128),
   name: z.string().trim().min(1).max(200).optional(),
   variant: z.string().max(128).optional(),
-  layout: canvasLayoutPatchSchema.optional(),
-  style: canvasStylePatchSchema.optional(),
+  layout: jsonText(canvasLayoutPatchSchema).optional(),
+  style: jsonText(canvasStylePatchSchema).optional(),
 })
 
 const tokenFields = {
@@ -739,25 +775,40 @@ const tokenSchema = z.discriminatedUnion('type', [
   }),
 ])
 
-export const setTokensInputSchema = z.object({
-  themes: z
-    .array(
-      z.object({
-        id: z.string().regex(/^[a-zA-Z0-9_-]{1,128}$/),
-        name: z.string().trim().min(1).max(200),
-      }),
-    )
-    .max(100)
-    .default([]),
-  tokens: z.array(tokenSchema).min(1).max(1_000),
-})
+export const setTokensInputSchema = z
+  .object({
+    themes: jsonText(
+      z.array(
+        z.object({
+          id: z.string().regex(/^[a-zA-Z0-9_-]{1,128}$/),
+          name: z.string().trim().min(1).max(200),
+        }),
+      ).max(100),
+    ).default([]),
+    tokens: jsonText(z.array(tokenSchema).max(1_000)).default([]),
+    // The persisted default theme the design renders with — on Main or on a
+    // branch — so a themed variant (e.g. dark mode) does not need a runtime
+    // event to look right on load. Merges field-level across branches.
+    activeThemeId: z
+      .string()
+      .regex(/^[a-zA-Z0-9_-]{1,128}$/)
+      .optional()
+      .describe('Persisted default theme id the design renders with, e.g. "dark". The theme must exist (define it in themes first, the same call is fine). Read current themes and activeThemeId from getDesignContext.'),
+  })
+  .refine(
+    (input) =>
+      input.themes.length > 0 ||
+      input.tokens.length > 0 ||
+      input.activeThemeId !== undefined,
+    { message: 'Nothing to do: pass themes, tokens, or activeThemeId' },
+  )
 
 
 export const setAnimationsInputSchema = z
   .object({
-    presets: z.array(z.enum(MOTION_PRESET_NAMES as [string, ...string[]])).max(20).default([]),
-    animations: z.array(animationSchema).max(50).default([]),
-    remove: z.array(z.string().min(1).max(128)).max(50).default([]),
+    presets: jsonText(z.array(z.enum(MOTION_PRESET_NAMES as [string, ...string[]])).max(20)).default([]),
+    animations: jsonText(z.array(animationSchema).max(50)).default([]),
+    remove: jsonText(z.array(z.string().min(1).max(128)).max(50)).default([]),
   })
   .refine(
     (input) =>
@@ -767,17 +818,17 @@ export const setAnimationsInputSchema = z
 
 export const animateNodesInputSchema = z
   .object({
-    refs: z.array(nodeRefSchema).min(1).max(200),
-    play: z.array(nodeAnimationSchema).max(8).optional(),
-    hover: z
-      .union([
+    refs: jsonText(z.array(nodeRefSchema).min(1).max(200)),
+    play: jsonText(z.array(nodeAnimationSchema).max(8)).optional(),
+    hover: jsonText(
+      z.union([
         z.enum(HOVER_PRESET_NAMES as [string, ...string[]]),
         visualStateSchema,
-      ])
-      .optional(),
-    press: visualStateSchema.optional(),
-    focus: visualStateSchema.optional(),
-    transition: transitionSchema.optional(),
+      ]),
+    ).optional(),
+    press: jsonText(visualStateSchema).optional(),
+    focus: jsonText(visualStateSchema).optional(),
+    transition: jsonText(transitionSchema).optional(),
     /** Per-node step in milliseconds, so a list can arrive one item at a time. */
     stagger: z.number().finite().min(0).max(5_000).optional(),
     clear: z.boolean().default(false),
@@ -800,10 +851,10 @@ export const readTreeInputSchema = z.object({
 })
 export const searchNodesInputSchema = z.object({
   query: z.string().trim().min(1).max(200),
-  types: z
-    .array(z.enum(['page', 'component', 'frame', 'group', 'text', 'shape', 'vector', 'image', 'instance']))
-    .max(9)
-    .optional(),
+  types: jsonText(
+    z.array(z.enum(['page', 'component', 'frame', 'group', 'text', 'shape', 'vector', 'image', 'instance']))
+      .max(9),
+  ).optional(),
 })
 export const viewNodeInputSchema = z.object({
   ref: nodeRefSchema,
@@ -1356,10 +1407,16 @@ export function searchCanvasNodes(
 export function tokenOperations(
   tokens: DesignToken[],
   themes: CanvasTheme[] = [],
+  activeThemeId?: string,
 ): CanvasOperation[] {
   return [
     ...themes.map((theme) => ({ type: 'theme.upsert' as const, theme })),
     ...tokens.map((token) => ({ type: 'token.upsert' as const, token })),
+    // Activation comes last, so a theme defined in this same call exists by
+    // the time it becomes the default.
+    ...(activeThemeId
+      ? [{ type: 'theme.activate' as const, id: activeThemeId }]
+      : []),
   ]
 }
 
@@ -1515,7 +1572,7 @@ export function createCanvasAgentTools({
     },
     setTokens: {
       description:
-        'Create or update named visual themes and document design tokens. Token modes are keyed by theme id; event actions can switch themes at runtime.',
+        'Create or update named visual themes and document design tokens, and set the persisted default theme (activeThemeId). Token modes are keyed by theme id; event actions can switch themes at runtime.',
       inputSchema: setTokensInputSchema,
     },
     viewNode: {

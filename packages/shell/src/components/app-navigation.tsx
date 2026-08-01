@@ -50,7 +50,7 @@ const adminNavigation = {
 function useNavigationItems() {
   const { data: session } = authClient.useSession()
   if (isDesktop()) return navigation.filter((item) => item.section !== 'billing')
-  return session?.user.isAdmin === true
+  return session?.user?.isAdmin === true
     ? [...navigation, adminNavigation]
     : [...navigation]
 }

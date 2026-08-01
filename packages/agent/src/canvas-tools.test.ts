@@ -12,8 +12,10 @@ import {
   type CanvasNode,
 } from '@loora/canvas/model'
 import {
+  canvasStylePatchSchema,
   createPageInputSchema,
   createPageTransaction,
+  insertNodesInputSchema,
   materializeNodeDescriptors,
   normalizeDeletionNodeIds,
   patchOperationsForChanges,
@@ -131,6 +133,30 @@ describe('Canvas agent NodeRefs', () => {
 
     expect(document.themes['brand-a']?.name).toBe('Brand A')
     expect(document.tokens.accent?.modes?.['brand-a']).toBe('#ec4899')
+  })
+
+  test('activates a persisted default theme in the same call', () => {
+    const source = createCanvasDocument('Agent theme fixture', 'agent-theme')
+    const input = setTokensInputSchema.parse({
+      themes: [{ id: 'dark', name: 'Dark' }],
+      activeThemeId: 'dark',
+    })
+    const document = applyTransaction(source, {
+      id: 'activate-dark-theme',
+      label: 'Activate dark theme',
+      operations: tokenOperations(
+        input.tokens,
+        input.themes,
+        input.activeThemeId,
+      ),
+    }).document
+
+    expect(document.themes.dark?.name).toBe('Dark')
+    expect(document.activeThemeId).toBe('dark')
+  })
+
+  test('setTokens requires at least one change', () => {
+    expect(setTokensInputSchema.safeParse({}).success).toBe(false)
   })
 
   test('reads source and effective instance state', () => {
@@ -317,6 +343,59 @@ describe('descriptor layout defaults', () => {
       position: 'flow',
       width: { unit: 'px', value: 320 },
       height: { unit: 'px', value: 200 },
+    })
+  })
+})
+
+describe('MCP input leniency and documentation', () => {
+  test('accepts JSON-serialized structured arguments', () => {
+    const parsed = insertNodesInputSchema.parse({
+      parent: '{"nodeId":"hero","instancePath":["card"]}',
+      nodes: '[{"type":"frame","name":"Row","layout":{"mode":"flex","gap":16}}]',
+    })
+
+    expect(parsed.parent).toEqual({ nodeId: 'hero', instancePath: ['card'] })
+    expect(parsed.nodes[0]?.name).toBe('Row')
+  })
+
+  test('accepts JSON-serialized layout, style, and children on createPage', () => {
+    const parsed = createPageInputSchema.parse({
+      name: 'Home',
+      layout: '{"mode":"flex","direction":"column","gap":24}',
+      style: '{"opacity":1}',
+      children: '[{"type":"text","text":"Hello"}]',
+    })
+
+    expect(parsed.layout?.mode).toBe('flex')
+    expect(parsed.style?.opacity).toBe(1)
+    expect(parsed.children[0]?.type).toBe('text')
+  })
+
+  test('rejects plain strings where structures belong', () => {
+    expect(() =>
+      insertNodesInputSchema.parse({ parent: 'hero', nodes: [] }),
+    ).toThrow()
+    expect(() =>
+      insertNodesInputSchema.parse({
+        parent: { nodeId: 'hero' },
+        nodes: '[{"nodeId":5}]',
+      }),
+    ).toThrow()
+  })
+
+  test('typography defaults letterSpacing and align', () => {
+    const parsed = canvasStylePatchSchema.parse({
+      typography: {
+        family: 'Inter',
+        size: 16,
+        weight: 400,
+        lineHeight: 1.5,
+      },
+    })
+
+    expect(parsed.typography).toMatchObject({
+      letterSpacing: 0,
+      align: 'left',
     })
   })
 })

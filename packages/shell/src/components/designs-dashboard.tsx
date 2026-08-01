@@ -363,7 +363,7 @@ export function DesignsDashboard() {
     await authClient.signOut()
   }
 
-  const accountName = session?.user.name ?? session?.user.email ?? 'Account'
+  const accountName = session?.user?.name ?? session?.user?.email ?? 'Account'
 
   return (
     <div className="flex h-screen min-h-0 bg-cx-canvas text-foreground">

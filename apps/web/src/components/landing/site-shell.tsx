@@ -87,6 +87,15 @@ function SiteFooter() {
         >
           GitHub
         </a>
+        <NavSep />
+        <a
+          href="https://loora.instatus.com/"
+          target="_blank"
+          rel="noreferrer"
+          className="transition-colors hover:text-foreground"
+        >
+          Status
+        </a>
       </div>
     </footer>
   )

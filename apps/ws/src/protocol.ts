@@ -76,6 +76,20 @@ function eventInput(value: unknown): CanvasRealtimeEventInput | null {
       nodeIds: raw.nodeIds as string[],
     }
   }
+  if (
+    raw.type === 'branch.changed' &&
+    (raw.draftId === null ||
+      (typeof raw.draftId === 'string' &&
+        raw.draftId.length > 0 &&
+        raw.draftId.length <= 128)) &&
+    (raw.status === null || typeof raw.status === 'string')
+  ) {
+    return {
+      type: 'branch.changed',
+      draftId: raw.draftId as string | null,
+      status: raw.status === null ? null : String(raw.status),
+    }
+  }
   return null
 }
 

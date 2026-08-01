@@ -1010,6 +1010,8 @@ export interface CanvasEditorController {
   subscribe: (listener: () => void) => () => void
   /** Separate from `subscribe`: cursor updates must not rerender the editor. */
   subscribePresence?: (listener: () => void) => () => void
+  /** Branch lifecycle notifications from realtime. */
+  subscribeBranches?: (listener: () => void) => () => void
   enqueue: (transaction: CanvasTransaction) => void
   flush?: () => Promise<void>
   adoptSnapshot?: (

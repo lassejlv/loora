@@ -30,7 +30,7 @@ async function handle(request: Request) {
 
   // Counted after the session resolves so a signed-in user is counted as
   // themselves rather than as whatever address they share with an office.
-  const userId = session?.user.id ?? null
+  const userId = session?.user?.id ?? null
   const decision = await rateLimit(
     userId ? 'rpc' : 'rpc-anonymous',
     callerIdentity(request.headers, userId),

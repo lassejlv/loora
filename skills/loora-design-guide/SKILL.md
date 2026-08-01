@@ -1,6 +1,6 @@
 ---
 name: loora-design-guide
-description: Build, edit, refine, and review polished responsive product interfaces through the Loora MCP server and its structured Canvas tools. Use when an agent must create or modify a Loora design, turn a product brief or reference into editable Canvas nodes, establish tokens or reusable components, add interactions or motion, work safely on a Loora branch, inspect screenshots, or export implementation code without treating HTML, JSX, or CSS as the authoring model.
+description: Build, edit, refine, troubleshoot, and review polished responsive product interfaces through the Loora MCP server and its structured Canvas schemas. Use when an agent must create or modify a Loora design, recover from MCP schema errors or missing authoring tools, turn a brief or reference into editable Canvas nodes, establish tokens or reusable components, add themes, interactions, or motion, work safely on a Loora branch, verify with or without image vision, or export implementation code without treating HTML, JSX, or CSS as the authoring model.
 ---
 
 # Loora Design Guide
@@ -10,23 +10,42 @@ document—not generated code—as the source of truth. Work like a designer:
 understand the product, establish a system, build coherent sections, inspect the
 render, and refine the weak parts.
 
-## Load the right reference
+## Gate the MCP surface first
 
-- Read [references/tool-workflows.md](references/tool-workflows.md) before
-  choosing a design, branch, mutation sequence, or merge flow.
-- Read [references/canvas-authoring.md](references/canvas-authoring.md) before
-  constructing unfamiliar node descriptors, NodeRefs, tokens, responsive
-  overrides, interactions, components, or motion.
-- Read [references/design-craft.md](references/design-craft.md) when creating or
-  materially restyling a design. Use its visual rubric during screenshot review.
-- Read [references/worked-examples.md](references/worked-examples.md) when a
-  concrete payload pattern would prevent schema guesswork.
+Inspect the callable Loora tools before creating or mutating anything. Require:
 
-Do not load every reference for a small text or spacing edit.
+- `createPage`, `insertNodes`, and `patchNodes` for new design authoring
+- `createComponent` and `createInstance` for reusable component work
+- `setTokens` for tokens or themes
+- `setAnimations` and `animateNodes` for motion
+- branch lifecycle tools for branch work
+
+If a required tool is absent, stop before `createDesign` or any partial mutation.
+`createDesign` creates only an empty record; it is not a successful Canvas
+design. Report the missing tools and the manifest/session mismatch. Do not
+substitute HTML, JSX, browser clicks, or repeated speculative calls.
+
+If a callable tool exposes nested arguments such as `ref`, `nodes`, or `patch`
+as `unknown`, treat that as a schema-display limitation, not permission to
+guess. Use the schema reference below.
+
+## Load references by action
+
+| Before this action | Read first | Read as well when applicable |
+|---|---|---|
+| Select a design, target Main, create/use a branch, compare, propose, or apply | [tool-workflows.md](references/tool-workflows.md) | [worked-examples.md](references/worked-examples.md) for branch theming or merge payloads |
+| Call `createPage`, `insertNodes`, `patchNodes`, component, token, interaction, or motion tools | [mcp-schema.md](references/mcp-schema.md) | [worked-examples.md](references/worked-examples.md) for a known-good envelope |
+| Compose responsive layout, components, themes, interactions, or motion | [canvas-authoring.md](references/canvas-authoring.md) | [design-craft.md](references/design-craft.md) for new or materially restyled work |
+| Review pixels with image vision | [design-craft.md](references/design-craft.md) | [tool-workflows.md](references/tool-workflows.md) for screenshot limits |
+| Verify without image vision | [tool-workflows.md](references/tool-workflows.md) | [mcp-schema.md](references/mcp-schema.md) to verify effective fields and collection semantics |
+
+For a one-field text or spacing patch, read `mcp-schema.md` plus the target node;
+do not load every design reference.
 
 ## Follow the core loop
 
-1. **Orient.** Call `getUsage` if budget matters. Call `listDesigns`, select the
+1. **Check capability and orient.** Confirm the required authoring tools are
+   callable. Call `getUsage` if budget matters. Call `listDesigns`, select the
    target explicitly, then call `getDesignContext`. For an existing design,
    inspect the relevant area with `readTree`, `readNode`, or `searchNodes`.
 2. **Protect the target.** Confirm whether the user intends Main or a branch.
@@ -46,12 +65,14 @@ Do not load every reference for a small text or spacing edit.
    `fill` and `hug`; reserve absolute positioning for intentional overlays or
    artwork.
 6. **Inspect after meaningful edits.** Call `getScreenshot` on the affected Page
-   or node. Compare the pixels against the brief and the rubric in
-   `design-craft.md`. Do not call a mutation successful merely because its tool
-   response succeeded.
-7. **Refine surgically.** Fix the largest visible problem first. Batch related
-   patches, render again, and repeat until hierarchy, spacing, contrast,
-   alignment, content, and responsive behavior are convincing.
+   or node. With image vision, compare the pixels against the brief and
+   `design-craft.md`. Without image vision, use the renderer result plus
+   `readTree`/`readNode` as described in `tool-workflows.md` and state that pixel
+   quality was not visually judged. A successful mutation alone is not proof.
+7. **Refine surgically.** Fix the largest verified problem first. With vision,
+   use visible hierarchy, spacing, contrast, alignment, content, and responsive
+   behavior. Without vision, fix only structural issues supported by reads or
+   renderer metadata; do not invent pixel problems.
 8. **Verify structure.** Re-read the affected tree or nodes. Confirm component
    instances, interactions, token references, responsive overrides, and target
    revision. Use `viewPage` or `viewNode` for a canonical Loora link.
@@ -64,6 +85,12 @@ Do not load every reference for a small text or spacing edit.
 
 - Send structured nodes and fields. Never insert HTML, JSX, Tailwind classes,
   arbitrary CSS, or code nodes.
+- Keep the three schema layers separate: the outer tool envelope, a NodeRef or
+  descriptor locator, and the typed field value. Never move fields between
+  those layers.
+- Keep IDs distinct: `designId` selects a design, `draftId` selects a branch,
+  `pageId` selects a Page, `componentId` selects a component, a NodeRef selects
+  an existing node, and descriptor `ref` is only a temporary label.
 - Use temporary descriptor `ref` values only inside a single create/insert
   payload. Save the permanent IDs returned in `refs` for later calls.
 - Use the exact NodeRef returned by `readTree` for component descendants.
@@ -99,14 +126,17 @@ Do not load every reference for a small text or spacing edit.
 - Use `getScreenshot` at useful milestones, not after every field.
 - Inspect at the Page's intended desktop width and at least one narrow width
   when responsive behavior matters.
-- Report what changed, which target was used, what was visually checked, and
-  any remaining uncertainty. Include the returned Loora URL when useful.
+- Report what changed, which target was used, whether verification was visual or
+  structural, and any remaining uncertainty. Include the returned Loora URL
+  when useful.
 
 ## Handle failure without thrashing
 
-- On schema rejection, read the relevant tool schema or
-  `canvas-authoring.md`; correct the payload instead of retrying variants at
-  random.
+- On schema rejection, read the error path from the outer envelope inward, then
+  compare it with `mcp-schema.md` and the live tool schema. Correct one coherent
+  payload; do not retry variants at random.
+- If mutation tools disappear from the callable surface, stop. Do not create an
+  empty design and hope later calls become available.
 - On an invalid or stale ID, re-read the nearest tree and use returned IDs.
 - On a locked node, stop and tell the user unless unlocking it is clearly part
   of the request.

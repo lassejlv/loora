@@ -285,6 +285,26 @@ export function CanvasApp({
     }
   }, [branchId, designId, navigate, openTarget, preview])
 
+  useEffect(() => {
+    if (preview || !controller || !activeId || shareRole !== 'owner') return
+    let cancelled = false
+    const refreshBranches = async () => {
+      if (cancelled) return
+      const next = await orpc.draft
+        .list({ designId: activeId, includeArchived: true })
+        .catch(() => null)
+      if (cancelled || !next) return
+      setBranches(next)
+    }
+    const unsubscribe = controller.subscribeBranches(() => {
+      void refreshBranches()
+    })
+    return () => {
+      cancelled = true
+      unsubscribe()
+    }
+  }, [controller, activeId, shareRole, preview])
+
   useEffect(
     () => () => {
       if (controllerRef.current) void controllerRef.current.close()
