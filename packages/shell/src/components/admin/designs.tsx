@@ -4,7 +4,7 @@ import { Badge } from '@loora/ui/badge'
 import { Button } from '@loora/ui/button'
 import { Input } from '@loora/ui/input'
 import { orpc } from '@loora/rpc/client'
-import type { AdminDesign } from '#/components/admin/types'
+import type { AdminDesign } from '../admin/types'
 
 function formatDate(value: Date | string) {
   const date = value instanceof Date ? value : new Date(value)

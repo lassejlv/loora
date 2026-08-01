@@ -21,20 +21,20 @@ import {
   saveCustomTheme,
   type CustomTheme,
   type CustomThemeColors,
-} from '#/lib/custom-themes'
+} from '../lib/custom-themes'
 import {
   BUILT_IN_THEMES,
   getThemePreference,
   setThemePreference,
   type ThemePreference,
-} from '#/lib/theme'
+} from '../lib/theme'
 import {
   DEFAULT_UI_SCALE,
   getUiScale,
   setUiScale,
   UI_SCALES,
   type UiScale,
-} from '#/lib/ui-scale'
+} from '../lib/ui-scale'
 
 type ThemeOption = {
   value: ThemePreference

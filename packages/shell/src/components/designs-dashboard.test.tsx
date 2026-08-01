@@ -27,12 +27,12 @@ mock.module('@loora/auth/client', () => ({
     signOut: mock(),
   },
 }))
-mock.module('#/components/design-thumbnail', () => ({
+mock.module('./design-thumbnail', () => ({
   DesignThumbnail: ({ designId }: { designId: string }) => (
     <div data-testid={`thumb-${designId}`} />
   ),
 }))
-mock.module('#/components/settings-panel', () => ({
+mock.module('./settings-panel', () => ({
   SettingsPanel: () => <div>Settings panel</div>,
 }))
 

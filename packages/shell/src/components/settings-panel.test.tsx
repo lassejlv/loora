@@ -69,7 +69,7 @@ mock.module('@loora/ui/panel-shell', () => ({
   ),
   PanelLoading: ({ label }: { label: string }) => <div>{label}</div>,
 }))
-mock.module('#/components/shortcuts-settings', () => ({
+mock.module('./shortcuts-settings', () => ({
   ShortcutsSettings: () => <div>Keyboard shortcuts</div>,
 }))
 mock.module('@loora/ui/alert-dialog', () => ({

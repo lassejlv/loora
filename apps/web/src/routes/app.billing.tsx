@@ -1,7 +1,7 @@
 import { createFileRoute } from '@tanstack/react-router'
-import { AccountGate } from '#/components/account-gate'
-import { AppPageShell } from '#/components/app-page-shell'
-import { BillingSettings } from '#/components/billing-settings'
+import { AccountGate } from '@loora/shell/account-gate'
+import { AppPageShell } from '@loora/shell/app-page-shell'
+import { BillingSettings } from '@loora/shell/billing-settings'
 
 export const Route = createFileRoute('/app/billing')({
   component: BillingPage,

@@ -17,11 +17,11 @@ import { authClient } from '@loora/auth/client'
 import {
   AppAccountMenu,
   AppNavigation,
-} from '#/components/app-navigation'
-import { DesignThumbnail } from '#/components/design-thumbnail'
-import { AppSettingsDialog } from '#/components/settings-dialog'
+} from './app-navigation'
+import { DesignThumbnail } from './design-thumbnail'
+import { AppSettingsDialog } from './settings-dialog'
 import { UpgradeToProButton } from '@loora/editor/upgrade-to-pro'
-import { clearWelcomeSeen } from '#/components/welcome-dialog'
+import { clearWelcomeSeen } from './welcome-dialog'
 import { Button } from '@loora/ui/button'
 import {
   Dialog,

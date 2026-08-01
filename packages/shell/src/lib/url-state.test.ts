@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from 'bun:test'
-import { bootstrapEditorSearch } from '#/lib/url-state'
+import { bootstrapEditorSearch } from './url-state'
 
 describe('bootstrapEditorSearch', () => {
   afterEach(() => {

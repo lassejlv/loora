@@ -1,7 +1,7 @@
 import { createFileRoute } from '@tanstack/react-router'
-import { AccountGate } from '#/components/account-gate'
-import { AdminPanel } from '#/components/admin/admin-panel'
-import { AppPageShell } from '#/components/app-page-shell'
+import { AccountGate } from '@loora/shell/account-gate'
+import { AdminPanel } from '@loora/shell/admin/admin-panel'
+import { AppPageShell } from '@loora/shell/app-page-shell'
 
 export const Route = createFileRoute('/app/admin')({
   component: AdminPage,

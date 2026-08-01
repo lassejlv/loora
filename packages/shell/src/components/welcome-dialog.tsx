@@ -10,7 +10,7 @@ import {
   DialogPopup,
   DialogTitle,
 } from '@loora/ui/dialog'
-import { fadeUp, uiTransition } from '#/lib/motion'
+import { fadeUp, uiTransition } from '../lib/motion'
 
 export const WELCOME_STORAGE_KEY = 'loora:welcome-seen'
 

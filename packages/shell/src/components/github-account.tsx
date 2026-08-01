@@ -7,7 +7,7 @@ import {
 } from '@loora/ui/icons'
 import { UnplugIcon } from '@loora/ui/icons'
 import { Button } from '@loora/ui/button'
-import { IntegrationCard, IntegrationStatus } from '#/components/integration-card'
+import { IntegrationCard, IntegrationStatus } from './integration-card'
 import { orpc } from '@loora/rpc/client'
 
 type GitHubStatus = Awaited<ReturnType<typeof orpc.github.status>>

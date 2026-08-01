@@ -7,6 +7,7 @@ import {
   inArray,
   lt,
   lte,
+  sql,
 } from 'drizzle-orm'
 import { z } from 'zod'
 import { db } from '@loora/db'
@@ -434,25 +435,38 @@ export const applyCanvasTransactions = consentedProcedure
         message: 'A transaction batch cannot contain duplicate ids.',
       })
     }
-    const duplicateIds = new Set(
-      await db
-        .select({ id: canvasTransactionLog.transactionId })
-        .from(canvasTransactionLog)
-        .where(
-          and(
-            eq(canvasTransactionLog.userId, access.ownerUserId),
-            eq(canvasTransactionLog.designId, input.designId),
-            eq(canvasTransactionLog.targetKey, canvasTargetKey(input.draftId)),
-            inArray(
-              canvasTransactionLog.transactionId,
-              transactions.map((transaction) => transaction.id),
-            ),
-          ),
-        )
-        .then((rows) => rows.map((row) => row.id)),
-    )
-
     const result = await db.transaction(async (tx) => {
+      const targetKey = canvasTargetKey(input.draftId)
+      // The editor already single-flights saves in one browser. This lock closes
+      // the remaining race between tabs, collaborators, and app replicas by
+      // letting Postgres queue one transaction at a time for this canvas target.
+      // Transaction-scoped advisory locks release automatically on commit or
+      // rollback, while saves for other designs and branches remain independent.
+      await tx.execute(sql`
+        select pg_advisory_xact_lock(
+          hashtextextended(
+            ${`${access.ownerUserId}:${input.designId}:${targetKey}`},
+            0
+          )
+        )
+      `)
+      const duplicateIds = new Set(
+        await tx
+          .select({ id: canvasTransactionLog.transactionId })
+          .from(canvasTransactionLog)
+          .where(
+            and(
+              eq(canvasTransactionLog.userId, access.ownerUserId),
+              eq(canvasTransactionLog.designId, input.designId),
+              eq(canvasTransactionLog.targetKey, targetKey),
+              inArray(
+                canvasTransactionLog.transactionId,
+                transactions.map((transaction) => transaction.id),
+              ),
+            ),
+          )
+          .then((rows) => rows.map((row) => row.id)),
+      )
       const target = input.draftId
         ? await tx
             .select({

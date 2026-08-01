@@ -1,0 +1,20 @@
+/* Self-hosted, and byte-identical to what the web app loads — the desktop
+   build copies them out of `apps/web/public/vendor`. */
+@import url('/vendor/fonts.css');
+@import 'tailwindcss' source('../');
+@plugin '@tailwindcss/typography';
+
+@import 'tw-animate-css';
+
+/* Tokens, variants, and utilities, shared with the web app. It carries the
+   `@source` lines for every package outside this app that ships classes. */
+@import '@loora/ui/styles.css';
+
+/* A window is not a page: it never scrolls as a document, and a rubber-band
+   bounce at the edge of the canvas reads as a bug rather than as a browser. */
+html,
+body,
+#root {
+  height: 100%;
+  overscroll-behavior: none;
+}

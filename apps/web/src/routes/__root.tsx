@@ -6,8 +6,8 @@ import { NuqsAdapter } from "nuqs/adapters/tanstack-router";
 import { useEffect } from "react";
 
 import appCss from "../styles.css?url";
-import { syncThemePreference, THEME_INIT_SCRIPT } from "#/lib/theme";
-import { syncUiScale, UI_SCALE_INIT_SCRIPT } from "#/lib/ui-scale";
+import { syncThemePreference, THEME_INIT_SCRIPT } from '@loora/shell/lib/theme';
+import { syncUiScale, UI_SCALE_INIT_SCRIPT } from '@loora/shell/lib/ui-scale';
 
 export const Route = createRootRoute({
   head: () => ({

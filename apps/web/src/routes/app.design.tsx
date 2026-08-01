@@ -1,5 +1,5 @@
 import { createFileRoute, redirect } from '@tanstack/react-router'
-import { legacyDesignValidateSearch } from '#/lib/url-state'
+import { legacyDesignValidateSearch } from '@loora/shell/lib/url-state'
 
 export const Route = createFileRoute('/app/design')({
   ssr: false,

@@ -38,6 +38,7 @@ import {
 import { captureCanvasPng, captureNodePng } from '../lib/canvas-capture'
 import { copyText } from '../lib/copy-text'
 import { orpc } from '@loora/rpc/client'
+import { appUrl } from '@loora/platform'
 import { Button } from '@loora/ui/button'
 import {
   Dialog,
@@ -579,7 +580,7 @@ export function CanvasExport({
         draftId: controller.target.draftId,
       })
       setHandoff({
-        url: `${window.location.origin}/api/handoff/${created.token}`,
+        url: appUrl(`/api/handoff/${created.token}`),
         expiresAt: created.expiresAt,
       })
     } catch {

@@ -5,10 +5,10 @@ import {
   AppAccountMenu,
   AppNavigation,
   type AppSection,
-} from '#/components/app-navigation'
-import { AppSettingsDialog } from '#/components/settings-dialog'
+} from './app-navigation'
+import { AppSettingsDialog } from './settings-dialog'
 import { UpgradeToProButton } from '@loora/editor/upgrade-to-pro'
-import { clearWelcomeSeen } from '#/components/welcome-dialog'
+import { clearWelcomeSeen } from './welcome-dialog'
 
 export function AppPageShell({
   active,

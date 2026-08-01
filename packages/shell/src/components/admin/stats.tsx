@@ -1,5 +1,5 @@
 import { formatStorageBytes } from '@loora/billing/plan-limits'
-import type { AdminOverview } from '#/components/admin/types'
+import type { AdminOverview } from '../admin/types'
 
 function StatTile({
   label,

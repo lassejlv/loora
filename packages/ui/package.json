@@ -3,6 +3,7 @@
   "private": true,
   "type": "module",
   "exports": {
+    "./styles.css": "./src/styles.css",
     "./utils": "./src/lib/utils.ts",
     "./icons": "./src/icons/index.tsx",
     "./hooks/*": "./src/hooks/*.ts",

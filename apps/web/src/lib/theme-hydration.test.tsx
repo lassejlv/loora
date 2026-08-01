@@ -2,7 +2,7 @@ import { act, type ComponentType, type ReactNode } from 'react'
 import { hydrateRoot, type Root } from 'react-dom/client'
 import { renderToString } from 'react-dom/server'
 import { describe, expect, it, mock } from 'bun:test'
-import { THEME_INIT_SCRIPT } from './theme'
+import { THEME_INIT_SCRIPT } from '@loora/shell/lib/theme'
 
 const routerModule = await import('@tanstack/react-router')
 mock.module('@tanstack/react-router', () => ({

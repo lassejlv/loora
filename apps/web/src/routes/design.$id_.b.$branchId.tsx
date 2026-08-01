@@ -1,8 +1,8 @@
 import { createFileRoute, redirect } from '@tanstack/react-router'
-import { AccountGate } from '#/components/account-gate'
+import { AccountGate } from '@loora/shell/account-gate'
 import { CanvasApp } from '@loora/editor/app'
-import { renderEditorSettings } from '#/components/editor-settings-slot'
-import { designValidateSearch } from '#/lib/url-state'
+import { renderEditorSettings } from '@loora/shell/editor-settings-slot'
+import { designValidateSearch } from '@loora/shell/lib/url-state'
 
 export const Route = createFileRoute('/design/$id_/b/$branchId')({
   component: BranchDesignPage,

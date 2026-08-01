@@ -11,6 +11,7 @@
     "@loora/auth": "workspace:*",
     "@loora/canvas": "workspace:*",
     "@loora/db": "workspace:*",
+    "@loora/platform": "workspace:*",
     "@loora/rpc": "workspace:*",
     "@loora/ui": "workspace:*",
     "@tanstack/react-router": "latest"

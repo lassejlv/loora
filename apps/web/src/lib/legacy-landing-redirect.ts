@@ -1,4 +1,4 @@
-import { INTEGRATION_TABS, type IntegrationTab } from '#/lib/url-state'
+import { INTEGRATION_TABS, type IntegrationTab } from '@loora/shell/lib/url-state'
 
 /**
  * The editor used to live at `/`, and settings used to be search params on it.

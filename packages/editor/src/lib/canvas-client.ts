@@ -10,6 +10,7 @@ import {
   type CanvasDocument,
 } from '@loora/canvas/model'
 import { orpc } from '@loora/rpc/client'
+import { apiUrl } from '@loora/platform'
 
 export interface CanvasSyncTarget {
   designId: string
@@ -948,7 +949,7 @@ export class CanvasSyncController {
     if (this.#closed || this.#eventSource || typeof EventSource === 'undefined') {
       return
     }
-    const url = new URL('/api/canvas-events', window.location.origin)
+    const url = new URL(apiUrl('/api/canvas-events'))
     url.searchParams.set('designId', this.target.designId)
     if (this.target.draftId) {
       url.searchParams.set('draftId', this.target.draftId)

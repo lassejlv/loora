@@ -29,6 +29,7 @@ import { Route as AppBillingRouteImport } from './routes/app.billing'
 import { Route as AppDesignRouteImport } from './routes/app.design'
 import { Route as AppIntegrationsRouteImport } from './routes/app.integrations'
 import { Route as DesignIdRouteImport } from './routes/design.$id'
+import { Route as DesktopAuthRouteImport } from './routes/desktop.auth'
 import { Route as ApiAssetIdRouteImport } from './routes/api.asset.$id'
 import { Route as ApiAuthSplatRouteImport } from './routes/api.auth.$'
 import { Route as ApiGithubCallbackRouteImport } from './routes/api.github.callback'
@@ -142,6 +143,11 @@ const DesignIdRoute = DesignIdRouteImport.update({
   path: '/design/$id',
   getParentRoute: () => rootRouteImport,
 } as any)
+const DesktopAuthRoute = DesktopAuthRouteImport.update({
+  id: '/desktop/auth',
+  path: '/desktop/auth',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ApiAssetIdRoute = ApiAssetIdRouteImport.update({
   id: '/api/asset/$id',
   path: '/api/asset/$id',
@@ -218,6 +224,7 @@ export interface FileRoutesByFullPath {
   '/app/design': typeof AppDesignRoute
   '/app/integrations': typeof AppIntegrationsRoute
   '/design/$id': typeof DesignIdRoute
+  '/desktop/auth': typeof DesktopAuthRoute
   '/app/': typeof AppIndexRoute
   '/api/asset/$id': typeof ApiAssetIdRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
@@ -251,6 +258,7 @@ export interface FileRoutesByTo {
   '/app/design': typeof AppDesignRoute
   '/app/integrations': typeof AppIntegrationsRoute
   '/design/$id': typeof DesignIdRoute
+  '/desktop/auth': typeof DesktopAuthRoute
   '/app': typeof AppIndexRoute
   '/api/asset/$id': typeof ApiAssetIdRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
@@ -285,6 +293,7 @@ export interface FileRoutesById {
   '/app/design': typeof AppDesignRoute
   '/app/integrations': typeof AppIntegrationsRoute
   '/design/$id': typeof DesignIdRoute
+  '/desktop/auth': typeof DesktopAuthRoute
   '/app/': typeof AppIndexRoute
   '/api/asset/$id': typeof ApiAssetIdRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
@@ -320,6 +329,7 @@ export interface FileRouteTypes {
     | '/app/design'
     | '/app/integrations'
     | '/design/$id'
+    | '/desktop/auth'
     | '/app/'
     | '/api/asset/$id'
     | '/api/auth/$'
@@ -353,6 +363,7 @@ export interface FileRouteTypes {
     | '/app/design'
     | '/app/integrations'
     | '/design/$id'
+    | '/desktop/auth'
     | '/app'
     | '/api/asset/$id'
     | '/api/auth/$'
@@ -386,6 +397,7 @@ export interface FileRouteTypes {
     | '/app/design'
     | '/app/integrations'
     | '/design/$id'
+    | '/desktop/auth'
     | '/app/'
     | '/api/asset/$id'
     | '/api/auth/$'
@@ -420,6 +432,7 @@ export interface RootRouteChildren {
   AppDesignRoute: typeof AppDesignRoute
   AppIntegrationsRoute: typeof AppIntegrationsRoute
   DesignIdRoute: typeof DesignIdRoute
+  DesktopAuthRoute: typeof DesktopAuthRoute
   AppIndexRoute: typeof AppIndexRoute
   ApiAssetIdRoute: typeof ApiAssetIdRoute
   ApiAuthSplatRoute: typeof ApiAuthSplatRoute
@@ -575,6 +588,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof DesignIdRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/desktop/auth': {
+      id: '/desktop/auth'
+      path: '/desktop/auth'
+      fullPath: '/desktop/auth'
+      preLoaderRoute: typeof DesktopAuthRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/asset/$id': {
       id: '/api/asset/$id'
       path: '/api/asset/$id'
@@ -688,6 +708,7 @@ const rootRouteChildren: RootRouteChildren = {
   AppDesignRoute: AppDesignRoute,
   AppIntegrationsRoute: AppIntegrationsRoute,
   DesignIdRoute: DesignIdRoute,
+  DesktopAuthRoute: DesktopAuthRoute,
   AppIndexRoute: AppIndexRoute,
   ApiAssetIdRoute: ApiAssetIdRoute,
   ApiAuthSplatRoute: ApiAuthSplatRoute,
@@ -703,12 +724,3 @@ const rootRouteChildren: RootRouteChildren = {
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
   ._addFileTypes<FileRouteTypes>()
-
-import type { getRouter } from './router.tsx'
-import type { createStart } from '@tanstack/react-start'
-declare module '@tanstack/react-start' {
-  interface Register {
-    ssr: true
-    router: Awaited<ReturnType<typeof getRouter>>
-  }
-}

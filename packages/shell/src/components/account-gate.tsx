@@ -1,17 +1,17 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import { authClient } from '@loora/auth/client'
 import { orpc } from '@loora/rpc/client'
-import { readAccessVerdict, writeAccessVerdict } from '#/lib/access-cache'
+import { readAccessVerdict, writeAccessVerdict } from '../lib/access-cache'
 import { CanvasApp } from '@loora/editor/app'
-import { AuthScreen } from '#/components/auth-screen'
-import { PreviewAccessScreen } from '#/components/preview-access-screen'
-import { SubscriptionScreen } from '#/components/subscription-screen'
-import { LegalConsentScreen } from '#/components/legal-consent-screen'
+import { AuthScreen } from './auth-screen'
+import { PreviewAccessScreen } from './preview-access-screen'
+import { SubscriptionScreen } from './subscription-screen'
+import { LegalConsentScreen } from './legal-consent-screen'
 import {
   WelcomeDialog,
   hasSeenWelcome,
   markWelcomeSeen,
-} from '#/components/welcome-dialog'
+} from './welcome-dialog'
 
 /**
  * Session, preview access, and billing gates for every signed-in surface.
@@ -23,13 +23,18 @@ import {
  * apply to them — being asked to subscribe before you can look at a document
  * someone shared with you would make an invitation worthless. Their own files
  * are still gated normally, because `/app` passes no design.
+ *
+ * `renderSignedOut` is for a client that does not sign people in itself: the
+ * desktop app sends them to a browser instead of showing a password field.
  */
 export function AccountGate({
   children,
   designId,
+  renderSignedOut,
 }: {
   children: ReactNode
   designId?: string
+  renderSignedOut?: () => ReactNode
 }) {
   const { data: session, isPending } = authClient.useSession()
   const [hasResolvedSession, setHasResolvedSession] = useState(() => !isPending)
@@ -94,7 +99,7 @@ export function AccountGate({
             }}
           />
         ) : (
-          <AuthScreen />
+          renderSignedOut?.() ?? <AuthScreen />
         )}
       </>
     )

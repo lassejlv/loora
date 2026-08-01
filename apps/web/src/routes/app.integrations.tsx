@@ -1,8 +1,8 @@
 import { createFileRoute } from '@tanstack/react-router'
-import { AccountGate } from '#/components/account-gate'
-import { AppPageShell } from '#/components/app-page-shell'
-import { IntegrationsSettings } from '#/components/integrations-settings'
-import { integrationsValidateSearch } from '#/lib/url-state'
+import { AccountGate } from '@loora/shell/account-gate'
+import { AppPageShell } from '@loora/shell/app-page-shell'
+import { IntegrationsSettings } from '@loora/shell/integrations-settings'
+import { integrationsValidateSearch } from '@loora/shell/lib/url-state'
 
 export const Route = createFileRoute('/app/integrations')({
   component: IntegrationsPage,

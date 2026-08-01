@@ -1,5 +1,5 @@
 import type { CanvasSettingsSlot } from '@loora/editor/editor'
-import { SettingsPanel } from '#/components/settings-panel'
+import { SettingsPanel } from './settings-panel'
 
 /**
  * The editor package owns the shortcut config but not the account, billing or

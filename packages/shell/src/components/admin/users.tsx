@@ -31,7 +31,7 @@ import {
 } from '@loora/ui/table'
 import { orpc } from '@loora/rpc/client'
 import { cn } from '@loora/ui/utils'
-import type { AdminUser, AdminUserFilter } from '#/components/admin/types'
+import type { AdminUser, AdminUserFilter } from '../admin/types'
 
 const FILTERS: { value: AdminUserFilter; label: string }[] = [
   { value: 'all', label: 'All' },

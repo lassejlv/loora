@@ -15,10 +15,11 @@
     "semiColons": false,
     "singleQuote": true
   },
+  "exclude": ["src", "dist", "node_modules", "scripts", "vite.config.ts"],
   "tasks": {
-    "dev": "deno desktop --hmr --no-npm main.ts",
-    "build": "deno run --allow-run build.ts",
-    "check": "deno check --desktop --no-npm main.ts && deno check --no-npm build.ts"
+    "host": "deno desktop --no-npm --allow-net --allow-read --allow-write --allow-env --allow-run main.ts",
+    "host:hmr": "deno desktop --hmr --no-npm --allow-net --allow-read --allow-write --allow-env --allow-run main.ts",
+    "check": "deno check --desktop --no-npm main.ts"
   },
   "desktop": {
     "app": {

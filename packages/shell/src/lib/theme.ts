@@ -4,7 +4,7 @@ import {
   getCustomTheme,
   getCustomThemes,
   isCustomThemeId,
-} from '#/lib/custom-themes'
+} from './custom-themes'
 
 const STORAGE_KEY = 'loora:theme'
 const CUSTOM_STORAGE_KEY = 'loora:custom-themes'

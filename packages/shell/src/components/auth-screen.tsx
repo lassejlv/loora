@@ -17,7 +17,7 @@ import { Tabs, TabsList, TabsPanel, TabsTab } from '@loora/ui/tabs'
 import {
   clearPendingLegalConsent,
   markPendingLegalConsent,
-} from '#/lib/pending-legal-consent'
+} from '../lib/pending-legal-consent'
 
 export function AuthScreen() {
   const [mode, setMode] = useState<'sign-in' | 'sign-up'>('sign-in')

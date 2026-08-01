@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Dialog, DialogPopup } from '@loora/ui/dialog'
-import { SettingsPanel } from '#/components/settings-panel'
+import { SettingsPanel } from './settings-panel'
 import { orpc } from '@loora/rpc/client'
 import {
   cacheShortcuts,

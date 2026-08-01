@@ -14,6 +14,7 @@ import { Input } from '@loora/ui/input'
 import { Skeleton } from '@loora/ui/skeleton'
 import { orpc } from '@loora/rpc/client'
 import { assetRouteUrl } from '@loora/rpc/asset-url'
+import { appUrl } from '@loora/platform'
 import { relativeTime } from '../lib/designs'
 import { cn } from '@loora/ui/utils'
 
@@ -39,7 +40,7 @@ export function assetSrc(asset: Pick<AssetMeta, 'id' | 'url'>) {
 /** Same URL, absolute — for the clipboard and drag payloads. */
 export function absoluteAssetSrc(asset: Pick<AssetMeta, 'id' | 'url'>) {
   const src = assetSrc(asset)
-  return src.startsWith('/') ? `${window.location.origin}${src}` : src
+  return src.startsWith('/') ? appUrl(src) : src
 }
 
 /** Payload a canvas drop reads to place an asset it was handed. */

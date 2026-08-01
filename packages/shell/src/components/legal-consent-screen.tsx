@@ -8,7 +8,7 @@ import { Label } from '@loora/ui/label'
 import {
   clearPendingLegalConsent,
   hasPendingLegalConsent,
-} from '#/lib/pending-legal-consent'
+} from '../lib/pending-legal-consent'
 import {
   Dialog,
   DialogDescription,

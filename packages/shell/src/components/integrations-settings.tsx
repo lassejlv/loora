@@ -1,11 +1,11 @@
 import { useQueryStates } from 'nuqs'
-import { GitHubAccount } from '#/components/github-account'
-import { McpSessions } from '#/components/mcp-sessions'
+import { GitHubAccount } from './github-account'
+import { McpSessions } from './mcp-sessions'
 import { Tabs, TabsList, TabsPanel, TabsTab } from '@loora/ui/tabs'
 import {
   integrationsSearchParams,
   type IntegrationTab,
-} from '#/lib/url-state'
+} from '../lib/url-state'
 
 export function IntegrationsSettings() {
   const [{ integration }, setSearch] = useQueryStates(integrationsSearchParams, {

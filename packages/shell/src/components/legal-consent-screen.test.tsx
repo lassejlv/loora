@@ -13,7 +13,7 @@ mock.module('@loora/auth/client', () => ({
 }))
 
 const { LegalConsentScreen } = await import('./legal-consent-screen')
-const { markPendingLegalConsent } = await import('#/lib/pending-legal-consent')
+const { markPendingLegalConsent } = await import('../lib/pending-legal-consent')
 
 function renderScreen() {
   return render(

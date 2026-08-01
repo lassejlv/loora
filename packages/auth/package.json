@@ -10,6 +10,7 @@
     "@loora/billing": "workspace:*",
     "@loora/db": "workspace:*",
     "@loora/email": "workspace:*",
+    "@loora/platform": "workspace:*",
     "@polar-sh/better-auth": "1.8.4",
     "better-auth": "catalog:",
     "drizzle-orm": "catalog:"

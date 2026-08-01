@@ -41,19 +41,19 @@ mock.module('@loora/rpc/client', () => ({
 mock.module('@loora/editor/app', () => ({
   CanvasApp: () => <div>Canvas preview</div>,
 }))
-mock.module('#/components/auth-screen', () => ({
+mock.module('./auth-screen', () => ({
   AuthScreen: StatefulAuthScreen,
 }))
-mock.module('#/components/preview-access-screen', () => ({
+mock.module('./preview-access-screen', () => ({
   PreviewAccessScreen: ({ children }: { children: React.ReactNode }) => children,
 }))
-mock.module('#/components/subscription-screen', () => ({
+mock.module('./subscription-screen', () => ({
   SubscriptionScreen: ({ children }: { children: React.ReactNode }) => children,
 }))
-mock.module('#/components/legal-consent-screen', () => ({
+mock.module('./legal-consent-screen', () => ({
   LegalConsentScreen: ({ children }: { children: React.ReactNode }) => children,
 }))
-mock.module('#/components/welcome-dialog', () => ({
+mock.module('./welcome-dialog', () => ({
   WelcomeDialog: () => null,
   hasSeenWelcome: () => true,
   markWelcomeSeen: () => {},

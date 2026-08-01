@@ -12,6 +12,7 @@ import {
 import { Input } from '@loora/ui/input'
 import { Spinner } from '@loora/ui/spinner'
 import { orpc } from '@loora/rpc/client'
+import { appUrl } from '@loora/platform'
 import { copyText } from '../lib/copy-text'
 import { cn } from '@loora/ui/utils'
 
@@ -165,10 +166,9 @@ export function ShareDialogContent({
   }, [load])
 
   const isOwner = state?.role === 'owner'
-  const link =
-    typeof window === 'undefined'
-      ? ''
-      : `${window.location.origin}/design/${designId}`
+  // The public link, which on the desktop app is loora.design rather than
+  // the origin the window happens to be served from.
+  const link = appUrl(`/design/${designId}`)
 
   const copyLink = async () => {
     await copyText(link)

@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useState } from 'react'
 import { LogOutIcon } from '@loora/ui/icons'
-import { clearWelcomeSeen } from '#/components/welcome-dialog'
+import { clearWelcomeSeen } from './welcome-dialog'
 import { authClient } from '@loora/auth/client'
 import { orpc } from '@loora/rpc/client'
-import { readAccessVerdict, writeAccessVerdict } from '#/lib/access-cache'
+import { readAccessVerdict, writeAccessVerdict } from '../lib/access-cache'
 import { Button } from '@loora/ui/button'
 import {
   Dialog,

@@ -2,11 +2,11 @@ import { useCallback, useEffect, useState } from 'react'
 import { authClient } from '@loora/auth/client'
 import { RefreshCwIcon } from '@loora/ui/icons'
 import { Button } from '@loora/ui/button'
-import { AdminDesigns } from '#/components/admin/designs'
-import { AdminStats } from '#/components/admin/stats'
-import { AdminUsers } from '#/components/admin/users'
+import { AdminDesigns } from '../admin/designs'
+import { AdminStats } from '../admin/stats'
+import { AdminUsers } from '../admin/users'
 import { orpc } from '@loora/rpc/client'
-import type { AdminOverview } from '#/components/admin/types'
+import type { AdminOverview } from '../admin/types'
 
 /**
  * The whole panel is admin-only on the server (every `admin.*` procedure runs

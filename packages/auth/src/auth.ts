@@ -1,7 +1,12 @@
 import { betterAuth } from 'better-auth'
 import { APIError } from 'better-auth/api'
 import { drizzleAdapter } from 'better-auth/adapters/drizzle'
-import { mcp, oAuthDiscoveryMetadata } from 'better-auth/plugins'
+import {
+  bearer,
+  mcp,
+  oAuthDiscoveryMetadata,
+  oneTimeToken,
+} from 'better-auth/plugins'
 import { tanstackStartCookies } from 'better-auth/tanstack-start'
 import { polar, portal, webhooks } from '@polar-sh/better-auth'
 import { db } from '@loora/db'
@@ -203,6 +208,16 @@ export const auth = betterAuth({
         ? { resource: process.env.MCP_RESOURCE_URL.trim() }
         : {}),
     }),
+    // The desktop app has no cookie jar: its own process holds the session and
+    // sends it as `Authorization: Bearer <token>` when it proxies a request on
+    // to this app. The token is the same signed session token the cookie
+    // carries, so a stolen one is worth exactly what a stolen cookie is.
+    bearer(),
+    // How the desktop app comes by that token. The browser signs in at
+    // loora.design as usual, mints a single-use code from that session, and
+    // hands it to the app waiting on loopback, which trades it for the
+    // session. Only the hash is stored, so the row is worthless on its own.
+    oneTimeToken({ expiresIn: 2, storeToken: 'hashed' }),
     tanstackStartCookies(),
   ],
 })
