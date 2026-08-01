@@ -255,6 +255,12 @@ Deploy: Railway via root `Dockerfile` / `railway.json`, with `apps/mcp` and
 `apps/ws` carrying their own `Dockerfile` + `railway.json` for the MCP and
 realtime services.
 
+A **new workspace package** has to be added to all three Dockerfiles. Each
+copies workspace manifests one at a time before `bun install
+--frozen-lockfile`, and a member the image never copies cannot resolve — the
+build fails at install, before any app code compiles. Local installs succeed
+either way, so this only ever shows up on Railway.
+
 ---
 
 ## Canvas Invariants
