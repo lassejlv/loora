@@ -1,7 +1,6 @@
 import {
   type CanvasAction,
   type CanvasDocument,
-  type CanvasLength,
   type CanvasNode,
   type CanvasStyle,
   type InstanceNode,
@@ -94,6 +93,7 @@ import {
   colorValue,
   escapeCssString,
   fontFamilyValue,
+  lengthValue,
   paintValue,
 } from './style-css'
 import {
@@ -109,19 +109,6 @@ function className(id: string) {
         : `_u${character.codePointAt(0)!.toString(16)}_`,
     )
     .join('')}`
-}
-
-function lengthValue(length: CanvasLength, axis: 'width' | 'height') {
-  switch (length.unit) {
-    case 'px':
-      return `${length.value}px`
-    case 'percent':
-      return `${length.value}%`
-    case 'fill':
-      return '100%'
-    case 'hug':
-      return axis === 'width' ? 'fit-content' : 'auto'
-  }
 }
 
 function styleDeclarations(document: CanvasDocument, node: CanvasNode) {

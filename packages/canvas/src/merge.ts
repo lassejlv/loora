@@ -200,6 +200,20 @@ export function mergeDocuments(
       updatedAt: Date.now(),
     },
   }
+  const animations = mergeValue(
+    base.animations ?? missing,
+    left.animations ?? missing,
+    right.animations ?? missing,
+    {
+      scope: 'document',
+      targetId: base.id,
+      path: 'animations',
+      conflicts,
+      unresolved,
+      resolutions,
+    },
+  ) as CanvasDocument['animations']
+  if (animations !== (missing as unknown)) document.animations = animations
   assertDocument(document)
   return {
     document,

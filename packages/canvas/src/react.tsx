@@ -27,6 +27,11 @@ import {
   nodeMotionDeclarations,
 } from './motion-css'
 import {
+  colorValue,
+  lengthValue,
+  paintValue,
+} from './style-css'
+import {
   type CanvasApplyResult,
   type CanvasTransaction,
   CanvasEngine,
@@ -35,11 +40,8 @@ import {
   withTransactionPreconditions,
 } from './engine'
 import {
-  type CanvasColor,
   type CanvasDocument,
-  type CanvasLength,
   type CanvasNode,
-  type CanvasPaint,
   type InstanceNode,
   type NodeId,
   type NodeMutationPatch,
@@ -455,30 +457,6 @@ export function useCanvasSelection() {
   const { session } = useCanvasContext()
   useSyncExternalStore(session.subscribe, () => session.revision, () => session.revision)
   return session.selection
-}
-
-function colorValue(_document: CanvasDocument, color: CanvasColor) {
-  if (typeof color === 'string') return color
-  return `var(--loora-token-${color.token.replace(/[^a-zA-Z0-9_-]/g, '-')})`
-}
-
-function paintValue(document: CanvasDocument, paint: CanvasPaint) {
-  if (paint.type === 'solid') return colorValue(document, paint.color)
-  const stops = paint.stops
-    .map((stop) => `${colorValue(document, stop.color)} ${stop.offset * 100}%`)
-    .join(', ')
-  if (paint.type === 'radial-gradient') {
-    const size = paint.size?.trim() || 'farthest-corner'
-    return `radial-gradient(${size} at ${paint.cx * 100}% ${paint.cy * 100}%, ${stops})`
-  }
-  return `linear-gradient(${paint.angle}deg, ${stops})`
-}
-
-function lengthValue(length: CanvasLength, axis: 'width' | 'height') {
-  if (length.unit === 'px') return `${length.value}px`
-  if (length.unit === 'percent') return `${length.value}%`
-  if (length.unit === 'fill') return '100%'
-  return axis === 'width' ? 'fit-content' : 'auto'
 }
 
 function patchNode(node: CanvasNode, patch: NodePatch | undefined): CanvasNode {

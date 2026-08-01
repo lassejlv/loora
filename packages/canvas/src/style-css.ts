@@ -1,6 +1,7 @@
 import type {
   CanvasColor,
   CanvasDocument,
+  CanvasLength,
   CanvasPaint,
   CanvasStylePatch,
 } from './model'
@@ -79,6 +80,19 @@ export function paintValue(document: CanvasDocument, paint: CanvasPaint) {
     return `radial-gradient(${size} at ${paint.cx * 100}% ${paint.cy * 100}%, ${stops})`
   }
   return `linear-gradient(${paint.angle}deg, ${stops})`
+}
+
+export function lengthValue(length: CanvasLength, axis: 'width' | 'height') {
+  switch (length.unit) {
+    case 'px':
+      return `${length.value}px`
+    case 'percent':
+      return `${length.value}%`
+    case 'fill':
+      return '100%'
+    case 'hug':
+      return axis === 'width' ? 'fit-content' : 'auto'
+  }
 }
 
 /**
