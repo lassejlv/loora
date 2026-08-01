@@ -12,7 +12,7 @@ import {
 describe('MCP included usage', () => {
   test('matches the published Free and Pro weekly limits', () => {
     expect(MCP_WEEKLY_INCLUDED).toEqual({
-      free: 200,
+      free: 100,
       pro: 1_000_000,
       studio: 1_000_000,
     })
@@ -39,7 +39,7 @@ describe('MCP included usage', () => {
     const meter: McpUsageMeter = {
       readTotal: async (input) => {
         reads.push(input)
-        return 199
+        return 99
       },
       record: async (input) => {
         records.push(input)
@@ -54,8 +54,8 @@ describe('MCP included usage', () => {
     expect(usage).toEqual({
       metric: 'mcp_tool_calls',
       plan: 'free',
-      included: 200,
-      used: 200,
+      included: 100,
+      used: 100,
       remaining: 0,
       periodStart: '2026-07-27T00:00:00.000Z',
       resetsAt: '2026-08-03T00:00:00.000Z',
@@ -76,7 +76,7 @@ describe('MCP included usage', () => {
   test('rejects at the included limit without recording another event', async () => {
     let records = 0
     const service = createMcpUsageService(() => ({
-      readTotal: async () => 200,
+      readTotal: async () => 100,
       record: async () => {
         records += 1
         return true

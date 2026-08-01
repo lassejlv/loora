@@ -4,7 +4,7 @@ import { PLAN_INCLUDES, PLANS } from '#/components/landing/plans'
 import { LandingShell } from '#/components/landing/site-shell'
 
 const DESCRIPTION =
-  'Free is $0/month with 50 design files, 1 GB of assets, 200 MCP calls a week, 2 days of version history, and 1 open branch per design. Pro is $20/month, or $200 a year, for unlimited files, 100 GB, 1M MCP calls a week, 90-day history, and unlimited branches.'
+  'Free is $0/month with 50 design files, 1 GB of assets, 100 MCP calls a week, 2 days of version history, and 1 open branch per design. Pro is $20/month, or $200 a year, for unlimited files, 50 GB, 1M MCP calls a week, 90-day history, and unlimited branches.'
 
 export const Route = createFileRoute('/pricing')({
   ssr: false,

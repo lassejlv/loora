@@ -194,8 +194,8 @@ function Pricing() {
   return (
     <Section title="Pricing">
       <p className="mt-4 text-muted-foreground">
-        Free is $0/month with 50 design files and 200 MCP calls a week. Pro is $20/month for
-        unlimited files, branches, 100 GB of assets, and a million calls a week.
+        Free is $0/month with 50 design files and 100 MCP calls a week. Pro is $20/month for
+        unlimited files, branches, 50 GB of assets, and a million calls a week.
       </p>
       <p className="mt-4">
         <Link to="/pricing" className={LINK} style={link}>

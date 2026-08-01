@@ -9,7 +9,7 @@ export const FREE_OPEN_BRANCHES_PER_DESIGN = 1
 
 const GIB = 1024 ** 3
 export const FREE_STORAGE_BYTES = 1 * GIB
-export const PRO_STORAGE_BYTES = 100 * GIB
+export const PRO_STORAGE_BYTES = 50 * GIB
 
 export const FREE_HISTORY_RETENTION_DAYS = 2
 export const PRO_HISTORY_RETENTION_DAYS = 90
@@ -144,7 +144,7 @@ export function storageLimitMessage(
 ) {
   const label = plan === 'pro' || plan === 'studio' ? 'Pro' : 'Free'
   const upgrade = plan === 'free' || plan === null || plan === undefined
-    ? ' Upgrade to Pro for 100 GB.'
+    ? ' Upgrade to Pro for 50 GB.'
     : ''
   return (
     `${label} plan includes ${formatStorageBytes(limit)} of asset storage ` +

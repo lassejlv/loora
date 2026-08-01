@@ -13,8 +13,8 @@ Start free and keep the whole editor. Pro lifts the limits and adds the in-app a
 
 | Plan | Price | Design files | Asset storage | MCP calls | History |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| Free | $0/month | 50 | 1 GB | 200/week | 2 days |
-| Pro | $20/month or $200/year | Unlimited | 100 GB | 1,000,000/week | 90 days |
+| Free | $0/month | 50 | 1 GB | 100/week | 2 days |
+| Pro | $20/month or $200/year | Unlimited | 50 GB | 1,000,000/week | 90 days |
 
 ### Free
 
@@ -22,7 +22,7 @@ Free needs no card and does not expire. It includes:
 
 - 50 design files
 - 1 GB of asset storage
-- 200 MCP calls per week
+- 100 MCP calls per week
 - 2 days of version history
 
 ### Pro
@@ -30,7 +30,7 @@ Free needs no card and does not expire. It includes:
 Pro includes everything in Free at production limits:
 
 - Unlimited design files
-- 100 GB of asset storage
+- 50 GB of asset storage
 - 1,000,000 MCP calls per week
 - 90 days of version history
 - Branches: fork, compare, and merge

@@ -31,14 +31,14 @@ const plans = [
     id: 'free' as const,
     name: 'Free',
     price: '$0',
-    summary: '50 files, 1 open branch per design, and 200 MCP calls a week',
+    summary: '50 files, 1 open branch per design, and 100 MCP calls a week',
     note: 'No card required',
   },
   {
     id: 'pro' as const,
     name: 'Pro',
     price: '$20',
-    summary: 'Unlimited files and branches, 100 GB storage, and agent access',
+    summary: 'Unlimited files and branches, 50 GB storage, and agent access',
     note: 'Save with yearly',
   },
 ]
@@ -122,7 +122,7 @@ export function SubscriptionScreen({ userId, children, preview, redirect }: Subs
             <DialogTitle>Choose your Loora plan</DialogTitle>
             <DialogDescription>
               Free is the whole editor, not a demo. Pro lifts the limits — unlimited files and branches,
-              100 GB of storage, 90-day history, and the in-app agent.
+              50 GB of storage, 90-day history, and the in-app agent.
             </DialogDescription>
           </DialogHeader>
           <DialogPanel className="flex flex-col gap-4 pt-1">

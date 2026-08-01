@@ -30,7 +30,7 @@ export interface McpUsageMeter {
 export const MCP_USAGE_EVENT = 'loora.mcp_call.v1'
 
 export const MCP_WEEKLY_INCLUDED = {
-  free: 200,
+  free: 100,
   pro: 1_000_000,
   studio: 1_000_000,
 } as const satisfies Record<BillingPlan, number>

@@ -110,7 +110,7 @@ describe('BillingSettings', () => {
     render(<BillingSettings />)
 
     expect(await screen.findAllByText('No plan')).toHaveLength(2)
-    expect(screen.getByText(/Free includes 200 calls per week/)).toBeTruthy()
+    expect(screen.getByText(/Free includes 100 calls per week/)).toBeTruthy()
     expect(screen.getByText(/Pro and Studio include 1,000,000/)).toBeTruthy()
   })
 

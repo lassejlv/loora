@@ -35,7 +35,7 @@ describe('plan limits', () => {
     expect(FREE_DESIGN_FILE_LIMIT).toBe(50)
     expect(FREE_OPEN_BRANCHES_PER_DESIGN).toBe(1)
     expect(FREE_STORAGE_BYTES).toBe(1024 ** 3)
-    expect(PRO_STORAGE_BYTES).toBe(100 * 1024 ** 3)
+    expect(PRO_STORAGE_BYTES).toBe(50 * 1024 ** 3)
     expect(FREE_HISTORY_RETENTION_DAYS).toBe(2)
     expect(PRO_HISTORY_RETENTION_DAYS).toBe(90)
   })
@@ -123,7 +123,7 @@ describe('plan limits', () => {
 
   test('formats storage sizes for error messages', () => {
     expect(formatStorageBytes(FREE_STORAGE_BYTES)).toBe('1 GB')
-    expect(formatStorageBytes(PRO_STORAGE_BYTES)).toBe('100 GB')
+    expect(formatStorageBytes(PRO_STORAGE_BYTES)).toBe('50 GB')
     expect(formatStorageBytes(512 * 1024)).toBe('512 KB')
   })
 

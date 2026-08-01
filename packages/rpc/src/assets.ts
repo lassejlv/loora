@@ -53,7 +53,7 @@ export const uploadAsset = protectedProcedure
     if (bytes.length > MAX_ASSET_BYTES) {
       throw new ORPCError('PAYLOAD_TOO_LARGE', { message: 'Assets are capped at 5MB.' })
     }
-    // Plan storage (Free 1 GB / Pro 100 GB) before writing to S3 so a rejected
+    // Plan storage (Free 1 GB / Pro 50 GB) before writing to S3 so a rejected
     // upload never leaves an orphan object.
     await ensureStorageRoom(context.user, bytes.length)
     const id = `a${crypto.randomUUID().replaceAll('-', '')}`

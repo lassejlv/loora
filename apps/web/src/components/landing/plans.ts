@@ -9,7 +9,7 @@ export const PLANS = [
     features: [
       '50 design files',
       '1 GB asset storage',
-      '200 MCP calls / week',
+      '100 MCP calls / week',
       '2 days of version history',
       '1 open branch per design',
     ],
@@ -25,7 +25,7 @@ export const PLANS = [
     summary: 'Everything in Free, at production limits.',
     features: [
       'Unlimited design files',
-      '100 GB asset storage',
+      '50 GB asset storage',
       '1,000,000 MCP calls / week',
       '90 days of version history',
       'Unlimited branches',
