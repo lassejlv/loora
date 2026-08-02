@@ -348,12 +348,24 @@ export function CanvasApp({
   if (loading || !activeId || !controller) {
     return (
       <main className="grid h-screen place-items-center bg-cx-canvas">
-        <div className="text-center">
-          <div className="mx-auto mb-3 size-5 animate-spin rounded-full border-2 border-cx-accent border-t-transparent" />
-          <p className="text-sm font-medium">{progress}</p>
-          <p className="mt-1 text-xs text-muted-foreground">
-            Preparing your structured document.
-          </p>
+        <div className="flex flex-col items-center gap-5">
+          <img
+            src="/logo-no-bg.png"
+            alt="Loora"
+            width={48}
+            height={48}
+            className="size-12"
+            draggable={false}
+          />
+          <div
+            className="h-0.5 w-32 overflow-hidden rounded-full bg-foreground/10"
+            role="progressbar"
+            aria-valuetext={progress}
+            aria-busy="true"
+          >
+            <div className="cx-load-bar h-full w-2/5 rounded-full bg-foreground/70" />
+          </div>
+          <p className="text-xs text-muted-foreground">{progress}</p>
         </div>
       </main>
     )

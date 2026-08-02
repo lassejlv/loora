@@ -275,6 +275,29 @@ body {
   }
 }
 
+/* Figma-style indeterminate load bar under the product mark. */
+.cx-load-bar {
+  animation: cx-load-bar 1.15s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+  will-change: transform;
+}
+
+@keyframes cx-load-bar {
+  0% {
+    transform: translateX(-120%);
+  }
+  100% {
+    transform: translateX(280%);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cx-load-bar {
+    animation: none;
+    width: 40%;
+    transform: none;
+  }
+}
+
 /* An external agent working in this document. The badge borrows the inverted
    tooltip material so it reads as chrome and never as part of the design. */
 .cx-agent-badge {
