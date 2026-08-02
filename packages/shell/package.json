@@ -8,6 +8,7 @@
     "./*": "./src/components/*.tsx"
   },
   "dependencies": {
+    "@better-auth/passkey": "1.6.25",
     "@loora/auth": "workspace:*",
     "@loora/billing": "workspace:*",
     "@loora/canvas": "workspace:*",

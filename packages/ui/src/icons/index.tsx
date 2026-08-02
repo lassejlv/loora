@@ -83,6 +83,7 @@ import {
   SentIcon as HugeSendIcon,
   Settings01Icon as HugeSettingsIcon,
   Share01Icon as HugeShareIcon,
+  ShieldKeyIcon as HugeShieldKeyIcon,
   SidebarBottomIcon as HugePanelBottomIcon,
   SlidersHorizontalIcon as HugeSlidersHorizontalIcon,
   SquareIcon as HugeSquareIcon,
@@ -248,6 +249,7 @@ export const SendIcon = createIcon(HugeSendIcon, 'SendIcon')
 export const SendToBackIcon = createIcon(HugeSendToBackIcon, 'SendToBackIcon')
 export const SettingsIcon = createIcon(HugeSettingsIcon, 'SettingsIcon')
 export const Share2Icon = createIcon(HugeShareIcon, 'Share2Icon')
+export const ShieldKeyIcon = createIcon(HugeShieldKeyIcon, 'ShieldKeyIcon')
 export const SlidersHorizontalIcon = createIcon(
   HugeSlidersHorizontalIcon,
   'SlidersHorizontalIcon',

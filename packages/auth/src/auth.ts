@@ -1,8 +1,10 @@
 import { betterAuth } from 'better-auth'
 import { APIError } from 'better-auth/api'
 import { drizzleAdapter } from 'better-auth/adapters/drizzle'
+import { passkey } from '@better-auth/passkey'
 import {
   bearer,
+  haveIBeenPwned,
   mcp,
   oAuthDiscoveryMetadata,
   oneTimeToken,
@@ -219,6 +221,11 @@ export const auth = betterAuth({
     // session. Only the hash is stored, so the row is worthless on its own.
     oneTimeToken({ expiresIn: 2, storeToken: 'hashed' }),
     tanstackStartCookies(),
+    haveIBeenPwned({
+      customPasswordCompromisedMessage:
+        'This password has appeared in a data breach. Please choose a different one.',
+    }),
+    passkey(),
   ],
 })
 

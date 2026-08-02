@@ -31,6 +31,7 @@ import { Route as AppAppearanceRouteImport } from './routes/app.appearance'
 import { Route as AppBillingRouteImport } from './routes/app.billing'
 import { Route as AppDesignRouteImport } from './routes/app.design'
 import { Route as AppIntegrationsRouteImport } from './routes/app.integrations'
+import { Route as AppSecurityRouteImport } from './routes/app.security'
 import { Route as CompareIndexRouteImport } from './routes/compare.index'
 import { Route as CompareSlugRouteImport } from './routes/compare.$slug'
 import { Route as DesignIdRouteImport } from './routes/design.$id'
@@ -164,6 +165,11 @@ const AppDesignRoute = AppDesignRouteImport.update({
 const AppIntegrationsRoute = AppIntegrationsRouteImport.update({
   id: '/app/integrations',
   path: '/app/integrations',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AppSecurityRoute = AppSecurityRouteImport.update({
+  id: '/app/security',
+  path: '/app/security',
   getParentRoute: () => rootRouteImport,
 } as any)
 const CompareIndexRoute = CompareIndexRouteImport.update({
@@ -305,6 +311,7 @@ export interface FileRoutesByFullPath {
   '/app/billing': typeof AppBillingRoute
   '/app/design': typeof AppDesignRoute
   '/app/integrations': typeof AppIntegrationsRoute
+  '/app/security': typeof AppSecurityRoute
   '/compare/$slug': typeof CompareSlugRoute
   '/design/$id': typeof DesignIdRoute
   '/desktop/auth': typeof DesktopAuthRoute
@@ -352,6 +359,7 @@ export interface FileRoutesByTo {
   '/app/billing': typeof AppBillingRoute
   '/app/design': typeof AppDesignRoute
   '/app/integrations': typeof AppIntegrationsRoute
+  '/app/security': typeof AppSecurityRoute
   '/compare/$slug': typeof CompareSlugRoute
   '/design/$id': typeof DesignIdRoute
   '/desktop/auth': typeof DesktopAuthRoute
@@ -400,6 +408,7 @@ export interface FileRoutesById {
   '/app/billing': typeof AppBillingRoute
   '/app/design': typeof AppDesignRoute
   '/app/integrations': typeof AppIntegrationsRoute
+  '/app/security': typeof AppSecurityRoute
   '/compare/$slug': typeof CompareSlugRoute
   '/design/$id': typeof DesignIdRoute
   '/desktop/auth': typeof DesktopAuthRoute
@@ -449,6 +458,7 @@ export interface FileRouteTypes {
     | '/app/billing'
     | '/app/design'
     | '/app/integrations'
+    | '/app/security'
     | '/compare/$slug'
     | '/design/$id'
     | '/desktop/auth'
@@ -496,6 +506,7 @@ export interface FileRouteTypes {
     | '/app/billing'
     | '/app/design'
     | '/app/integrations'
+    | '/app/security'
     | '/compare/$slug'
     | '/design/$id'
     | '/desktop/auth'
@@ -543,6 +554,7 @@ export interface FileRouteTypes {
     | '/app/billing'
     | '/app/design'
     | '/app/integrations'
+    | '/app/security'
     | '/compare/$slug'
     | '/design/$id'
     | '/desktop/auth'
@@ -591,6 +603,7 @@ export interface RootRouteChildren {
   AppBillingRoute: typeof AppBillingRoute
   AppDesignRoute: typeof AppDesignRoute
   AppIntegrationsRoute: typeof AppIntegrationsRoute
+  AppSecurityRoute: typeof AppSecurityRoute
   CompareSlugRoute: typeof CompareSlugRoute
   DesignIdRoute: typeof DesignIdRoute
   DesktopAuthRoute: typeof DesktopAuthRoute
@@ -769,6 +782,13 @@ declare module '@tanstack/react-router' {
       path: '/app/integrations'
       fullPath: '/app/integrations'
       preLoaderRoute: typeof AppIntegrationsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/app/security': {
+      id: '/app/security'
+      path: '/app/security'
+      fullPath: '/app/security'
+      preLoaderRoute: typeof AppSecurityRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/compare/': {
@@ -982,6 +1002,7 @@ const rootRouteChildren: RootRouteChildren = {
   AppBillingRoute: AppBillingRoute,
   AppDesignRoute: AppDesignRoute,
   AppIntegrationsRoute: AppIntegrationsRoute,
+  AppSecurityRoute: AppSecurityRoute,
   CompareSlugRoute: CompareSlugRoute,
   DesignIdRoute: DesignIdRoute,
   DesktopAuthRoute: DesktopAuthRoute,
@@ -1008,12 +1029,3 @@ const rootRouteChildren: RootRouteChildren = {
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
   ._addFileTypes<FileRouteTypes>()
-
-import type { getRouter } from './router.tsx'
-import type { createStart } from '@tanstack/react-start'
-declare module '@tanstack/react-start' {
-  interface Register {
-    ssr: true
-    router: Awaited<ReturnType<typeof getRouter>>
-  }
-}

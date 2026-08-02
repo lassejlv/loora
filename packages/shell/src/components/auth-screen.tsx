@@ -30,6 +30,7 @@ export function AuthScreen() {
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
   const [googleOAuthEnabled, setGoogleOAuthEnabled] = useState(false)
+  const [passkeySupported, setPasskeySupported] = useState(false)
 
   useEffect(() => {
     clearPendingLegalConsent()
@@ -40,6 +41,18 @@ export function AuthScreen() {
         if (!cancelled) setGoogleOAuthEnabled(config.googleOAuthEnabled)
       })
       .catch(() => {})
+    if (
+      typeof window !== 'undefined' &&
+      'PublicKeyCredential' in window &&
+      typeof PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable ===
+        'function'
+    ) {
+      PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable()
+        .then((available) => {
+          if (!cancelled) setPasskeySupported(available)
+        })
+        .catch(() => {})
+    }
     return () => {
       cancelled = true
     }
@@ -219,6 +232,30 @@ export function AuthScreen() {
                       <span className="text-xs text-muted-foreground">or</span>
                       <span className="h-px flex-1 bg-border" />
                     </div>
+                    {passkeySupported ? (
+                      <Button
+                        className="mb-2 w-full"
+                        disabled={pending}
+                        type="button"
+                        variant="outline"
+                        onClick={async () => {
+                          setPending(true)
+                          setError('')
+                          try {
+                            const result = await authClient.signIn.passkey()
+                            if (result.error) {
+                              setError(result.error.message ?? 'Passkey sign-in failed')
+                            }
+                          } catch {
+                            setError('Passkey sign-in failed')
+                          } finally {
+                            setPending(false)
+                          }
+                        }}
+                      >
+                        Continue with passkey
+                      </Button>
+                    ) : null}
                     <Button
                       className="w-full"
                       disabled={pending || (mode === 'sign-up' && !acceptedLegal)}
@@ -244,6 +281,36 @@ export function AuthScreen() {
                       }}
                     >
                       Continue with Google
+                    </Button>
+                  </>
+                ) : passkeySupported && !forgotPassword ? (
+                  <>
+                    <div className="my-4 flex items-center gap-3" aria-hidden="true">
+                      <span className="h-px flex-1 bg-border" />
+                      <span className="text-xs text-muted-foreground">or</span>
+                      <span className="h-px flex-1 bg-border" />
+                    </div>
+                    <Button
+                      className="w-full"
+                      disabled={pending}
+                      type="button"
+                      variant="outline"
+                      onClick={async () => {
+                        setPending(true)
+                        setError('')
+                        try {
+                          const result = await authClient.signIn.passkey()
+                          if (result.error) {
+                            setError(result.error.message ?? 'Passkey sign-in failed')
+                          }
+                        } catch {
+                          setError('Passkey sign-in failed')
+                        } finally {
+                          setPending(false)
+                        }
+                      }}
+                    >
+                      Continue with passkey
                     </Button>
                   </>
                 ) : null}

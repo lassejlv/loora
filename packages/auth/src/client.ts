@@ -4,6 +4,7 @@ import {
   oidcClient,
   oneTimeTokenClient,
 } from 'better-auth/client/plugins'
+import { passkeyClient } from '@better-auth/passkey/client'
 import { polarClient } from '@polar-sh/better-auth/client'
 import { apiOrigin } from '@loora/platform'
 import type { auth } from './auth'
@@ -21,5 +22,6 @@ export const authClient = createAuthClient({
     // oneTimeTokenClient mints the hand-off code the desktop app trades for a
     // session after signing in at loora.design.
     oneTimeTokenClient(),
+    passkeyClient(),
   ],
 })

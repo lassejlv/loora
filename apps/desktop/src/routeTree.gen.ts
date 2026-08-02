@@ -13,6 +13,7 @@ import { Route as IndexRouteImport } from './routes/index'
 import { Route as AppIndexRouteImport } from './routes/app.index'
 import { Route as AppAppearanceRouteImport } from './routes/app.appearance'
 import { Route as AppIntegrationsRouteImport } from './routes/app.integrations'
+import { Route as AppSecurityRouteImport } from './routes/app.security'
 import { Route as DesignIdRouteImport } from './routes/design.$id'
 import { Route as DesignIdBBranchIdRouteImport } from './routes/design.$id_.b.$branchId'
 
@@ -36,6 +37,11 @@ const AppIntegrationsRoute = AppIntegrationsRouteImport.update({
   path: '/app/integrations',
   getParentRoute: () => rootRouteImport,
 } as any)
+const AppSecurityRoute = AppSecurityRouteImport.update({
+  id: '/app/security',
+  path: '/app/security',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const DesignIdRoute = DesignIdRouteImport.update({
   id: '/design/$id',
   path: '/design/$id',
@@ -51,6 +57,7 @@ export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/app/appearance': typeof AppAppearanceRoute
   '/app/integrations': typeof AppIntegrationsRoute
+  '/app/security': typeof AppSecurityRoute
   '/design/$id': typeof DesignIdRoute
   '/app/': typeof AppIndexRoute
   '/design/$id/b/$branchId': typeof DesignIdBBranchIdRoute
@@ -59,6 +66,7 @@ export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/app/appearance': typeof AppAppearanceRoute
   '/app/integrations': typeof AppIntegrationsRoute
+  '/app/security': typeof AppSecurityRoute
   '/design/$id': typeof DesignIdRoute
   '/app': typeof AppIndexRoute
   '/design/$id/b/$branchId': typeof DesignIdBBranchIdRoute
@@ -68,6 +76,7 @@ export interface FileRoutesById {
   '/': typeof IndexRoute
   '/app/appearance': typeof AppAppearanceRoute
   '/app/integrations': typeof AppIntegrationsRoute
+  '/app/security': typeof AppSecurityRoute
   '/design/$id': typeof DesignIdRoute
   '/app/': typeof AppIndexRoute
   '/design/$id_/b/$branchId': typeof DesignIdBBranchIdRoute
@@ -78,6 +87,7 @@ export interface FileRouteTypes {
     | '/'
     | '/app/appearance'
     | '/app/integrations'
+    | '/app/security'
     | '/design/$id'
     | '/app/'
     | '/design/$id/b/$branchId'
@@ -86,6 +96,7 @@ export interface FileRouteTypes {
     | '/'
     | '/app/appearance'
     | '/app/integrations'
+    | '/app/security'
     | '/design/$id'
     | '/app'
     | '/design/$id/b/$branchId'
@@ -94,6 +105,7 @@ export interface FileRouteTypes {
     | '/'
     | '/app/appearance'
     | '/app/integrations'
+    | '/app/security'
     | '/design/$id'
     | '/app/'
     | '/design/$id_/b/$branchId'
@@ -103,6 +115,7 @@ export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AppAppearanceRoute: typeof AppAppearanceRoute
   AppIntegrationsRoute: typeof AppIntegrationsRoute
+  AppSecurityRoute: typeof AppSecurityRoute
   DesignIdRoute: typeof DesignIdRoute
   AppIndexRoute: typeof AppIndexRoute
   DesignIdBBranchIdRoute: typeof DesignIdBBranchIdRoute
@@ -138,6 +151,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppIntegrationsRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/app/security': {
+      id: '/app/security'
+      path: '/app/security'
+      fullPath: '/app/security'
+      preLoaderRoute: typeof AppSecurityRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/design/$id': {
       id: '/design/$id'
       path: '/design/$id'
@@ -159,6 +179,7 @@ const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AppAppearanceRoute: AppAppearanceRoute,
   AppIntegrationsRoute: AppIntegrationsRoute,
+  AppSecurityRoute: AppSecurityRoute,
   DesignIdRoute: DesignIdRoute,
   AppIndexRoute: AppIndexRoute,
   DesignIdBBranchIdRoute: DesignIdBBranchIdRoute,

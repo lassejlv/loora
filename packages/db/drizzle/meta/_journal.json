@@ -281,6 +281,13 @@
       "when": 1785698438635,
       "tag": "0039_fat_skullbuster",
       "breakpoints": true
+    },
+    {
+      "idx": 40,
+      "version": "7",
+      "when": 1785709115197,
+      "tag": "0040_lean_mantis",
+      "breakpoints": true
     }
   ]
 }

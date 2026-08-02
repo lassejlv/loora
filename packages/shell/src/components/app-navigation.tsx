@@ -8,6 +8,7 @@ import {
   LockIcon,
   LogOutIcon,
   SettingsIcon,
+  ShieldKeyIcon,
   SunIcon,
 } from '@loora/ui/icons'
 import {
@@ -24,6 +25,7 @@ export type AppSection =
   | 'appearance'
   | 'billing'
   | 'integrations'
+  | 'security'
   | 'admin'
 
 const navigation = [
@@ -31,6 +33,7 @@ const navigation = [
   { section: 'appearance', label: 'Appearance', to: '/app/appearance', icon: SunIcon },
   { section: 'billing', label: 'Billing', to: '/app/billing', icon: CreditCardIcon },
   { section: 'integrations', label: 'Integrations', to: '/app/integrations', icon: LinkIcon },
+  { section: 'security', label: 'Security', to: '/app/security', icon: ShieldKeyIcon },
 ] as const
 
 const adminNavigation = {
