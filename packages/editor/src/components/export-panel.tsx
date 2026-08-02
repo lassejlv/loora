@@ -485,6 +485,16 @@ export function CanvasExport({
         null,
     )
     setWidth(widths.at(-1)?.previewWidth ?? 1440)
+    // Preload publish eligibility so the Publish tab can appear for admins
+    // without requiring the user to first select a format they can't see.
+    void orpc.publish
+      .getHandle()
+      .then((result) => {
+        setSitesEnabled(result.sitesEnabled)
+        setPublishHandle(result.handle)
+        setHandleDraft(result.handle ?? '')
+      })
+      .catch(() => undefined)
   }, [open])
 
   useEffect(() => {
@@ -498,18 +508,20 @@ export function CanvasExport({
     let cancelled = false
     void (async () => {
       try {
-        const [handleState, sites] = await Promise.all([
-          orpc.publish.getHandle(),
-          orpc.publish.list({ designId: controller.target!.designId }),
-        ])
+        const sites = await orpc.publish.list({ designId: controller.target!.designId })
+        if (cancelled) return
+        setCustomDomainsAllowed(false)
+        setCustomDomainsEnabled(true)
+        setCustomDomainsConfigured(false)
+        setPublishedSites(sites)
+        // Refresh handle + domain eligibility in case it changed since open.
+        const handleState = await orpc.publish.getHandle()
         if (cancelled) return
         setPublishHandle(handleState.handle)
-        setSitesEnabled(handleState.sitesEnabled)
         setHandleDraft(handleState.handle ?? '')
         setCustomDomainsAllowed(handleState.customDomains.allowed)
         setCustomDomainsEnabled(handleState.customDomains.enabled)
         setCustomDomainsConfigured(handleState.customDomains.configured)
-        setPublishedSites(sites)
       } catch {
         if (!cancelled) {
           setError('Could not load publish status.')
