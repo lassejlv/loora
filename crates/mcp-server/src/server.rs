@@ -190,7 +190,10 @@ impl AppState {
             .json(&body)
             .send()
             .await
-            .map_err(|_| "Loora's MCP execution service is temporarily unavailable.".to_owned())?;
+            .map_err(|error| {
+                tracing::warn!(%error, "MCP internal executor request failed");
+                "Loora's MCP execution service is temporarily unavailable.".to_owned()
+            })?;
         let status = response.status();
         let value: Value = response.json().await.map_err(|_| {
             "Loora's MCP execution service returned an invalid response.".to_owned()

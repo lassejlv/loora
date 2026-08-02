@@ -31,7 +31,9 @@ export const databaseClient = new SQL({
   ),
   maxLifetime: integerEnvironment(
     'DATABASE_MAX_LIFETIME_SECONDS',
-    300,
+    // Bun terminates busy connections when maxLifetime elapses, rejecting
+    // in-flight queries instead of waiting for them to become idle.
+    0,
     0,
     86_400,
   ),
