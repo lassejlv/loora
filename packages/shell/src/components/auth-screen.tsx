@@ -38,7 +38,6 @@ export function AuthScreen() {
   const [passkeySupported, setPasskeySupported] = useState(false)
   const [twoFactorPending, setTwoFactorPending] = useState(false)
   const [twoFactorCode, setTwoFactorCode] = useState('')
-  const [twoFactorOtpSent, setTwoFactorOtpSent] = useState(false)
 
   useEffect(() => {
     clearPendingLegalConsent()
@@ -77,9 +76,7 @@ export function AuthScreen() {
                 </p>
                 <DialogTitle>Two-factor verification</DialogTitle>
                 <DialogDescription>
-                  {twoFactorOtpSent
-                    ? 'Enter the code sent to your email.'
-                    : 'Enter the code from your authenticator app.'}
+                  Enter the code from your authenticator app.
                 </DialogDescription>
               </DialogHeader>
               <DialogPanel className="pt-1">
@@ -133,31 +130,10 @@ export function AuthScreen() {
                     <button
                       type="button"
                       className="text-xs text-muted-foreground underline underline-offset-2 hover:text-foreground"
-                      onClick={async () => {
-                        setError('')
-                        try {
-                          const { data, error: sendError } =
-                            await authClient.twoFactor.sendOtp()
-                          if (sendError) {
-                            setError(sendError.message ?? 'Could not send code.')
-                          } else if (data) {
-                            setTwoFactorOtpSent(true)
-                          }
-                        } catch {
-                          setError('Could not send code.')
-                        }
-                      }}
-                    >
-                      Send code to email
-                    </button>
-                    <button
-                      type="button"
-                      className="text-xs text-muted-foreground underline underline-offset-2 hover:text-foreground"
                       onClick={() => {
                         setTwoFactorPending(false)
                         setTwoFactorCode('')
                         setError('')
-                        setTwoFactorOtpSent(false)
                       }}
                     >
                       Back
