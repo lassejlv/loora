@@ -47,6 +47,7 @@ import {
   DialogPopup,
   DialogTitle,
 } from '@loora/ui/dialog'
+import { Input } from '@loora/ui/input'
 import { Spinner } from '@loora/ui/spinner'
 import { Switch } from '@loora/ui/switch'
 import { cn } from '@loora/ui/utils'
@@ -397,6 +398,8 @@ export function CanvasExport({
   const [handoff, setHandoff] = useState<{ url: string; expiresAt: number } | null>(null)
   const [handoffBusy, setHandoffBusy] = useState(false)
   const [publishHandle, setPublishHandle] = useState<string | null>(null)
+  const [handleDraft, setHandleDraft] = useState('')
+  const [handleBusy, setHandleBusy] = useState(false)
   const [publishedSites, setPublishedSites] = useState<PublishedSiteSummary[]>(
     [],
   )
@@ -438,6 +441,7 @@ export function CanvasExport({
         ])
         if (cancelled) return
         setPublishHandle(handleState.handle)
+        setHandleDraft(handleState.handle ?? '')
         setPublishedSites(sites)
       } catch {
         if (!cancelled) {
@@ -656,6 +660,24 @@ export function CanvasExport({
       setError('Could not create the handoff link. Try again.')
     } finally {
       setHandoffBusy(false)
+    }
+  }
+
+  const savePublishHandle = async () => {
+    setHandleBusy(true)
+    setError(null)
+    try {
+      const result = await orpc.publish.setHandle({ handle: handleDraft })
+      setPublishHandle(result.handle)
+      setHandleDraft(result.handle)
+    } catch (cause) {
+      setError(
+        cause instanceof Error
+          ? cause.message
+          : 'Could not save that handle. Try another.',
+      )
+    } finally {
+      setHandleBusy(false)
     }
   }
 
@@ -1012,15 +1034,39 @@ export function CanvasExport({
               {format === 'publish' ? (
                 <div className="space-y-3 p-4">
                   {!publishHandle ? (
-                    <div className="grid h-40 place-items-center px-6 text-center">
-                      <p className="text-xs text-muted-foreground">
-                        Set a public handle in Settings before publishing. Sites
-                        are served at{' '}
+                    <div className="flex h-40 flex-col items-center justify-center gap-3 px-6">
+                      <p className="text-center text-xs text-muted-foreground">
+                        Choose a public handle. Sites are served at{' '}
                         <span className="font-mono">
-                          /sites/&lt;handle&gt;/&lt;slug&gt;
+                          /sites/&lt;handle&gt;/&lt;id&gt;
                         </span>
                         .
                       </p>
+                      <div className="flex w-full max-w-xs items-center gap-2">
+                        <Input
+                          value={handleDraft}
+                          placeholder="your-name"
+                          aria-label="Public handle"
+                          className="font-mono"
+                          disabled={handleBusy}
+                          onChange={(event) =>
+                            setHandleDraft(event.target.value)
+                          }
+                          onKeyDown={(event) => {
+                            if (event.key === 'Enter') {
+                              event.preventDefault()
+                              void savePublishHandle()
+                            }
+                          }}
+                        />
+                        <Button
+                          size="sm"
+                          disabled={handleBusy || handleDraft.trim().length < 3}
+                          onClick={() => void savePublishHandle()}
+                        >
+                          {handleBusy ? <Spinner /> : 'Save'}
+                        </Button>
+                      </div>
                     </div>
                   ) : publishedForPage && publishedUrl ? (
                     <>

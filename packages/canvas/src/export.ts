@@ -13,6 +13,7 @@ import {
   resolveNodeAtWidth,
   stateDefinitionsForNode,
 } from './model'
+import { vendorFontFaceCss } from './export-fonts'
 
 export interface CanvasExportOptions {
   pageId?: NodeId
@@ -20,6 +21,12 @@ export interface CanvasExportOptions {
   title?: string
   assetUrl?: (url: string) => string
   width?: number
+  /**
+   * Absolute origin that hosts `/vendor/fonts/*.woff2` (e.g. https://loora.design).
+   * When omitted, faces use same-origin `/vendor/fonts/…` paths — correct for
+   * published sites served from the app host.
+   */
+  fontOrigin?: string
 }
 
 export interface CompiledCanvas {
@@ -1024,6 +1031,23 @@ document.querySelectorAll('[data-loora-states]').forEach(function(scope){stateFo
   return prepared.compiled
 }
 
+function collectExportFontFamilies(prepared: PreparedCanvasExportState) {
+  const families = new Set<string>()
+  const addFamily = (family: string | undefined) => {
+    if (family?.trim()) families.add(family)
+  }
+  for (const { node, rendered } of prepared.occurrences) {
+    addFamily(rendered.style?.typography?.family)
+    addFamily(node.style?.typography?.family)
+    if (node.responsive) {
+      for (const patch of Object.values(node.responsive)) {
+        addFamily(patch.style?.typography?.family)
+      }
+    }
+  }
+  return families
+}
+
 export function compileStandaloneHtml(prepared: PreparedCanvasExport): string
 export function compileStandaloneHtml(
   document: CanvasDocument,
@@ -1039,15 +1063,19 @@ export function compileStandaloneHtml(
   const title = escapeHtml(
     prepared.options.title ?? prepared.document.name,
   )
+  const fontCss = vendorFontFaceCss(
+    collectExportFontFamilies(prepared),
+    prepared.options.fontOrigin,
+  )
   prepared.standaloneHtml = `<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="referrer" content="no-referrer">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data: blob: https:; style-src 'unsafe-inline'; script-src 'unsafe-inline';">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data: blob: https:; style-src 'unsafe-inline'; script-src 'unsafe-inline'; font-src 'self' https: data:">
 <title>${title}</title>
-<style>html,body{margin:0;min-height:100%}${compiled.css}</style>
+<style>html,body{margin:0;min-height:100%}${fontCss}${compiled.css}</style>
 </head>
 <body>${compiled.html}<script>${compiled.runtime}<\/script></body>
 </html>`

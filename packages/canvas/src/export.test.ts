@@ -46,6 +46,33 @@ describe('Canvas exports', () => {
     expect(first).toContain('&lt;script&gt;alert(1)&lt;/script&gt;')
     expect(first).not.toContain('<script>alert(1)</script>')
     expect(first).toContain('Content-Security-Policy')
+    expect(first).toContain("font-src 'self' https: data:")
+  })
+
+  it('embeds @font-face rules for used vendor typefaces', () => {
+    const document = fixture()
+    document.nodes.headline.style.typography!.family = 'Playfair Display'
+    document.nodes.sub = createTextNode('Body', {
+      id: 'sub',
+      parentId: 'hero',
+      order: 2048,
+    })
+    document.nodes.sub.style.typography!.family =
+      '"Space Grotesk", system-ui, sans-serif'
+
+    const html = compileStandaloneHtml(document)
+    expect(html).toContain("font-family:'Playfair Display'")
+    expect(html).toContain('/vendor/fonts/playfair-display-latin.woff2')
+    expect(html).toContain('/vendor/fonts/space-grotesk-latin.woff2')
+    expect(html).not.toContain('/vendor/fonts/inter-latin.woff2')
+    expect(html).not.toContain('/vendor/fonts/archivo-latin.woff2')
+
+    const absolute = compileStandaloneHtml(document, {
+      fontOrigin: 'https://loora.design/',
+    })
+    expect(absolute).toContain(
+      'https://loora.design/vendor/fonts/playfair-display-latin.woff2',
+    )
   })
 
   it('exports a directly addressed node for expiring legacy links', () => {

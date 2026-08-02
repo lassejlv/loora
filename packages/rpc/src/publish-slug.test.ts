@@ -1,10 +1,9 @@
 import { describe, expect, it } from 'vitest'
 import {
   assertHandle,
-  assertSlug,
   isValidHandle,
   isValidSlug,
-  normalizeSlug,
+  newPublishSiteId,
   RESERVED_HANDLES,
   sitePublicPath,
   siteStorageKey,
@@ -18,14 +17,18 @@ describe('publish slug helpers', () => {
     expect(() => assertHandle('ab')).toThrow(/3–32/)
   })
 
-  it('slugifies page titles', () => {
-    expect(normalizeSlug('Hello World!')).toBe('hello-world')
-    expect(assertSlug('Pricing Page')).toBe('pricing-page')
-    expect(isValidSlug('---')).toBe(false)
+  it('mints a random public site id', () => {
+    const first = newPublishSiteId()
+    const second = newPublishSiteId()
+    expect(first).toMatch(/^[0-9a-f]{32}$/)
+    expect(second).toMatch(/^[0-9a-f]{32}$/)
+    expect(first).not.toBe(second)
+    expect(isValidSlug(first)).toBe(true)
   })
 
   it('builds storage keys and public paths', () => {
-    expect(siteStorageKey('lasse', 'home')).toBe('sites/lasse/home/index.html')
-    expect(sitePublicPath('lasse', 'home')).toBe('/sites/lasse/home')
+    const id = 'a'.repeat(32)
+    expect(siteStorageKey('lasse', id)).toBe(`sites/lasse/${id}/index.html`)
+    expect(sitePublicPath('lasse', id)).toBe(`/sites/lasse/${id}`)
   })
 })

@@ -1,6 +1,7 @@
 /**
- * Handle and slug rules for `/sites/<handle>/<slug>`. Pure helpers so the
- * public route, RPC, and tests share one definition.
+ * Handle and site-id rules for `/sites/<handle>/<id>`. Pure helpers so the
+ * public route, RPC, and tests share one definition. The second path segment is
+ * a random id minted on first publish, not a human slug.
  */
 
 const HANDLE_RE = /^[a-z0-9](?:[a-z0-9-]{1,30}[a-z0-9])?$/
@@ -77,16 +78,21 @@ export function assertSlug(value: string) {
   const slug = normalizeSlug(value)
   if (!isValidSlug(slug)) {
     throw new Error(
-      'Slug must be 1–64 characters: lowercase letters, numbers, and hyphens.',
+      'Site id must be 1–64 characters: lowercase letters, numbers, and hyphens.',
     )
   }
   return slug
 }
 
-export function siteStorageKey(handle: string, slug: string) {
-  return `sites/${handle}/${slug}/index.html`
+/** Random public id for a newly published page (`/sites/<handle>/<id>`). */
+export function newPublishSiteId() {
+  return crypto.randomUUID().replaceAll('-', '')
 }
 
-export function sitePublicPath(handle: string, slug: string) {
-  return `/sites/${handle}/${slug}`
+export function siteStorageKey(handle: string, siteId: string) {
+  return `sites/${handle}/${siteId}/index.html`
+}
+
+export function sitePublicPath(handle: string, siteId: string) {
+  return `/sites/${handle}/${siteId}`
 }

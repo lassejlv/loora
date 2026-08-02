@@ -13,9 +13,9 @@ import type { CanvasDocument } from '@loora/canvas/model'
 import { assetIdFromSrc } from './asset-url'
 import {
   assertHandle,
-  assertSlug,
   normalizeHandle,
   normalizeSlug,
+  newPublishSiteId,
   sitePublicPath,
   siteStorageKey,
 } from './publish-slug'
@@ -239,7 +239,6 @@ export const publishPage = protectedProcedure
     z.object({
       designId: z.string().min(1).max(128),
       pageId: z.string().min(1).max(128),
-      slug: z.string().min(1).max(64).optional(),
     }),
   )
   .handler(async ({ context, input }) => {
@@ -296,15 +295,6 @@ export const publishPage = protectedProcedure
       })
     }
 
-    let slug: string
-    try {
-      slug = assertSlug(input.slug ?? (page.name || row.name || 'page'))
-    } catch (cause) {
-      throw new ORPCError('BAD_REQUEST', {
-        message: cause instanceof Error ? cause.message : 'Invalid slug.',
-      })
-    }
-
     const [existingForPage] = await db
       .select()
       .from(publishedSite)
@@ -316,23 +306,8 @@ export const publishPage = protectedProcedure
       )
       .limit(1)
 
-    // Keep the slug on republish unless the caller asked for a new one.
-    if (existingForPage && !input.slug) {
-      slug = existingForPage.slug
-    }
-
-    const [slugTaken] = await db
-      .select({ id: publishedSite.id, pageId: publishedSite.pageId })
-      .from(publishedSite)
-      .where(
-        and(eq(publishedSite.handle, handle), eq(publishedSite.slug, slug)),
-      )
-      .limit(1)
-    if (slugTaken && slugTaken.pageId !== input.pageId) {
-      throw new ORPCError('CONFLICT', {
-        message: 'That slug is already used by another published page.',
-      })
-    }
+    // First publish mints a random public id; republish keeps it stable.
+    const slug = existingForPage?.slug ?? newPublishSiteId()
 
     const assetMap = await resolvePublishAssetMap(
       context.user.id,

@@ -70,7 +70,7 @@ function PublicHandleSection() {
         <h2 className="text-sm font-semibold">Public handle</h2>
         <p className="mt-1 text-xs text-muted-foreground">
           Used for published sites at{' '}
-          <span className="font-mono">/sites/&lt;handle&gt;/…</span>
+          <span className="font-mono">/sites/&lt;handle&gt;/&lt;id&gt;</span>
         </p>
       </div>
       <div className="flex items-center gap-2">
