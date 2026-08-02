@@ -156,8 +156,9 @@ impl AppState {
             config.auth_timeout_ms,
             config.auth_cache_ttl_ms,
         );
-        let tools: Value = serde_json::from_str(TOOLS_JSON).expect("valid embedded MCP tools");
-        let schemas = tools
+        let validation_tools: Value =
+            serde_json::from_str(TOOLS_JSON).expect("valid embedded MCP tools");
+        let schemas = validation_tools
             .as_array()
             .expect("tool manifest array")
             .iter()
@@ -168,6 +169,8 @@ impl AppState {
                 ))
             })
             .collect();
+        let mut tools = validation_tools;
+        normalize_advertised_schemas(&mut tools);
         let rates = RateLimiter::new(config.rate_limit_redis_url.as_deref());
         Ok(Arc::new(Self {
             config,
@@ -213,6 +216,35 @@ impl AppState {
         self.rates
             .check(bucket, identity, limit, Duration::from_secs(60))
             .await
+    }
+}
+
+// Codex models array `items` as one schema and drops tools that use Draft 7's
+// tuple form. Advertise the tuple's possible item shapes while validating calls
+// against the original schema retained in `AppState::schemas`.
+fn normalize_advertised_schemas(value: &mut Value) {
+    match value {
+        Value::Array(values) => {
+            for value in values {
+                normalize_advertised_schemas(value);
+            }
+        }
+        Value::Object(map) => {
+            for value in map.values_mut() {
+                normalize_advertised_schemas(value);
+            }
+            let Some(Value::Array(tuple_items)) = map.get_mut("items") else {
+                return;
+            };
+            let mut variants = Vec::new();
+            for item in std::mem::take(tuple_items) {
+                if !variants.contains(&item) {
+                    variants.push(item);
+                }
+            }
+            map.insert("items".to_owned(), json!({ "anyOf": variants }));
+        }
+        _ => {}
     }
 }
 
@@ -505,6 +537,50 @@ mod tests {
         assert_eq!(names.first(), Some(&"getUsage"));
         assert!(names.contains(&"getScreenshot"));
         assert_eq!(names.last(), Some(&"listAssets"));
+    }
+
+    #[tokio::test]
+    async fn advertises_codex_compatible_arrays_without_weakening_validation_schemas() {
+        let state = AppState::new(Config {
+            port: 4100,
+            public_url: "http://localhost:4100".into(),
+            auth_origin: "http://localhost:3000".into(),
+            auth_timeout_ms: 5_000,
+            auth_cache_ttl_ms: 60_000,
+            internal_api_url: "http://localhost:3000/api/internal/mcp".into(),
+            internal_token: "shared-secret".into(),
+            rate_limit_redis_url: None,
+        })
+        .await
+        .unwrap();
+        let radius_items = "/definitions/CanvasStylePatch/properties/radius/anyOf/1/items";
+
+        assert!(state.schemas["createPage"]
+            .pointer(radius_items)
+            .unwrap()
+            .is_array());
+        assert!(state
+            .tools
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|tool| tool["name"] == "createPage")
+            .unwrap()["inputSchema"]
+            .pointer(radius_items)
+            .unwrap()["anyOf"]
+            .is_array());
+        assert!(!contains_tuple_items(&state.tools));
+    }
+
+    fn contains_tuple_items(value: &Value) -> bool {
+        match value {
+            Value::Array(values) => values.iter().any(contains_tuple_items),
+            Value::Object(map) => {
+                matches!(map.get("items"), Some(Value::Array(_)))
+                    || map.values().any(contains_tuple_items)
+            }
+            _ => false,
+        }
     }
 
     #[test]
