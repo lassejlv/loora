@@ -11,6 +11,7 @@
     "preview": "vite preview",
     "start": "bun --env-file=../../.env run .output/server/index.mjs",
     "benchmark-api": "bun --env-file=../../.env run scripts/benchmark-api.ts",
+    "indexnow": "bun run scripts/indexnow.ts",
     "test": "bun run --cwd ../.. test apps/web",
     "generate-routes": "tsr generate"
   },

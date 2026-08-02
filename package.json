@@ -22,6 +22,7 @@
     "build:desktop": "bun run --cwd apps/desktop build",
     "check:desktop": "bun run --cwd apps/desktop check",
     "benchmark-api": "bun run --cwd apps/web benchmark-api",
+    "seo:indexnow": "bun run --cwd apps/web indexnow",
     "docs:dev": "bun run --cwd apps/docs dev",
     "docs:build": "bun run --cwd apps/docs build",
     "preview": "bun run --cwd apps/web preview",
