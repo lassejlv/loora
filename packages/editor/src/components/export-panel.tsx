@@ -10,6 +10,7 @@ import {
   CheckIcon,
   DownloadIcon,
   EyeIcon,
+  Globe2Icon,
   Link2Icon,
 } from '@loora/ui/icons'
 import {
@@ -58,7 +59,20 @@ type ExportFormat =
   | 'tailwind'
   | 'json'
   | 'handoff'
+  | 'publish'
 type ExportScope = 'canvas' | 'page' | 'selection'
+
+type PublishedSiteSummary = {
+  id: string
+  designId: string
+  pageId: string
+  handle: string
+  slug: string
+  title: string
+  path: string
+  publishedAt: number
+  updatedAt: number
+}
 
 const FORMATS: {
   id: ExportFormat
@@ -95,6 +109,12 @@ const FORMATS: {
     extension: 'JSON',
     name: 'Canvas document',
     description: 'The structured source of truth',
+  },
+  {
+    id: 'publish',
+    extension: 'SITE',
+    name: 'Publish',
+    description: 'A public snapshot at loora.design/sites/…',
   },
   {
     id: 'handoff',
@@ -376,6 +396,11 @@ export function CanvasExport({
   const [dropped, setDropped] = useState<string[]>([])
   const [handoff, setHandoff] = useState<{ url: string; expiresAt: number } | null>(null)
   const [handoffBusy, setHandoffBusy] = useState(false)
+  const [publishHandle, setPublishHandle] = useState<string | null>(null)
+  const [publishedSites, setPublishedSites] = useState<PublishedSiteSummary[]>(
+    [],
+  )
+  const [publishBusy, setPublishBusy] = useState(false)
   const [copied, setCopied] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -396,11 +421,46 @@ export function CanvasExport({
     setWidth(widths.at(-1)?.previewWidth ?? 1440)
   }, [open])
 
+  useEffect(() => {
+    if (!open || format !== 'publish') return
+    setScope('page')
+    if (!pageId && pages[0]) setPageId(pages[0].id)
+  }, [open, format, pageId, pages])
+
+  useEffect(() => {
+    if (!open || format !== 'publish' || !controller.target) return
+    let cancelled = false
+    void (async () => {
+      try {
+        const [handleState, sites] = await Promise.all([
+          orpc.publish.getHandle(),
+          orpc.publish.list({ designId: controller.target!.designId }),
+        ])
+        if (cancelled) return
+        setPublishHandle(handleState.handle)
+        setPublishedSites(sites)
+      } catch {
+        if (!cancelled) {
+          setError('Could not load publish status.')
+        }
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [open, format, controller.target])
+
   const target = useMemo(
     () => exportTarget(document, scope, pageId, selectedRef),
     [document, scope, pageId, selectedRef],
   )
-  const scoped = format !== 'json' && format !== 'handoff'
+  const scoped =
+    format !== 'json' && format !== 'handoff' && format !== 'publish'
+  const publishedForPage =
+    publishedSites.find((site) => site.pageId === pageId) ?? null
+  const publishedUrl = publishedForPage
+    ? appUrl(publishedForPage.path)
+    : null
   const options = useMemo<CanvasExportOptions>(
     () => ({
       ...target.options,
@@ -441,7 +501,9 @@ export function CanvasExport({
   }, [open, embed, sourceKey])
 
   const webExportEnabled =
-    format === 'html' || format === 'jsx' || format === 'tailwind'
+    format === 'html' ||
+    format === 'jsx' ||
+    format === 'tailwind'
   const preparedWebExport = useMemo(() => {
     if (!open || !webExportEnabled) return null
     try {
@@ -491,7 +553,14 @@ export function CanvasExport({
   }, [preparedWebExport, format])
 
   const compiled = useMemo(() => {
-    if (!open || format === 'png' || format === 'handoff') return null
+    if (
+      !open ||
+      format === 'png' ||
+      format === 'handoff' ||
+      format === 'publish'
+    ) {
+      return null
+    }
     if (format !== 'json') return webCompiled
     try {
       return {
@@ -590,6 +659,54 @@ export function CanvasExport({
     }
   }
 
+  const publishCurrentPage = async () => {
+    if (!controller.target || !pageId) return
+    setPublishBusy(true)
+    setError(null)
+    try {
+      await controller.flush?.()
+      const site = await orpc.publish.publish({
+        designId: controller.target.designId,
+        pageId,
+      })
+      setPublishedSites((current) => {
+        const rest = current.filter((entry) => entry.pageId !== site.pageId)
+        return [...rest, site]
+      })
+    } catch (cause) {
+      setError(
+        cause instanceof Error
+          ? cause.message
+          : 'Could not publish this page. Try again.',
+      )
+    } finally {
+      setPublishBusy(false)
+    }
+  }
+
+  const unpublishCurrentPage = async () => {
+    if (!controller.target || !pageId) return
+    setPublishBusy(true)
+    setError(null)
+    try {
+      await orpc.publish.unpublish({
+        designId: controller.target.designId,
+        pageId,
+      })
+      setPublishedSites((current) =>
+        current.filter((entry) => entry.pageId !== pageId),
+      )
+    } catch (cause) {
+      setError(
+        cause instanceof Error
+          ? cause.message
+          : 'Could not unpublish this page. Try again.',
+      )
+    } finally {
+      setPublishBusy(false)
+    }
+  }
+
   const flash = () => {
     setCopied(true)
     window.setTimeout(() => setCopied(false), 1800)
@@ -598,7 +715,10 @@ export function CanvasExport({
   const copy = async () => {
     setError(null)
     try {
-      if (format === 'handoff') {
+      if (format === 'publish') {
+        if (!publishedUrl) return
+        await copyText(publishedUrl)
+      } else if (format === 'handoff') {
         await copyText(handoffPrompt)
       } else if (format === 'png') {
         if (!png) return
@@ -645,11 +765,13 @@ export function CanvasExport({
           : `${pages.length} ${pages.length === 1 ? 'Page' : 'Pages'}`
 
   const canCopy =
-    format === 'handoff'
-      ? Boolean(handoff)
-      : format === 'png'
-        ? Boolean(png) && typeof ClipboardItem !== 'undefined'
-        : Boolean(compiled?.text)
+    format === 'publish'
+      ? Boolean(publishedUrl)
+      : format === 'handoff'
+        ? Boolean(handoff)
+        : format === 'png'
+          ? Boolean(png) && typeof ClipboardItem !== 'undefined'
+          : Boolean(compiled?.text)
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -684,51 +806,77 @@ export function CanvasExport({
 
             <div className="grid shrink-0 gap-3 border-b p-3 sm:grid-cols-2">
               <Row label="What">
-                <div className="flex rounded-md border bg-background p-0.5">
-                  <ScopeButton
-                    active={scoped && scope === 'canvas'}
-                    disabled={!scoped}
-                    onClick={() => setScope('canvas')}
-                  >
-                    Canvas
-                  </ScopeButton>
-                  <ScopeButton
-                    active={scoped && scope === 'page'}
-                    disabled={!scoped || pages.length === 0}
-                    onClick={() => setScope('page')}
-                  >
-                    Page
-                  </ScopeButton>
-                  <ScopeButton
-                    active={scoped && scope === 'selection'}
-                    disabled={!scoped || !selectedRef}
-                    title={
-                      selectedRef ? undefined : 'Select one node on the canvas'
-                    }
-                    onClick={() => setScope('selection')}
-                  >
-                    Selection
-                  </ScopeButton>
-                </div>
-                {scoped && scope === 'page' && pages.length > 1 ? (
-                  <select
-                    aria-label="Page"
-                    value={pageId ?? ''}
-                    className="h-7 w-full rounded-md border bg-background px-1.5 text-xs outline-none"
-                    onChange={(event) => setPageId(event.target.value)}
-                  >
-                    {pages.map((page) => (
-                      <option key={page.id} value={page.id}>
-                        {page.name}
-                      </option>
-                    ))}
-                  </select>
-                ) : null}
-                <p className="text-xs text-muted-foreground">
-                  {scopeLabel}
-                  {scoped ? ` · ${nodeCount} nodes` : null}
-                  {byteSize > 0 ? ` · ${formatBytes(byteSize)}` : null}
-                </p>
+                {format === 'publish' ? (
+                  <>
+                    {pages.length > 1 ? (
+                      <select
+                        aria-label="Page"
+                        value={pageId ?? ''}
+                        className="h-7 w-full rounded-md border bg-background px-1.5 text-xs outline-none"
+                        onChange={(event) => setPageId(event.target.value)}
+                      >
+                        {pages.map((page) => (
+                          <option key={page.id} value={page.id}>
+                            {page.name}
+                          </option>
+                        ))}
+                      </select>
+                    ) : null}
+                    <p className="text-xs text-muted-foreground">
+                      Publishes a frozen HTML snapshot of one Page.
+                    </p>
+                  </>
+                ) : (
+                  <>
+                    <div className="flex rounded-md border bg-background p-0.5">
+                      <ScopeButton
+                        active={scoped && scope === 'canvas'}
+                        disabled={!scoped}
+                        onClick={() => setScope('canvas')}
+                      >
+                        Canvas
+                      </ScopeButton>
+                      <ScopeButton
+                        active={scoped && scope === 'page'}
+                        disabled={!scoped || pages.length === 0}
+                        onClick={() => setScope('page')}
+                      >
+                        Page
+                      </ScopeButton>
+                      <ScopeButton
+                        active={scoped && scope === 'selection'}
+                        disabled={!scoped || !selectedRef}
+                        title={
+                          selectedRef
+                            ? undefined
+                            : 'Select one node on the canvas'
+                        }
+                        onClick={() => setScope('selection')}
+                      >
+                        Selection
+                      </ScopeButton>
+                    </div>
+                    {scoped && scope === 'page' && pages.length > 1 ? (
+                      <select
+                        aria-label="Page"
+                        value={pageId ?? ''}
+                        className="h-7 w-full rounded-md border bg-background px-1.5 text-xs outline-none"
+                        onChange={(event) => setPageId(event.target.value)}
+                      >
+                        {pages.map((page) => (
+                          <option key={page.id} value={page.id}>
+                            {page.name}
+                          </option>
+                        ))}
+                      </select>
+                    ) : null}
+                    <p className="text-xs text-muted-foreground">
+                      {scopeLabel}
+                      {scoped ? ` · ${nodeCount} nodes` : null}
+                      {byteSize > 0 ? ` · ${formatBytes(byteSize)}` : null}
+                    </p>
+                  </>
+                )}
               </Row>
 
               {format === 'html' ||
@@ -824,6 +972,10 @@ export function CanvasExport({
                 <p className="px-1 text-xs text-muted-foreground">
                   A private, expiring link to this document and its assets.
                 </p>
+              ) : format === 'publish' ? (
+                <p className="px-1 text-xs text-muted-foreground">
+                  A public HTML snapshot. Republish to update it.
+                </p>
               ) : (
                 <>
                   <Button
@@ -857,7 +1009,47 @@ export function CanvasExport({
             </div>
 
             <div ref={preview.ref} className="h-56 shrink-0 overflow-auto bg-cx-canvas">
-              {format === 'handoff' ? (
+              {format === 'publish' ? (
+                <div className="space-y-3 p-4">
+                  {!publishHandle ? (
+                    <div className="grid h-40 place-items-center px-6 text-center">
+                      <p className="text-xs text-muted-foreground">
+                        Set a public handle in Settings before publishing. Sites
+                        are served at{' '}
+                        <span className="font-mono">
+                          /sites/&lt;handle&gt;/&lt;slug&gt;
+                        </span>
+                        .
+                      </p>
+                    </div>
+                  ) : publishedForPage && publishedUrl ? (
+                    <>
+                      <input
+                        readOnly
+                        value={publishedUrl}
+                        aria-label="Published site URL"
+                        className="h-9 w-full rounded-lg border bg-background px-3 font-mono text-xs outline-none"
+                        onFocus={(event) => event.currentTarget.select()}
+                      />
+                      <p className="text-xs text-muted-foreground">
+                        Last published{' '}
+                        {new Date(publishedForPage.updatedAt).toLocaleString()}.
+                        Visitors see this snapshot until you republish.
+                      </p>
+                    </>
+                  ) : (
+                    <div className="grid h-40 place-items-center px-6 text-center">
+                      <p className="text-xs text-muted-foreground">
+                        Publish this Page to{' '}
+                        <span className="font-mono">
+                          /sites/{publishHandle}/…
+                        </span>
+                        .
+                      </p>
+                    </div>
+                  )}
+                </div>
+              ) : format === 'handoff' ? (
                 <div className="space-y-3 p-4">
                   {handoff ? (
                     <>
@@ -956,20 +1148,78 @@ export function CanvasExport({
                 </p>
               ) : (
                 <p className="min-w-0 flex-1 text-xs text-muted-foreground">
-                  {format === 'handoff'
-                    ? 'The prompt points an agent at the document itself.'
-                    : `Saved as ${safeExportName(
-                        format === 'json' ? document.name : target.name,
-                        format === 'jsx' || format === 'tailwind'
-                          ? 'jsx'
-                          : format,
-                      )}`}
+                  {format === 'publish'
+                    ? publishedUrl
+                      ? 'Anyone with the link can view the snapshot.'
+                      : 'HTML is uploaded to storage; nothing is stored in the database.'
+                    : format === 'handoff'
+                      ? 'The prompt points an agent at the document itself.'
+                      : `Saved as ${safeExportName(
+                          format === 'json' ? document.name : target.name,
+                          format === 'jsx' || format === 'tailwind'
+                            ? 'jsx'
+                            : format,
+                        )}`}
                 </p>
               )}
               <Button variant="outline" onClick={() => onOpenChange(false)}>
                 Close
               </Button>
-              {format === 'handoff' ? (
+              {format === 'publish' ? (
+                <>
+                  {publishedForPage ? (
+                    <Button
+                      variant="outline"
+                      disabled={publishBusy || !controller.target || !pageId}
+                      onClick={() => void unpublishCurrentPage()}
+                    >
+                      Unpublish
+                    </Button>
+                  ) : null}
+                  {publishedForPage ? (
+                    <Button
+                      variant="outline"
+                      disabled={
+                        publishBusy ||
+                        !controller.target ||
+                        !pageId ||
+                        Boolean(controller.target.draftId)
+                      }
+                      onClick={() => void publishCurrentPage()}
+                    >
+                      {publishBusy ? <Spinner /> : <Globe2Icon />}
+                      Republish
+                    </Button>
+                  ) : null}
+                  <Button
+                    disabled={
+                      publishBusy ||
+                      !controller.target ||
+                      !pageId ||
+                      !publishHandle ||
+                      Boolean(controller.target.draftId) ||
+                      (Boolean(publishedUrl) && !canCopy)
+                    }
+                    title={
+                      controller.target?.draftId
+                        ? 'Publish from Main, not a branch'
+                        : undefined
+                    }
+                    onClick={() =>
+                      void (publishedUrl ? copy() : publishCurrentPage())
+                    }
+                  >
+                    {publishBusy ? (
+                      <Spinner />
+                    ) : publishedUrl ? (
+                      <ClipboardIcon />
+                    ) : (
+                      <Globe2Icon />
+                    )}
+                    {publishedUrl ? (copied ? 'Copied' : 'Copy link') : 'Publish'}
+                  </Button>
+                </>
+              ) : format === 'handoff' ? (
                 <Button
                   disabled={handoffBusy || !controller.target}
                   onClick={() => void (handoff ? copy() : createHandoff())}

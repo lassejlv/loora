@@ -8,6 +8,10 @@ const TabsContext = createContext('')
 vi.doMock('@loora/rpc/client', () => ({
   orpc: {
     auth: { deleteAccount: vi.fn() },
+    publish: {
+      getHandle: vi.fn(async () => ({ handle: null })),
+      setHandle: vi.fn(async ({ handle }: { handle: string }) => ({ handle })),
+    },
   },
 }))
 vi.doMock('@loora/auth/client', () => ({

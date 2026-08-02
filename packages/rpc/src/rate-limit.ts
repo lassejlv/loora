@@ -314,6 +314,10 @@ export const rateLimits = {
    * random; this is what makes guessing at them pointless rather than slow.
    */
   handoff: { limit: 60, windowMs: 60_000 },
+  /** Compiling and uploading a published Page snapshot, per account. */
+  publish: { limit: 20, windowMs: 60_000 },
+  /** Anonymous reads of published site HTML. */
+  publishedSite: { limit: 240, windowMs: 60_000 },
   /** GitHub OAuth and app-install round trips, per address. */
   github: { limit: 30, windowMs: 60_000 },
   /** GitHub's own webhook deliveries. Signed, so this is only a ceiling. */

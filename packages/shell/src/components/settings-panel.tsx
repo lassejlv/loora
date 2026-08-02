@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useQueryStates } from 'nuqs'
 import { LogOutIcon } from '@loora/ui/icons'
 import {
@@ -12,6 +12,7 @@ import {
   AlertDialogTrigger,
 } from '@loora/ui/alert-dialog'
 import { Button } from '@loora/ui/button'
+import { Input } from '@loora/ui/input'
 import { Tabs, TabsList, TabsPanel, TabsTab } from '@loora/ui/tabs'
 import { authClient } from '@loora/auth/client'
 import { orpc } from '@loora/rpc/client'
@@ -21,6 +22,84 @@ import { clearWelcomeSeen } from './welcome-dialog'
 import { AppearanceSettings } from './appearance-settings'
 import { editorSearchParams, type SettingsTab } from '../lib/url-state'
 import type { ShortcutConfig } from '@loora/editor/lib/shortcuts'
+
+function PublicHandleSection() {
+  const [handle, setHandle] = useState('')
+  const [saved, setSaved] = useState<string | null>(null)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [loaded, setLoaded] = useState(false)
+
+  useEffect(() => {
+    let cancelled = false
+    void orpc.publish
+      .getHandle()
+      .then((result) => {
+        if (cancelled) return
+        setHandle(result.handle ?? '')
+        setSaved(result.handle)
+        setLoaded(true)
+      })
+      .catch(() => {
+        if (!cancelled) setLoaded(true)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  async function save() {
+    setBusy(true)
+    setError(null)
+    try {
+      const result = await orpc.publish.setHandle({ handle })
+      setHandle(result.handle)
+      setSaved(result.handle)
+    } catch (cause) {
+      setError(
+        cause instanceof Error ? cause.message : 'Could not save handle.',
+      )
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div className="flex flex-col gap-2 border-t pt-4">
+      <div>
+        <h2 className="text-sm font-semibold">Public handle</h2>
+        <p className="mt-1 text-xs text-muted-foreground">
+          Used for published sites at{' '}
+          <span className="font-mono">/sites/&lt;handle&gt;/…</span>
+        </p>
+      </div>
+      <div className="flex items-center gap-2">
+        <Input
+          value={handle}
+          disabled={!loaded || busy}
+          placeholder="your-name"
+          aria-label="Public handle"
+          className="font-mono"
+          onChange={(event) => setHandle(event.target.value)}
+        />
+        <Button
+          size="sm"
+          variant="outline"
+          disabled={!loaded || busy || handle === (saved ?? '')}
+          onClick={() => void save()}
+        >
+          {busy ? 'Saving…' : 'Save'}
+        </Button>
+      </div>
+      {error ? <p className="text-xs text-destructive">{error}</p> : null}
+      {saved ? (
+        <p className="text-xs text-muted-foreground font-mono">
+          /sites/{saved}/…
+        </p>
+      ) : null}
+    </div>
+  )
+}
 
 function DeleteAccountSection() {
   const [deleting, setDeleting] = useState(false)
@@ -136,6 +215,7 @@ export function SettingsPanel({
               Sign out
             </Button>
           </div>
+          <PublicHandleSection />
           <AppearanceSettings className="border-t pt-4" />
           <DeleteAccountSection />
         </TabsPanel>

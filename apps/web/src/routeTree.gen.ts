@@ -40,6 +40,7 @@ import { Route as ApiGithubWebhookRouteImport } from './routes/api.github.webhoo
 import { Route as ApiHandoffTokenRouteImport } from './routes/api.handoff.$token'
 import { Route as ApiInternalMcpRouteImport } from './routes/api.internal.mcp'
 import { Route as ApiRpcSplatRouteImport } from './routes/api.rpc.$'
+import { Route as SitesHandleSlugRouteImport } from './routes/sites.$handle.$slug'
 import { Route as DesignIdBBranchIdRouteImport } from './routes/design.$id_.b.$branchId'
 import { Route as ApiHandoffTokenAssetIdRouteImport } from './routes/api.handoff.$token.asset.$id'
 
@@ -199,6 +200,11 @@ const ApiRpcSplatRoute = ApiRpcSplatRouteImport.update({
   path: '/api/rpc/$',
   getParentRoute: () => rootRouteImport,
 } as any)
+const SitesHandleSlugRoute = SitesHandleSlugRouteImport.update({
+  id: '/sites/$handle/$slug',
+  path: '/sites/$handle/$slug',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const DesignIdBBranchIdRoute = DesignIdBBranchIdRouteImport.update({
   id: '/design/$id_/b/$branchId',
   path: '/design/$id/b/$branchId',
@@ -242,6 +248,7 @@ export interface FileRoutesByFullPath {
   '/api/handoff/$token': typeof ApiHandoffTokenRouteWithChildren
   '/api/internal/mcp': typeof ApiInternalMcpRoute
   '/api/rpc/$': typeof ApiRpcSplatRoute
+  '/sites/$handle/$slug': typeof SitesHandleSlugRoute
   '/design/$id/b/$branchId': typeof DesignIdBBranchIdRoute
   '/api/handoff/$token/asset/$id': typeof ApiHandoffTokenAssetIdRoute
 }
@@ -277,6 +284,7 @@ export interface FileRoutesByTo {
   '/api/handoff/$token': typeof ApiHandoffTokenRouteWithChildren
   '/api/internal/mcp': typeof ApiInternalMcpRoute
   '/api/rpc/$': typeof ApiRpcSplatRoute
+  '/sites/$handle/$slug': typeof SitesHandleSlugRoute
   '/design/$id/b/$branchId': typeof DesignIdBBranchIdRoute
   '/api/handoff/$token/asset/$id': typeof ApiHandoffTokenAssetIdRoute
 }
@@ -313,6 +321,7 @@ export interface FileRoutesById {
   '/api/handoff/$token': typeof ApiHandoffTokenRouteWithChildren
   '/api/internal/mcp': typeof ApiInternalMcpRoute
   '/api/rpc/$': typeof ApiRpcSplatRoute
+  '/sites/$handle/$slug': typeof SitesHandleSlugRoute
   '/design/$id_/b/$branchId': typeof DesignIdBBranchIdRoute
   '/api/handoff/$token/asset/$id': typeof ApiHandoffTokenAssetIdRoute
 }
@@ -350,6 +359,7 @@ export interface FileRouteTypes {
     | '/api/handoff/$token'
     | '/api/internal/mcp'
     | '/api/rpc/$'
+    | '/sites/$handle/$slug'
     | '/design/$id/b/$branchId'
     | '/api/handoff/$token/asset/$id'
   fileRoutesByTo: FileRoutesByTo
@@ -385,6 +395,7 @@ export interface FileRouteTypes {
     | '/api/handoff/$token'
     | '/api/internal/mcp'
     | '/api/rpc/$'
+    | '/sites/$handle/$slug'
     | '/design/$id/b/$branchId'
     | '/api/handoff/$token/asset/$id'
   id:
@@ -420,6 +431,7 @@ export interface FileRouteTypes {
     | '/api/handoff/$token'
     | '/api/internal/mcp'
     | '/api/rpc/$'
+    | '/sites/$handle/$slug'
     | '/design/$id_/b/$branchId'
     | '/api/handoff/$token/asset/$id'
   fileRoutesById: FileRoutesById
@@ -456,6 +468,7 @@ export interface RootRouteChildren {
   ApiHandoffTokenRoute: typeof ApiHandoffTokenRouteWithChildren
   ApiInternalMcpRoute: typeof ApiInternalMcpRoute
   ApiRpcSplatRoute: typeof ApiRpcSplatRoute
+  SitesHandleSlugRoute: typeof SitesHandleSlugRoute
   DesignIdBBranchIdRoute: typeof DesignIdBBranchIdRoute
 }
 
@@ -678,6 +691,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiRpcSplatRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/sites/$handle/$slug': {
+      id: '/sites/$handle/$slug'
+      path: '/sites/$handle/$slug'
+      fullPath: '/sites/$handle/$slug'
+      preLoaderRoute: typeof SitesHandleSlugRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/design/$id_/b/$branchId': {
       id: '/design/$id_/b/$branchId'
       path: '/design/$id/b/$branchId'
@@ -740,17 +760,9 @@ const rootRouteChildren: RootRouteChildren = {
   ApiHandoffTokenRoute: ApiHandoffTokenRouteWithChildren,
   ApiInternalMcpRoute: ApiInternalMcpRoute,
   ApiRpcSplatRoute: ApiRpcSplatRoute,
+  SitesHandleSlugRoute: SitesHandleSlugRoute,
   DesignIdBBranchIdRoute: DesignIdBBranchIdRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
   ._addFileTypes<FileRouteTypes>()
-
-import type { getRouter } from './router.tsx'
-import type { createStart } from '@tanstack/react-start'
-declare module '@tanstack/react-start' {
-  interface Register {
-    ssr: true
-    router: Awaited<ReturnType<typeof getRouter>>
-  }
-}

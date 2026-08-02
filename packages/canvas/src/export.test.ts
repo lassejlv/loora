@@ -759,4 +759,29 @@ describe('inlineBrowserImages', () => {
       }),
     ).rejects.toThrow('too large to capture safely')
   })
+
+  it('rewrites asset routes through assetUrl for published HTML snapshots', () => {
+    const document = fixture()
+    const { semanticTag: _tag, ...base } = createFrameNode('Shot', {
+      id: 'shot',
+      parentId: 'page',
+      order: 3_072,
+    })
+    document.nodes.shot = {
+      ...base,
+      type: 'image',
+      src: '/api/asset/a0123456789abcdef0123456789abcdef',
+      alt: 'Shot',
+      fit: 'fill',
+    }
+    const html = compileStandaloneHtml(document, {
+      pageId: 'page',
+      assetUrl: (src) =>
+        src.startsWith('/api/asset/')
+          ? `data:image/png;base64,aaaa`
+          : src,
+    })
+    expect(html).toContain('data:image/png;base64,aaaa')
+    expect(html).not.toContain('/api/asset/')
+  })
 })

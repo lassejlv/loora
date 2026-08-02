@@ -38,6 +38,11 @@ export const user = pgTable('user', {
   termsVersion: text('terms_version'),
   privacyVersion: text('privacy_version'),
   image: text('image'),
+  /**
+   * Public URL segment for published sites (`/sites/<handle>/<slug>`).
+   * Nullable until the account claims one; unique when set.
+   */
+  handle: text('handle').unique(),
   createdAt: timestamp('created_at').defaultNow().notNull(),
   updatedAt: timestamp('updated_at')
     .defaultNow()
@@ -375,6 +380,45 @@ export const publishEgress = pgTable(
   (table) => [primaryKey({ columns: [table.userId, table.day] })],
 )
 
+/**
+ * Frozen HTML snapshot of a Page, stored in S3. The row is only metadata —
+ * HTML bytes live at `storageKey`. Public URL is `/sites/<handle>/<slug>`.
+ */
+export const publishedSite = pgTable(
+  'published_site',
+  {
+    id: text('id').primaryKey(),
+    userId: text('user_id')
+      .notNull()
+      .references(() => user.id, { onDelete: 'cascade' }),
+    designId: text('design_id').notNull(),
+    pageId: text('page_id').notNull(),
+    handle: text('handle').notNull(),
+    slug: text('slug').notNull(),
+    storageKey: text('storage_key').notNull(),
+    title: text('title').notNull(),
+    publishedAt: timestamp('published_at').defaultNow().notNull(),
+    updatedAt: timestamp('updated_at')
+      .defaultNow()
+      .$onUpdate(() => new Date())
+      .notNull(),
+  },
+  (table) => [
+    foreignKey({
+      columns: [table.designId, table.userId],
+      foreignColumns: [design.id, design.userId],
+      name: 'published_site_design_fk',
+    }).onDelete('cascade'),
+    uniqueIndex('published_site_handle_slug_uidx').on(table.handle, table.slug),
+    uniqueIndex('published_site_design_page_uidx').on(
+      table.designId,
+      table.pageId,
+    ),
+    index('published_site_user_idx').on(table.userId),
+    index('published_site_design_idx').on(table.userId, table.designId),
+  ],
+)
+
 // GitHub App user tokens are encrypted before they reach these columns. A user
 // token keeps repository access intersected with the person's current GitHub
 // permissions, unlike a long-lived installation-only association.
@@ -668,6 +712,11 @@ export const userRelations = relations(user, ({ many }) => ({
   sessions: many(session),
   accounts: many(account),
   designs: many(design),
+  publishedSites: many(publishedSite),
+}))
+
+export const publishedSiteRelations = relations(publishedSite, ({ one }) => ({
+  user: one(user, { fields: [publishedSite.userId], references: [user.id] }),
 }))
 
 export const sessionRelations = relations(session, ({ one }) => ({

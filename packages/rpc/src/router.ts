@@ -96,6 +96,13 @@ import {
   getPreferences,
   savePreferences,
 } from './preferences'
+import {
+  getPublishHandle,
+  listPublishedSites,
+  publishPage,
+  setPublishHandle,
+  unpublishPage,
+} from './publish-procedures'
 
 export type { ORPCContext } from './procedures'
 
@@ -153,6 +160,13 @@ export const appRouter = {
   },
   handoff: {
     create: createDesignHandoff,
+  },
+  publish: {
+    getHandle: getPublishHandle,
+    setHandle: setPublishHandle,
+    list: listPublishedSites,
+    publish: publishPage,
+    unpublish: unpublishPage,
   },
   history: {
     list: listVersions,
