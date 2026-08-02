@@ -232,10 +232,12 @@ export function AdminUsers({
   currentUserId,
   pendingRequests,
   onChanged,
+  limit,
 }: {
   currentUserId: string
   pendingRequests: number
   onChanged: () => void
+  limit?: number
 }) {
   const [users, setUsers] = useState<AdminUser[] | null>(null)
   const [filter, setFilter] = useState<AdminUserFilter>('all')
@@ -245,6 +247,7 @@ export function AdminUsers({
   const [error, setError] = useState('')
   const [status, setStatus] = useState('')
   const [approving, setApproving] = useState(false)
+  const [total, setTotal] = useState(0)
   const requestId = useRef(0)
 
   useEffect(() => {
@@ -259,17 +262,19 @@ export function AdminUsers({
         const rows = await orpc.admin.listUsers({
           filter,
           search: debouncedSearch || undefined,
+          ...(limit ? { limit } : {}),
         })
         // Ignore a response that a newer query already superseded.
         if (id === requestId.current) {
           setUsers(rows)
+          setTotal(rows.length)
           setError('')
         }
       } catch {
         if (id === requestId.current) setError('Could not load users.')
       }
     },
-    [filter, debouncedSearch],
+    [filter, debouncedSearch, limit],
   )
 
   useEffect(() => {
@@ -439,13 +444,22 @@ export function AdminUsers({
     <section className="flex flex-col gap-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <h2 className="text-sm font-semibold">Users</h2>
-        {pendingRequests > 0 ? (
-          <Button size="xs" variant="outline" disabled={approving} onClick={() => void approveAll()}>
-            {approving
-              ? 'Approving…'
-              : `Approve ${pendingRequests} pending request${pendingRequests === 1 ? '' : 's'}`}
-          </Button>
-        ) : null}
+        <div className="flex items-center gap-2">
+          {limit && total >= limit ? (
+            <a href="/app/admin/users">
+              <Button size="xs" variant="outline">
+                View all
+              </Button>
+            </a>
+          ) : null}
+          {pendingRequests > 0 ? (
+            <Button size="xs" variant="outline" disabled={approving} onClick={() => void approveAll()}>
+              {approving
+                ? 'Approving…'
+                : `Approve ${pendingRequests} pending request${pendingRequests === 1 ? '' : 's'}`}
+            </Button>
+          ) : null}
+        </div>
       </div>
 
       <div className="flex flex-wrap items-center gap-2">

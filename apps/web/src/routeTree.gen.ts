@@ -42,6 +42,7 @@ import { Route as ApiHandoffTokenRouteImport } from './routes/api.handoff.$token
 import { Route as ApiInternalCustomDomainSyncRouteImport } from './routes/api.internal.custom-domain-sync'
 import { Route as ApiInternalMcpRouteImport } from './routes/api.internal.mcp'
 import { Route as ApiRpcSplatRouteImport } from './routes/api.rpc.$'
+import { Route as AppAdminUsersRouteImport } from './routes/app.admin.users'
 import { Route as SitesHandleSlugRouteImport } from './routes/sites.$handle.$slug'
 import { Route as DesignIdBBranchIdRouteImport } from './routes/design.$id_.b.$branchId'
 import { Route as ApiHandoffTokenAssetIdRouteImport } from './routes/api.handoff.$token.asset.$id'
@@ -213,6 +214,11 @@ const ApiRpcSplatRoute = ApiRpcSplatRouteImport.update({
   path: '/api/rpc/$',
   getParentRoute: () => rootRouteImport,
 } as any)
+const AppAdminUsersRoute = AppAdminUsersRouteImport.update({
+  id: '/users',
+  path: '/users',
+  getParentRoute: () => AppAdminRoute,
+} as any)
 const SitesHandleSlugRoute = SitesHandleSlugRouteImport.update({
   id: '/sites/$handle/$slug',
   path: '/sites/$handle/$slug',
@@ -244,7 +250,7 @@ export interface FileRoutesByFullPath {
   '/api/custom-domain-site': typeof ApiCustomDomainSiteRoute
   '/api/ready': typeof ApiReadyRoute
   '/api/realtime-ticket': typeof ApiRealtimeTicketRoute
-  '/app/admin': typeof AppAdminRoute
+  '/app/admin': typeof AppAdminRouteWithChildren
   '/app/appearance': typeof AppAppearanceRoute
   '/app/billing': typeof AppBillingRoute
   '/app/design': typeof AppDesignRoute
@@ -263,6 +269,7 @@ export interface FileRoutesByFullPath {
   '/api/internal/custom-domain-sync': typeof ApiInternalCustomDomainSyncRoute
   '/api/internal/mcp': typeof ApiInternalMcpRoute
   '/api/rpc/$': typeof ApiRpcSplatRoute
+  '/app/admin/users': typeof AppAdminUsersRoute
   '/sites/$handle/$slug': typeof SitesHandleSlugRoute
   '/design/$id/b/$branchId': typeof DesignIdBBranchIdRoute
   '/api/handoff/$token/asset/$id': typeof ApiHandoffTokenAssetIdRoute
@@ -282,7 +289,7 @@ export interface FileRoutesByTo {
   '/api/custom-domain-site': typeof ApiCustomDomainSiteRoute
   '/api/ready': typeof ApiReadyRoute
   '/api/realtime-ticket': typeof ApiRealtimeTicketRoute
-  '/app/admin': typeof AppAdminRoute
+  '/app/admin': typeof AppAdminRouteWithChildren
   '/app/appearance': typeof AppAppearanceRoute
   '/app/billing': typeof AppBillingRoute
   '/app/design': typeof AppDesignRoute
@@ -301,6 +308,7 @@ export interface FileRoutesByTo {
   '/api/internal/custom-domain-sync': typeof ApiInternalCustomDomainSyncRoute
   '/api/internal/mcp': typeof ApiInternalMcpRoute
   '/api/rpc/$': typeof ApiRpcSplatRoute
+  '/app/admin/users': typeof AppAdminUsersRoute
   '/sites/$handle/$slug': typeof SitesHandleSlugRoute
   '/design/$id/b/$branchId': typeof DesignIdBBranchIdRoute
   '/api/handoff/$token/asset/$id': typeof ApiHandoffTokenAssetIdRoute
@@ -321,7 +329,7 @@ export interface FileRoutesById {
   '/api/custom-domain-site': typeof ApiCustomDomainSiteRoute
   '/api/ready': typeof ApiReadyRoute
   '/api/realtime-ticket': typeof ApiRealtimeTicketRoute
-  '/app/admin': typeof AppAdminRoute
+  '/app/admin': typeof AppAdminRouteWithChildren
   '/app/appearance': typeof AppAppearanceRoute
   '/app/billing': typeof AppBillingRoute
   '/app/design': typeof AppDesignRoute
@@ -340,6 +348,7 @@ export interface FileRoutesById {
   '/api/internal/custom-domain-sync': typeof ApiInternalCustomDomainSyncRoute
   '/api/internal/mcp': typeof ApiInternalMcpRoute
   '/api/rpc/$': typeof ApiRpcSplatRoute
+  '/app/admin/users': typeof AppAdminUsersRoute
   '/sites/$handle/$slug': typeof SitesHandleSlugRoute
   '/design/$id_/b/$branchId': typeof DesignIdBBranchIdRoute
   '/api/handoff/$token/asset/$id': typeof ApiHandoffTokenAssetIdRoute
@@ -380,6 +389,7 @@ export interface FileRouteTypes {
     | '/api/internal/custom-domain-sync'
     | '/api/internal/mcp'
     | '/api/rpc/$'
+    | '/app/admin/users'
     | '/sites/$handle/$slug'
     | '/design/$id/b/$branchId'
     | '/api/handoff/$token/asset/$id'
@@ -418,6 +428,7 @@ export interface FileRouteTypes {
     | '/api/internal/custom-domain-sync'
     | '/api/internal/mcp'
     | '/api/rpc/$'
+    | '/app/admin/users'
     | '/sites/$handle/$slug'
     | '/design/$id/b/$branchId'
     | '/api/handoff/$token/asset/$id'
@@ -456,6 +467,7 @@ export interface FileRouteTypes {
     | '/api/internal/custom-domain-sync'
     | '/api/internal/mcp'
     | '/api/rpc/$'
+    | '/app/admin/users'
     | '/sites/$handle/$slug'
     | '/design/$id_/b/$branchId'
     | '/api/handoff/$token/asset/$id'
@@ -476,7 +488,7 @@ export interface RootRouteChildren {
   ApiCustomDomainSiteRoute: typeof ApiCustomDomainSiteRoute
   ApiReadyRoute: typeof ApiReadyRoute
   ApiRealtimeTicketRoute: typeof ApiRealtimeTicketRoute
-  AppAdminRoute: typeof AppAdminRoute
+  AppAdminRoute: typeof AppAdminRouteWithChildren
   AppAppearanceRoute: typeof AppAppearanceRoute
   AppBillingRoute: typeof AppBillingRoute
   AppDesignRoute: typeof AppDesignRoute
@@ -732,6 +744,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiRpcSplatRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/app/admin/users': {
+      id: '/app/admin/users'
+      path: '/users'
+      fullPath: '/app/admin/users'
+      preLoaderRoute: typeof AppAdminUsersRouteImport
+      parentRoute: typeof AppAdminRoute
+    }
     '/sites/$handle/$slug': {
       id: '/sites/$handle/$slug'
       path: '/sites/$handle/$slug'
@@ -755,6 +774,18 @@ declare module '@tanstack/react-router' {
     }
   }
 }
+
+interface AppAdminRouteChildren {
+  AppAdminUsersRoute: typeof AppAdminUsersRoute
+}
+
+const AppAdminRouteChildren: AppAdminRouteChildren = {
+  AppAdminUsersRoute: AppAdminUsersRoute,
+}
+
+const AppAdminRouteWithChildren = AppAdminRoute._addFileChildren(
+  AppAdminRouteChildren,
+)
 
 interface ApiHandoffTokenRouteChildren {
   ApiHandoffTokenAssetIdRoute: typeof ApiHandoffTokenAssetIdRoute
@@ -784,7 +815,7 @@ const rootRouteChildren: RootRouteChildren = {
   ApiCustomDomainSiteRoute: ApiCustomDomainSiteRoute,
   ApiReadyRoute: ApiReadyRoute,
   ApiRealtimeTicketRoute: ApiRealtimeTicketRoute,
-  AppAdminRoute: AppAdminRoute,
+  AppAdminRoute: AppAdminRouteWithChildren,
   AppAppearanceRoute: AppAppearanceRoute,
   AppBillingRoute: AppBillingRoute,
   AppDesignRoute: AppDesignRoute,
@@ -809,12 +840,3 @@ const rootRouteChildren: RootRouteChildren = {
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
   ._addFileTypes<FileRouteTypes>()
-
-import type { getRouter } from './router.tsx'
-import type { createStart } from '@tanstack/react-start'
-declare module '@tanstack/react-start' {
-  interface Register {
-    ssr: true
-    router: Awaited<ReturnType<typeof getRouter>>
-  }
-}

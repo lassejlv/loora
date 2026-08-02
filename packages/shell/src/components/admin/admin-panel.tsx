@@ -80,6 +80,7 @@ export function AdminPanel() {
         currentUserId={userId}
         pendingRequests={overview?.users.pendingPreviewRequests ?? 0}
         onChanged={() => void loadOverview()}
+        limit={25}
       />
 
       <AdminDesigns onChanged={() => void loadOverview()} />
