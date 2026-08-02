@@ -20,6 +20,7 @@ import {
 } from './app-navigation'
 import { DesignThumbnail } from './design-thumbnail'
 import { AppSettingsDialog } from './settings-dialog'
+import { StatusBadge } from './status-badge'
 import { UpgradeToProButton } from '@loora/editor/upgrade-to-pro'
 import { clearWelcomeSeen } from './welcome-dialog'
 import { Button } from '@loora/ui/button'
@@ -383,6 +384,7 @@ export function DesignsDashboard() {
           onSettings={() => setSettingsOpen(true)}
         />
         <div className="mt-auto flex flex-col gap-2 border-t border-line p-2">
+          <StatusBadge className="-mb-1" />
           <UpgradeToProButton fullWidth size="sm" />
           <AppAccountMenu
             name={accountName}

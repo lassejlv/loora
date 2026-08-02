@@ -8,6 +8,7 @@ import {
   type ReactNode,
   type RefObject,
 } from 'react'
+import { Link } from '@tanstack/react-router'
 import {
   BracesIcon,
   CodeXmlIcon,
@@ -901,16 +902,22 @@ function CanvasShell({
 
       <div className="pointer-events-none absolute inset-0 z-20 flex flex-col">
         <header className="pointer-events-auto flex h-9 shrink-0 items-center gap-1.5 border-b border-line bg-surface px-2">
-          <img
-            src="/logo192.png"
-            alt=""
-            width={16}
-            height={16}
-            className="size-4 shrink-0 rounded-sm"
-          />
-          <span className="shrink-0 text-xs font-semibold tracking-tight">
-            loora
-          </span>
+          <Link
+            to="/app"
+            className="flex items-center gap-1.5"
+            aria-label="Back to dashboard"
+          >
+            <img
+              src="/logo192.png"
+              alt=""
+              width={16}
+              height={16}
+              className="size-4 shrink-0 rounded-sm"
+            />
+            <span className="shrink-0 text-xs font-semibold tracking-tight">
+              loora
+            </span>
+          </Link>
           <span className="text-muted-foreground/35 max-sm:hidden">/</span>
           <div className="flex min-w-0 items-center gap-1.5 overflow-hidden max-sm:max-w-40">
             {typeof topBar === 'function'

@@ -7,6 +7,7 @@ import {
   type AppSection,
 } from './app-navigation'
 import { AppSettingsDialog } from './settings-dialog'
+import { StatusBadge } from './status-badge'
 import { UpgradeToProButton } from '@loora/editor/upgrade-to-pro'
 import { clearWelcomeSeen } from './welcome-dialog'
 
@@ -48,6 +49,7 @@ export function AppPageShell({
         </Link>
         <AppNavigation active={active} onSettings={() => setSettingsOpen(true)} />
         <div className="mt-auto flex flex-col gap-2 border-t border-line p-2">
+          <StatusBadge className="-mb-1" />
           <UpgradeToProButton fullWidth size="sm" />
           <AppAccountMenu
             name={accountName}
