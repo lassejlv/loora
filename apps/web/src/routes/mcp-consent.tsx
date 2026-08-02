@@ -2,12 +2,19 @@ import { useMemo, useState } from 'react'
 import { createFileRoute } from '@tanstack/react-router'
 import { authClient } from '@loora/auth/client'
 import { Button } from '@loora/ui/button'
+import { seo } from '#/lib/seo'
 
 // OAuth consent screen for MCP clients (Claude Code, Codex, opencode, …).
 // Better Auth redirects here with consent_code/client_id/scope query params;
 // oauth2.consent finishes the authorize flow and hands back the redirect URI.
 export const Route = createFileRoute('/mcp-consent')({
   ssr: false,
+  head: () =>
+    seo({
+      title: 'Authorize — Loora',
+      description: 'Approve an MCP client connection.',
+      noindex: true,
+    }),
   component: McpConsentPage,
 })
 

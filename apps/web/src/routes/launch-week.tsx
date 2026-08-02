@@ -3,20 +3,17 @@ import { createFileRoute, Link } from '@tanstack/react-router'
 import { orpc } from '@loora/rpc/client'
 import { usePalette } from '#/components/landing/palette'
 import { LandingShell } from '#/components/landing/site-shell'
+import { seo } from '#/lib/seo'
 
 type LaunchWeek = Awaited<ReturnType<typeof orpc.launchWeek.get>>
 type ActiveLaunchWeek = Extract<LaunchWeek, { enabled: true }>
 
+const DESCRIPTION =
+  'One new Loora release a day. The schedule, what shipped, and what is still to come.'
+
 export const Route = createFileRoute('/launch-week')({
-  ssr: false,
-  head: () => ({
-    meta: [
-      { title: 'Launch week — loora' },
-      { name: 'description', content: 'Daily new Loora releases.' },
-      { property: 'og:title', content: 'Launch week — loora' },
-      { property: 'og:description', content: 'Daily new Loora releases.' },
-    ],
-  }),
+  head: () =>
+    seo({ title: 'Launch week — Loora', description: DESCRIPTION, path: '/launch-week' }),
   component: LaunchWeekPage,
 })
 
@@ -53,7 +50,10 @@ function LaunchWeekPage() {
       {failed ? (
         <Unavailable message="Launch week could not be loaded." />
       ) : !launchWeek ? (
-        <p className="text-muted-foreground">Loading launch week…</p>
+        /* The schedule is fetched on the client, so this is what the server —
+           and therefore a crawler — renders. Say what the page is rather than
+           serving a bare spinner to it. */
+        <Pending />
       ) : !launchWeek.enabled ? (
         <Unavailable message="Launch week is not live yet." />
       ) : (
@@ -232,6 +232,30 @@ function CountdownUnit({ value, label }: { value: number; label: string }) {
       <span className="text-[24px] font-semibold leading-none">{String(value).padStart(2, '0')}</span>
       <span className="mt-1.5 text-[10px] text-muted-foreground">{label}</span>
     </span>
+  )
+}
+
+/** The server-rendered state, before the client has the schedule. */
+function Pending() {
+  const palette = usePalette()
+  const link = { color: palette.accent }
+
+  return (
+    <div>
+      <h1 className="flex gap-2 text-[15px] font-semibold leading-snug sm:text-[16px]">
+        <span aria-hidden="true" style={link}>
+          |
+        </span>
+        <span>Launch week</span>
+      </h1>
+      <p className="mt-6 text-muted-foreground">{DESCRIPTION}</p>
+      <p className="mt-4 text-[13px] text-muted-foreground">Loading the schedule…</p>
+      <p className="mt-8">
+        <Link to="/features" className={LINK} style={link}>
+          Everything Loora does →
+        </Link>
+      </p>
+    </div>
   )
 }
 

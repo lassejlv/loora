@@ -11,6 +11,7 @@ import {
   DialogTitle,
 } from '@loora/ui/dialog'
 import { Input } from '@loora/ui/input'
+import { seo } from '#/lib/seo'
 
 type ResetPasswordSearch = {
   error?: string
@@ -23,9 +24,12 @@ export const Route = createFileRoute('/reset-password')({
     error: typeof search.error === 'string' ? search.error : undefined,
     token: typeof search.token === 'string' ? search.token : undefined,
   }),
-  head: () => ({
-    meta: [{ title: 'Reset password — loora' }],
-  }),
+  head: () =>
+    seo({
+      title: 'Reset password — Loora',
+      description: 'Set a new password for your Loora account.',
+      noindex: true,
+    }),
   component: ResetPasswordPage,
 })
 

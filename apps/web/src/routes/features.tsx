@@ -2,19 +2,18 @@ import { createFileRoute, Link } from '@tanstack/react-router'
 import { FEATURE_SECTIONS } from '#/components/landing/features'
 import { usePalette } from '#/components/landing/palette'
 import { LandingShell } from '#/components/landing/site-shell'
+import { breadcrumbSchema, jsonLd, seo, softwareApplicationSchema } from '#/lib/seo'
+
+const TITLE = 'Features — Loora'
 
 const DESCRIPTION =
-  'What Loora does: a canvas document, typed transactions shared by the editor and your agent, MCP, branches, history, exports, and HTML/CSS import.'
+  'What Loora does: a structured canvas document, typed transactions shared by the editor and your agent, MCP, branches, version history, code export, and HTML/CSS import.'
 
 export const Route = createFileRoute('/features')({
-  ssr: false,
   head: () => ({
-    meta: [
-      { title: 'Features — loora' },
-      { name: 'description', content: DESCRIPTION },
-      { property: 'og:title', content: 'Features — loora' },
-      { property: 'og:description', content: DESCRIPTION },
-      { property: 'og:image', content: '/landing-cover.png' },
+    ...seo({ title: TITLE, description: DESCRIPTION, path: '/features' }),
+    scripts: [
+      jsonLd([softwareApplicationSchema(), breadcrumbSchema([{ name: 'Features', path: '/features' }])]),
     ],
   }),
   component: FeaturesPage,
@@ -101,6 +100,11 @@ function FeaturesContent() {
         <Link to="/pricing" className="underline-offset-2 hover:underline" style={link}>
           See what each plan includes →
         </Link>
+      </p>
+      <p className="mt-4">
+        <a href="/learn" className="underline-offset-2 hover:underline" style={link}>
+          Read the ideas behind it →
+        </a>
       </p>
     </>
   )

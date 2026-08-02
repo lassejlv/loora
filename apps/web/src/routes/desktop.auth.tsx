@@ -5,6 +5,7 @@ import { AuthScreen } from '@loora/shell/auth-screen'
 import { Button } from '@loora/ui/button'
 import { Spinner } from '@loora/ui/spinner'
 import { desktopCallbackUrl, parseDesktopHandoff } from '#/lib/desktop-handoff'
+import { seo } from '#/lib/seo'
 
 /**
  * Where the desktop app sends a browser to sign in.
@@ -19,6 +20,12 @@ import { desktopCallbackUrl, parseDesktopHandoff } from '#/lib/desktop-handoff'
 export const Route = createFileRoute('/desktop/auth')({
   component: DesktopAuthPage,
   ssr: false,
+  head: () =>
+    seo({
+      title: 'Sign in to the desktop app — Loora',
+      description: 'Hand a session to the Loora desktop app.',
+      noindex: true,
+    }),
   validateSearch: parseDesktopHandoff,
 })
 

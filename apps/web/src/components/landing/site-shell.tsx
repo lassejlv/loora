@@ -14,6 +14,7 @@ const NAV = [
   { label: 'Canvas', to: '/', hash: 'canvas', marksActive: false },
   { label: 'Features', to: '/features', hash: undefined, marksActive: true },
   { label: 'MCP', to: '/mcp', hash: undefined, marksActive: true },
+  { label: 'Learn', to: '/learn', hash: undefined, marksActive: true },
   { label: 'Pricing', to: '/pricing', hash: undefined, marksActive: true },
 ] as const
 
@@ -73,6 +74,14 @@ function SiteFooter() {
         <NavSep />
         <Link to="/mcp" className="transition-colors hover:text-foreground">
           MCP
+        </Link>
+        <NavSep />
+        <Link to="/learn" className="transition-colors hover:text-foreground">
+          Learn
+        </Link>
+        <NavSep />
+        <Link to="/compare" className="transition-colors hover:text-foreground">
+          Compare
         </Link>
         <NavSep />
         <Link to="/pricing" className="transition-colors hover:text-foreground">

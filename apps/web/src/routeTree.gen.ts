@@ -12,11 +12,12 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as FeaturesRouteImport } from './routes/features'
 import { Route as LaunchWeekRouteImport } from './routes/launch-week'
-import { Route as McpRouteImport } from './routes/mcp'
+import { Route as LlmsDottxtRouteImport } from './routes/llms[.]txt'
 import { Route as McpConsentRouteImport } from './routes/mcp-consent'
 import { Route as PricingRouteImport } from './routes/pricing'
 import { Route as PrivacyRouteImport } from './routes/privacy'
 import { Route as ResetPasswordRouteImport } from './routes/reset-password'
+import { Route as SitemapDotxmlRouteImport } from './routes/sitemap[.]xml'
 import { Route as TermsRouteImport } from './routes/terms'
 import { Route as DotwellKnownOauthAuthorizationServerRouteImport } from './routes/[.]well-known.oauth-authorization-server'
 import { Route as ApiCanvasEventsRouteImport } from './routes/api.canvas-events'
@@ -30,8 +31,14 @@ import { Route as AppAppearanceRouteImport } from './routes/app.appearance'
 import { Route as AppBillingRouteImport } from './routes/app.billing'
 import { Route as AppDesignRouteImport } from './routes/app.design'
 import { Route as AppIntegrationsRouteImport } from './routes/app.integrations'
+import { Route as CompareIndexRouteImport } from './routes/compare.index'
+import { Route as CompareSlugRouteImport } from './routes/compare.$slug'
 import { Route as DesignIdRouteImport } from './routes/design.$id'
 import { Route as DesktopAuthRouteImport } from './routes/desktop.auth'
+import { Route as LearnIndexRouteImport } from './routes/learn.index'
+import { Route as LearnSlugRouteImport } from './routes/learn.$slug'
+import { Route as McpIndexRouteImport } from './routes/mcp.index'
+import { Route as McpClientRouteImport } from './routes/mcp.$client'
 import { Route as ApiAssetIdRouteImport } from './routes/api.asset.$id'
 import { Route as ApiAuthSplatRouteImport } from './routes/api.auth.$'
 import { Route as ApiGithubCallbackRouteImport } from './routes/api.github.callback'
@@ -63,9 +70,9 @@ const LaunchWeekRoute = LaunchWeekRouteImport.update({
   path: '/launch-week',
   getParentRoute: () => rootRouteImport,
 } as any)
-const McpRoute = McpRouteImport.update({
-  id: '/mcp',
-  path: '/mcp',
+const LlmsDottxtRoute = LlmsDottxtRouteImport.update({
+  id: '/llms.txt',
+  path: '/llms.txt',
   getParentRoute: () => rootRouteImport,
 } as any)
 const McpConsentRoute = McpConsentRouteImport.update({
@@ -86,6 +93,11 @@ const PrivacyRoute = PrivacyRouteImport.update({
 const ResetPasswordRoute = ResetPasswordRouteImport.update({
   id: '/reset-password',
   path: '/reset-password',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const SitemapDotxmlRoute = SitemapDotxmlRouteImport.update({
+  id: '/sitemap.xml',
+  path: '/sitemap.xml',
   getParentRoute: () => rootRouteImport,
 } as any)
 const TermsRoute = TermsRouteImport.update({
@@ -154,6 +166,16 @@ const AppIntegrationsRoute = AppIntegrationsRouteImport.update({
   path: '/app/integrations',
   getParentRoute: () => rootRouteImport,
 } as any)
+const CompareIndexRoute = CompareIndexRouteImport.update({
+  id: '/compare/',
+  path: '/compare/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const CompareSlugRoute = CompareSlugRouteImport.update({
+  id: '/compare/$slug',
+  path: '/compare/$slug',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const DesignIdRoute = DesignIdRouteImport.update({
   id: '/design/$id',
   path: '/design/$id',
@@ -162,6 +184,26 @@ const DesignIdRoute = DesignIdRouteImport.update({
 const DesktopAuthRoute = DesktopAuthRouteImport.update({
   id: '/desktop/auth',
   path: '/desktop/auth',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const LearnIndexRoute = LearnIndexRouteImport.update({
+  id: '/learn/',
+  path: '/learn/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const LearnSlugRoute = LearnSlugRouteImport.update({
+  id: '/learn/$slug',
+  path: '/learn/$slug',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const McpIndexRoute = McpIndexRouteImport.update({
+  id: '/mcp/',
+  path: '/mcp/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const McpClientRoute = McpClientRouteImport.update({
+  id: '/mcp/$client',
+  path: '/mcp/$client',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ApiAssetIdRoute = ApiAssetIdRouteImport.update({
@@ -245,11 +287,12 @@ export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/features': typeof FeaturesRoute
   '/launch-week': typeof LaunchWeekRoute
-  '/mcp': typeof McpRoute
+  '/llms.txt': typeof LlmsDottxtRoute
   '/mcp-consent': typeof McpConsentRoute
   '/pricing': typeof PricingRoute
   '/privacy': typeof PrivacyRoute
   '/reset-password': typeof ResetPasswordRoute
+  '/sitemap.xml': typeof SitemapDotxmlRoute
   '/terms': typeof TermsRoute
   '/.well-known/oauth-authorization-server': typeof DotwellKnownOauthAuthorizationServerRoute
   '/api/canvas-events': typeof ApiCanvasEventsRoute
@@ -262,9 +305,15 @@ export interface FileRoutesByFullPath {
   '/app/billing': typeof AppBillingRoute
   '/app/design': typeof AppDesignRoute
   '/app/integrations': typeof AppIntegrationsRoute
+  '/compare/$slug': typeof CompareSlugRoute
   '/design/$id': typeof DesignIdRoute
   '/desktop/auth': typeof DesktopAuthRoute
+  '/learn/$slug': typeof LearnSlugRoute
+  '/mcp/$client': typeof McpClientRoute
   '/app/': typeof AppIndexRoute
+  '/compare/': typeof CompareIndexRoute
+  '/learn/': typeof LearnIndexRoute
+  '/mcp/': typeof McpIndexRoute
   '/api/asset/$id': typeof ApiAssetIdRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
   '/api/github/callback': typeof ApiGithubCallbackRoute
@@ -285,11 +334,12 @@ export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/features': typeof FeaturesRoute
   '/launch-week': typeof LaunchWeekRoute
-  '/mcp': typeof McpRoute
+  '/llms.txt': typeof LlmsDottxtRoute
   '/mcp-consent': typeof McpConsentRoute
   '/pricing': typeof PricingRoute
   '/privacy': typeof PrivacyRoute
   '/reset-password': typeof ResetPasswordRoute
+  '/sitemap.xml': typeof SitemapDotxmlRoute
   '/terms': typeof TermsRoute
   '/.well-known/oauth-authorization-server': typeof DotwellKnownOauthAuthorizationServerRoute
   '/api/canvas-events': typeof ApiCanvasEventsRoute
@@ -302,9 +352,15 @@ export interface FileRoutesByTo {
   '/app/billing': typeof AppBillingRoute
   '/app/design': typeof AppDesignRoute
   '/app/integrations': typeof AppIntegrationsRoute
+  '/compare/$slug': typeof CompareSlugRoute
   '/design/$id': typeof DesignIdRoute
   '/desktop/auth': typeof DesktopAuthRoute
+  '/learn/$slug': typeof LearnSlugRoute
+  '/mcp/$client': typeof McpClientRoute
   '/app': typeof AppIndexRoute
+  '/compare': typeof CompareIndexRoute
+  '/learn': typeof LearnIndexRoute
+  '/mcp': typeof McpIndexRoute
   '/api/asset/$id': typeof ApiAssetIdRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
   '/api/github/callback': typeof ApiGithubCallbackRoute
@@ -326,11 +382,12 @@ export interface FileRoutesById {
   '/': typeof IndexRoute
   '/features': typeof FeaturesRoute
   '/launch-week': typeof LaunchWeekRoute
-  '/mcp': typeof McpRoute
+  '/llms.txt': typeof LlmsDottxtRoute
   '/mcp-consent': typeof McpConsentRoute
   '/pricing': typeof PricingRoute
   '/privacy': typeof PrivacyRoute
   '/reset-password': typeof ResetPasswordRoute
+  '/sitemap.xml': typeof SitemapDotxmlRoute
   '/terms': typeof TermsRoute
   '/.well-known/oauth-authorization-server': typeof DotwellKnownOauthAuthorizationServerRoute
   '/api/canvas-events': typeof ApiCanvasEventsRoute
@@ -343,9 +400,15 @@ export interface FileRoutesById {
   '/app/billing': typeof AppBillingRoute
   '/app/design': typeof AppDesignRoute
   '/app/integrations': typeof AppIntegrationsRoute
+  '/compare/$slug': typeof CompareSlugRoute
   '/design/$id': typeof DesignIdRoute
   '/desktop/auth': typeof DesktopAuthRoute
+  '/learn/$slug': typeof LearnSlugRoute
+  '/mcp/$client': typeof McpClientRoute
   '/app/': typeof AppIndexRoute
+  '/compare/': typeof CompareIndexRoute
+  '/learn/': typeof LearnIndexRoute
+  '/mcp/': typeof McpIndexRoute
   '/api/asset/$id': typeof ApiAssetIdRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
   '/api/github/callback': typeof ApiGithubCallbackRoute
@@ -368,11 +431,12 @@ export interface FileRouteTypes {
     | '/'
     | '/features'
     | '/launch-week'
-    | '/mcp'
+    | '/llms.txt'
     | '/mcp-consent'
     | '/pricing'
     | '/privacy'
     | '/reset-password'
+    | '/sitemap.xml'
     | '/terms'
     | '/.well-known/oauth-authorization-server'
     | '/api/canvas-events'
@@ -385,9 +449,15 @@ export interface FileRouteTypes {
     | '/app/billing'
     | '/app/design'
     | '/app/integrations'
+    | '/compare/$slug'
     | '/design/$id'
     | '/desktop/auth'
+    | '/learn/$slug'
+    | '/mcp/$client'
     | '/app/'
+    | '/compare/'
+    | '/learn/'
+    | '/mcp/'
     | '/api/asset/$id'
     | '/api/auth/$'
     | '/api/github/callback'
@@ -408,11 +478,12 @@ export interface FileRouteTypes {
     | '/'
     | '/features'
     | '/launch-week'
-    | '/mcp'
+    | '/llms.txt'
     | '/mcp-consent'
     | '/pricing'
     | '/privacy'
     | '/reset-password'
+    | '/sitemap.xml'
     | '/terms'
     | '/.well-known/oauth-authorization-server'
     | '/api/canvas-events'
@@ -425,9 +496,15 @@ export interface FileRouteTypes {
     | '/app/billing'
     | '/app/design'
     | '/app/integrations'
+    | '/compare/$slug'
     | '/design/$id'
     | '/desktop/auth'
+    | '/learn/$slug'
+    | '/mcp/$client'
     | '/app'
+    | '/compare'
+    | '/learn'
+    | '/mcp'
     | '/api/asset/$id'
     | '/api/auth/$'
     | '/api/github/callback'
@@ -448,11 +525,12 @@ export interface FileRouteTypes {
     | '/'
     | '/features'
     | '/launch-week'
-    | '/mcp'
+    | '/llms.txt'
     | '/mcp-consent'
     | '/pricing'
     | '/privacy'
     | '/reset-password'
+    | '/sitemap.xml'
     | '/terms'
     | '/.well-known/oauth-authorization-server'
     | '/api/canvas-events'
@@ -465,9 +543,15 @@ export interface FileRouteTypes {
     | '/app/billing'
     | '/app/design'
     | '/app/integrations'
+    | '/compare/$slug'
     | '/design/$id'
     | '/desktop/auth'
+    | '/learn/$slug'
+    | '/mcp/$client'
     | '/app/'
+    | '/compare/'
+    | '/learn/'
+    | '/mcp/'
     | '/api/asset/$id'
     | '/api/auth/$'
     | '/api/github/callback'
@@ -489,11 +573,12 @@ export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   FeaturesRoute: typeof FeaturesRoute
   LaunchWeekRoute: typeof LaunchWeekRoute
-  McpRoute: typeof McpRoute
+  LlmsDottxtRoute: typeof LlmsDottxtRoute
   McpConsentRoute: typeof McpConsentRoute
   PricingRoute: typeof PricingRoute
   PrivacyRoute: typeof PrivacyRoute
   ResetPasswordRoute: typeof ResetPasswordRoute
+  SitemapDotxmlRoute: typeof SitemapDotxmlRoute
   TermsRoute: typeof TermsRoute
   DotwellKnownOauthAuthorizationServerRoute: typeof DotwellKnownOauthAuthorizationServerRoute
   ApiCanvasEventsRoute: typeof ApiCanvasEventsRoute
@@ -506,9 +591,15 @@ export interface RootRouteChildren {
   AppBillingRoute: typeof AppBillingRoute
   AppDesignRoute: typeof AppDesignRoute
   AppIntegrationsRoute: typeof AppIntegrationsRoute
+  CompareSlugRoute: typeof CompareSlugRoute
   DesignIdRoute: typeof DesignIdRoute
   DesktopAuthRoute: typeof DesktopAuthRoute
+  LearnSlugRoute: typeof LearnSlugRoute
+  McpClientRoute: typeof McpClientRoute
   AppIndexRoute: typeof AppIndexRoute
+  CompareIndexRoute: typeof CompareIndexRoute
+  LearnIndexRoute: typeof LearnIndexRoute
+  McpIndexRoute: typeof McpIndexRoute
   ApiAssetIdRoute: typeof ApiAssetIdRoute
   ApiAuthSplatRoute: typeof ApiAuthSplatRoute
   ApiGithubCallbackRoute: typeof ApiGithubCallbackRoute
@@ -547,11 +638,11 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof LaunchWeekRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/mcp': {
-      id: '/mcp'
-      path: '/mcp'
-      fullPath: '/mcp'
-      preLoaderRoute: typeof McpRouteImport
+    '/llms.txt': {
+      id: '/llms.txt'
+      path: '/llms.txt'
+      fullPath: '/llms.txt'
+      preLoaderRoute: typeof LlmsDottxtRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/mcp-consent': {
@@ -580,6 +671,13 @@ declare module '@tanstack/react-router' {
       path: '/reset-password'
       fullPath: '/reset-password'
       preLoaderRoute: typeof ResetPasswordRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/sitemap.xml': {
+      id: '/sitemap.xml'
+      path: '/sitemap.xml'
+      fullPath: '/sitemap.xml'
+      preLoaderRoute: typeof SitemapDotxmlRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/terms': {
@@ -673,6 +771,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppIntegrationsRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/compare/': {
+      id: '/compare/'
+      path: '/compare'
+      fullPath: '/compare/'
+      preLoaderRoute: typeof CompareIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/compare/$slug': {
+      id: '/compare/$slug'
+      path: '/compare/$slug'
+      fullPath: '/compare/$slug'
+      preLoaderRoute: typeof CompareSlugRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/design/$id': {
       id: '/design/$id'
       path: '/design/$id'
@@ -685,6 +797,34 @@ declare module '@tanstack/react-router' {
       path: '/desktop/auth'
       fullPath: '/desktop/auth'
       preLoaderRoute: typeof DesktopAuthRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/learn/': {
+      id: '/learn/'
+      path: '/learn'
+      fullPath: '/learn/'
+      preLoaderRoute: typeof LearnIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/learn/$slug': {
+      id: '/learn/$slug'
+      path: '/learn/$slug'
+      fullPath: '/learn/$slug'
+      preLoaderRoute: typeof LearnSlugRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/mcp/': {
+      id: '/mcp/'
+      path: '/mcp'
+      fullPath: '/mcp/'
+      preLoaderRoute: typeof McpIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/mcp/$client': {
+      id: '/mcp/$client'
+      path: '/mcp/$client'
+      fullPath: '/mcp/$client'
+      preLoaderRoute: typeof McpClientRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/api/asset/$id': {
@@ -823,11 +963,12 @@ const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   FeaturesRoute: FeaturesRoute,
   LaunchWeekRoute: LaunchWeekRoute,
-  McpRoute: McpRoute,
+  LlmsDottxtRoute: LlmsDottxtRoute,
   McpConsentRoute: McpConsentRoute,
   PricingRoute: PricingRoute,
   PrivacyRoute: PrivacyRoute,
   ResetPasswordRoute: ResetPasswordRoute,
+  SitemapDotxmlRoute: SitemapDotxmlRoute,
   TermsRoute: TermsRoute,
   DotwellKnownOauthAuthorizationServerRoute:
     DotwellKnownOauthAuthorizationServerRoute,
@@ -841,9 +982,15 @@ const rootRouteChildren: RootRouteChildren = {
   AppBillingRoute: AppBillingRoute,
   AppDesignRoute: AppDesignRoute,
   AppIntegrationsRoute: AppIntegrationsRoute,
+  CompareSlugRoute: CompareSlugRoute,
   DesignIdRoute: DesignIdRoute,
   DesktopAuthRoute: DesktopAuthRoute,
+  LearnSlugRoute: LearnSlugRoute,
+  McpClientRoute: McpClientRoute,
   AppIndexRoute: AppIndexRoute,
+  CompareIndexRoute: CompareIndexRoute,
+  LearnIndexRoute: LearnIndexRoute,
+  McpIndexRoute: McpIndexRoute,
   ApiAssetIdRoute: ApiAssetIdRoute,
   ApiAuthSplatRoute: ApiAuthSplatRoute,
   ApiGithubCallbackRoute: ApiGithubCallbackRoute,

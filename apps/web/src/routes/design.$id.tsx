@@ -3,10 +3,17 @@ import { AccountGate } from '@loora/shell/account-gate'
 import { CanvasApp } from '@loora/editor/app'
 import { renderEditorSettings } from '@loora/shell/editor-settings-slot'
 import { designValidateSearch } from '@loora/shell/lib/url-state'
+import { seo } from '#/lib/seo'
 
 export const Route = createFileRoute('/design/$id')({
   component: DesignPage,
   ssr: false,
+  head: () =>
+    seo({
+      title: 'Editor — Loora',
+      description: 'The Loora canvas editor.',
+      noindex: true,
+    }),
   validateSearch: designValidateSearch,
   beforeLoad: ({ params, search }) => {
     if (!search.draft) return

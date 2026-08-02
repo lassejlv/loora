@@ -19,8 +19,9 @@ export const Route = createRootRoute({
         name: "viewport",
         content: "width=device-width, initial-scale=1",
       },
+      // Fallback only — every public route sets its own head through `seo()`.
       {
-        title: "loora",
+        title: "Loora",
       },
       {
         name: "theme-color",

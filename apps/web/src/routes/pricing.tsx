@@ -2,19 +2,21 @@ import { createFileRoute, Link } from '@tanstack/react-router'
 import { usePalette } from '#/components/landing/palette'
 import { PLAN_INCLUDES, PLANS } from '#/components/landing/plans'
 import { LandingShell } from '#/components/landing/site-shell'
+import { breadcrumbSchema, jsonLd, seo, softwareApplicationSchema } from '#/lib/seo'
+
+const TITLE = 'Pricing — Loora'
 
 const DESCRIPTION =
   'Free is $0/month with 50 design files, 1 GB of assets, 100 MCP calls a week, 2 days of version history, and 1 open branch per design. Pro is $20/month, or $200 a year, for unlimited files, 50 GB, 1M MCP calls a week, 90-day history, and unlimited branches.'
 
 export const Route = createFileRoute('/pricing')({
-  ssr: false,
   head: () => ({
-    meta: [
-      { title: 'Pricing — loora' },
-      { name: 'description', content: DESCRIPTION },
-      { property: 'og:title', content: 'Pricing — loora' },
-      { property: 'og:description', content: DESCRIPTION },
-      { property: 'og:image', content: '/landing-cover.png' },
+    ...seo({ title: TITLE, description: DESCRIPTION, path: '/pricing' }),
+    scripts: [
+      jsonLd([
+        softwareApplicationSchema({ withOffers: true }),
+        breadcrumbSchema([{ name: 'Pricing', path: '/pricing' }]),
+      ]),
     ],
   }),
   component: PricingPage,

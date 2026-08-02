@@ -3,10 +3,17 @@ import { AccountGate } from '@loora/shell/account-gate'
 import { CanvasApp } from '@loora/editor/app'
 import { renderEditorSettings } from '@loora/shell/editor-settings-slot'
 import { designValidateSearch } from '@loora/shell/lib/url-state'
+import { seo } from '#/lib/seo'
 
 export const Route = createFileRoute('/design/$id_/b/$branchId')({
   component: BranchDesignPage,
   ssr: false,
+  head: () =>
+    seo({
+      title: 'Branch editor — Loora',
+      description: 'The Loora canvas editor, on a branch.',
+      noindex: true,
+    }),
   validateSearch: designValidateSearch,
   beforeLoad: ({ params, search }) => {
     if (!search.draft) return

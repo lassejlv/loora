@@ -2,10 +2,17 @@ import { createFileRoute } from '@tanstack/react-router'
 import { AccountGate } from '@loora/shell/account-gate'
 import { AdminPanel } from '@loora/shell/admin/admin-panel'
 import { AppPageShell } from '@loora/shell/app-page-shell'
+import { seo } from '#/lib/seo'
 
 export const Route = createFileRoute('/app/admin')({
   component: AdminPage,
   ssr: false,
+  head: () =>
+    seo({
+      title: 'Admin — Loora',
+      description: 'Staff panel.',
+      noindex: true,
+    }),
 })
 
 function AdminPage() {

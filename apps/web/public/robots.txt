@@ -1,3 +1,56 @@
 # https://www.robotstxt.org/robotstxt.html
+
+# The marketing pages are server-rendered and meant to be indexed. Signed-in
+# surfaces are not — but they are excluded with a noindex meta tag on the route
+# rather than here, because a crawler that is not allowed to fetch a page never
+# reads the tag on it, and a URL blocked this way can still be indexed on the
+# strength of inbound links alone. Disallow is therefore reserved for things
+# that should never be fetched at all.
 User-agent: *
-Disallow:
+Allow: /
+Disallow: /api/
+Disallow: /.well-known/
+Disallow: /*?design=
+Disallow: /*?d=
+Disallow: /*?settings=
+
+# AI crawlers are named explicitly rather than left to the wildcard. Loora's
+# users mostly arrive by asking an agent how to connect a design tool to MCP,
+# so being readable by the model that answers is worth as much as ranking.
+User-agent: GPTBot
+Allow: /
+
+User-agent: OAI-SearchBot
+Allow: /
+
+User-agent: ChatGPT-User
+Allow: /
+
+User-agent: ClaudeBot
+Allow: /
+
+User-agent: Claude-User
+Allow: /
+
+User-agent: Claude-SearchBot
+Allow: /
+
+User-agent: anthropic-ai
+Allow: /
+
+User-agent: PerplexityBot
+Allow: /
+
+User-agent: Perplexity-User
+Allow: /
+
+User-agent: Google-Extended
+Allow: /
+
+User-agent: Applebot-Extended
+Allow: /
+
+User-agent: cohere-ai
+Allow: /
+
+Sitemap: https://loora.design/sitemap.xml
