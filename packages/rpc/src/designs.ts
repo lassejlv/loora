@@ -6,7 +6,7 @@ import {
 } from 'drizzle-orm'
 import { z } from 'zod'
 import { db } from '@loora/db'
-import { design } from '@loora/db/schema'
+import { design, publishedSite } from '@loora/db/schema'
 import {
   claimDesignShares,
   listSharedDesigns,
@@ -18,6 +18,8 @@ import {
   protectedProcedure,
   shapeSchema,
 } from './procedures'
+import { customDomainOrpcError } from './publish-domain'
+import { cleanupPublishedSiteArtifacts } from './published-site-artifacts'
 
 /**
  * The `design` namespace: the legacy shape/page payload documents.
@@ -121,6 +123,27 @@ export const saveDesign = protectedProcedure
 export const deleteDesign = protectedProcedure
   .input(z.object({ id: z.string().min(1).max(128) }))
   .handler(async ({ context, input }) => {
+    const sites = await db
+      .select({
+        customDomain: publishedSite.customDomain,
+        storageKey: publishedSite.storageKey,
+      })
+      .from(publishedSite)
+      .where(
+        and(
+          eq(publishedSite.designId, input.id),
+          eq(publishedSite.userId, context.user.id),
+        ),
+      )
+    try {
+      await cleanupPublishedSiteArtifacts(sites, {
+        strictCustomDomains: true,
+        logScope: 'design-delete',
+      })
+    } catch (error) {
+      customDomainOrpcError(error)
+    }
+
     const deleted = await db
       .delete(design)
       .where(and(eq(design.id, input.id), eq(design.userId, context.user.id)))

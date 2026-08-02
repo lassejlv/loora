@@ -10,8 +10,11 @@ import {
   CheckIcon,
   DownloadIcon,
   EyeIcon,
+  ExternalLinkIcon,
   Globe2Icon,
   Link2Icon,
+  RefreshCwIcon,
+  Trash2Icon,
 } from '@loora/ui/icons'
 import {
   compileJsxComponent,
@@ -52,6 +55,7 @@ import { Spinner } from '@loora/ui/spinner'
 import { Switch } from '@loora/ui/switch'
 import { cn } from '@loora/ui/utils'
 import type { CanvasEditorController } from './editor'
+import { UpgradeToProButton } from './upgrade-to-pro'
 
 type ExportFormat =
   | 'png'
@@ -71,8 +75,39 @@ type PublishedSiteSummary = {
   slug: string
   title: string
   path: string
+  customDomain: {
+    hostname: string
+    providerId: string | null
+    status:
+      | 'pending'
+      | 'pending_dns'
+      | 'pending_verification'
+      | 'pending_certificate'
+      | 'active'
+      | 'misconfigured'
+      | 'failed'
+      | 'unknown'
+    records: {
+      type: 'A' | 'AAAA' | 'CNAME' | 'TXT' | 'CAA' | 'ALIAS' | 'ANAME'
+      name: string
+      value: string
+      purpose: 'routing' | 'ownership' | 'certificate' | 'other'
+      required: boolean
+      status: 'pending' | 'valid' | 'invalid' | 'unknown'
+    }[]
+    updatedAt: number | null
+  } | null
   publishedAt: number
   updatedAt: number
+}
+
+function customDomainStatusLabel(status: NonNullable<PublishedSiteSummary['customDomain']>['status']) {
+  if (status === 'active') return 'Active'
+  if (status === 'failed' || status === 'misconfigured') return 'Needs attention'
+  return status
+    .replace(/^pending_?/, 'Pending ')
+    .replaceAll('_', ' ')
+    .replace(/^./, (letter) => letter.toUpperCase())
 }
 
 const FORMATS: {
@@ -400,6 +435,11 @@ export function CanvasExport({
   const [publishHandle, setPublishHandle] = useState<string | null>(null)
   const [handleDraft, setHandleDraft] = useState('')
   const [handleBusy, setHandleBusy] = useState(false)
+  const [customDomainsAllowed, setCustomDomainsAllowed] = useState(false)
+  const [customDomainsEnabled, setCustomDomainsEnabled] = useState(true)
+  const [customDomainsConfigured, setCustomDomainsConfigured] = useState(false)
+  const [domainDraft, setDomainDraft] = useState('')
+  const [domainBusy, setDomainBusy] = useState(false)
   const [publishedSites, setPublishedSites] = useState<PublishedSiteSummary[]>(
     [],
   )
@@ -442,6 +482,9 @@ export function CanvasExport({
         if (cancelled) return
         setPublishHandle(handleState.handle)
         setHandleDraft(handleState.handle ?? '')
+        setCustomDomainsAllowed(handleState.customDomains.allowed)
+        setCustomDomainsEnabled(handleState.customDomains.enabled)
+        setCustomDomainsConfigured(handleState.customDomains.configured)
         setPublishedSites(sites)
       } catch {
         if (!cancelled) {
@@ -465,6 +508,10 @@ export function CanvasExport({
   const publishedUrl = publishedForPage
     ? appUrl(publishedForPage.path)
     : null
+  const customDomain = publishedForPage?.customDomain ?? null
+  useEffect(() => {
+    setDomainDraft(customDomain?.hostname ?? '')
+  }, [customDomain?.hostname, pageId])
   const options = useMemo<CanvasExportOptions>(
     () => ({
       ...target.options,
@@ -681,6 +728,13 @@ export function CanvasExport({
     }
   }
 
+  const replacePublishedSite = (site: PublishedSiteSummary) => {
+    setPublishedSites((current) => [
+      ...current.filter((entry) => entry.pageId !== site.pageId),
+      site,
+    ])
+  }
+
   const publishCurrentPage = async () => {
     if (!controller.target || !pageId) return
     setPublishBusy(true)
@@ -691,10 +745,7 @@ export function CanvasExport({
         designId: controller.target.designId,
         pageId,
       })
-      setPublishedSites((current) => {
-        const rest = current.filter((entry) => entry.pageId !== site.pageId)
-        return [...rest, site]
-      })
+      replacePublishedSite(site)
     } catch (cause) {
       setError(
         cause instanceof Error
@@ -703,6 +754,66 @@ export function CanvasExport({
       )
     } finally {
       setPublishBusy(false)
+    }
+  }
+
+  const connectCustomDomain = async () => {
+    if (!publishedForPage || !domainDraft.trim()) return
+    setDomainBusy(true)
+    setError(null)
+    try {
+      replacePublishedSite(
+        await orpc.publish.connectDomain({
+          siteId: publishedForPage.id,
+          hostname: domainDraft,
+        }),
+      )
+    } catch (cause) {
+      setError(
+        cause instanceof Error
+          ? cause.message
+          : 'Could not connect this domain. Try again.',
+      )
+    } finally {
+      setDomainBusy(false)
+    }
+  }
+
+  const refreshCustomDomain = async () => {
+    if (!publishedForPage?.customDomain) return
+    setDomainBusy(true)
+    setError(null)
+    try {
+      replacePublishedSite(
+        await orpc.publish.refreshDomain({ siteId: publishedForPage.id }),
+      )
+    } catch (cause) {
+      setError(
+        cause instanceof Error
+          ? cause.message
+          : 'Could not refresh this domain. Try again.',
+      )
+    } finally {
+      setDomainBusy(false)
+    }
+  }
+
+  const removeCustomDomain = async () => {
+    if (!publishedForPage?.customDomain) return
+    setDomainBusy(true)
+    setError(null)
+    try {
+      replacePublishedSite(
+        await orpc.publish.removeDomain({ siteId: publishedForPage.id }),
+      )
+    } catch (cause) {
+      setError(
+        cause instanceof Error
+          ? cause.message
+          : 'Could not remove this domain. Try again.',
+      )
+    } finally {
+      setDomainBusy(false)
     }
   }
 
@@ -1082,6 +1193,157 @@ export function CanvasExport({
                         {new Date(publishedForPage.updatedAt).toLocaleString()}.
                         Visitors see this snapshot until you republish.
                       </p>
+                      <div className="space-y-2 border-t pt-3">
+                        <div className="flex items-center justify-between gap-2">
+                          <p className="text-xs font-medium">Custom domain</p>
+                          <span className="text-2xs text-muted-foreground">Pro</span>
+                        </div>
+                        {customDomain ? (
+                          <div className="space-y-2 rounded-md border bg-background p-2.5">
+                            <div className="flex items-center gap-2">
+                              <span
+                                className={cn(
+                                  'size-1.5 rounded-full',
+                                  customDomain.status === 'active'
+                                    ? 'bg-emerald-500'
+                                    : customDomain.status === 'failed' ||
+                                        customDomain.status === 'misconfigured'
+                                      ? 'bg-destructive'
+                                      : 'bg-amber-500',
+                                )}
+                              />
+                              <span className="min-w-0 flex-1 truncate font-mono text-xs">
+                                {customDomain.hostname}
+                              </span>
+                              <span className="text-2xs text-muted-foreground">
+                                {customDomainStatusLabel(customDomain.status)}
+                              </span>
+                              {customDomain.status === 'active' ? (
+                                <a
+                                  href={`https://${customDomain.hostname}`}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  className="text-muted-foreground hover:text-foreground"
+                                  aria-label="Open custom domain"
+                                >
+                                  <ExternalLinkIcon className="size-3.5" />
+                                </a>
+                              ) : null}
+                            </div>
+                            {customDomain.records.length > 0 &&
+                            customDomain.status !== 'active' ? (
+                              <div className="space-y-2 border-t pt-2">
+                                <p className="text-2xs text-muted-foreground">
+                                  Add these records at your DNS provider.
+                                </p>
+                                {customDomain.records
+                                  .filter((record) => record.required)
+                                  .map((record) => (
+                                    <div
+                                      key={`${record.purpose}:${record.type}:${record.name}:${record.value}`}
+                                      className="grid gap-0.5 font-mono text-2xs"
+                                    >
+                                      <span className="text-muted-foreground">
+                                        {record.type} · {record.purpose}
+                                      </span>
+                                      <button
+                                        type="button"
+                                        className="truncate text-start hover:text-cx-accent"
+                                        title="Copy record name"
+                                        onClick={() => void copyText(record.name)}
+                                      >
+                                        {record.name}
+                                      </button>
+                                      <button
+                                        type="button"
+                                        className="truncate text-start text-muted-foreground hover:text-cx-accent"
+                                        title="Copy record value"
+                                        onClick={() => void copyText(record.value)}
+                                      >
+                                        {record.value}
+                                      </button>
+                                    </div>
+                                  ))}
+                              </div>
+                            ) : null}
+                            {!customDomainsEnabled ? (
+                              <p className="border-t pt-2 text-2xs text-muted-foreground">
+                                Custom domains are currently disabled.
+                              </p>
+                            ) : !customDomainsConfigured ? (
+                              <p className="border-t pt-2 text-2xs text-muted-foreground">
+                                Cloudflare domain management is unavailable on this deployment.
+                              </p>
+                            ) : null}
+                            <div className="flex justify-end gap-1 border-t pt-2">
+                              {customDomainsAllowed &&
+                              customDomainsEnabled &&
+                              customDomainsConfigured ? (
+                                <Button
+                                  size="xs"
+                                  variant="ghost"
+                                  disabled={domainBusy}
+                                  onClick={() => void refreshCustomDomain()}
+                                >
+                                  {domainBusy ? <Spinner /> : <RefreshCwIcon />}
+                                  Refresh
+                                </Button>
+                              ) : null}
+                              {customDomainsConfigured ? (
+                                <Button
+                                  size="xs"
+                                  variant="ghost"
+                                  disabled={domainBusy}
+                                  onClick={() => void removeCustomDomain()}
+                                >
+                                  <Trash2Icon />
+                                  Remove
+                                </Button>
+                              ) : null}
+                            </div>
+                          </div>
+                        ) : !customDomainsEnabled ? (
+                          <p className="text-xs text-muted-foreground">
+                            Custom domains are currently disabled.
+                          </p>
+                        ) : !customDomainsAllowed ? (
+                          <div className="flex items-center justify-between gap-3 rounded-md border bg-background p-2.5">
+                            <p className="text-xs text-muted-foreground">
+                              Serve this site from your own domain with managed TLS.
+                            </p>
+                            <UpgradeToProButton size="xs" />
+                          </div>
+                        ) : !customDomainsConfigured ? (
+                          <p className="text-xs text-muted-foreground">
+                            Custom domains are not configured on this deployment.
+                          </p>
+                        ) : (
+                          <div className="flex items-center gap-2">
+                            <Input
+                              value={domainDraft}
+                              placeholder="www.example.com"
+                              aria-label="Custom domain"
+                              className="font-mono"
+                              disabled={domainBusy}
+                              onChange={(event) => setDomainDraft(event.target.value)}
+                              onKeyDown={(event) => {
+                                if (event.key === 'Enter') {
+                                  event.preventDefault()
+                                  void connectCustomDomain()
+                                }
+                              }}
+                            />
+                            <Button
+                              size="sm"
+                              disabled={domainBusy || !domainDraft.trim()}
+                              onClick={() => void connectCustomDomain()}
+                            >
+                              {domainBusy ? <Spinner /> : <Globe2Icon />}
+                              Connect
+                            </Button>
+                          </div>
+                        )}
+                      </div>
                     </>
                   ) : (
                     <div className="grid h-40 place-items-center px-6 text-center">

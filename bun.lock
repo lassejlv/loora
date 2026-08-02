@@ -233,6 +233,7 @@
         "@loora/db": "workspace:*",
         "@loora/platform": "workspace:*",
         "@modelcontextprotocol/sdk": "^1.21.0",
+        "@opencoredev/domain-sdk": "^0.2.0",
         "@orpc/client": "^1.14.8",
         "@orpc/server": "^1.14.8",
         "drizzle-orm": "catalog:",
@@ -527,6 +528,8 @@
     "@oozcitak/url": ["@oozcitak/url@3.0.0", "", { "dependencies": { "@oozcitak/infra": "^2.0.2", "@oozcitak/util": "^10.0.0" } }, "sha512-ZKfET8Ak1wsLAiLWNfFkZc/BraDccuTJKR6svTYc7sVjbR+Iu0vtXdiDMY4o6jaFl5TW2TlS7jbLl4VovtAJWQ=="],
 
     "@oozcitak/util": ["@oozcitak/util@10.0.0", "", {}, "sha512-hAX0pT/73190NLqBPPWSdBVGtbY6VOhWYK3qqHqtXQ1gK7kS2yz4+ivsN07hpJ6I3aeMtKP6J6npsEKOAzuTLA=="],
+
+    "@opencoredev/domain-sdk": ["@opencoredev/domain-sdk@0.2.0", "", { "dependencies": { "tldts": "^7.0.19" } }, "sha512-pUNWxyHwSsiJPx+cT3ZuVqqekLV7KqWdjBbx/arXLOW29nUI+zLU2LRlUNWS4LmQlNy3y3oISYncbIb1Wsmd4w=="],
 
     "@opencoredev/email-sdk": ["@opencoredev/email-sdk@1.0.0", "", { "peerDependencies": { "@react-email/render": "^2.1.0", "ai": "^6.0.182 || ^7.0.0", "react": "^18.0.0 || ^19.0.0", "react-dom": "^18.0.0 || ^19.0.0" }, "optionalPeers": ["@react-email/render", "ai", "react", "react-dom"], "bin": { "email-sdk": "dist/cli.js" } }, "sha512-JdUFj1Cu9BNrInQrTmE8f/K3jBiBFLu8DwrJzz62Foi0TfjAVaRGvqYhVyXcE4zgi2i6BY8frmXmFAkvHWIsPg=="],
 

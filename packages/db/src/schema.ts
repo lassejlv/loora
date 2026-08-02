@@ -380,6 +380,25 @@ export const publishEgress = pgTable(
   (table) => [primaryKey({ columns: [table.userId, table.day] })],
 )
 
+export type PublishedSiteDomainStatus =
+  | 'pending'
+  | 'pending_dns'
+  | 'pending_verification'
+  | 'pending_certificate'
+  | 'active'
+  | 'misconfigured'
+  | 'failed'
+  | 'unknown'
+
+export interface PublishedSiteDomainRecord {
+  type: 'A' | 'AAAA' | 'CNAME' | 'TXT' | 'CAA' | 'ALIAS' | 'ANAME'
+  name: string
+  value: string
+  purpose: 'routing' | 'ownership' | 'certificate' | 'other'
+  required: boolean
+  status: 'pending' | 'valid' | 'invalid' | 'unknown'
+}
+
 /**
  * Frozen HTML snapshot of a Page, stored in S3. The row is only metadata —
  * HTML bytes live at `storageKey`. Public URL is `/sites/<handle>/<slug>`.
@@ -397,6 +416,11 @@ export const publishedSite = pgTable(
     slug: text('slug').notNull(),
     storageKey: text('storage_key').notNull(),
     title: text('title').notNull(),
+    customDomain: text('custom_domain').unique(),
+    customDomainProviderId: text('custom_domain_provider_id'),
+    customDomainStatus: text('custom_domain_status').$type<PublishedSiteDomainStatus>(),
+    customDomainRecords: jsonb('custom_domain_records').$type<PublishedSiteDomainRecord[]>(),
+    customDomainUpdatedAt: timestamp('custom_domain_updated_at'),
     publishedAt: timestamp('published_at').defaultNow().notNull(),
     updatedAt: timestamp('updated_at')
       .defaultNow()

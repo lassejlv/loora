@@ -18,6 +18,7 @@
     "@loora/db": "workspace:*",
     "@loora/platform": "workspace:*",
     "@modelcontextprotocol/sdk": "^1.21.0",
+    "@opencoredev/domain-sdk": "^0.2.0",
     "@orpc/client": "^1.14.8",
     "@orpc/server": "^1.14.8",
     "drizzle-orm": "catalog:",

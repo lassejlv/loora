@@ -20,6 +20,7 @@ import { Route as TermsRouteImport } from './routes/terms'
 import { Route as DotwellKnownOauthAuthorizationServerRouteImport } from './routes/[.]well-known.oauth-authorization-server'
 import { Route as ApiCanvasEventsRouteImport } from './routes/api.canvas-events'
 import { Route as ApiCanvasPresenceRouteImport } from './routes/api.canvas-presence'
+import { Route as ApiCustomDomainSiteRouteImport } from './routes/api.custom-domain-site'
 import { Route as ApiReadyRouteImport } from './routes/api.ready'
 import { Route as ApiRealtimeTicketRouteImport } from './routes/api.realtime-ticket'
 import { Route as AppIndexRouteImport } from './routes/app.index'
@@ -38,6 +39,7 @@ import { Route as ApiGithubInstallRouteImport } from './routes/api.github.instal
 import { Route as ApiGithubSetupRouteImport } from './routes/api.github.setup'
 import { Route as ApiGithubWebhookRouteImport } from './routes/api.github.webhook'
 import { Route as ApiHandoffTokenRouteImport } from './routes/api.handoff.$token'
+import { Route as ApiInternalCustomDomainSyncRouteImport } from './routes/api.internal.custom-domain-sync'
 import { Route as ApiInternalMcpRouteImport } from './routes/api.internal.mcp'
 import { Route as ApiRpcSplatRouteImport } from './routes/api.rpc.$'
 import { Route as SitesHandleSlugRouteImport } from './routes/sites.$handle.$slug'
@@ -98,6 +100,11 @@ const ApiCanvasEventsRoute = ApiCanvasEventsRouteImport.update({
 const ApiCanvasPresenceRoute = ApiCanvasPresenceRouteImport.update({
   id: '/api/canvas-presence',
   path: '/api/canvas-presence',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiCustomDomainSiteRoute = ApiCustomDomainSiteRouteImport.update({
+  id: '/api/custom-domain-site',
+  path: '/api/custom-domain-site',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ApiReadyRoute = ApiReadyRouteImport.update({
@@ -190,6 +197,12 @@ const ApiHandoffTokenRoute = ApiHandoffTokenRouteImport.update({
   path: '/api/handoff/$token',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiInternalCustomDomainSyncRoute =
+  ApiInternalCustomDomainSyncRouteImport.update({
+    id: '/api/internal/custom-domain-sync',
+    path: '/api/internal/custom-domain-sync',
+    getParentRoute: () => rootRouteImport,
+  } as any)
 const ApiInternalMcpRoute = ApiInternalMcpRouteImport.update({
   id: '/api/internal/mcp',
   path: '/api/internal/mcp',
@@ -228,6 +241,7 @@ export interface FileRoutesByFullPath {
   '/.well-known/oauth-authorization-server': typeof DotwellKnownOauthAuthorizationServerRoute
   '/api/canvas-events': typeof ApiCanvasEventsRoute
   '/api/canvas-presence': typeof ApiCanvasPresenceRoute
+  '/api/custom-domain-site': typeof ApiCustomDomainSiteRoute
   '/api/ready': typeof ApiReadyRoute
   '/api/realtime-ticket': typeof ApiRealtimeTicketRoute
   '/app/admin': typeof AppAdminRoute
@@ -246,6 +260,7 @@ export interface FileRoutesByFullPath {
   '/api/github/setup': typeof ApiGithubSetupRoute
   '/api/github/webhook': typeof ApiGithubWebhookRoute
   '/api/handoff/$token': typeof ApiHandoffTokenRouteWithChildren
+  '/api/internal/custom-domain-sync': typeof ApiInternalCustomDomainSyncRoute
   '/api/internal/mcp': typeof ApiInternalMcpRoute
   '/api/rpc/$': typeof ApiRpcSplatRoute
   '/sites/$handle/$slug': typeof SitesHandleSlugRoute
@@ -264,6 +279,7 @@ export interface FileRoutesByTo {
   '/.well-known/oauth-authorization-server': typeof DotwellKnownOauthAuthorizationServerRoute
   '/api/canvas-events': typeof ApiCanvasEventsRoute
   '/api/canvas-presence': typeof ApiCanvasPresenceRoute
+  '/api/custom-domain-site': typeof ApiCustomDomainSiteRoute
   '/api/ready': typeof ApiReadyRoute
   '/api/realtime-ticket': typeof ApiRealtimeTicketRoute
   '/app/admin': typeof AppAdminRoute
@@ -282,6 +298,7 @@ export interface FileRoutesByTo {
   '/api/github/setup': typeof ApiGithubSetupRoute
   '/api/github/webhook': typeof ApiGithubWebhookRoute
   '/api/handoff/$token': typeof ApiHandoffTokenRouteWithChildren
+  '/api/internal/custom-domain-sync': typeof ApiInternalCustomDomainSyncRoute
   '/api/internal/mcp': typeof ApiInternalMcpRoute
   '/api/rpc/$': typeof ApiRpcSplatRoute
   '/sites/$handle/$slug': typeof SitesHandleSlugRoute
@@ -301,6 +318,7 @@ export interface FileRoutesById {
   '/.well-known/oauth-authorization-server': typeof DotwellKnownOauthAuthorizationServerRoute
   '/api/canvas-events': typeof ApiCanvasEventsRoute
   '/api/canvas-presence': typeof ApiCanvasPresenceRoute
+  '/api/custom-domain-site': typeof ApiCustomDomainSiteRoute
   '/api/ready': typeof ApiReadyRoute
   '/api/realtime-ticket': typeof ApiRealtimeTicketRoute
   '/app/admin': typeof AppAdminRoute
@@ -319,6 +337,7 @@ export interface FileRoutesById {
   '/api/github/setup': typeof ApiGithubSetupRoute
   '/api/github/webhook': typeof ApiGithubWebhookRoute
   '/api/handoff/$token': typeof ApiHandoffTokenRouteWithChildren
+  '/api/internal/custom-domain-sync': typeof ApiInternalCustomDomainSyncRoute
   '/api/internal/mcp': typeof ApiInternalMcpRoute
   '/api/rpc/$': typeof ApiRpcSplatRoute
   '/sites/$handle/$slug': typeof SitesHandleSlugRoute
@@ -339,6 +358,7 @@ export interface FileRouteTypes {
     | '/.well-known/oauth-authorization-server'
     | '/api/canvas-events'
     | '/api/canvas-presence'
+    | '/api/custom-domain-site'
     | '/api/ready'
     | '/api/realtime-ticket'
     | '/app/admin'
@@ -357,6 +377,7 @@ export interface FileRouteTypes {
     | '/api/github/setup'
     | '/api/github/webhook'
     | '/api/handoff/$token'
+    | '/api/internal/custom-domain-sync'
     | '/api/internal/mcp'
     | '/api/rpc/$'
     | '/sites/$handle/$slug'
@@ -375,6 +396,7 @@ export interface FileRouteTypes {
     | '/.well-known/oauth-authorization-server'
     | '/api/canvas-events'
     | '/api/canvas-presence'
+    | '/api/custom-domain-site'
     | '/api/ready'
     | '/api/realtime-ticket'
     | '/app/admin'
@@ -393,6 +415,7 @@ export interface FileRouteTypes {
     | '/api/github/setup'
     | '/api/github/webhook'
     | '/api/handoff/$token'
+    | '/api/internal/custom-domain-sync'
     | '/api/internal/mcp'
     | '/api/rpc/$'
     | '/sites/$handle/$slug'
@@ -411,6 +434,7 @@ export interface FileRouteTypes {
     | '/.well-known/oauth-authorization-server'
     | '/api/canvas-events'
     | '/api/canvas-presence'
+    | '/api/custom-domain-site'
     | '/api/ready'
     | '/api/realtime-ticket'
     | '/app/admin'
@@ -429,6 +453,7 @@ export interface FileRouteTypes {
     | '/api/github/setup'
     | '/api/github/webhook'
     | '/api/handoff/$token'
+    | '/api/internal/custom-domain-sync'
     | '/api/internal/mcp'
     | '/api/rpc/$'
     | '/sites/$handle/$slug'
@@ -448,6 +473,7 @@ export interface RootRouteChildren {
   DotwellKnownOauthAuthorizationServerRoute: typeof DotwellKnownOauthAuthorizationServerRoute
   ApiCanvasEventsRoute: typeof ApiCanvasEventsRoute
   ApiCanvasPresenceRoute: typeof ApiCanvasPresenceRoute
+  ApiCustomDomainSiteRoute: typeof ApiCustomDomainSiteRoute
   ApiReadyRoute: typeof ApiReadyRoute
   ApiRealtimeTicketRoute: typeof ApiRealtimeTicketRoute
   AppAdminRoute: typeof AppAdminRoute
@@ -466,6 +492,7 @@ export interface RootRouteChildren {
   ApiGithubSetupRoute: typeof ApiGithubSetupRoute
   ApiGithubWebhookRoute: typeof ApiGithubWebhookRoute
   ApiHandoffTokenRoute: typeof ApiHandoffTokenRouteWithChildren
+  ApiInternalCustomDomainSyncRoute: typeof ApiInternalCustomDomainSyncRoute
   ApiInternalMcpRoute: typeof ApiInternalMcpRoute
   ApiRpcSplatRoute: typeof ApiRpcSplatRoute
   SitesHandleSlugRoute: typeof SitesHandleSlugRoute
@@ -549,6 +576,13 @@ declare module '@tanstack/react-router' {
       path: '/api/canvas-presence'
       fullPath: '/api/canvas-presence'
       preLoaderRoute: typeof ApiCanvasPresenceRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/custom-domain-site': {
+      id: '/api/custom-domain-site'
+      path: '/api/custom-domain-site'
+      fullPath: '/api/custom-domain-site'
+      preLoaderRoute: typeof ApiCustomDomainSiteRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/api/ready': {
@@ -677,6 +711,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiHandoffTokenRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/internal/custom-domain-sync': {
+      id: '/api/internal/custom-domain-sync'
+      path: '/api/internal/custom-domain-sync'
+      fullPath: '/api/internal/custom-domain-sync'
+      preLoaderRoute: typeof ApiInternalCustomDomainSyncRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/internal/mcp': {
       id: '/api/internal/mcp'
       path: '/api/internal/mcp'
@@ -740,6 +781,7 @@ const rootRouteChildren: RootRouteChildren = {
     DotwellKnownOauthAuthorizationServerRoute,
   ApiCanvasEventsRoute: ApiCanvasEventsRoute,
   ApiCanvasPresenceRoute: ApiCanvasPresenceRoute,
+  ApiCustomDomainSiteRoute: ApiCustomDomainSiteRoute,
   ApiReadyRoute: ApiReadyRoute,
   ApiRealtimeTicketRoute: ApiRealtimeTicketRoute,
   AppAdminRoute: AppAdminRoute,
@@ -758,6 +800,7 @@ const rootRouteChildren: RootRouteChildren = {
   ApiGithubSetupRoute: ApiGithubSetupRoute,
   ApiGithubWebhookRoute: ApiGithubWebhookRoute,
   ApiHandoffTokenRoute: ApiHandoffTokenRouteWithChildren,
+  ApiInternalCustomDomainSyncRoute: ApiInternalCustomDomainSyncRoute,
   ApiInternalMcpRoute: ApiInternalMcpRoute,
   ApiRpcSplatRoute: ApiRpcSplatRoute,
   SitesHandleSlugRoute: SitesHandleSlugRoute,
@@ -766,3 +809,12 @@ const rootRouteChildren: RootRouteChildren = {
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
   ._addFileTypes<FileRouteTypes>()
+
+import type { getRouter } from './router.tsx'
+import type { createStart } from '@tanstack/react-start'
+declare module '@tanstack/react-start' {
+  interface Register {
+    ssr: true
+    router: Awaited<ReturnType<typeof getRouter>>
+  }
+}

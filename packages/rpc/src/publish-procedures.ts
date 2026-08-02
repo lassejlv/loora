@@ -1,5 +1,6 @@
 import { ORPCError } from '@orpc/server'
-import { and, eq, inArray } from 'drizzle-orm'
+import { DomainSdkError, type Domain } from '@opencoredev/domain-sdk'
+import { and, eq, inArray, isNull } from 'drizzle-orm'
 import { z } from 'zod'
 import { compileStandaloneHtml } from '@loora/canvas/export'
 import { db } from '@loora/db'
@@ -8,6 +9,10 @@ import {
   design,
   publishedSite,
   user,
+} from '@loora/db/schema'
+import type {
+  PublishedSiteDomainRecord,
+  PublishedSiteDomainStatus,
 } from '@loora/db/schema'
 import type { CanvasDocument } from '@loora/canvas/model'
 import { assetIdFromSrc } from './asset-url'
@@ -25,6 +30,18 @@ import {
 } from './procedures'
 import { rateLimit, rateLimits } from './rate-limit'
 import { assetPublicUrl, s3 } from './storage'
+import {
+  canUseCustomDomains,
+  customDomainClient,
+  customDomainOrpcError,
+  customDomainsEnabled,
+  normalizeCustomDomain,
+  requireCustomDomainClient,
+  requireCustomDomainPlan,
+  requireCustomDomainsEnabled,
+  storedDomainState,
+} from './publish-domain'
+import { cleanupPublishedSiteArtifacts } from './published-site-artifacts'
 
 const SAFE_IMAGE_TYPES = new Set([
   'image/avif',
@@ -41,6 +58,11 @@ function siteSummary(row: {
   handle: string
   slug: string
   title: string
+  customDomain: string | null
+  customDomainProviderId: string | null
+  customDomainStatus: PublishedSiteDomainStatus | null
+  customDomainRecords: PublishedSiteDomainRecord[] | null
+  customDomainUpdatedAt: Date | null
   publishedAt: Date
   updatedAt: Date
 }) {
@@ -52,6 +74,15 @@ function siteSummary(row: {
     slug: row.slug,
     title: row.title,
     path: sitePublicPath(row.handle, row.slug),
+    customDomain: row.customDomain
+      ? {
+          hostname: row.customDomain,
+          providerId: row.customDomainProviderId,
+          status: row.customDomainStatus ?? 'unknown',
+          records: row.customDomainRecords ?? [],
+          updatedAt: row.customDomainUpdatedAt?.getTime() ?? null,
+        }
+      : null,
     publishedAt: row.publishedAt.getTime(),
     updatedAt: row.updatedAt.getTime(),
   }
@@ -133,12 +164,22 @@ async function resolvePublishAssetMap(
 }
 
 export const getPublishHandle = protectedProcedure.handler(async ({ context }) => {
-  const [account] = await db
-    .select({ handle: user.handle })
-    .from(user)
-    .where(eq(user.id, context.user.id))
-    .limit(1)
-  return { handle: account?.handle ?? null }
+  const [[account], allowed] = await Promise.all([
+    db
+      .select({ handle: user.handle })
+      .from(user)
+      .where(eq(user.id, context.user.id))
+      .limit(1),
+    canUseCustomDomains(context.user),
+  ])
+  return {
+    handle: account?.handle ?? null,
+    customDomains: {
+      allowed,
+      enabled: customDomainsEnabled(),
+      configured: customDomainClient() !== null,
+    },
+  }
 })
 
 export const setPublishHandle = protectedProcedure
@@ -370,6 +411,207 @@ export const publishPage = protectedProcedure
     return siteSummary(created!)
   })
 
+async function requireOwnedPublishedSite(userId: string, siteId: string) {
+  const [site] = await db
+    .select()
+    .from(publishedSite)
+    .where(and(eq(publishedSite.id, siteId), eq(publishedSite.userId, userId)))
+    .limit(1)
+  if (!site) throw new ORPCError('NOT_FOUND')
+  return site
+}
+
+export const connectPublishedSiteDomain = protectedProcedure
+  .input(
+    z.object({
+      siteId: z.string().min(1).max(128),
+      hostname: z.string().min(1).max(253),
+    }),
+  )
+  .handler(async ({ context, input }) => {
+    requireCustomDomainsEnabled()
+    await requireCustomDomainPlan(context.user)
+    const client = requireCustomDomainClient()
+    const hostname = normalizeCustomDomain(input.hostname)
+    const site = await requireOwnedPublishedSite(context.user.id, input.siteId)
+
+    if (site.customDomain && site.customDomain !== hostname) {
+      throw new ORPCError('CONFLICT', {
+        message: 'Remove the current custom domain before connecting another.',
+      })
+    }
+
+    if (!site.customDomain) {
+      let alreadyProvisioned = false
+      try {
+        await client.get(hostname)
+        alreadyProvisioned = true
+      } catch (error) {
+        if (
+          !(error instanceof DomainSdkError) ||
+          error.code !== 'DOMAIN_NOT_FOUND'
+        ) {
+          customDomainOrpcError(error)
+        }
+      }
+      if (alreadyProvisioned) {
+        throw new ORPCError('CONFLICT', {
+          message:
+            'That domain is already provisioned in Cloudflare. Remove the old custom hostname first.',
+        })
+      }
+
+      const [other] = await db
+        .select({ id: publishedSite.id })
+        .from(publishedSite)
+        .where(eq(publishedSite.customDomain, hostname))
+        .limit(1)
+      if (other) {
+        throw new ORPCError('CONFLICT', {
+          message: 'That domain is already connected to another site.',
+        })
+      }
+
+      try {
+        const [reserved] = await db
+          .update(publishedSite)
+          .set({
+            customDomain: hostname,
+            customDomainStatus: 'pending',
+            customDomainRecords: [],
+            customDomainUpdatedAt: new Date(),
+          })
+          .where(
+            and(
+              eq(publishedSite.id, site.id),
+              eq(publishedSite.userId, context.user.id),
+              isNull(publishedSite.customDomain),
+            ),
+          )
+          .returning({ id: publishedSite.id })
+        if (!reserved) {
+          throw new ORPCError('CONFLICT', {
+            message: 'This site already has a custom domain.',
+          })
+        }
+      } catch (error) {
+        if (error instanceof ORPCError) throw error
+        throw new ORPCError('CONFLICT', {
+          message: 'That domain is already connected to another site.',
+        })
+      }
+    }
+
+    let domain: Domain
+    try {
+      domain = await client.add(hostname)
+    } catch (error) {
+      if (!site.customDomain) {
+        await db
+          .update(publishedSite)
+          .set({
+            customDomain: null,
+            customDomainStatus: null,
+            customDomainRecords: null,
+            customDomainUpdatedAt: null,
+          })
+          .where(
+            and(
+              eq(publishedSite.id, site.id),
+              eq(publishedSite.customDomain, hostname),
+              isNull(publishedSite.customDomainProviderId),
+            ),
+          )
+      }
+      customDomainOrpcError(error)
+    }
+
+    try {
+      const [updated] = await db
+        .update(publishedSite)
+        .set(storedDomainState(domain))
+        .where(
+          and(
+            eq(publishedSite.id, site.id),
+            eq(publishedSite.userId, context.user.id),
+            eq(publishedSite.customDomain, hostname),
+          ),
+        )
+        .returning()
+      if (!updated) throw new Error('Custom domain reservation disappeared')
+      return siteSummary(updated)
+    } catch (error) {
+      await client.remove(hostname).catch(() => undefined)
+      await db
+        .update(publishedSite)
+        .set({
+          customDomain: null,
+          customDomainProviderId: null,
+          customDomainStatus: null,
+          customDomainRecords: null,
+          customDomainUpdatedAt: null,
+        })
+        .where(
+          and(
+            eq(publishedSite.id, site.id),
+            eq(publishedSite.customDomain, hostname),
+          ),
+        )
+      throw error
+    }
+  })
+
+export const refreshPublishedSiteDomain = protectedProcedure
+  .input(z.object({ siteId: z.string().min(1).max(128) }))
+  .handler(async ({ context, input }) => {
+    requireCustomDomainsEnabled()
+    await requireCustomDomainPlan(context.user)
+    const site = await requireOwnedPublishedSite(context.user.id, input.siteId)
+    if (!site.customDomain) {
+      throw new ORPCError('NOT_FOUND', {
+        message: 'This site has no custom domain.',
+      })
+    }
+
+    let domain: Domain
+    try {
+      domain = await requireCustomDomainClient().refresh(site.customDomain)
+    } catch (error) {
+      customDomainOrpcError(error)
+    }
+    const [updated] = await db
+      .update(publishedSite)
+      .set(storedDomainState(domain))
+      .where(eq(publishedSite.id, site.id))
+      .returning()
+    return siteSummary(updated!)
+  })
+
+export const removePublishedSiteDomain = protectedProcedure
+  .input(z.object({ siteId: z.string().min(1).max(128) }))
+  .handler(async ({ context, input }) => {
+    const site = await requireOwnedPublishedSite(context.user.id, input.siteId)
+    if (!site.customDomain) return siteSummary(site)
+
+    try {
+      await requireCustomDomainClient().remove(site.customDomain)
+    } catch (error) {
+      customDomainOrpcError(error)
+    }
+    const [updated] = await db
+      .update(publishedSite)
+      .set({
+        customDomain: null,
+        customDomainProviderId: null,
+        customDomainStatus: null,
+        customDomainRecords: null,
+        customDomainUpdatedAt: null,
+      })
+      .where(eq(publishedSite.id, site.id))
+      .returning()
+    return siteSummary(updated!)
+  })
+
 export const unpublishPage = protectedProcedure
   .input(
     z.object({
@@ -402,8 +644,13 @@ export const unpublishPage = protectedProcedure
       .limit(1)
     if (!row) throw new ORPCError('NOT_FOUND')
 
-    if (s3) {
-      await s3.delete(row.storageKey).catch(() => undefined)
+    try {
+      await cleanupPublishedSiteArtifacts([row], {
+        strictCustomDomains: true,
+        logScope: 'unpublish',
+      })
+    } catch (error) {
+      customDomainOrpcError(error)
     }
     await db.delete(publishedSite).where(eq(publishedSite.id, row.id))
     return { ok: true as const }
@@ -428,15 +675,54 @@ export async function loadPublishedSiteHtml(handle: string, slug: string) {
       ),
     )
     .limit(1)
-  if (!row || !s3) return null
+  if (!row) return null
+  return readPublishedSiteObject(row.storageKey, row.title)
+}
+
+async function readPublishedSiteObject(storageKey: string, title: string) {
+  if (!s3) return null
 
   try {
-    const bytes = new Uint8Array(await s3.file(row.storageKey).arrayBuffer())
+    const bytes = new Uint8Array(await s3.file(storageKey).arrayBuffer())
     return {
       html: new TextDecoder().decode(bytes),
-      title: row.title,
+      title,
     }
   } catch {
     return null
   }
+}
+
+/** Used by the custom-domain Worker origin route. */
+export async function loadPublishedSiteHtmlByDomain(hostname: string) {
+  if (!customDomainsEnabled()) return null
+
+  let domain: string
+  try {
+    domain = normalizeCustomDomain(hostname)
+  } catch {
+    return null
+  }
+
+  const [row] = await db
+    .select({
+      storageKey: publishedSite.storageKey,
+      title: publishedSite.title,
+      userId: publishedSite.userId,
+      isAdmin: user.isAdmin,
+    })
+    .from(publishedSite)
+    .innerJoin(user, eq(user.id, publishedSite.userId))
+    .where(
+      and(
+        eq(publishedSite.customDomain, domain),
+        eq(publishedSite.customDomainStatus, 'active'),
+      ),
+    )
+    .limit(1)
+  if (!row) return null
+  if (!(await canUseCustomDomains({ id: row.userId, isAdmin: row.isAdmin }))) {
+    return null
+  }
+  return readPublishedSiteObject(row.storageKey, row.title)
 }

@@ -9,6 +9,7 @@ import { googleOAuthEnabled } from '@loora/auth'
 import { db } from '@loora/db'
 import {
   asset,
+  publishedSite,
   user,
 } from '@loora/db/schema'
 import { canUseApp, isPreviewAccessRequired } from '@loora/auth/preview-access'
@@ -19,6 +20,7 @@ import {
 } from '@loora/auth/legal-consent'
 import { githubEnabled } from '@loora/auth/github'
 import { s3 } from './storage'
+import { cleanupPublishedSiteArtifacts } from './published-site-artifacts'
 import {
   consentedProcedure,
   signedInProcedure,
@@ -118,6 +120,15 @@ export const requestPreviewAccess = consentedProcedure.handler(async ({ context 
 })
 
 export async function deleteUserAccountData(userId: string) {
+  const sites = await db
+    .select({
+      customDomain: publishedSite.customDomain,
+      storageKey: publishedSite.storageKey,
+    })
+    .from(publishedSite)
+    .where(eq(publishedSite.userId, userId))
+  await cleanupPublishedSiteArtifacts(sites, { logScope: 'account' })
+
   // S3 objects don't cascade with the user row; collect and delete them first.
   if (s3) {
     const keys = await db

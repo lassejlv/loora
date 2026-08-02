@@ -97,9 +97,12 @@ import {
   savePreferences,
 } from './preferences'
 import {
+  connectPublishedSiteDomain,
   getPublishHandle,
   listPublishedSites,
   publishPage,
+  refreshPublishedSiteDomain,
+  removePublishedSiteDomain,
   setPublishHandle,
   unpublishPage,
 } from './publish-procedures'
@@ -167,6 +170,9 @@ export const appRouter = {
     list: listPublishedSites,
     publish: publishPage,
     unpublish: unpublishPage,
+    connectDomain: connectPublishedSiteDomain,
+    refreshDomain: refreshPublishedSiteDomain,
+    removeDomain: removePublishedSiteDomain,
   },
   history: {
     list: listVersions,
