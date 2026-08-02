@@ -7,6 +7,16 @@ import { Switch } from '@loora/ui/switch'
 import { Textarea } from '@loora/ui/textarea'
 
 type LaunchWeekConfig = Awaited<ReturnType<typeof orpc.admin.launchWeek.get>>
+const DAY_NAMES = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
+
+function emptyDay(index: number): LaunchWeekConfig['days'][number] {
+  return {
+    title: `${DAY_NAMES[index]} release`,
+    description: 'Describe what launches today and why it matters.',
+    ctaLabel: '',
+    ctaUrl: '',
+  }
+}
 
 function formatDate(value: string, index: number) {
   const date = new Date(`${value}T00:00:00Z`)
@@ -43,13 +53,18 @@ export function AdminLaunchWeek() {
     })
   }
 
+  const setDayCount = (count: 5 | 7) => {
+    const days = Array.from({ length: count }, (_, index) => config.days[index] ?? emptyDay(index))
+    setConfig({ ...config, days })
+  }
+
   return (
     <section className="rounded-md border border-line bg-surface">
       <div className="flex flex-wrap items-center justify-between gap-3 border-b border-line p-4">
         <div>
           <h2 className="text-sm font-semibold">Launch week</h2>
           <p className="mt-1 text-xs text-muted-foreground">
-            Schedule seven daily releases at <span className="font-mono">/launch-week</span>.
+            Schedule five or seven daily releases at <span className="font-mono">/launch-week</span>.
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -65,7 +80,7 @@ export function AdminLaunchWeek() {
       </div>
 
       <div className="space-y-5 p-4">
-        <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_180px]">
+        <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_180px_140px]">
           <div className="space-y-1.5">
             <Label htmlFor="launch-week-headline">Headline</Label>
             <Input
@@ -84,6 +99,22 @@ export function AdminLaunchWeek() {
               onChange={(event) => setConfig({ ...config, startDate: event.target.value })}
             />
             <p className="text-2xs text-muted-foreground">Choose a Monday.</p>
+          </div>
+          <div className="space-y-1.5">
+            <Label>Campaign length</Label>
+            <div className="grid grid-cols-2 gap-1" role="group" aria-label="Campaign length">
+              {([5, 7] as const).map((count) => (
+                <Button
+                  key={count}
+                  size="sm"
+                  variant={config.days.length === count ? 'secondary' : 'outline'}
+                  aria-pressed={config.days.length === count}
+                  onClick={() => setDayCount(count)}
+                >
+                  {count} days
+                </Button>
+              ))}
+            </div>
           </div>
         </div>
 

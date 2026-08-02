@@ -12,9 +12,9 @@ export const Route = createFileRoute('/launch-week')({
   head: () => ({
     meta: [
       { title: 'Launch week — loora' },
-      { name: 'description', content: 'Seven days of new Loora releases.' },
+      { name: 'description', content: 'Daily new Loora releases.' },
       { property: 'og:title', content: 'Launch week — loora' },
-      { property: 'og:description', content: 'Seven days of new Loora releases.' },
+      { property: 'og:description', content: 'Daily new Loora releases.' },
     ],
   }),
   component: LaunchWeekPage,
@@ -99,7 +99,9 @@ function LaunchWeekContent({
       ) : null}
 
       {/* At-a-glance grid: hairline cells, today washed in accent. */}
-      <ul className="mt-10 grid gap-px border border-border bg-border sm:grid-cols-7">
+      <ul className={`mt-10 grid gap-px border border-border bg-border ${
+        launchWeek.days.length === 5 ? 'sm:grid-cols-5' : 'sm:grid-cols-7'
+      }`}>
         {launchWeek.days.map((day) => (
           <li
             key={day.date}

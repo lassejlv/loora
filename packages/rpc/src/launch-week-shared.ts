@@ -40,7 +40,10 @@ export const launchWeekConfigSchema = z.object({
   ),
   headline: z.string().trim().min(1).max(120),
   description: z.string().trim().min(1).max(600),
-  days: z.array(launchWeekDaySchema).length(7),
+  days: z.array(launchWeekDaySchema).refine(
+    (days) => days.length === 5 || days.length === 7,
+    'Launch week must have 5 or 7 days.',
+  ),
 })
 
 export type LaunchWeekConfig = z.infer<typeof launchWeekConfigSchema>
@@ -96,7 +99,8 @@ export function publicLaunchWeek(config: LaunchWeekConfig, today: string): Publi
     startDate: config.startDate,
     headline: config.headline,
     description: config.description,
-    days: LAUNCH_WEEK_DAY_NAMES.map((name, index) => {
+    days: config.days.map((offer, index) => {
+      const name = LAUNCH_WEEK_DAY_NAMES[index]
       const date = addDays(config.startDate, index)
       const status: 'upcoming' | 'today' | 'released' =
         today < date ? 'upcoming' : today === date ? 'today' : 'released'
@@ -104,7 +108,7 @@ export function publicLaunchWeek(config: LaunchWeekConfig, today: string): Publi
         name,
         date,
         status,
-        offer: status === 'upcoming' ? null : config.days[index] as LaunchWeekDay,
+        offer: status === 'upcoming' ? null : offer as LaunchWeekDay,
       }
     }),
   }
