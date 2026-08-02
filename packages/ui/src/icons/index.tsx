@@ -79,6 +79,7 @@ import {
   Search01Icon as HugeSearchIcon,
   SearchAddIcon as HugeZoomInIcon,
   SearchMinusIcon as HugeZoomOutIcon,
+  QrCode01Icon as HugeQrCodeIcon,
   SendToBackIcon as HugeSendToBackIcon,
   SentIcon as HugeSendIcon,
   Settings01Icon as HugeSettingsIcon,
@@ -236,6 +237,7 @@ export const PanelsTopLeftIcon = createIcon(
 )
 export const PencilIcon = createIcon(HugePencilIcon, 'PencilIcon')
 export const PlusIcon = createIcon(HugePlusIcon, 'PlusIcon')
+export const QrCodeIcon = createIcon(HugeQrCodeIcon, 'QrCodeIcon')
 export const RectangleHorizontalIcon = createIcon(
   HugeSquareIcon,
   'RectangleHorizontalIcon',

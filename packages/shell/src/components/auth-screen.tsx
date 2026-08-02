@@ -38,7 +38,6 @@ export function AuthScreen() {
   const [passkeySupported, setPasskeySupported] = useState(false)
   const [twoFactorPending, setTwoFactorPending] = useState(false)
   const [twoFactorCode, setTwoFactorCode] = useState('')
-  const [twoFactorMethods, setTwoFactorMethods] = useState<string[]>([])
   const [twoFactorOtpSent, setTwoFactorOtpSent] = useState(false)
 
   useEffect(() => {
@@ -80,9 +79,7 @@ export function AuthScreen() {
                 <DialogDescription>
                   {twoFactorOtpSent
                     ? 'Enter the code sent to your email.'
-                    : twoFactorMethods.includes('totp')
-                      ? 'Enter the code from your authenticator app.'
-                      : 'Enter the code sent to your email.'}
+                    : 'Enter the code from your authenticator app.'}
                 </DialogDescription>
               </DialogHeader>
               <DialogPanel className="pt-1">
@@ -104,25 +101,27 @@ export function AuthScreen() {
                     setPending(false)
                   }}
                 >
-                  <OTPField
-                    length={6}
-                    value={twoFactorCode}
-                    onValueChange={setTwoFactorCode}
-                  >
-                    <OTPFieldInput />
-                    <OTPFieldSeparator />
-                    <OTPFieldInput />
-                    <OTPFieldSeparator />
-                    <OTPFieldInput />
-                    <OTPFieldSeparator />
-                    <OTPFieldInput />
-                    <OTPFieldSeparator />
-                    <OTPFieldInput />
-                    <OTPFieldSeparator />
-                    <OTPFieldInput />
-                  </OTPField>
+                  <div className="flex justify-center">
+                    <OTPField
+                      length={6}
+                      value={twoFactorCode}
+                      onValueChange={setTwoFactorCode}
+                    >
+                      <OTPFieldInput />
+                      <OTPFieldSeparator />
+                      <OTPFieldInput />
+                      <OTPFieldSeparator />
+                      <OTPFieldInput />
+                      <OTPFieldSeparator />
+                      <OTPFieldInput />
+                      <OTPFieldSeparator />
+                      <OTPFieldInput />
+                      <OTPFieldSeparator />
+                      <OTPFieldInput />
+                    </OTPField>
+                  </div>
 
-                  {error && <p className="text-sm text-destructive-foreground">{error}</p>}
+                  {error && <p className="text-center text-sm text-destructive-foreground">{error}</p>}
                   <Button
                     className="mt-1 rounded-lg"
                     disabled={pending || twoFactorCode.length < 6}
@@ -130,44 +129,40 @@ export function AuthScreen() {
                   >
                     {pending ? 'Verifying…' : 'Verify'}
                   </Button>
-                  <Button
-                    type="button"
-                    variant="link"
-                    className="self-center text-xs"
-                    onClick={async () => {
-                      setError('')
-                      try {
-                        const { data, error: sendError } =
-                          await authClient.twoFactor.sendOtp()
-                        if (sendError) {
-                          setError(sendError.message ?? 'Could not send code.')
-                        } else if (data) {
-                          setTwoFactorMethods((current) =>
-                            current.includes('otp') ? current : [...current, 'otp'],
-                          )
-                          setTwoFactorOtpSent(true)
-                          setError('')
+                  <div className="flex items-center justify-center gap-4">
+                    <button
+                      type="button"
+                      className="text-xs text-muted-foreground underline underline-offset-2 hover:text-foreground"
+                      onClick={async () => {
+                        setError('')
+                        try {
+                          const { data, error: sendError } =
+                            await authClient.twoFactor.sendOtp()
+                          if (sendError) {
+                            setError(sendError.message ?? 'Could not send code.')
+                          } else if (data) {
+                            setTwoFactorOtpSent(true)
+                          }
+                        } catch {
+                          setError('Could not send code.')
                         }
-                      } catch {
-                        setError('Could not send code.')
-                      }
-                    }}
-                  >
-                    Send a code to my email instead
-                  </Button>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    className="self-center text-xs"
-                    onClick={() => {
-                      setTwoFactorPending(false)
-                      setTwoFactorCode('')
-                      setError('')
-                      setTwoFactorOtpSent(false)
-                    }}
-                  >
-                    Back to login
-                  </Button>
+                      }}
+                    >
+                      Send code to email
+                    </button>
+                    <button
+                      type="button"
+                      className="text-xs text-muted-foreground underline underline-offset-2 hover:text-foreground"
+                      onClick={() => {
+                        setTwoFactorPending(false)
+                        setTwoFactorCode('')
+                        setError('')
+                        setTwoFactorOtpSent(false)
+                      }}
+                    >
+                      Back
+                    </button>
+                  </div>
                 </form>
               </DialogPanel>
             </>
@@ -235,7 +230,6 @@ export function AuthScreen() {
                         {
                           onSuccess(context) {
                             if (context.data?.twoFactorRedirect) {
-                              setTwoFactorMethods(context.data.twoFactorMethods ?? ['totp'])
                               setTwoFactorPending(true)
                             }
                           },
