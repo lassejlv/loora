@@ -23,6 +23,7 @@
     "@orpc/server": "^1.14.8",
     "drizzle-orm": "catalog:",
     "playwright-core": "^1.61.1",
+    "railway": "^3.7.0",
     "zod": "catalog:"
   },
   "devDependencies": {

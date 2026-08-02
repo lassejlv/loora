@@ -42,6 +42,7 @@ import {
   storedDomainState,
 } from './publish-domain'
 import { cleanupPublishedSiteArtifacts } from './published-site-artifacts'
+import { isPublishSitesEnabled } from './feature-flags'
 
 const SAFE_IMAGE_TYPES = new Set([
   'image/avif',
@@ -164,16 +165,18 @@ async function resolvePublishAssetMap(
 }
 
 export const getPublishHandle = protectedProcedure.handler(async ({ context }) => {
-  const [[account], allowed] = await Promise.all([
+  const [[account], allowed, sitesEnabled] = await Promise.all([
     db
       .select({ handle: user.handle })
       .from(user)
       .where(eq(user.id, context.user.id))
       .limit(1),
     canUseCustomDomains(context.user),
+    isPublishSitesEnabled(context.user),
   ])
   return {
     handle: account?.handle ?? null,
+    sitesEnabled,
     customDomains: {
       allowed,
       enabled: customDomainsEnabled(),
@@ -185,6 +188,9 @@ export const getPublishHandle = protectedProcedure.handler(async ({ context }) =
 export const setPublishHandle = protectedProcedure
   .input(z.object({ handle: z.string().min(1).max(64) }))
   .handler(async ({ context, input }) => {
+    if (!(await isPublishSitesEnabled(context.user))) {
+      throw new ORPCError('FORBIDDEN', { message: 'Publishing is not available.' })
+    }
     let handle: string
     try {
       handle = assertHandle(input.handle)
@@ -258,6 +264,9 @@ export const listPublishedSites = protectedProcedure
       .optional(),
   )
   .handler(async ({ context, input }) => {
+    if (!(await isPublishSitesEnabled(context.user))) {
+      throw new ORPCError('FORBIDDEN', { message: 'Publishing is not available.' })
+    }
     const rows = input?.designId
       ? await db
           .select()
@@ -283,6 +292,9 @@ export const publishPage = protectedProcedure
     }),
   )
   .handler(async ({ context, input }) => {
+    if (!(await isPublishSitesEnabled(context.user))) {
+      throw new ORPCError('FORBIDDEN', { message: 'Publishing is not available.' })
+    }
     const decision = await rateLimit(
       'publish',
       `user:${context.user.id}`,
@@ -429,6 +441,9 @@ export const connectPublishedSiteDomain = protectedProcedure
     }),
   )
   .handler(async ({ context, input }) => {
+    if (!(await isPublishSitesEnabled(context.user))) {
+      throw new ORPCError('FORBIDDEN', { message: 'Publishing is not available.' })
+    }
     requireCustomDomainsEnabled()
     await requireCustomDomainPlan(context.user)
     const client = requireCustomDomainClient()
@@ -564,6 +579,9 @@ export const connectPublishedSiteDomain = protectedProcedure
 export const refreshPublishedSiteDomain = protectedProcedure
   .input(z.object({ siteId: z.string().min(1).max(128) }))
   .handler(async ({ context, input }) => {
+    if (!(await isPublishSitesEnabled(context.user))) {
+      throw new ORPCError('FORBIDDEN', { message: 'Publishing is not available.' })
+    }
     requireCustomDomainsEnabled()
     await requireCustomDomainPlan(context.user)
     const site = await requireOwnedPublishedSite(context.user.id, input.siteId)
@@ -590,6 +608,9 @@ export const refreshPublishedSiteDomain = protectedProcedure
 export const removePublishedSiteDomain = protectedProcedure
   .input(z.object({ siteId: z.string().min(1).max(128) }))
   .handler(async ({ context, input }) => {
+    if (!(await isPublishSitesEnabled(context.user))) {
+      throw new ORPCError('FORBIDDEN', { message: 'Publishing is not available.' })
+    }
     const site = await requireOwnedPublishedSite(context.user.id, input.siteId)
     if (!site.customDomain) return siteSummary(site)
 
@@ -620,6 +641,9 @@ export const unpublishPage = protectedProcedure
     }),
   )
   .handler(async ({ context, input }) => {
+    if (!(await isPublishSitesEnabled(context.user))) {
+      throw new ORPCError('FORBIDDEN', { message: 'Publishing is not available.' })
+    }
     const access = await requireDesignAccess(
       context.user,
       input.designId,

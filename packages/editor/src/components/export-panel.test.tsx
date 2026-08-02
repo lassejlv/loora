@@ -16,7 +16,17 @@ const captureCanvasPng = vi.fn()
 const captureNodePng = vi.fn()
 
 vi.doMock('@loora/rpc/client', () => ({
-  orpc: { handoff: { create: handoffCreate } },
+  orpc: {
+    handoff: { create: handoffCreate },
+    publish: {
+      getHandle: vi.fn(async () => ({
+        handle: null,
+        sitesEnabled: false,
+        customDomains: { allowed: false, enabled: false, configured: false },
+      })),
+      list: vi.fn(async () => []),
+    },
+  },
 }))
 vi.doMock('../lib/canvas-capture', () => ({
   captureCanvasPng,

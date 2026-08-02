@@ -29,6 +29,7 @@ function PublicHandleSection() {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [loaded, setLoaded] = useState(false)
+  const [sitesEnabled, setSitesEnabled] = useState(false)
 
   useEffect(() => {
     let cancelled = false
@@ -38,6 +39,7 @@ function PublicHandleSection() {
         if (cancelled) return
         setHandle(result.handle ?? '')
         setSaved(result.handle)
+        setSitesEnabled(result.sitesEnabled)
         setLoaded(true)
       })
       .catch(() => {
@@ -47,6 +49,8 @@ function PublicHandleSection() {
       cancelled = true
     }
   }, [])
+
+  if (!sitesEnabled) return null
 
   async function save() {
     setBusy(true)

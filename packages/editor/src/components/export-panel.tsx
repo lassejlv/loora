@@ -453,6 +453,7 @@ export function CanvasExport({
   const [handoff, setHandoff] = useState<{ url: string; expiresAt: number } | null>(null)
   const [handoffBusy, setHandoffBusy] = useState(false)
   const [publishHandle, setPublishHandle] = useState<string | null>(null)
+  const [sitesEnabled, setSitesEnabled] = useState(false)
   const [handleDraft, setHandleDraft] = useState('')
   const [handleBusy, setHandleBusy] = useState(false)
   const [customDomainsAllowed, setCustomDomainsAllowed] = useState(false)
@@ -503,6 +504,7 @@ export function CanvasExport({
         ])
         if (cancelled) return
         setPublishHandle(handleState.handle)
+        setSitesEnabled(handleState.sitesEnabled)
         setHandleDraft(handleState.handle ?? '')
         setCustomDomainsAllowed(handleState.customDomains.allowed)
         setCustomDomainsEnabled(handleState.customDomains.enabled)
@@ -1002,24 +1004,21 @@ export function CanvasExport({
 
         <div className="flex max-h-[min(78svh,36rem)] flex-col">
           <div className="contents">
-            <div className="flex shrink-0 gap-0.5 overflow-x-auto border-b p-1">
-              {FORMATS.map((item) => (
+            <div className="flex shrink-0 gap-1 overflow-x-auto border-b px-3 py-2">
+              {FORMATS.filter((item) => item.id !== 'publish' || sitesEnabled).map((item) => (
                 <button
                   key={item.id}
                   type="button"
                   aria-pressed={format === item.id}
                   className={cn(
-                    'flex h-8 shrink-0 items-center gap-1.5 rounded-md px-2 text-left',
-                    format === item.id ? 'bg-secondary' : 'hover:bg-secondary/60',
+                    'flex h-7 shrink-0 items-center rounded-full px-3 text-xs font-medium transition-colors duration-150',
+                    format === item.id
+                      ? 'bg-secondary text-foreground'
+                      : 'text-muted-foreground hover:bg-secondary/50 hover:text-foreground',
                   )}
                   onClick={() => setFormat(item.id)}
                 >
-                  <span className="font-mono text-2xs font-medium text-muted-foreground">
-                    {item.extension}
-                  </span>
-                  <span className="whitespace-nowrap text-xs font-medium">
-                    {item.name}
-                  </span>
+                  {item.name}
                 </button>
               ))}
             </div>
