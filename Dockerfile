@@ -18,6 +18,7 @@ COPY packages/platform/package.json packages/platform/
 COPY packages/shell/package.json packages/shell/
 COPY packages/realtime/package.json packages/realtime/
 COPY packages/rpc/package.json packages/rpc/
+COPY packages/railway/package.json packages/railway/
 COPY packages/editor/package.json packages/editor/
 COPY packages/ui/package.json packages/ui/
 RUN bun install --frozen-lockfile
@@ -69,6 +70,7 @@ COPY --from=deps /app/packages/platform/node_modules ./packages/platform/node_mo
 COPY --from=deps /app/packages/shell/node_modules ./packages/shell/node_modules
 COPY --from=deps /app/packages/realtime/node_modules ./packages/realtime/node_modules
 COPY --from=deps /app/packages/rpc/node_modules ./packages/rpc/node_modules
+COPY --from=deps /app/packages/railway/node_modules ./packages/railway/node_modules
 COPY --from=deps /app/packages/editor/node_modules ./packages/editor/node_modules
 COPY --from=deps /app/packages/ui/node_modules ./packages/ui/node_modules
 COPY package.json bun.lock bunfig.toml ./
@@ -82,6 +84,7 @@ COPY packages/platform ./packages/platform
 COPY packages/shell/package.json packages/shell/
 COPY packages/realtime ./packages/realtime
 COPY packages/rpc/package.json packages/rpc/
+COPY packages/railway/package.json packages/railway/
 COPY packages/editor/package.json packages/editor/
 COPY packages/ui/package.json packages/ui/
 COPY packages/db ./packages/db

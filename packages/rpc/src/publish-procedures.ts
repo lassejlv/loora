@@ -42,7 +42,7 @@ import {
   storedDomainState,
 } from './publish-domain'
 import { cleanupPublishedSiteArtifacts } from './published-site-artifacts'
-import { isPublishSitesEnabled } from './feature-flags'
+import { isPublishSitesEnabled } from '@loora/railway'
 
 const SAFE_IMAGE_TYPES = new Set([
   'image/avif',

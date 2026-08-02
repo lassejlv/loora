@@ -216,6 +216,16 @@
         "typescript": "catalog:",
       },
     },
+    "packages/railway": {
+      "name": "@loora/railway",
+      "dependencies": {
+        "railway": "^3.7.0",
+      },
+      "devDependencies": {
+        "@types/bun": "^1.3.14",
+        "typescript": "catalog:",
+      },
+    },
     "packages/realtime": {
       "name": "@loora/realtime",
       "devDependencies": {
@@ -232,13 +242,13 @@
         "@loora/canvas": "workspace:*",
         "@loora/db": "workspace:*",
         "@loora/platform": "workspace:*",
+        "@loora/railway": "workspace:*",
         "@modelcontextprotocol/sdk": "^1.21.0",
         "@opencoredev/domain-sdk": "^0.2.0",
         "@orpc/client": "^1.14.8",
         "@orpc/server": "^1.14.8",
         "drizzle-orm": "catalog:",
         "playwright-core": "^1.61.1",
-        "railway": "^3.7.0",
         "zod": "catalog:",
       },
       "devDependencies": {
@@ -505,6 +515,8 @@
     "@loora/email": ["@loora/email@workspace:packages/email"],
 
     "@loora/platform": ["@loora/platform@workspace:packages/platform"],
+
+    "@loora/railway": ["@loora/railway@workspace:packages/railway"],
 
     "@loora/realtime": ["@loora/realtime@workspace:packages/realtime"],
 

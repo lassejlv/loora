@@ -93,6 +93,16 @@ import {
   setUserPreviewAccess,
 } from './admin'
 import {
+  adminCreateFlag,
+  adminDeleteFlag,
+  adminEvaluateFlag,
+  adminGetFlag,
+  adminListFlags,
+  adminSetFlagRule,
+  adminUnsetFlagRule,
+  adminUpdateFlagDefault,
+} from './admin-flags'
+import {
   getPreferences,
   savePreferences,
 } from './preferences'
@@ -215,5 +225,15 @@ export const appRouter = {
     deleteUser: deleteUserAccount,
     listDesigns: listRecentDesigns,
     revokeDesignLinks,
+    flags: {
+      list: adminListFlags,
+      get: adminGetFlag,
+      create: adminCreateFlag,
+      updateDefault: adminUpdateFlagDefault,
+      setRule: adminSetFlagRule,
+      unsetRule: adminUnsetFlagRule,
+      delete: adminDeleteFlag,
+      evaluate: adminEvaluateFlag,
+    },
   },
 }

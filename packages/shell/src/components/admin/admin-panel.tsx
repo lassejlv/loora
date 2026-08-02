@@ -3,6 +3,7 @@ import { authClient } from '@loora/auth/client'
 import { RefreshCwIcon } from '@loora/ui/icons'
 import { Button } from '@loora/ui/button'
 import { AdminDesigns } from '../admin/designs'
+import { AdminFlags } from '../admin/flags'
 import { AdminStats } from '../admin/stats'
 import { AdminUsers } from '../admin/users'
 import { orpc } from '@loora/rpc/client'
@@ -82,6 +83,8 @@ export function AdminPanel() {
       />
 
       <AdminDesigns onChanged={() => void loadOverview()} />
+
+      <AdminFlags onChanged={() => void loadOverview()} />
     </div>
   )
 }

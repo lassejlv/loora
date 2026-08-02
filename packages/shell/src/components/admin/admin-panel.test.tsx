@@ -82,6 +82,16 @@ vi.doMock('@loora/rpc/client', () => ({
       revokeSessions: vi.fn(),
       revokeMcpAccess: vi.fn(),
       deleteUser: vi.fn(),
+      flags: {
+        list: vi.fn(async () => []),
+        get: vi.fn(),
+        create: vi.fn(),
+        updateDefault: vi.fn(),
+        setRule: vi.fn(),
+        unsetRule: vi.fn(),
+        delete: vi.fn(),
+        evaluate: vi.fn(),
+      },
     },
   },
 }))

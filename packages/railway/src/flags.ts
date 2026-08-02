@@ -14,10 +14,12 @@ function ensureInit() {
   return initPromise
 }
 
-export async function isPublishSitesEnabled(user: {
+export type FeatureFlagUser = {
   id: string
   isAdmin?: boolean | null
-}) {
+}
+
+export async function isPublishSitesEnabled(user: FeatureFlagUser) {
   if (user.isAdmin) return true
   if (!process.env.RAILWAY_TOKEN) return false
   await ensureInit()
