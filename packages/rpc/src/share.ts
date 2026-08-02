@@ -21,6 +21,7 @@ import {
   consentedProcedure,
   requireDesignAccess,
 } from './procedures'
+import { sendDesignInvitationEmail } from '@loora/email'
 
 /**
  * The `share` namespace: who else may open a design, and how.
@@ -131,6 +132,27 @@ export const inviteDesignCollaborator = consentedProcedure
         target: [designShare.designId, designShare.ownerUserId, designShare.email],
         set: { role: input.role, updatedAt: new Date() },
       })
+
+    const [designRow] = await db
+      .select({ name: design.name })
+      .from(design)
+      .where(and(eq(design.id, input.designId), eq(design.userId, access.ownerUserId)))
+      .limit(1)
+
+    void sendDesignInvitationEmail({
+      email,
+      inviterName: context.user.name || context.user.email,
+      designName: designRow?.name ?? 'a design',
+      designUrl: designEditorUrl(input.designId),
+      role: input.role,
+    }).catch((cause) => {
+      console.error(JSON.stringify({
+        event: 'email.send_failed',
+        kind: 'design-invitation',
+        error: cause instanceof Error ? cause.message : 'unknown',
+      }))
+    })
+
     return { email, role: input.role }
   })
 
@@ -193,3 +215,8 @@ export const leaveDesignShare = consentedProcedure
       .returning({ id: designShare.id })
     return { left: removed.length > 0 }
   })
+
+function designEditorUrl(designId: string) {
+  const origin = (process.env.LOORA_APP_URL?.trim() || 'https://loora.design').replace(/\/+$/, '')
+  return `${origin}/design/${encodeURIComponent(designId)}`
+}

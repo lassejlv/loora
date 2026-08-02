@@ -15,12 +15,12 @@ export function PasswordResetEmail({ name, resetUrl }: PasswordResetEmailProps) 
       preview="Use this secure link to choose a new Loora password."
     >
       <EmailText>
-        {name ? `Hi ${name},` : 'Hi,'} we received a request to reset the password for your Loora
-        account.
+        {name ? `Hi ${name},` : 'Hi,'} we received a request to reset the password for your
+        Loora account.
       </EmailText>
       <EmailText muted>
-        This link expires in one hour. If you did not request a password reset, you can safely
-        ignore this email.
+        This link expires in one hour. If you didn't request this, you can safely ignore this
+        email.
       </EmailText>
     </LooraEmailLayout>
   )

@@ -288,6 +288,13 @@
       "when": 1785709115197,
       "tag": "0040_lean_mantis",
       "breakpoints": true
+    },
+    {
+      "idx": 41,
+      "version": "7",
+      "when": 1785710053698,
+      "tag": "0041_ancient_captain_flint",
+      "breakpoints": true
     }
   ]
 }

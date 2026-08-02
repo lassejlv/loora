@@ -15,6 +15,11 @@ import {
 } from '@loora/ui/dialog'
 import { Tabs, TabsList, TabsPanel, TabsTab } from '@loora/ui/tabs'
 import {
+  OTPField,
+  OTPFieldInput,
+  OTPFieldSeparator,
+} from '@loora/ui/otp-field'
+import {
   clearPendingLegalConsent,
   markPendingLegalConsent,
 } from '../lib/pending-legal-consent'
@@ -31,6 +36,10 @@ export function AuthScreen() {
   const [notice, setNotice] = useState('')
   const [googleOAuthEnabled, setGoogleOAuthEnabled] = useState(false)
   const [passkeySupported, setPasskeySupported] = useState(false)
+  const [twoFactorPending, setTwoFactorPending] = useState(false)
+  const [twoFactorCode, setTwoFactorCode] = useState('')
+  const [twoFactorMethods, setTwoFactorMethods] = useState<string[]>([])
+  const [twoFactorOtpSent, setTwoFactorOtpSent] = useState(false)
 
   useEffect(() => {
     clearPendingLegalConsent()
@@ -61,28 +70,131 @@ export function AuthScreen() {
   return (
       <Dialog open onOpenChange={() => {}}>
         <DialogPopup className="max-w-sm" showCloseButton={false} bottomStickOnMobile={false}>
-          <DialogHeader>
-            <p className="mb-4 text-lg font-semibold tracking-tight">
-              loora<span className="text-cx-accent">.</span>
-            </p>
-            <DialogTitle>
-              {forgotPassword
-                ? 'Reset your password'
-                : mode === 'sign-in'
-                  ? 'Welcome back'
-                  : 'Create your account'}
-            </DialogTitle>
-            <DialogDescription>
-              {forgotPassword
-                ? 'We will send a secure reset link if an account exists.'
-                : mode === 'sign-in'
-                ? 'Sign in to open your canvas.'
-                : 'Start designing with your own workspace.'}
-            </DialogDescription>
-          </DialogHeader>
+          {twoFactorPending ? (
+            <>
+              <DialogHeader>
+                <p className="mb-4 text-lg font-semibold tracking-tight">
+                  loora<span className="text-cx-accent">.</span>
+                </p>
+                <DialogTitle>Two-factor verification</DialogTitle>
+                <DialogDescription>
+                  {twoFactorOtpSent
+                    ? 'Enter the code sent to your email.'
+                    : twoFactorMethods.includes('totp')
+                      ? 'Enter the code from your authenticator app.'
+                      : 'Enter the code sent to your email.'}
+                </DialogDescription>
+              </DialogHeader>
+              <DialogPanel className="pt-1">
+                <form
+                  className="flex flex-col gap-4"
+                  onSubmit={async (event) => {
+                    event.preventDefault()
+                    setPending(true)
+                    setError('')
 
-          <DialogPanel className="pt-1">
-            <Tabs
+                    const result = await authClient.twoFactor.verifyTotp({
+                      code: twoFactorCode,
+                      trustDevice: true,
+                    })
+
+                    if (result.error) {
+                      setError(result.error.message ?? 'Verification failed')
+                    }
+                    setPending(false)
+                  }}
+                >
+                  <OTPField
+                    length={6}
+                    value={twoFactorCode}
+                    onValueChange={setTwoFactorCode}
+                  >
+                    <OTPFieldInput />
+                    <OTPFieldSeparator />
+                    <OTPFieldInput />
+                    <OTPFieldSeparator />
+                    <OTPFieldInput />
+                    <OTPFieldSeparator />
+                    <OTPFieldInput />
+                    <OTPFieldSeparator />
+                    <OTPFieldInput />
+                    <OTPFieldSeparator />
+                    <OTPFieldInput />
+                  </OTPField>
+
+                  {error && <p className="text-sm text-destructive-foreground">{error}</p>}
+                  <Button
+                    className="mt-1 rounded-lg"
+                    disabled={pending || twoFactorCode.length < 6}
+                    type="submit"
+                  >
+                    {pending ? 'Verifying…' : 'Verify'}
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="link"
+                    className="self-center text-xs"
+                    onClick={async () => {
+                      setError('')
+                      try {
+                        const { data, error: sendError } =
+                          await authClient.twoFactor.sendOtp()
+                        if (sendError) {
+                          setError(sendError.message ?? 'Could not send code.')
+                        } else if (data) {
+                          setTwoFactorMethods((current) =>
+                            current.includes('otp') ? current : [...current, 'otp'],
+                          )
+                          setTwoFactorOtpSent(true)
+                          setError('')
+                        }
+                      } catch {
+                        setError('Could not send code.')
+                      }
+                    }}
+                  >
+                    Send a code to my email instead
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    className="self-center text-xs"
+                    onClick={() => {
+                      setTwoFactorPending(false)
+                      setTwoFactorCode('')
+                      setError('')
+                      setTwoFactorOtpSent(false)
+                    }}
+                  >
+                    Back to login
+                  </Button>
+                </form>
+              </DialogPanel>
+            </>
+          ) : (
+            <>
+              <DialogHeader>
+                <p className="mb-4 text-lg font-semibold tracking-tight">
+                  loora<span className="text-cx-accent">.</span>
+                </p>
+                <DialogTitle>
+                  {forgotPassword
+                    ? 'Reset your password'
+                    : mode === 'sign-in'
+                      ? 'Welcome back'
+                      : 'Create your account'}
+                </DialogTitle>
+                <DialogDescription>
+                  {forgotPassword
+                    ? 'We will send a secure reset link if an account exists.'
+                    : mode === 'sign-in'
+                    ? 'Sign in to open your canvas.'
+                    : 'Start designing with your own workspace.'}
+                </DialogDescription>
+              </DialogHeader>
+
+              <DialogPanel className="pt-1">
+                <Tabs
               value={mode}
               onValueChange={(value) => {
                 setMode(value as 'sign-in' | 'sign-up')
@@ -106,25 +218,43 @@ export function AuthScreen() {
                     setError('')
                     setNotice('')
 
-                    const result = forgotPassword
-                      ? await authClient.requestPasswordReset({
-                          email,
-                          redirectTo: '/reset-password',
-                        })
-                      : mode === 'sign-in'
-                        ? await authClient.signIn.email({ email, password })
-                        : await authClient.signUp.email({
-                            name,
-                            email,
-                            password,
-                            acceptedTerms: acceptedLegal,
-                            acceptedPrivacy: acceptedLegal,
-                          })
+                    if (forgotPassword) {
+                      const result = await authClient.requestPasswordReset({
+                        email,
+                        redirectTo: '/reset-password',
+                      })
+                      if (result.error) setError(result.error.message ?? 'Authentication failed')
+                      else setNotice('Check your inbox for a password reset link.')
+                      setPending(false)
+                      return
+                    }
 
+                    if (mode === 'sign-in') {
+                      const result = await authClient.signIn.email(
+                        { email, password },
+                        {
+                          onSuccess(context) {
+                            if (context.data?.twoFactorRedirect) {
+                              setTwoFactorMethods(context.data.twoFactorMethods ?? ['totp'])
+                              setTwoFactorPending(true)
+                            }
+                          },
+                        },
+                      )
+                      if (result.error) setError(result.error.message ?? 'Authentication failed')
+                      setPending(false)
+                      return
+                    }
+
+                    const result = await authClient.signUp.email({
+                      name,
+                      email,
+                      password,
+                      acceptedTerms: acceptedLegal,
+                      acceptedPrivacy: acceptedLegal,
+                    })
                     if (result.error) setError(result.error.message ?? 'Authentication failed')
-                    else if (forgotPassword) {
-                      setNotice('Check your inbox for a password reset link.')
-                    } else if (mode === 'sign-up') {
+                    else {
                       setNotice('Check your inbox to verify your email and finish signing up.')
                       setPassword('')
                     }
@@ -317,6 +447,8 @@ export function AuthScreen() {
               </TabsPanel>
             </Tabs>
           </DialogPanel>
+            </>
+          )}
         </DialogPopup>
       </Dialog>
   )

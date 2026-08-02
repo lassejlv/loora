@@ -12,7 +12,13 @@ import {
   AlertDialogTrigger,
 } from '@loora/ui/alert-dialog'
 import { Button } from '@loora/ui/button'
+import { Dialog, DialogDescription, DialogHeader, DialogPanel, DialogPopup, DialogTitle } from '@loora/ui/dialog'
 import { Input } from '@loora/ui/input'
+import {
+  OTPField,
+  OTPFieldInput,
+  OTPFieldSeparator,
+} from '@loora/ui/otp-field'
 import { PlusIcon, Trash2Icon } from '@loora/ui/icons'
 
 type Passkey = {
@@ -41,6 +47,209 @@ function formatDate(date: Date | null): string {
   } catch {
     return ''
   }
+}
+
+function TwoFactorSection() {
+  const { data: session } = authClient.useSession()
+  const enabled = session?.user?.twoFactorEnabled === true
+  const [enrolling, setEnrolling] = useState(false)
+  const [disabling, setDisabling] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [notice, setNotice] = useState<string | null>(null)
+  const [password, setPassword] = useState('')
+  const [totpUri, setTotpUri] = useState<string | null>(null)
+  const [verifyCode, setVerifyCode] = useState('')
+  const [backupCodes, setBackupCodes] = useState<string[] | null>(null)
+
+  async function startEnroll() {
+    setEnrolling(true)
+    setError(null)
+    setNotice(null)
+    try {
+      const { data, error: enableError } = await authClient.twoFactor.enable({
+        password,
+      })
+      if (enableError) {
+        setError(enableError.message ?? 'Could not enable 2FA.')
+      } else if (data) {
+        setTotpUri(data.totpURI ?? null)
+        setBackupCodes(data.backupCodes ?? null)
+      }
+    } catch {
+      setError('Could not enable 2FA.')
+    } finally {
+      setEnrolling(false)
+    }
+  }
+
+  async function verifyTotp() {
+    setEnrolling(true)
+    setError(null)
+    try {
+      const { error: verifyError } = await authClient.twoFactor.verifyTotp({
+        code: verifyCode,
+      })
+      if (verifyError) {
+        setError(verifyError.message ?? 'Verification failed.')
+      } else {
+        setNotice('Two-factor authentication is now enabled.')
+        setTotpUri(null)
+        setVerifyCode('')
+        setPassword('')
+      }
+    } catch {
+      setError('Verification failed.')
+    } finally {
+      setEnrolling(false)
+    }
+  }
+
+  async function disable() {
+    setDisabling(true)
+    setError(null)
+    try {
+      const { error: disableError } = await authClient.twoFactor.disable({
+        password,
+      })
+      if (disableError) {
+        setError(disableError.message ?? 'Could not disable 2FA.')
+      } else {
+        setNotice('Two-factor authentication is disabled.')
+        setPassword('')
+      }
+    } catch {
+      setError('Could not disable 2FA.')
+    } finally {
+      setDisabling(false)
+    }
+  }
+
+  const showEnrollForm = !enabled && !totpUri
+  const showVerifyForm = totpUri !== null
+
+  return (
+    <section className="flex flex-col gap-3">
+      <div>
+        <h2 className="text-sm font-semibold">Two-factor authentication</h2>
+        <p className="mt-1 text-xs text-muted-foreground">
+          Add a second step at sign-in with an authenticator app (TOTP) or a code sent
+          to your email.
+        </p>
+      </div>
+
+      {error ? <p className="text-xs text-destructive">{error}</p> : null}
+      {notice ? <p className="text-xs text-muted-foreground">{notice}</p> : null}
+
+      {enabled ? (
+        <div className="flex items-center gap-3">
+          <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-500/10 px-2.5 py-0.5 text-xs font-medium text-emerald-600">
+            Enabled
+          </span>
+          <Button size="xs" variant="outline" onClick={() => setDisabling(true)}>
+            Disable
+          </Button>
+        </div>
+      ) : showVerifyForm ? (
+        <div className="flex flex-col gap-3">
+          <p className="text-xs text-muted-foreground">
+            Scan this QR code with your authenticator app, then enter the 6-digit code.
+          </p>
+          {totpUri ? (
+            <div className="rounded-lg border border-line bg-surface p-4">
+              <img
+                src={`https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(totpUri)}`}
+                alt="QR code for TOTP enrollment"
+                width={200}
+                height={200}
+                className="mx-auto"
+              />
+            </div>
+          ) : null}
+          {backupCodes && backupCodes.length > 0 ? (
+            <div className="rounded-lg border border-line bg-surface p-3">
+              <p className="mb-1 text-xs font-medium">Backup codes</p>
+              <p className="mb-2 text-xs text-muted-foreground">
+                Save these now — you won't see them again.
+              </p>
+              <div className="grid grid-cols-2 gap-1 font-mono text-xs">
+                {backupCodes.map((code) => (
+                  <span key={code}>{code}</span>
+                ))}
+              </div>
+            </div>
+          ) : null}
+          <OTPField
+            length={6}
+            value={verifyCode}
+            onValueChange={setVerifyCode}
+          >
+            <OTPFieldInput />
+            <OTPFieldSeparator />
+            <OTPFieldInput />
+            <OTPFieldSeparator />
+            <OTPFieldInput />
+            <OTPFieldSeparator />
+            <OTPFieldInput />
+            <OTPFieldSeparator />
+            <OTPFieldInput />
+            <OTPFieldSeparator />
+            <OTPFieldInput />
+          </OTPField>
+          <Button size="sm" disabled={enrolling || verifyCode.length < 6} onClick={() => void verifyTotp()}>
+            {enrolling ? 'Verifying…' : 'Verify and enable'}
+          </Button>
+        </div>
+      ) : showEnrollForm ? (
+        <div className="flex flex-col gap-3">
+          <Input
+            type="password"
+            placeholder="Enter your password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            className="max-w-64"
+          />
+          <Button size="sm" disabled={enrolling || !password} onClick={() => void startEnroll()}>
+            {enrolling ? 'Working…' : 'Enable 2FA'}
+          </Button>
+        </div>
+      ) : null}
+
+      {disabling && enabled ? (
+        <Dialog open onOpenChange={() => setDisabling(false)}>
+          <DialogPopup className="max-w-sm">
+            <DialogHeader>
+              <DialogTitle>Disable two-factor authentication?</DialogTitle>
+              <DialogDescription>
+                Enter your password to confirm. Your account will be less secure.
+              </DialogDescription>
+            </DialogHeader>
+            <DialogPanel className="pt-1">
+              <Input
+                type="password"
+                placeholder="Password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                className="mb-3"
+              />
+              <div className="flex justify-end gap-2">
+                <Button variant="ghost" size="sm" onClick={() => setDisabling(false)}>
+                  Cancel
+                </Button>
+                <Button
+                  variant="destructive"
+                  size="sm"
+                  disabled={disabling || !password}
+                  onClick={() => void disable()}
+                >
+                  {disabling ? 'Working…' : 'Disable'}
+                </Button>
+              </div>
+            </DialogPanel>
+          </DialogPopup>
+        </Dialog>
+      ) : null}
+    </section>
+  )
 }
 
 export function SecuritySettings() {
@@ -119,6 +328,7 @@ export function SecuritySettings() {
 
   return (
     <div className="flex flex-col gap-6">
+      <TwoFactorSection />
       <section className="flex flex-col gap-3">
         <div>
           <h2 className="text-sm font-semibold">Passkeys</h2>

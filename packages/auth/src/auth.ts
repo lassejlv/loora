@@ -8,6 +8,7 @@ import {
   mcp,
   oAuthDiscoveryMetadata,
   oneTimeToken,
+  twoFactor,
 } from 'better-auth/plugins'
 import { tanstackStartCookies } from 'better-auth/tanstack-start'
 import { polar, portal, webhooks } from '@polar-sh/better-auth'
@@ -19,6 +20,7 @@ import { getPolarRuntime } from '@loora/billing/polar'
 import {
   sendAccountVerificationEmail,
   sendPasswordResetEmail,
+  sendTwoFactorOTPEmail,
 } from '@loora/email'
 import {
   CURRENT_PRIVACY_VERSION,
@@ -95,6 +97,12 @@ export const auth = betterAuth({
       privacyVersion: {
         type: 'string',
         required: false,
+        input: false,
+      },
+      twoFactorEnabled: {
+        type: 'boolean',
+        required: false,
+        defaultValue: false,
         input: false,
       },
     },
@@ -220,12 +228,26 @@ export const auth = betterAuth({
     // hands it to the app waiting on loopback, which trades it for the
     // session. Only the hash is stored, so the row is worthless on its own.
     oneTimeToken({ expiresIn: 2, storeToken: 'hashed' }),
-    tanstackStartCookies(),
     haveIBeenPwned({
       customPasswordCompromisedMessage:
         'This password has appeared in a data breach. Please choose a different one.',
     }),
     passkey(),
+    twoFactor({
+      issuer: 'Loora',
+      otpOptions: {
+        async sendOTP({ user, otp }) {
+          void sendTwoFactorOTPEmail({
+            email: user.email,
+            name: user.name,
+            code: otp,
+          }).catch(reportEmailFailure('two-factor-otp'))
+        },
+      },
+    }),
+    // Cookie integration must be last so plugins with `hooks.after` (like
+    // twoFactor) still see their Set-Cookie headers forwarded to the framework.
+    tanstackStartCookies(),
   ],
 })
 
@@ -242,7 +264,9 @@ export async function requireSession(request: Request) {
   return session ?? null
 }
 
-function reportEmailFailure(kind: 'account-verification' | 'password-reset') {
+function reportEmailFailure(
+  kind: 'account-verification' | 'password-reset' | 'two-factor-otp',
+) {
   return () => {
     console.error(JSON.stringify({
       event: 'email.send_failed',

@@ -50,6 +50,7 @@ export const user = pgTable('user', {
    * Nullable until the account claims one; unique when set.
    */
   handle: text('handle').unique(),
+  twoFactorEnabled: boolean('two_factor_enabled').default(false).notNull(),
   createdAt: timestamp('created_at').defaultNow().notNull(),
   updatedAt: timestamp('updated_at')
     .defaultNow()
@@ -775,10 +776,30 @@ export const passkey = pgTable(
   (table) => [index('passkey_user_id_idx').on(table.userId)],
 )
 
+// Two-factor authentication data for the Better Auth `twoFactor` plugin. Each
+// row stores the encrypted TOTP secret, backup codes, and verification state
+// for a user's 2FA enrollment.
+export const twoFactor = pgTable(
+  'twoFactor',
+  {
+    id: text('id').primaryKey(),
+    userId: text('user_id')
+      .notNull()
+      .references(() => user.id, { onDelete: 'cascade' }),
+    secret: text('secret').notNull(),
+    backupCodes: text('backup_codes').notNull(),
+    verified: boolean('verified').default(false).notNull(),
+    failedVerificationCount: integer('failed_verification_count').default(0).notNull(),
+    lockedUntil: timestamp('locked_until'),
+  },
+  (table) => [index('two_factor_user_id_idx').on(table.userId)],
+)
+
 export const userRelations = relations(user, ({ many }) => ({
   sessions: many(session),
   accounts: many(account),
   passkeys: many(passkey),
+  twoFactors: many(twoFactor),
   designs: many(design),
   publishedSites: many(publishedSite),
 }))
@@ -797,6 +818,10 @@ export const accountRelations = relations(account, ({ one }) => ({
 
 export const passkeyRelations = relations(passkey, ({ one }) => ({
   user: one(user, { fields: [passkey.userId], references: [user.id] }),
+}))
+
+export const twoFactorRelations = relations(twoFactor, ({ one }) => ({
+  user: one(user, { fields: [twoFactor.userId], references: [user.id] }),
 }))
 
 export const designRelations = relations(design, ({ one }) => ({

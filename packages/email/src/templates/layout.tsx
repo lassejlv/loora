@@ -9,22 +9,22 @@ import {
 } from '@opencoredev/email-sdk/react'
 
 const theme = {
-  background: '#f4f3ef',
-  foreground: '#242522',
-  card: '#fbfaf7',
-  cardForeground: '#242522',
-  primary: '#292b27',
-  primaryForeground: '#fbfaf7',
-  muted: '#eeece6',
-  mutedForeground: '#696b64',
-  border: '#d8d5cd',
-  radius: 10,
+  background: '#f5f4f0',
+  foreground: '#1c1d1a',
+  card: '#fdfcf8',
+  cardForeground: '#1c1d1a',
+  primary: '#1c1d1a',
+  primaryForeground: '#fdfcf8',
+  muted: '#efede7',
+  mutedForeground: '#74746d',
+  border: '#e6e4dc',
+  radius: 12,
   fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
 }
 
 export type LooraEmailLayoutProps = {
-  actionLabel: string
-  actionUrl: string
+  actionLabel?: string
+  actionUrl?: string
   children: ReactNode
   heading: string
   preview: string
@@ -38,42 +38,71 @@ export function LooraEmailLayout({
   preview,
 }: LooraEmailLayoutProps) {
   return (
-    <ShadcnEmail preview={preview} theme={theme}>
+    <ShadcnEmail preview={preview} theme={theme} bodyStyle={{ padding: '48px 16px' }}>
       <EmailCard>
         <EmailText
           style={{
-            fontSize: '18px',
-            fontWeight: 700,
-            letterSpacing: '-0.02em',
-            marginBottom: '28px',
+            fontSize: '17px',
+            fontWeight: 600,
+            letterSpacing: '-0.01em',
+            marginBottom: '36px',
           }}
         >
-          loora<span style={{ color: '#797d71' }}>.</span>
+          loora<span style={{ color: '#b0b0a4' }}>.</span>
         </EmailText>
-        <EmailHeading>{heading}</EmailHeading>
-        {children}
-        <EmailButton href={actionUrl}>{actionLabel}</EmailButton>
-        <EmailSeparator />
-        <EmailText muted style={{ fontSize: '13px', lineHeight: '20px' }}>
-          If the button does not work, copy and paste this link into your browser:
-        </EmailText>
-        <EmailText
-          muted
+        <EmailHeading
           style={{
-            fontSize: '13px',
-            lineHeight: '20px',
-            marginBottom: 0,
-            overflowWrap: 'anywhere',
+            fontSize: '30px',
+            fontWeight: 600,
+            letterSpacing: '-0.03em',
+            lineHeight: '38px',
+            marginBottom: '12px',
           }}
         >
-          {actionUrl}
-        </EmailText>
+          {heading}
+        </EmailHeading>
+        {children}
+        {actionLabel && actionUrl ? (
+          <>
+            <EmailButton
+              href={actionUrl}
+              style={{
+                display: 'block',
+                width: '100%',
+                textAlign: 'center',
+                boxSizing: 'border-box',
+                fontSize: '15px',
+                fontWeight: 600,
+                padding: '14px 24px',
+                borderRadius: 12,
+                marginTop: '8px',
+              }}
+            >
+              {actionLabel}
+            </EmailButton>
+            <EmailSeparator style={{ margin: '32px 0' }} />
+            <EmailText muted style={{ fontSize: '13px', lineHeight: '20px', marginBottom: '6px' }}>
+              If the button doesn't work, paste this link into your browser:
+            </EmailText>
+            <EmailText
+              muted
+              style={{
+                fontSize: '13px',
+                lineHeight: '20px',
+                marginBottom: 0,
+                overflowWrap: 'anywhere',
+              }}
+            >
+              {actionUrl}
+            </EmailText>
+          </>
+        ) : null}
       </EmailCard>
       <EmailText
         muted
         style={{
           fontSize: '12px',
-          margin: '18px auto 0',
+          margin: '24px auto 0',
           maxWidth: '600px',
           textAlign: 'center',
         }}
