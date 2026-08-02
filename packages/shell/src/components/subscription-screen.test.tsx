@@ -1,15 +1,15 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
-import { afterEach, beforeEach, describe, expect, mock, test } from 'bun:test'
+import { afterEach, beforeEach, describe, expect, vi, test } from 'vitest'
 
-const status = mock()
-const refresh = mock()
-const checkout = mock()
-const signOut = mock()
+const status = vi.fn()
+const refresh = vi.fn()
+const checkout = vi.fn()
+const signOut = vi.fn()
 
-mock.module('@loora/rpc/client', () => ({
+vi.doMock('@loora/rpc/client', () => ({
   orpc: { billing: { status, refresh, checkout } },
 }))
-mock.module('@loora/auth/client', () => ({
+vi.doMock('@loora/auth/client', () => ({
   authClient: { signOut },
 }))
 
@@ -28,7 +28,7 @@ const noPlan = {
 
 const CACHE_KEY = 'loora:access:billing:user-1'
 
-function renderScreen(redirect?: ReturnType<typeof mock>) {
+function renderScreen(redirect?: (url: string) => void) {
   return render(
     <SubscriptionScreen userId="user-1" preview={<div>Preview canvas</div>} redirect={redirect}>
       <div>Real editor</div>
@@ -49,7 +49,7 @@ describe('SubscriptionScreen', () => {
   afterEach(() => cleanup())
 
   test('keeps the editor inert and offers Free and Pro', async () => {
-    const redirect = mock()
+    const redirect = vi.fn()
     renderScreen(redirect)
 
     expect(await screen.findByText('$0')).toBeTruthy()
@@ -64,7 +64,7 @@ describe('SubscriptionScreen', () => {
   })
 
   test('starts yearly Pro checkout from the plan picker', async () => {
-    const redirect = mock()
+    const redirect = vi.fn()
     checkout.mockResolvedValue({ url: 'https://polar.sh/checkout/pro-year' })
     renderScreen(redirect)
 

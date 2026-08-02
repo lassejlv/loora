@@ -1,16 +1,16 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
-import { afterEach, beforeEach, describe, expect, mock, test } from 'bun:test'
+import { afterEach, beforeEach, describe, expect, vi, test } from 'vitest'
 
-const status = mock()
-const checkout = mock()
+const status = vi.fn()
+const checkout = vi.fn()
 
-mock.module('@loora/rpc/client', () => ({
+vi.doMock('@loora/rpc/client', () => ({
   orpc: {
     billing: { status, checkout },
   },
 }))
 
-mock.module('@loora/auth/client', () => ({
+vi.doMock('@loora/auth/client', () => ({
   authClient: {
     useSession: () => ({
       data: {
@@ -54,7 +54,7 @@ describe('UpgradeToProButton', () => {
   })
 
   test('lets free users pick yearly or monthly Pro checkout', async () => {
-    const redirect = mock()
+    const redirect = vi.fn()
     render(<UpgradeToProButton redirect={redirect} />)
 
     fireEvent.click(await screen.findByRole('button', { name: 'Upgrade to Pro' }))
@@ -71,7 +71,7 @@ describe('UpgradeToProButton', () => {
   })
 
   test('starts monthly Pro checkout when selected', async () => {
-    const redirect = mock()
+    const redirect = vi.fn()
     checkout.mockResolvedValue({ url: 'https://polar.sh/checkout/pro-month' })
     render(<UpgradeToProButton redirect={redirect} />)
 

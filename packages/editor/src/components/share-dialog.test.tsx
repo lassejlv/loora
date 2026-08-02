@@ -1,11 +1,11 @@
-import { afterEach, beforeEach, describe, expect, mock, test } from 'bun:test'
+import { afterEach, beforeEach, describe, expect, vi, test } from 'vitest'
 
-const get = mock()
-const invite = mock()
-const setLinkAccess = mock()
-const revoke = mock()
-const setRole = mock()
-const leave = mock()
+const get = vi.fn()
+const invite = vi.fn()
+const setLinkAccess = vi.fn()
+const revoke = vi.fn()
+const setRole = vi.fn()
+const leave = vi.fn()
 
 const client = { get, invite, setLinkAccess, revoke, setRole, leave }
 

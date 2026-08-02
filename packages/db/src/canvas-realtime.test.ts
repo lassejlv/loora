@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'bun:test'
+import { describe, expect, it } from 'vitest'
 import {
   canvasRealtimeChannel,
   parseCanvasRealtimeEvent,
@@ -18,7 +18,7 @@ describe('Canvas realtime events', () => {
       canvasRealtimeChannel('user:one', {
         designId: 'design/one',
       }),
-    ).toEndWith(':main')
+    ).toMatch(/:main$/)
   })
 
   it('accepts bounded change and activity payloads', () => {

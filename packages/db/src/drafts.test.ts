@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'bun:test'
+import { describe, expect, test } from 'vitest'
 import type { CanvasElement, CanvasPage } from './canvas'
 import { canvasDiff, mergeCanvas } from './drafts'
 

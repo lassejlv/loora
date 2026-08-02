@@ -1,5 +1,5 @@
 import { render } from '@testing-library/react'
-import { describe, expect, mock, test } from 'bun:test'
+import { describe, expect, vi, test } from 'vitest'
 import { CanvasEngine } from '@loora/canvas/engine'
 import { createCanvasDocument } from '@loora/canvas/model'
 import { CanvasProvider } from '@loora/canvas/react'
@@ -26,7 +26,7 @@ describe('CanvasCollaboratorPresence', () => {
     const scene = document.createElement('div')
     scene.dataset.looraCanvasScene = ''
     Object.defineProperty(scene, 'offsetWidth', { value: 1_000 })
-    const getBoundingClientRect = mock(() => ({
+    const getBoundingClientRect = vi.fn(() => ({
       left: 0,
       top: 0,
       width: 1_000,
@@ -39,7 +39,7 @@ describe('CanvasCollaboratorPresence', () => {
     }) as DOMRect)
     scene.getBoundingClientRect = getBoundingClientRect
     surface.append(scene)
-    const publishPresence = mock()
+    const publishPresence = vi.fn()
     const engine = new CanvasEngine(createCanvasDocument('Presence', 'presence'))
     const controller: CanvasEditorController = {
       engine,

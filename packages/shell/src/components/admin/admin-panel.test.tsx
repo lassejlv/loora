@@ -1,5 +1,5 @@
 import { cleanup, fireEvent, render, waitFor, within } from '@testing-library/react'
-import { afterEach, describe, expect, mock, test } from 'bun:test'
+import { afterEach, describe, expect, vi, test } from 'vitest'
 
 const overview = {
   generatedAt: '2026-07-30T12:00:00.000Z',
@@ -62,30 +62,30 @@ const designs = [
   },
 ]
 
-const setPreviewAccess = mock(async () => ({ userId: 'user-2', previewAccess: true }))
-const approvePendingPreviewAccess = mock(async () => ({ granted: 2 }))
-const revokeDesignLinks = mock(async () => ({ revokedLinks: 1 }))
+const setPreviewAccess = vi.fn(async () => ({ userId: 'user-2', previewAccess: true }))
+const approvePendingPreviewAccess = vi.fn(async () => ({ granted: 2 }))
+const revokeDesignLinks = vi.fn(async () => ({ revokedLinks: 1 }))
 
-mock.module('@loora/rpc/client', () => ({
+vi.doMock('@loora/rpc/client', () => ({
   orpc: {
     admin: {
-      overview: mock(async () => overview),
-      listUsers: mock(async () => users),
-      listDesigns: mock(async () => designs),
+      overview: vi.fn(async () => overview),
+      listUsers: vi.fn(async () => users),
+      listDesigns: vi.fn(async () => designs),
       setPreviewAccess,
       approvePendingPreviewAccess,
       revokeDesignLinks,
-      setAdmin: mock(),
-      refreshBilling: mock(),
-      setMcpLimit: mock(),
-      resetMcpUsage: mock(),
-      revokeSessions: mock(),
-      revokeMcpAccess: mock(),
-      deleteUser: mock(),
+      setAdmin: vi.fn(),
+      refreshBilling: vi.fn(),
+      setMcpLimit: vi.fn(),
+      resetMcpUsage: vi.fn(),
+      revokeSessions: vi.fn(),
+      revokeMcpAccess: vi.fn(),
+      deleteUser: vi.fn(),
     },
   },
 }))
-mock.module('@loora/auth/client', () => ({
+vi.doMock('@loora/auth/client', () => ({
   authClient: {
     useSession: () => ({
       data: { user: { id: 'user-1', name: 'Admin', email: 'admin@example.com', isAdmin: true } },
@@ -135,7 +135,7 @@ describe('AdminPanel', () => {
   })
 
   test('restricts a design that is shared by link', async () => {
-    const confirm = mock(() => true)
+    const confirm = vi.fn(() => true)
     window.confirm = confirm as unknown as typeof window.confirm
     const screen = within(render(<AdminPanel />).container)
 

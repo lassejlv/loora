@@ -1,14 +1,14 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
-import { afterEach, beforeEach, describe, expect, mock, test } from 'bun:test'
+import { afterEach, beforeEach, describe, expect, vi, test } from 'vitest'
 
-const previewAccess = mock()
-const requestPreviewAccess = mock()
-const signOut = mock()
+const previewAccess = vi.fn()
+const requestPreviewAccess = vi.fn()
+const signOut = vi.fn()
 
-mock.module('@loora/rpc/client', () => ({
+vi.doMock('@loora/rpc/client', () => ({
   orpc: { auth: { previewAccess, requestPreviewAccess } },
 }))
-mock.module('@loora/auth/client', () => ({
+vi.doMock('@loora/auth/client', () => ({
   authClient: { signOut },
 }))
 

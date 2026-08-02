@@ -1,21 +1,21 @@
 import { cleanup, fireEvent, render, waitFor } from '@testing-library/react'
-import { afterEach, beforeEach, describe, expect, mock, test } from 'bun:test'
+import { afterEach, beforeEach, describe, expect, vi, test } from 'vitest'
 import {
   createCanvasDocument,
   createFrameNode,
   createPageNode,
 } from '@loora/canvas/model'
 
-const list = mock()
-const create = mock()
-const compare = mock()
-const apply = mock()
-const propose = mock()
-const reopen = mock()
-const close = mock()
-const rename = mock()
+const list = vi.fn()
+const create = vi.fn()
+const compare = vi.fn()
+const apply = vi.fn()
+const propose = vi.fn()
+const reopen = vi.fn()
+const close = vi.fn()
+const rename = vi.fn()
 
-mock.module('@loora/rpc/client', () => ({
+vi.doMock('@loora/rpc/client', () => ({
   orpc: {
     draft: { list, create, compare, apply, propose, reopen, close, rename },
   },
@@ -104,9 +104,9 @@ const styleConflict = {
   draft: [{ type: 'solid', color: '#ff0000' }],
 }
 
-const flush = mock(async () => undefined)
-const onSwitch = mock(async () => undefined)
-const onBranchesChange = mock()
+const flush = vi.fn(async () => undefined)
+const onSwitch = vi.fn(async () => undefined)
+const onBranchesChange = vi.fn()
 
 /**
  * Queries are scoped to this render's own tree: other suites in the same

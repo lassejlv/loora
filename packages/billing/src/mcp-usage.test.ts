@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'bun:test'
+import { describe, expect, test } from 'vitest'
 import {
   McpUsageLimitError,
   MCP_WEEKLY_INCLUDED,
@@ -83,7 +83,7 @@ describe('MCP included usage', () => {
       },
     }))
 
-    expect(
+    await expect(
       service.reserve('user-1', 'free', new Date('2026-07-29T12:00:00Z')),
     ).rejects.toBeInstanceOf(McpUsageLimitError)
     expect(records).toBe(0)

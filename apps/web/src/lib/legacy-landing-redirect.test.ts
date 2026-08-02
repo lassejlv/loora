@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'bun:test'
+import { describe, expect, test } from 'vitest'
 import { resolveLegacyLandingRedirect } from './legacy-landing-redirect'
 
 describe('resolveLegacyLandingRedirect', () => {

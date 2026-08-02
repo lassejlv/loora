@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { cleanup, fireEvent, render, screen } from '@testing-library/react'
-import { afterEach, beforeEach, describe, expect, mock, test } from 'bun:test'
+import { afterEach, beforeEach, describe, expect, vi, test } from 'vitest'
 
 let sessionState: {
   data: { user: { id: string } } | null
@@ -10,7 +10,7 @@ let sessionState: {
   isPending: false,
 }
 
-const getShare = mock()
+const getShare = vi.fn()
 
 function StatefulAuthScreen() {
   const [notice, setNotice] = useState('')
@@ -30,30 +30,30 @@ function StatefulAuthScreen() {
   )
 }
 
-mock.module('@loora/auth/client', () => ({
+vi.doMock('@loora/auth/client', () => ({
   authClient: {
     useSession: () => sessionState,
   },
 }))
-mock.module('@loora/rpc/client', () => ({
+vi.doMock('@loora/rpc/client', () => ({
   orpc: { share: { get: getShare } },
 }))
-mock.module('@loora/editor/app', () => ({
+vi.doMock('@loora/editor/app', () => ({
   CanvasApp: () => <div>Canvas preview</div>,
 }))
-mock.module('./auth-screen', () => ({
+vi.doMock('./auth-screen', () => ({
   AuthScreen: StatefulAuthScreen,
 }))
-mock.module('./preview-access-screen', () => ({
+vi.doMock('./preview-access-screen', () => ({
   PreviewAccessScreen: ({ children }: { children: React.ReactNode }) => children,
 }))
-mock.module('./subscription-screen', () => ({
+vi.doMock('./subscription-screen', () => ({
   SubscriptionScreen: ({ children }: { children: React.ReactNode }) => children,
 }))
-mock.module('./legal-consent-screen', () => ({
+vi.doMock('./legal-consent-screen', () => ({
   LegalConsentScreen: ({ children }: { children: React.ReactNode }) => children,
 }))
-mock.module('./welcome-dialog', () => ({
+vi.doMock('./welcome-dialog', () => ({
   WelcomeDialog: () => null,
   hasSeenWelcome: () => true,
   markWelcomeSeen: () => {},

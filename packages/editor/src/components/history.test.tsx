@@ -1,5 +1,5 @@
 import { cleanup, fireEvent, render, waitFor } from '@testing-library/react'
-import { afterEach, beforeEach, describe, expect, mock, test } from 'bun:test'
+import { afterEach, beforeEach, describe, expect, vi, test } from 'vitest'
 import { CanvasEngine } from '@loora/canvas/engine'
 import { CanvasProvider } from '@loora/canvas/react'
 import {
@@ -8,12 +8,12 @@ import {
   createPageNode,
 } from '@loora/canvas/model'
 
-const list = mock()
-const compareCanvas = mock()
-const commitCanvas = mock()
-const restoreCanvas = mock()
+const list = vi.fn()
+const compareCanvas = vi.fn()
+const commitCanvas = vi.fn()
+const restoreCanvas = vi.fn()
 
-mock.module('@loora/rpc/client', () => ({
+vi.doMock('@loora/rpc/client', () => ({
   orpc: { history: { list, compareCanvas, commitCanvas, restoreCanvas } },
 }))
 
@@ -48,8 +48,8 @@ function setup() {
   const controller = {
     target: { designId: 'design-1', draftId: null },
     revision: 7,
-    flush: mock(async () => undefined),
-    adoptSnapshot: mock(async () => undefined),
+    flush: vi.fn(async () => undefined),
+    adoptSnapshot: vi.fn(async () => undefined),
   }
   const view = render(
     <CanvasProvider engine={engine}>

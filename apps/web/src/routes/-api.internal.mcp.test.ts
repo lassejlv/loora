@@ -1,4 +1,4 @@
-import { afterEach, expect, test } from 'bun:test'
+import { afterEach, expect, test } from 'vitest'
 import { internalMcpResponse } from './api.internal.mcp'
 
 const originalToken = process.env.MCP_INTERNAL_TOKEN

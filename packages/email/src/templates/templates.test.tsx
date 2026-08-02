@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'bun:test'
+import { describe, expect, test } from 'vitest'
 import { renderEmail } from '@opencoredev/email-sdk/react'
 import { AccountVerificationEmail } from './account-verification'
 import { PasswordResetEmail } from './password-reset'

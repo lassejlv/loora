@@ -1,5 +1,5 @@
 import { render } from '@testing-library/react'
-import { describe, expect, test } from 'bun:test'
+import { describe, expect, test } from 'vitest'
 import { CanvasEngine } from '@loora/canvas/engine'
 import { createCanvasDocument } from '@loora/canvas/model'
 import { CanvasProvider } from '@loora/canvas/react'

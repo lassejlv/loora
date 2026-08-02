@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { cleanup, fireEvent, render, waitFor } from '@testing-library/react'
-import { afterEach, beforeEach, describe, expect, mock, test } from 'bun:test'
+import { afterEach, beforeEach, describe, expect, vi, test } from 'vitest'
 import { CanvasEngine } from '@loora/canvas/engine'
 import { CanvasProvider, useCanvasSession } from '@loora/canvas/react'
 import {
@@ -11,14 +11,14 @@ import {
   defaultLayout,
 } from '@loora/canvas/model'
 
-const handoffCreate = mock()
-const captureCanvasPng = mock()
-const captureNodePng = mock()
+const handoffCreate = vi.fn()
+const captureCanvasPng = vi.fn()
+const captureNodePng = vi.fn()
 
-mock.module('@loora/rpc/client', () => ({
+vi.doMock('@loora/rpc/client', () => ({
   orpc: { handoff: { create: handoffCreate } },
 }))
-mock.module('../lib/canvas-capture', () => ({
+vi.doMock('../lib/canvas-capture', () => ({
   captureCanvasPng,
   captureNodePng,
 }))
@@ -60,7 +60,7 @@ function Select({ ids }: { ids: string[] }) {
 
 const controller = {
   target: { designId: 'design-1', draftId: null },
-  flush: mock(async () => undefined),
+  flush: vi.fn(async () => undefined),
 }
 
 function Harness({ ids }: { ids: string[] }) {
@@ -179,7 +179,7 @@ describe('CanvasExport', () => {
   })
 
   test('copies the generated code', async () => {
-    const writeText = mock(async (_value: string) => undefined)
+    const writeText = vi.fn(async (_value: string) => undefined)
     Object.defineProperty(navigator, 'clipboard', {
       value: { writeText },
       configurable: true,

@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'bun:test'
+import { describe, expect, test } from 'vitest'
 import { newDesignId, relativeTime } from './designs'
 
 const NOW = Date.UTC(2026, 6, 27, 12, 0, 0)

@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'bun:test'
+import { describe, expect, test } from 'vitest'
 import type { CustomerState } from '@polar-sh/sdk/models/components/customerstate.js'
 import {
   cachedEntitlementGrantsAccess,

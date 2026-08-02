@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'bun:test'
+import { describe, expect, test } from 'vitest'
 import {
   FREE_CAPACITY,
   FREE_DESIGN_FILE_LIMIT,

@@ -1,11 +1,11 @@
 import { cleanup, fireEvent, render, waitFor } from '@testing-library/react'
-import { afterEach, beforeEach, describe, expect, mock, test } from 'bun:test'
+import { afterEach, beforeEach, describe, expect, vi, test } from 'vitest'
 
-const list = mock()
-const upload = mock()
-const remove = mock()
+const list = vi.fn()
+const upload = vi.fn()
+const remove = vi.fn()
 
-mock.module('@loora/rpc/client', () => ({
+vi.doMock('@loora/rpc/client', () => ({
   orpc: { asset: { list, upload, delete: remove } },
 }))
 
@@ -24,7 +24,7 @@ function imageFile(name: string, bytes: number, type = 'image/png') {
  * the shared document, and `screen` reads whichever body is current.
  */
 function setup(usage?: Record<string, number>) {
-  const onInsert = mock()
+  const onInsert = vi.fn()
   const view = render(<AssetsPanel onInsert={onInsert} usage={usage} />)
   return { view, onInsert }
 }

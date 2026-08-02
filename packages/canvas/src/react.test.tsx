@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'bun:test'
+import { describe, expect, it } from 'vitest'
 import { fireEvent, render, waitFor } from '@testing-library/react'
 import { useEffect } from 'react'
 import { CanvasEngine } from './engine'

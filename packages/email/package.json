@@ -7,7 +7,7 @@
     "./templates/*": "./src/templates/*.tsx"
   },
   "scripts": {
-    "test": "bun test"
+    "test": "bun run --cwd ../.. test packages/email"
   },
   "dependencies": {
     "@opencoredev/email-sdk": "1.0.0",

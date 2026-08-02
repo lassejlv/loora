@@ -1,14 +1,14 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
-import { afterEach, beforeEach, describe, expect, mock, test } from 'bun:test'
+import { afterEach, beforeEach, describe, expect, vi, test } from 'vitest'
 
-const legalConsent = mock()
-const acceptLegal = mock()
-const signOut = mock()
+const legalConsent = vi.fn()
+const acceptLegal = vi.fn()
+const signOut = vi.fn()
 
-mock.module('@loora/rpc/client', () => ({
+vi.doMock('@loora/rpc/client', () => ({
   orpc: { auth: { legalConsent, acceptLegal } },
 }))
-mock.module('@loora/auth/client', () => ({
+vi.doMock('@loora/auth/client', () => ({
   authClient: { signOut },
 }))
 

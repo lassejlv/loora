@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'bun:test'
+import { describe, expect, it } from 'vitest'
 import { canvasEventsResponse } from './api.canvas-events'
 
 describe('Canvas realtime endpoint', () => {

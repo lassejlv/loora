@@ -235,7 +235,7 @@ Root scripts (from repo root; env loaded from `.env` where needed):
 | `bun run start` | Serve production build |
 | `bun run build:desktop` | Desktop interface → `apps/desktop/dist/app`, then the app bundle |
 | `bun run check:desktop` | `cargo check` on the desktop host + `tsc` on its interface |
-| `bun run test` | All `bun:test` suites with JSDOM preload |
+| `bun run test` | All Vitest suites with the shared JSDOM setup |
 | `bun run generate-routes` | Regenerate TanStack route tree after route file changes |
 | `bun run db:generate` | Create migration from `schema.ts` changes |
 | `bun run db:migrate` | Apply pending migrations |
@@ -247,7 +247,7 @@ Root scripts (from repo root; env loaded from `.env` where needed):
 
 MCP local: `bun run dev:mcp` (or `bun run dev:mcp:stdio`). The web app must be running and both processes must share `MCP_INTERNAL_TOKEN`.
 
-**Always** use `bun run test`, not plain `bun test` — the root script preloads `apps/web/src/test/setup.ts` for DOM globals.
+**Always** use `bun run test` so Vitest loads `apps/web/src/test/setup.ts` for DOM globals.
 
 Copy `.env.example` → `.env` before dev. Required pieces typically include `DATABASE_URL`, `BETTER_AUTH_SECRET`, `BETTER_AUTH_URL`; optional billing/OAuth/storage keys as needed.
 
@@ -407,12 +407,12 @@ HTML/CSS import computes a sandboxed DOM snapshot and converts supported layout 
 
 ## Testing Guidelines
 
-- Import from `bun:test`. Colocate as `*.test.ts` / `*.test.tsx`.
+- Import from `vitest`. Colocate as `*.test.ts` / `*.test.tsx`.
 - Use Testing Library for DOM behavior.
 - Cover important success **and** failure paths for new behavior and bug fixes.
 - Prefer package-local or file-adjacent tests when changing engine/model/merge/RPC.
-- Run `bun run test` (preload required). Narrow with path args when iterating:  
-  `bun test --preload ./apps/web/src/test/setup.ts path/to/file.test.ts`
+- Run `bun run test` (shared setup required). Narrow with path args when iterating:
+  `bun run test path/to/file.test.ts`
 
 ---
 

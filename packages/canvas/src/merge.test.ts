@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'bun:test'
+import { describe, expect, it } from 'vitest'
 import { mergeDocuments, diffDocuments, changedNodeIds } from './merge'
 import { createCanvasDocument, createFrameNode, createPageNode, type CanvasAnimation } from './model'
 

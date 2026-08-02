@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'bun:test'
+import { describe, expect, it } from 'vitest'
 import {
   BoundedConcurrencyGate,
   ConcurrencyLimitError,
@@ -33,7 +33,7 @@ describe('BoundedConcurrencyGate', () => {
     )
     await Promise.resolve()
 
-    expect(gate.run(async () => {})).rejects.toBeInstanceOf(
+    await expect(gate.run(async () => {})).rejects.toBeInstanceOf(
       ConcurrencyLimitError,
     )
     release()

@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'bun:test'
+import { describe, expect, test } from 'vitest'
 import {
   CURRENT_PRIVACY_VERSION,
   CURRENT_TERMS_VERSION,

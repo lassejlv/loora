@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'bun:test'
+import { describe, expect, test } from 'vitest'
 import type { CanvasTransaction } from '@loora/canvas/engine'
 import {
   createCanvasDocument,

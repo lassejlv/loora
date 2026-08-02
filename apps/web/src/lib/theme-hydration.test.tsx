@@ -1,21 +1,21 @@
 import { act, type ComponentType, type ReactNode } from 'react'
 import { hydrateRoot, type Root } from 'react-dom/client'
 import { renderToString } from 'react-dom/server'
-import { describe, expect, it, mock } from 'bun:test'
+import { describe, expect, it, vi } from 'vitest'
 import { THEME_INIT_SCRIPT } from '@loora/shell/lib/theme'
 
 const routerModule = await import('@tanstack/react-router')
-mock.module('@tanstack/react-router', () => ({
+vi.doMock('@tanstack/react-router', () => ({
   ...routerModule,
   HeadContent: () => null,
   Scripts: () => null,
 }))
-mock.module('@databuddy/sdk/react', () => ({ Databuddy: () => null }))
-mock.module('@tanstack/react-router-devtools', () => ({
+vi.doMock('@databuddy/sdk/react', () => ({ Databuddy: () => null }))
+vi.doMock('@tanstack/react-router-devtools', () => ({
   TanStackRouterDevtoolsPanel: () => null,
 }))
-mock.module('@tanstack/react-devtools', () => ({ TanStackDevtools: () => null }))
-mock.module('nuqs/adapters/tanstack-router', () => ({
+vi.doMock('@tanstack/react-devtools', () => ({ TanStackDevtools: () => null }))
+vi.doMock('nuqs/adapters/tanstack-router', () => ({
   NuqsAdapter: ({ children }: { children: ReactNode }) => children,
 }))
 

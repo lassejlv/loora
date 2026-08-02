@@ -1,8 +1,15 @@
-import { describe, expect, test } from 'bun:test'
+import { describe, expect, test, vi } from 'vitest'
 import { render, waitFor } from '@testing-library/react'
+import type { ReactNode } from 'react'
 import { CanvasEngine, type CanvasTransaction } from '@loora/canvas/engine'
 import { createStarterCanvas } from '../lib/canvas-fixtures'
-import { CanvasEditor, type CanvasEditorController } from './editor'
+import type { CanvasEditorController } from './editor'
+
+vi.doMock('@tanstack/react-router', () => ({
+  Link: ({ children }: { children?: ReactNode }) => <>{children}</>,
+}))
+
+const { CanvasEditor } = await import('./editor')
 
 function controllerFixture(
   activity: CanvasEditorController['agentActivity'],

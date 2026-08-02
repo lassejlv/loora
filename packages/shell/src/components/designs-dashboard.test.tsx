@@ -1,44 +1,44 @@
 import type { ReactNode } from 'react'
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
-import { afterEach, beforeEach, describe, expect, mock, test } from 'bun:test'
+import { afterEach, beforeEach, describe, expect, vi, test } from 'vitest'
 
-const list = mock()
-const listShared = mock()
-const deleteDesign = mock()
-const create = mock()
-const rename = mock()
-const getPreferences = mock()
+const list = vi.fn()
+const listShared = vi.fn()
+const deleteDesign = vi.fn()
+const create = vi.fn()
+const rename = vi.fn()
+const getPreferences = vi.fn()
 
-mock.module('@loora/rpc/client', () => ({
+vi.doMock('@loora/rpc/client', () => ({
   orpc: {
     design: { list, listShared, delete: deleteDesign },
     canvas: { create, rename },
     // The dashboard renders the upgrade button, which reads billing status.
-    billing: { status: mock(async () => ({ required: false, plan: null })) },
+    billing: { status: vi.fn(async () => ({ required: false, plan: null })) },
     preferences: {
       get: getPreferences,
-      save: mock(),
+      save: vi.fn(),
     },
   },
 }))
-mock.module('@loora/auth/client', () => ({
+vi.doMock('@loora/auth/client', () => ({
   authClient: {
     useSession: () => ({ data: { user: { id: 'user-1', name: 'Lasse' } } }),
-    signOut: mock(),
+    signOut: vi.fn(),
   },
 }))
-mock.module('./design-thumbnail', () => ({
+vi.doMock('./design-thumbnail', () => ({
   DesignThumbnail: ({ designId }: { designId: string }) => (
     <div data-testid={`thumb-${designId}`} />
   ),
 }))
-mock.module('./settings-panel', () => ({
+vi.doMock('./settings-panel', () => ({
   SettingsPanel: () => <div>Settings panel</div>,
 }))
 
-const navigate = mock()
+const navigate = vi.fn()
 const routerModule = await import('@tanstack/react-router')
-mock.module('@tanstack/react-router', () => ({
+vi.doMock('@tanstack/react-router', () => ({
   ...routerModule,
   useNavigate: () => navigate,
   Link: ({

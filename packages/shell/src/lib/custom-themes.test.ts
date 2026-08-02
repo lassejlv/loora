@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test } from 'bun:test'
+import { afterEach, describe, expect, test } from 'vitest'
 import {
   CUSTOM_THEME_VAR_NAMES,
   DARK_PRESET,

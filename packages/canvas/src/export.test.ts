@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'bun:test'
+import { afterEach, describe, expect, it } from 'vitest'
 import {
   compileCanvas,
   compileJsxComponent,
@@ -690,9 +690,9 @@ describe('inlineBrowserImages', () => {
     expect(skipped).toEqual(['https://cdn.example.com/hero.png'])
     const images = [...host.querySelectorAll('img')]
     // A remote reference left in place is what makes `toDataURL` throw.
-    expect(images[0]!.getAttribute('src')).toStartWith('data:image/gif;base64,')
+    expect(images[0]!.getAttribute('src')).toMatch(/^data:image\/gif;base64,/)
     expect(images[0]!.hasAttribute('srcset')).toBe(false)
-    expect(images[1]!.getAttribute('src')).toStartWith('data:image/png')
+    expect(images[1]!.getAttribute('src')).toMatch(/^data:image\/png/)
   })
 
   it('leaves an image that is already inline alone', async () => {
@@ -723,7 +723,7 @@ describe('inlineBrowserImages', () => {
     const sources = [...host.querySelectorAll('img')].map((image) =>
       image.getAttribute('src'),
     )
-    expect(sources[0]).toStartWith('data:image/png')
+    expect(sources[0]).toMatch(/^data:image\/png/)
     expect(sources[1]).toBe(sources[0])
   })
 

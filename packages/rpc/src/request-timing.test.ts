@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, spyOn } from 'bun:test'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   logRequestTiming,
   requestIdFromHeaders,
@@ -46,7 +46,7 @@ describe('request timing', () => {
   })
 
   it('skips console request logs unless LOG_REQUEST_TIMING is enabled', () => {
-    const info = spyOn(console, 'info').mockImplementation(() => {})
+    const info = vi.spyOn(console, 'info').mockImplementation(() => {})
 
     delete process.env.LOG_REQUEST_TIMING
     logRequestTiming({

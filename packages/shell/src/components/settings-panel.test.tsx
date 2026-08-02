@@ -1,16 +1,16 @@
 import { cleanup, fireEvent, render, screen } from '@testing-library/react'
-import { afterEach, beforeEach, describe, expect, mock, test } from 'bun:test'
+import { afterEach, beforeEach, describe, expect, vi, test } from 'vitest'
 import { createContext, useContext, type ReactNode } from 'react'
 import { withNuqsTestingAdapter } from 'nuqs/adapters/testing'
 
 const TabsContext = createContext('')
 
-mock.module('@loora/rpc/client', () => ({
+vi.doMock('@loora/rpc/client', () => ({
   orpc: {
-    auth: { deleteAccount: mock() },
+    auth: { deleteAccount: vi.fn() },
   },
 }))
-mock.module('@loora/auth/client', () => ({
+vi.doMock('@loora/auth/client', () => ({
   authClient: {
     useSession: () => ({
       data: {
@@ -22,10 +22,10 @@ mock.module('@loora/auth/client', () => ({
         },
       },
     }),
-    signOut: mock(),
+    signOut: vi.fn(),
   },
 }))
-mock.module('@loora/ui/tabs', () => ({
+vi.doMock('@loora/ui/tabs', () => ({
   Tabs: ({ value, children }: { value: string; children: ReactNode }) => (
     <TabsContext.Provider value={value}>{children}</TabsContext.Provider>
   ),
@@ -37,10 +37,10 @@ mock.module('@loora/ui/tabs', () => ({
     useContext(TabsContext) === value ? <div>{children}</div> : null
   ),
 }))
-// `mock.module` is process-global, so this stub is what every later test file
+// `vi.doMock` is process-global, so this stub is what every later test file
 // in the run sees too — the canvas panels render their header buttons through
 // PanelShell. Keep the shape of the real thing: title, actions, close, body.
-mock.module('@loora/ui/panel-shell', () => ({
+vi.doMock('@loora/ui/panel-shell', () => ({
   PanelShell: ({
     title,
     actions,
@@ -69,10 +69,10 @@ mock.module('@loora/ui/panel-shell', () => ({
   ),
   PanelLoading: ({ label }: { label: string }) => <div>{label}</div>,
 }))
-mock.module('./shortcuts-settings', () => ({
+vi.doMock('./shortcuts-settings', () => ({
   ShortcutsSettings: () => <div>Keyboard shortcuts</div>,
 }))
-mock.module('@loora/ui/alert-dialog', () => ({
+vi.doMock('@loora/ui/alert-dialog', () => ({
   AlertDialog: ({ children }: { children: ReactNode }) => <div>{children}</div>,
   AlertDialogTrigger: () => null,
   AlertDialogClose: ({ children }: { children?: ReactNode }) => <>{children}</>,
@@ -82,7 +82,7 @@ mock.module('@loora/ui/alert-dialog', () => ({
   AlertDialogPopup: ({ children }: { children: ReactNode }) => <div>{children}</div>,
   AlertDialogTitle: ({ children }: { children: ReactNode }) => <div>{children}</div>,
 }))
-// theme.ts is deliberately NOT mocked. mock.module is process-global, so
+// theme.ts is deliberately NOT mocked. vi.doMock is process-global, so
 // stubbing it here would hand every other test file in the run the stub — which
 // is exactly how theme.test.ts started reading the wrong default. The real
 // module tolerates a missing `localStorage`, so it is safe to let it run.

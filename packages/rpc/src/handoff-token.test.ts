@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from 'bun:test'
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { createHandoffToken, readHandoffToken } from './handoff-token'
 
 const originalSecret = process.env.BETTER_AUTH_SECRET

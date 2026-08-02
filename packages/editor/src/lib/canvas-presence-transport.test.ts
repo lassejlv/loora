@@ -1,11 +1,11 @@
-import { afterEach, describe, expect, mock, test } from 'bun:test'
+import { afterEach, describe, expect, vi, test } from 'vitest'
 import { createCanvasDocument } from '@loora/canvas/model'
 
-mock.module('@loora/rpc/client', () => ({
+vi.doMock('@loora/rpc/client', () => ({
   orpc: {
     canvas: {
-      get: mock(async () => ({ document: createCanvasDocument('Test', 'test'), revision: 0 })),
-      apply: mock(async () => ({ revision: 0, transactionIds: [] })),
+      get: vi.fn(async () => ({ document: createCanvasDocument('Test', 'test'), revision: 0 })),
+      apply: vi.fn(async () => ({ revision: 0, transactionIds: [] })),
     },
   },
 }))

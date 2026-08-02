@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test } from 'bun:test'
+import { afterEach, describe, expect, test } from 'vitest'
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js'
 import rustToolManifest from '../../../crates/mcp-server/src/tools.json'
@@ -122,7 +122,7 @@ describe('MCP agent workflow', () => {
     expect(tailwind.code).toContain('[font-size:16px]')
     expect(tailwind.code).toContain('useLooraRuntime(rootRef)')
     expect(jsx.code).toContain('style={{')
-    expect(html.code).toStartWith('<!doctype html>')
+    expect(html.code).toMatch(/^<!doctype html>/)
     expect(html.nodeId).toBe('text-title')
     expect(() =>
       exportCanvasCode(document, {

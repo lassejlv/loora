@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'bun:test'
+import { describe, expect, test } from 'vitest'
 import { assetIdFromSrc, assetKey, assetRouteUrl } from './asset-url'
 
 const ID = `a${'0123456789abcdef'.repeat(2)}`

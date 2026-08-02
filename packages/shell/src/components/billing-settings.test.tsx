@@ -1,17 +1,17 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
-import { afterEach, beforeEach, describe, expect, mock, test } from 'bun:test'
+import { afterEach, beforeEach, describe, expect, vi, test } from 'vitest'
 
-const status = mock()
-const mcpUsage = mock()
-const portal = mock()
+const status = vi.fn()
+const mcpUsage = vi.fn()
+const portal = vi.fn()
 
-mock.module('@loora/rpc/client', () => ({
+vi.doMock('@loora/rpc/client', () => ({
   orpc: {
     billing: { status, mcpUsage },
   },
 }))
 
-mock.module('@loora/auth/client', () => ({
+vi.doMock('@loora/auth/client', () => ({
   authClient: {
     useSession: () => ({
       data: {

@@ -1,6 +1,6 @@
 import { useEffect } from 'react'
 import { cleanup, fireEvent, render } from '@testing-library/react'
-import { afterEach, describe, expect, test } from 'bun:test'
+import { afterEach, describe, expect, test } from 'vitest'
 import { CanvasEngine } from '@loora/canvas/engine'
 import { CanvasProvider, useCanvasSession } from '@loora/canvas/react'
 import {

@@ -1,5 +1,5 @@
 import { fireEvent, render } from '@testing-library/react'
-import { describe, expect, mock, test } from 'bun:test'
+import { describe, expect, vi, test } from 'vitest'
 import { CanvasEngine } from '@loora/canvas/engine'
 import {
   createCanvasDocument,
@@ -39,8 +39,8 @@ describe('CanvasLayersPanel controls', () => {
   })
 
   test('creates pages and moves between dock positions', () => {
-    const onAddPage = mock()
-    const onPositionChange = mock()
+    const onAddPage = vi.fn()
+    const onPositionChange = vi.fn()
     const view = render(
       <CanvasProvider engine={new CanvasEngine(fixture())}>
         <CanvasLayersPanel

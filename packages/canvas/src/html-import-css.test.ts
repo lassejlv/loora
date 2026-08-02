@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'bun:test'
+import { describe, expect, it } from 'vitest'
 import {
   HTML_IMPORT_SANDBOX_BASE_CSS,
   TAILWIND_PREFLIGHT_CSS,
