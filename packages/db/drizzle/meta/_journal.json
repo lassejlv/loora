@@ -253,6 +253,13 @@
       "when": 1785421061785,
       "tag": "0035_panoramic_mister_fear",
       "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "7",
+      "when": 1785628727207,
+      "tag": "0036_perpetual_rick_jones",
+      "breakpoints": true
     }
   ]
 }

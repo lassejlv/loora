@@ -1,5 +1,8 @@
 import { ORPCError } from '@orpc/server'
 import { z } from 'zod'
+import { eq } from 'drizzle-orm'
+import { db } from '@loora/db'
+import { user } from '@loora/db/schema'
 import {
   authorizeBilling,
   createPlanCheckout,
@@ -64,7 +67,17 @@ export const getCurrentMcpUsage = previewProcedure.handler(async ({ context }) =
   })
   if (!plan) return { usage: null }
   try {
-    return { usage: await getMcpUsage(context.user.id, plan) }
+    const [account] = await db
+      .select({
+        weeklyLimit: user.mcpWeeklyLimit,
+        resetAt: user.mcpUsageResetAt,
+      })
+      .from(user)
+      .where(eq(user.id, context.user.id))
+      .limit(1)
+    return {
+      usage: await getMcpUsage(context.user.id, plan, new Date(), account),
+    }
   } catch (error) {
     if (error instanceof McpUsageUnavailableError) {
       throw new ORPCError('INTERNAL_SERVER_ERROR', {

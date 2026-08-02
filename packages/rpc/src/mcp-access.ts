@@ -24,6 +24,8 @@ export async function requireAppAccess(userId: string) {
         privacyAcceptedAt: user.privacyAcceptedAt,
         termsVersion: user.termsVersion,
         privacyVersion: user.privacyVersion,
+        mcpWeeklyLimit: user.mcpWeeklyLimit,
+        mcpUsageResetAt: user.mcpUsageResetAt,
       },
       entitlement: {
         accessGranted: billingEntitlement.accessGranted,
@@ -62,5 +64,12 @@ export async function requireAppAccess(userId: string) {
   if (!mcpPlan) {
     throw new AccessDeniedError('A recognized Loora plan is required.')
   }
-  return { account, mcpPlan }
+  return {
+    account,
+    mcpPlan,
+    mcpUsageOptions: {
+      weeklyLimit: account.mcpWeeklyLimit,
+      resetAt: account.mcpUsageResetAt,
+    },
+  }
 }

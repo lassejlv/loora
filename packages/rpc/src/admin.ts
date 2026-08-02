@@ -31,6 +31,7 @@ import {
   user,
 } from '@loora/db/schema'
 import { refreshEntitlement } from '@loora/billing/billing'
+import { includedMcpCalls, type McpUsagePlan } from '@loora/billing/mcp-usage'
 import { adminProcedure } from './procedures'
 import { deleteUserAccountData } from './account'
 
@@ -185,6 +186,8 @@ export const listUsersWithUsage = adminProcedure
         isAdmin: user.isAdmin,
         previewAccess: user.previewAccess,
         previewAccessRequestedAt: user.previewAccessRequestedAt,
+        mcpWeeklyLimit: user.mcpWeeklyLimit,
+        mcpUsageResetAt: user.mcpUsageResetAt,
         createdAt: user.createdAt,
       })
       .from(user)
@@ -372,6 +375,59 @@ export const refreshUserBilling = adminProcedure
       accessGranted: entitlement?.accessGranted ?? false,
       currentPeriodEnd: entitlement?.currentPeriodEnd ?? null,
     }
+  })
+
+export const setUserMcpLimit = adminProcedure
+  .input(z.object({
+    userId: z.string().min(1).max(128),
+    weeklyLimit: z.number().int().min(1).max(2_000_000_000).nullable(),
+  }))
+  .handler(async ({ input }) => {
+    const [target] = await db
+      .select({
+        id: user.id,
+        isAdmin: user.isAdmin,
+        plan: billingEntitlement.plan,
+      })
+      .from(user)
+      .leftJoin(billingEntitlement, eq(billingEntitlement.userId, user.id))
+      .where(eq(user.id, input.userId))
+      .limit(1)
+    if (!target) throw new ORPCError('NOT_FOUND')
+    if (target.isAdmin && input.weeklyLimit !== null) {
+      throw new ORPCError('BAD_REQUEST', { message: 'Admin accounts already have unlimited MCP calls.' })
+    }
+
+    const plan: McpUsagePlan = target.plan === 'pro' || target.plan === 'studio'
+      ? target.plan
+      : 'free'
+    const planLimit = includedMcpCalls(plan) ?? 0
+    if (input.weeklyLimit !== null && input.weeklyLimit < planLimit) {
+      throw new ORPCError('BAD_REQUEST', {
+        message: `The custom limit cannot be lower than the plan limit of ${planLimit.toLocaleString()}.`,
+      })
+    }
+
+    const [updated] = await db
+      .update(user)
+      .set({ mcpWeeklyLimit: input.weeklyLimit, updatedAt: new Date() })
+      .where(eq(user.id, input.userId))
+      .returning({ weeklyLimit: user.mcpWeeklyLimit })
+    if (!updated) throw new ORPCError('NOT_FOUND')
+    return updated
+  })
+
+export const resetUserMcpUsage = adminProcedure
+  .input(z.object({ userId: z.string().min(1).max(128) }))
+  .handler(async ({ input }) => {
+    const resetAt = new Date()
+    const [updated] = await db
+      .update(user)
+      .set({ mcpUsageResetAt: resetAt, updatedAt: resetAt })
+      .where(eq(user.id, input.userId))
+      .returning({ resetAt: user.mcpUsageResetAt })
+    if (!updated) throw new ORPCError('NOT_FOUND')
+    return updated
   })
 
 /** Sign an account out of every browser session. Their data is untouched. */

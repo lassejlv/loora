@@ -61,7 +61,7 @@ export async function internalMcpResponse(request: Request) {
       const access = await requireAppAccess(input.userId)
       const execute = createLooraToolExecutor(
         input.userId,
-        createMcpUsageController(input.userId, access.mcpPlan),
+        createMcpUsageController(input.userId, access.mcpPlan, access.mcpUsageOptions),
         async () => (await requireAppAccess(input.userId)).mcpPlan,
       )
       return Response.json(

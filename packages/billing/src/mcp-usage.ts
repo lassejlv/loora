@@ -13,6 +13,11 @@ export interface McpIncludedUsage {
   resetsAt: string
 }
 
+export interface McpUsageOptions {
+  weeklyLimit?: number | null
+  resetAt?: Date | null
+}
+
 export interface McpUsageMeter {
   readTotal: (input: {
     userId: string
@@ -64,10 +69,10 @@ export function mcpUsageWindow(now = new Date()) {
   return { periodStart, resetsAt }
 }
 
-export function includedMcpCalls(plan: McpUsagePlan) {
+export function includedMcpCalls(plan: McpUsagePlan, weeklyLimit?: number | null) {
   return plan === 'admin' || plan === 'disabled'
     ? null
-    : MCP_WEEKLY_INCLUDED[plan]
+    : Math.max(MCP_WEEKLY_INCLUDED[plan], Math.floor(weeklyLimit ?? 0))
 }
 
 /**
@@ -94,9 +99,10 @@ export function mcpUsageSnapshot(
   plan: McpUsagePlan,
   used: number,
   now: Date,
+  weeklyLimit?: number | null,
 ): McpIncludedUsage {
   const window = mcpUsageWindow(now)
-  const included = includedMcpCalls(plan)
+  const included = includedMcpCalls(plan, weeklyLimit)
   const normalizedUsed = Math.max(0, Math.floor(used))
   return {
     metric: 'mcp_tool_calls',
@@ -109,6 +115,11 @@ export function mcpUsageSnapshot(
     periodStart: window.periodStart.toISOString(),
     resetsAt: window.resetsAt.toISOString(),
   }
+}
+
+function meteringPeriodStart(now: Date, resetAt?: Date | null) {
+  const { periodStart } = mcpUsageWindow(now)
+  return resetAt && resetAt > periodStart && resetAt <= now ? resetAt : periodStart
 }
 
 async function loadPolarMcpRuntime() {
@@ -226,23 +237,24 @@ export function createMcpUsageService(
     userId: string,
     plan: McpUsagePlan,
     now = new Date(),
+    options: McpUsageOptions = {},
   ) {
     if (plan === 'admin' || plan === 'disabled') {
       return mcpUsageSnapshot(plan, 0, now)
     }
-    const window = mcpUsageWindow(now)
+    const periodStart = meteringPeriodStart(now, options.resetAt)
     try {
       const used = await meter().readTotal({
         userId,
-        periodStart: window.periodStart,
+        periodStart,
         periodEnd: now,
       })
       // Keep the admission counter in sync. Polar's total can lag events the
       // local counter already knows about, so never let a read move it back.
-      const counter = counterFor(userId, window.periodStart)
+      const counter = counterFor(userId, periodStart)
       counter.used = Math.max(counter.used, Math.max(0, Math.floor(used)))
       counter.readAt = now.getTime()
-      return mcpUsageSnapshot(plan, used, now)
+      return mcpUsageSnapshot(plan, used, now, options.weeklyLimit)
     } catch (error) {
       if (error instanceof McpUsageUnavailableError) throw error
       throw new McpUsageUnavailableError(error)
@@ -253,18 +265,19 @@ export function createMcpUsageService(
     userId: string,
     plan: McpUsagePlan,
     now = new Date(),
+    options: McpUsageOptions = {},
   ) {
     if (plan === 'admin' || plan === 'disabled') {
       return mcpUsageSnapshot(plan, 0, now)
     }
-    const window = mcpUsageWindow(now)
+    const periodStart = meteringPeriodStart(now, options.resetAt)
 
     // Pro and Studio include a million calls a week — the limit is not
     // reachable in practice, so the call never waits on Polar. The event is
     // recorded in the background and the snapshot comes from the local
     // counter; getUsage still reads the real total.
     if (plan !== 'free') {
-      const counter = counterFor(userId, window.periodStart)
+      const counter = counterFor(userId, periodStart)
       counter.used += 1
       void (async () => {
         try {
@@ -278,19 +291,19 @@ export function createMcpUsageService(
           console.error('[mcp-usage] deferred usage event failed', error)
         }
       })()
-      return mcpUsageSnapshot(plan, counter.used, now)
+      return mcpUsageSnapshot(plan, counter.used, now, options.weeklyLimit)
     }
 
     // Free has a small quota, so admission stays strict: read Polar when the
     // counter is stale, count locally in between, and record before running.
     return serialized(userId, async () => {
-      const counter = counterFor(userId, window.periodStart)
+      const counter = counterFor(userId, periodStart)
       const nowMs = now.getTime()
       if (counter.readAt === 0 || nowMs - counter.readAt > readTtlMs) {
         try {
           const used = await meter().readTotal({
             userId,
-            periodStart: window.periodStart,
+            periodStart,
             periodEnd: now,
           })
           counter.used = Math.max(counter.used, Math.max(0, Math.floor(used)))
@@ -300,7 +313,7 @@ export function createMcpUsageService(
           throw new McpUsageUnavailableError(error)
         }
       }
-      const usage = mcpUsageSnapshot(plan, counter.used, now)
+      const usage = mcpUsageSnapshot(plan, counter.used, now, options.weeklyLimit)
       if (usage.remaining === 0) throw new McpUsageLimitError(usage)
       try {
         const inserted = await meter().record({
@@ -310,7 +323,7 @@ export function createMcpUsageService(
           plan,
         })
         if (inserted) counter.used += 1
-        return mcpUsageSnapshot(plan, counter.used, now)
+        return mcpUsageSnapshot(plan, counter.used, now, options.weeklyLimit)
       } catch (error) {
         if (error instanceof McpUsageUnavailableError) throw error
         throw new McpUsageUnavailableError(error)

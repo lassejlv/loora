@@ -84,10 +84,12 @@ import {
   listRecentDesigns,
   listUsersWithUsage,
   refreshUserBilling,
+  resetUserMcpUsage,
   revokeDesignLinks,
   revokeUserMcpAccess,
   revokeUserSessions,
   setUserAdmin,
+  setUserMcpLimit,
   setUserPreviewAccess,
 } from './admin'
 import {
@@ -186,6 +188,8 @@ export const appRouter = {
     approvePendingPreviewAccess,
     setAdmin: setUserAdmin,
     refreshBilling: refreshUserBilling,
+    setMcpLimit: setUserMcpLimit,
+    resetMcpUsage: resetUserMcpUsage,
     revokeSessions: revokeUserSessions,
     revokeMcpAccess: revokeUserMcpAccess,
     deleteUser: deleteUserAccount,

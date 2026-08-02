@@ -89,6 +89,49 @@ describe('MCP included usage', () => {
     expect(records).toBe(0)
   })
 
+  test('honors a raised weekly limit', async () => {
+    let records = 0
+    const service = createMcpUsageService(() => ({
+      readTotal: async () => 100,
+      record: async () => {
+        records += 1
+        return true
+      },
+    }))
+
+    const usage = await service.reserve(
+      'user-1',
+      'free',
+      new Date('2026-07-29T12:00:00Z'),
+      { weeklyLimit: 250 },
+    )
+
+    expect(usage.included).toBe(250)
+    expect(usage.used).toBe(101)
+    expect(usage.remaining).toBe(149)
+    expect(records).toBe(1)
+  })
+
+  test('starts metering at an admin reset within the current week', async () => {
+    const reads: Parameters<McpUsageMeter['readTotal']>[0][] = []
+    const service = createMcpUsageService(() => ({
+      readTotal: async (input) => {
+        reads.push(input)
+        return 0
+      },
+      record: async () => true,
+    }))
+    const resetAt = new Date('2026-07-29T11:30:00Z')
+    const now = new Date('2026-07-29T12:00:00Z')
+
+    const usage = await service.current('user-1', 'free', now, { resetAt })
+
+    expect(reads[0]?.periodStart).toEqual(resetAt)
+    expect(usage.used).toBe(0)
+    expect(usage.periodStart).toBe('2026-07-27T00:00:00.000Z')
+    expect(usage.resetsAt).toBe('2026-08-03T00:00:00.000Z')
+  })
+
   test('caches Free meter reads between calls instead of reading every time', async () => {
     let reads = 0
     let records = 0

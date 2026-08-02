@@ -173,6 +173,21 @@ function UserRowActions({
           <DropdownMenuItem onClick={() => onAction('refreshBilling', account)}>
             Refresh billing from Polar
           </DropdownMenuItem>
+          {!account.isAdmin ? (
+            <DropdownMenuItem onClick={() => onAction('setMcpLimit', account)}>
+              Set MCP weekly limit
+            </DropdownMenuItem>
+          ) : null}
+          {account.mcpWeeklyLimit !== null ? (
+            <DropdownMenuItem onClick={() => onAction('restoreMcpLimit', account)}>
+              Restore plan MCP limit
+            </DropdownMenuItem>
+          ) : null}
+          {!account.isAdmin ? (
+            <DropdownMenuItem onClick={() => onAction('resetMcpUsage', account)}>
+              Reset MCP usage
+            </DropdownMenuItem>
+          ) : null}
           <DropdownMenuItem onClick={() => onAction('copyId', account)}>
             Copy user ID
           </DropdownMenuItem>
@@ -206,6 +221,9 @@ export type AdminUserAction =
   | 'previewAccess'
   | 'toggleAdmin'
   | 'refreshBilling'
+  | 'setMcpLimit'
+  | 'restoreMcpLimit'
+  | 'resetMcpUsage'
   | 'revokeSessions'
   | 'revokeMcp'
   | 'copyId'
@@ -283,6 +301,29 @@ export function AdminUsers({
     ) {
       return
     }
+    if (
+      action === 'resetMcpUsage' &&
+      !window.confirm(`Reset ${account.email}'s MCP usage to zero for this week?`)
+    ) {
+      return
+    }
+
+    let requestedLimit: number | null = null
+    if (action === 'setMcpLimit') {
+      const value = window.prompt(
+        `Weekly MCP call limit for ${account.email}`,
+        String(
+          account.mcpWeeklyLimit ??
+            (account.plan === 'pro' || account.plan === 'studio' ? 1_000_000 : 100),
+        ),
+      )
+      if (value === null) return
+      requestedLimit = Number(value.replaceAll(',', '').trim())
+      if (!Number.isSafeInteger(requestedLimit) || requestedLimit < 1) {
+        setError('Enter a positive whole number for the weekly MCP limit.')
+        return
+      }
+    }
 
     setBusyId(account.id)
     setError('')
@@ -325,6 +366,22 @@ export function AdminUsers({
           `Synced ${account.email}: ${entitlement.plan ?? 'no plan'}` +
             `${entitlement.subscriptionStatus ? ` (${entitlement.subscriptionStatus})` : ''}.`,
         )
+      } else if (action === 'setMcpLimit' || action === 'restoreMcpLimit') {
+        const weeklyLimit = action === 'setMcpLimit' ? requestedLimit : null
+        const updated = await orpc.admin.setMcpLimit({
+          userId: account.id,
+          weeklyLimit,
+        })
+        patchUser(account.id, { mcpWeeklyLimit: updated.weeklyLimit })
+        setStatus(
+          updated.weeklyLimit === null
+            ? `Restored ${account.email}'s plan MCP limit.`
+            : `Set ${account.email}'s MCP limit to ${updated.weeklyLimit.toLocaleString()} calls per week.`,
+        )
+      } else if (action === 'resetMcpUsage') {
+        const updated = await orpc.admin.resetMcpUsage({ userId: account.id })
+        patchUser(account.id, { mcpUsageResetAt: updated.resetAt })
+        setStatus(`Reset ${account.email}'s MCP usage for this week.`)
       } else if (action === 'revokeSessions') {
         const { revoked } = await orpc.admin.revokeSessions({ userId: account.id })
         patchUser(account.id, { lastSeenAt: null })
@@ -473,6 +530,11 @@ export function AdminUsers({
                   <TableCell>
                     <div className="flex flex-col">
                       <span className="text-xs">{planLabel(account)}</span>
+                      {account.mcpWeeklyLimit !== null ? (
+                        <span className="text-2xs text-muted-foreground">
+                          MCP {account.mcpWeeklyLimit.toLocaleString()}/week
+                        </span>
+                      ) : null}
                       {account.subscriptionStatus ? (
                         <span className="text-2xs text-muted-foreground">
                           {account.subscriptionStatus}

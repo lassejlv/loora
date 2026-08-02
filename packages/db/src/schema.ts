@@ -29,6 +29,8 @@ export const user = pgTable('user', {
   previewAccess: boolean('preview_access').default(false).notNull(),
   previewAccessRequestedAt: timestamp('preview_access_requested_at'),
   usageMultiplier: integer('usage_multiplier').default(1).notNull(),
+  mcpWeeklyLimit: integer('mcp_weekly_limit'),
+  mcpUsageResetAt: timestamp('mcp_usage_reset_at'),
   acceptedTerms: boolean('accepted_terms').default(false).notNull(),
   acceptedPrivacy: boolean('accepted_privacy').default(false).notNull(),
   termsAcceptedAt: timestamp('terms_accepted_at'),
