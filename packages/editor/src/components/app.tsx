@@ -350,7 +350,7 @@ export function CanvasApp({
       <main className="grid h-screen place-items-center bg-cx-canvas">
         <div className="flex flex-col items-center gap-5">
           <img
-            src="/logo-no-bg.png"
+            src="/logo-removebg-preview.png"
             alt="Loora"
             width={48}
             height={48}

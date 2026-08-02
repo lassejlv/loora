@@ -1129,8 +1129,33 @@ function frameAsImage(
     type: 'image',
     src: assetSrc(asset),
     alt: asset.name,
-    fit: 'contain',
+    // Sized to the asset's aspect on insert, so fill paints edge-to-edge.
+    fit: 'fill',
   }
+}
+
+function imagePlacementSize(
+  natural: { width: number; height: number } | null,
+  maxEdge = 320,
+) {
+  if (!natural || natural.width <= 0 || natural.height <= 0) {
+    return { width: maxEdge, height: Math.round((maxEdge * 3) / 4) }
+  }
+  const scale = Math.min(maxEdge / natural.width, maxEdge / natural.height, 1)
+  return {
+    width: Math.max(1, Math.round(natural.width * scale)),
+    height: Math.max(1, Math.round(natural.height * scale)),
+  }
+}
+
+function probeImageSize(src: string) {
+  return new Promise<{ width: number; height: number } | null>((resolve) => {
+    const image = new Image()
+    image.onload = () =>
+      resolve({ width: image.naturalWidth, height: image.naturalHeight })
+    image.onerror = () => resolve(null)
+    image.src = src
+  })
 }
 
 function frameAsGroup(frame: ReturnType<typeof createFrameNode>): GroupNode {
@@ -1444,25 +1469,28 @@ function useCanvasEditorActions(
       ? document.nodes[placement.parentId]
       : parent
     if (!target || readOnly) return
-    const children = orderedChildren(document, target.id)
-    const frame = createFrameNode(asset.name, {
-      parentId: target.id,
-      order: placement?.order ?? (children.at(-1)?.order ?? 0) + 1024,
-      layout: defaultLayout(320, 240, {
-        position:
-          placement?.position ??
-          (target.layout.mode === 'absolute' ? 'absolute' : 'flow'),
-        // Dropped images centre on the pointer rather than hanging off it.
-        x: placement ? Math.round(placement.x - 160) : 48,
-        y: placement ? Math.round(placement.y - 120) : 48,
-      }),
-      style: defaultStyle({
-        fills: [{ type: 'solid', color: '#ffffff' }],
-        radius: 12,
-        overflow: 'hidden',
-      }),
-    })
-    insert(frameAsImage(frame, asset))
+    void (async () => {
+      const size = imagePlacementSize(await probeImageSize(assetSrc(asset)))
+      const children = orderedChildren(document, target.id)
+      const frame = createFrameNode(asset.name, {
+        parentId: target.id,
+        order: placement?.order ?? (children.at(-1)?.order ?? 0) + 1024,
+        layout: defaultLayout(size.width, size.height, {
+          position:
+            placement?.position ??
+            (target.layout.mode === 'absolute' ? 'absolute' : 'flow'),
+          // Dropped images centre on the pointer rather than hanging off it.
+          x: placement ? Math.round(placement.x - size.width / 2) : 48,
+          y: placement ? Math.round(placement.y - size.height / 2) : 48,
+        }),
+        style: defaultStyle({
+          fills: [{ type: 'solid', color: '#ffffff' }],
+          radius: 12,
+          overflow: 'hidden',
+        }),
+      })
+      insert(frameAsImage(frame, asset))
+    })()
   }
 
   const sourceRefs = selection.filter(

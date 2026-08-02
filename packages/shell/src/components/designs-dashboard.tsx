@@ -407,7 +407,7 @@ export function DesignsDashboard() {
           <h1 className="flex-1 text-sm font-semibold tracking-tight">
             Recents
           </h1>
-          <div className="flex items-center gap-0.5 rounded-sm border border-line p-0.5">
+          <div className="flex items-center gap-0.5 rounded-md border border-line p-0.5">
             <Button
               variant={view === 'grid' ? 'secondary' : 'ghost'}
               size="icon-xs"
@@ -428,20 +428,20 @@ export function DesignsDashboard() {
             </Button>
           </div>
           <div className="relative w-44">
-            <SearchIcon className="pointer-events-none absolute start-2 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
+            <SearchIcon className="pointer-events-none absolute start-2 top-1/2 z-10 size-3.5 -translate-y-1/2 text-muted-foreground" />
             <Input
               ref={searchRef}
               type="search"
               aria-label="Search files"
               placeholder="Search recents"
-              className="rounded-sm bg-surface-2 pe-8 ps-7"
+              className="rounded-sm bg-surface-2 text-start [&_[data-slot=input]]:pe-8 [&_[data-slot=input]]:ps-7 [&_[data-slot=input]]:text-start"
               value={query}
               onChange={(event) => setQuery(event.target.value)}
             />
             {/* The ⌘F binding above is invisible otherwise; the hint retires
                 once there is a query, where it would sit under the text. */}
             {query ? null : (
-              <kbd className="pointer-events-none absolute end-1.5 top-1/2 -translate-y-1/2 rounded-sm border border-line px-1 text-2xs leading-4 text-muted-foreground">
+              <kbd className="pointer-events-none absolute end-1.5 top-1/2 z-10 -translate-y-1/2 rounded-sm border border-line px-1 text-2xs leading-4 text-muted-foreground">
                 {searchHint()}
               </kbd>
             )}

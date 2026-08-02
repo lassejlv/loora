@@ -1244,6 +1244,50 @@ interface OverlayWorldRect {
   height: number
 }
 
+/**
+ * Painted box inside an `object-fit: contain` layout box. Selection and resize
+ * use this so the handles hug the pixels instead of the letterboxed frame.
+ */
+export function objectFitContainRect(
+  box: { left: number; top: number; width: number; height: number },
+  naturalWidth: number,
+  naturalHeight: number,
+): { left: number; top: number; width: number; height: number } {
+  if (
+    naturalWidth <= 0 ||
+    naturalHeight <= 0 ||
+    box.width <= 0 ||
+    box.height <= 0
+  ) {
+    return { left: box.left, top: box.top, width: box.width, height: box.height }
+  }
+  const scale = Math.min(box.width / naturalWidth, box.height / naturalHeight)
+  const width = naturalWidth * scale
+  const height = naturalHeight * scale
+  return {
+    left: box.left + (box.width - width) / 2,
+    top: box.top + (box.height - height) / 2,
+    width,
+    height,
+  }
+}
+
+function selectionClientRect(
+  element: Element,
+  fit: 'cover' | 'contain' | 'fill' | null,
+): DOMRect {
+  const box = element.getBoundingClientRect()
+  if (fit !== 'contain' || element.tagName !== 'IMG') return box
+  const image = element as HTMLImageElement
+  if (image.naturalWidth <= 0 || image.naturalHeight <= 0) return box
+  const content = objectFitContainRect(
+    { left: box.left, top: box.top, width: box.width, height: box.height },
+    image.naturalWidth,
+    image.naturalHeight,
+  )
+  return new DOMRect(content.left, content.top, content.width, content.height)
+}
+
 function SelectionOverlay({
   sceneRef,
   cameraRef,
@@ -1269,6 +1313,8 @@ function SelectionOverlay({
   const [renaming, setRenaming] = useState(false)
   const selected = session.selection[0] ?? null
   const element = selected ? registry.get(selected) : null
+  const source = selected ? engine.getNode(selected.nodeId) : null
+  const imageFit = source?.type === 'image' ? source.fit : null
   const groupRef = useRef<SVGGElement | null>(null)
   const outlineRef = useRef<SVGRectElement | null>(null)
   const labelRef = useRef<SVGGElement | null>(null)
@@ -1286,7 +1332,7 @@ function SelectionOverlay({
       worldRef.current = null
       return
     }
-    const rect = element.getBoundingClientRect()
+    const rect = selectionClientRect(element, imageFit)
     const sceneRect = scene.getBoundingClientRect()
     const zoom = cameraRef.current.zoom || 1
     worldRef.current = {
@@ -1295,7 +1341,7 @@ function SelectionOverlay({
       width: rect.width / zoom,
       height: rect.height / zoom,
     }
-  }, [cameraRef, element, sceneRef])
+  }, [cameraRef, element, imageFit, sceneRef])
 
   /**
    * Attribute writes only, never a React render. `offset` follows a drag
@@ -1363,7 +1409,16 @@ function SelectionOverlay({
     return () => window.removeEventListener('resize', onScroll)
   }, [engine, registry, session.revision])
 
-  const source = selected ? engine.getNode(selected.nodeId) : null
+  // Intrinsic size arrives after layout; remeasure so contain letterboxing is
+  // not mistaken for the painted box.
+  useLayoutEffect(() => {
+    if (element?.tagName !== 'IMG') return
+    const image = element as HTMLImageElement
+    const onLoad = () => refresh((value) => value + 1)
+    image.addEventListener('load', onLoad)
+    return () => image.removeEventListener('load', onLoad)
+  }, [element])
+
   const instanceId = selected?.instancePath.at(-1)
   const selectionKey = selected ? refKey(selected) : null
 
@@ -1403,23 +1458,23 @@ function SelectionOverlay({
     event.currentTarget.setPointerCapture(event.pointerId)
     const startX = event.clientX
     const startY = event.clientY
-    const start = element.getBoundingClientRect()
+    const boxStart = element.getBoundingClientRect()
+    const contentStart = selectionClientRect(element, imageFit)
+    const zoom = cameraRef.current.zoom || 1
+    const insetX = (contentStart.left - boxStart.left) / zoom
+    const insetY = (contentStart.top - boxStart.top) / zoom
+    const startWidth = contentStart.width / zoom
+    const startHeight = contentStart.height / zoom
     const original = element.getAttribute('style') ?? ''
     let latestX = 0
     let latestY = 0
     let resizeFrame: number | null = null
     const applyPreview = () => {
       resizeFrame = null
-      const width = Math.max(
-        1,
-        start.width / cameraRef.current.zoom + latestX * horizontal,
-      )
-      const height = Math.max(
-        1,
-        start.height / cameraRef.current.zoom + latestY * vertical,
-      )
-      const translateX = horizontal < 0 ? latestX : 0
-      const translateY = vertical < 0 ? latestY : 0
+      const width = Math.max(1, startWidth + latestX * horizontal)
+      const height = Math.max(1, startHeight + latestY * vertical)
+      const translateX = insetX + (horizontal < 0 ? latestX : 0)
+      const translateY = insetY + (vertical < 0 ? latestY : 0)
       ;(element as HTMLElement).style.width = `${width}px`
       ;(element as HTMLElement).style.height = `${height}px`
       ;(element as HTMLElement).style.transform =
@@ -1440,20 +1495,14 @@ function SelectionOverlay({
       window.removeEventListener('pointerup', onUp)
       if (resizeFrame !== null) cancelAnimationFrame(resizeFrame)
       element.setAttribute('style', original)
-      const width = Math.max(
-        1,
-        start.width / cameraRef.current.zoom + latestX * horizontal,
-      )
-      const height = Math.max(
-        1,
-        start.height / cameraRef.current.zoom + latestY * vertical,
-      )
+      const width = Math.max(1, startWidth + latestX * horizontal)
+      const height = Math.max(1, startHeight + latestY * vertical)
       const patch: NodeMutationPatch = {
         layout: {
           width: { unit: 'px', value: width },
           height: { unit: 'px', value: height },
-          x: source.layout.x + (horizontal < 0 ? latestX : 0),
-          y: source.layout.y + (vertical < 0 ? latestY : 0),
+          x: source.layout.x + insetX + (horizontal < 0 ? latestX : 0),
+          y: source.layout.y + insetY + (vertical < 0 ? latestY : 0),
         },
         ...(source.type === 'page'
           ? { viewport: { width, minHeight: height } }
@@ -1482,6 +1531,9 @@ function SelectionOverlay({
   const label = source?.name ?? ''
   const labelWidth = Math.min(240, Math.max(44, label.length * 6.5 + 12))
   const renameWidth = Math.max(labelWidth, 140)
+  const labelChars = Math.max(4, Math.floor((labelWidth - 12) / 6.5))
+  const labelText =
+    label.length > labelChars ? `${label.slice(0, labelChars - 1)}…` : label
   return (
     <svg
       data-loora-viewport-overlay
@@ -1613,7 +1665,7 @@ function SelectionOverlay({
                 fontFamily="ui-sans-serif, system-ui"
                 fontSize="11"
               >
-                {label}
+                {labelText}
               </text>
             )}
           </g>

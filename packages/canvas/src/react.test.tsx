@@ -15,6 +15,7 @@ import {
   CanvasProvider,
   CanvasSession,
   CanvasSurface,
+  objectFitContainRect,
   useCanvasHistory,
   useCanvasSelection,
   useCanvasSession,
@@ -989,5 +990,33 @@ describe('Canvas React surface', () => {
     const camera = controls.current?.getCamera()
     expect(camera?.x).not.toBe(80)
     expect(outline.getAttribute('x')).toBe(String(camera?.x))
+  })
+})
+
+describe('objectFitContainRect', () => {
+  it('letterboxes a square image in a wide box', () => {
+    expect(
+      objectFitContainRect(
+        { left: 100, top: 50, width: 320, height: 240 },
+        100,
+        100,
+      ),
+    ).toEqual({ left: 140, top: 50, width: 240, height: 240 })
+  })
+
+  it('letterboxes a wide image in a tall box', () => {
+    expect(
+      objectFitContainRect(
+        { left: 0, top: 0, width: 100, height: 200 },
+        200,
+        100,
+      ),
+    ).toEqual({ left: 0, top: 75, width: 100, height: 50 })
+  })
+
+  it('returns the box when natural size is missing', () => {
+    expect(
+      objectFitContainRect({ left: 1, top: 2, width: 3, height: 4 }, 0, 10),
+    ).toEqual({ left: 1, top: 2, width: 3, height: 4 })
   })
 })
