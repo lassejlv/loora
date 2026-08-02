@@ -116,10 +116,18 @@ import {
   setPublishHandle,
   unpublishPage,
 } from './publish-procedures'
+import {
+  adminGetLaunchWeek,
+  adminSaveLaunchWeek,
+  getPublicLaunchWeek,
+} from './launch-week'
 
 export type { ORPCContext } from './procedures'
 
 export const appRouter = {
+  launchWeek: {
+    get: getPublicLaunchWeek,
+  },
   auth: {
     config: getAuthConfig,
     legalConsent: getLegalConsent,
@@ -225,6 +233,10 @@ export const appRouter = {
     deleteUser: deleteUserAccount,
     listDesigns: listRecentDesigns,
     revokeDesignLinks,
+    launchWeek: {
+      get: adminGetLaunchWeek,
+      save: adminSaveLaunchWeek,
+    },
     flags: {
       list: adminListFlags,
       get: adminGetFlag,

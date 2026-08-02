@@ -65,6 +65,18 @@ const designs = [
 const setPreviewAccess = vi.fn(async () => ({ userId: 'user-2', previewAccess: true }))
 const approvePendingPreviewAccess = vi.fn(async () => ({ granted: 2 }))
 const revokeDesignLinks = vi.fn(async () => ({ revokedLinks: 1 }))
+const launchWeek = {
+  enabled: false,
+  startDate: '2026-08-03',
+  headline: 'Seven days. Seven releases.',
+  description: 'A new Loora release lands every day.',
+  days: Array.from({ length: 7 }, (_, index) => ({
+    title: `Release ${index + 1}`,
+    description: 'What ships today.',
+    ctaLabel: '',
+    ctaUrl: '',
+  })),
+}
 
 vi.doMock('@loora/rpc/client', () => ({
   orpc: {
@@ -82,6 +94,10 @@ vi.doMock('@loora/rpc/client', () => ({
       revokeSessions: vi.fn(),
       revokeMcpAccess: vi.fn(),
       deleteUser: vi.fn(),
+      launchWeek: {
+        get: vi.fn(async () => launchWeek),
+        save: vi.fn(async () => launchWeek),
+      },
       flags: {
         list: vi.fn(async () => []),
         get: vi.fn(),

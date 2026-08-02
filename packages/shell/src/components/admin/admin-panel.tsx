@@ -4,6 +4,7 @@ import { RefreshCwIcon } from '@loora/ui/icons'
 import { Button } from '@loora/ui/button'
 import { AdminDesigns } from '../admin/designs'
 import { AdminFlags } from '../admin/flags'
+import { AdminLaunchWeek } from '../admin/launch-week'
 import { AdminStats } from '../admin/stats'
 import { AdminUsers } from '../admin/users'
 import { orpc } from '@loora/rpc/client'
@@ -75,6 +76,8 @@ export function AdminPanel() {
 
       {error ? <p className="text-xs text-destructive-foreground">{error}</p> : null}
       {overview ? <AdminStats overview={overview} /> : null}
+
+      <AdminLaunchWeek />
 
       <AdminUsers
         currentUserId={userId}

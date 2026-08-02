@@ -11,6 +11,7 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as FeaturesRouteImport } from './routes/features'
+import { Route as LaunchWeekRouteImport } from './routes/launch-week'
 import { Route as McpRouteImport } from './routes/mcp'
 import { Route as McpConsentRouteImport } from './routes/mcp-consent'
 import { Route as PricingRouteImport } from './routes/pricing'
@@ -55,6 +56,11 @@ const IndexRoute = IndexRouteImport.update({
 const FeaturesRoute = FeaturesRouteImport.update({
   id: '/features',
   path: '/features',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const LaunchWeekRoute = LaunchWeekRouteImport.update({
+  id: '/launch-week',
+  path: '/launch-week',
   getParentRoute: () => rootRouteImport,
 } as any)
 const McpRoute = McpRouteImport.update({
@@ -238,6 +244,7 @@ const ApiHandoffTokenAssetIdRoute = ApiHandoffTokenAssetIdRouteImport.update({
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/features': typeof FeaturesRoute
+  '/launch-week': typeof LaunchWeekRoute
   '/mcp': typeof McpRoute
   '/mcp-consent': typeof McpConsentRoute
   '/pricing': typeof PricingRoute
@@ -277,6 +284,7 @@ export interface FileRoutesByFullPath {
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/features': typeof FeaturesRoute
+  '/launch-week': typeof LaunchWeekRoute
   '/mcp': typeof McpRoute
   '/mcp-consent': typeof McpConsentRoute
   '/pricing': typeof PricingRoute
@@ -317,6 +325,7 @@ export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/features': typeof FeaturesRoute
+  '/launch-week': typeof LaunchWeekRoute
   '/mcp': typeof McpRoute
   '/mcp-consent': typeof McpConsentRoute
   '/pricing': typeof PricingRoute
@@ -358,6 +367,7 @@ export interface FileRouteTypes {
   fullPaths:
     | '/'
     | '/features'
+    | '/launch-week'
     | '/mcp'
     | '/mcp-consent'
     | '/pricing'
@@ -397,6 +407,7 @@ export interface FileRouteTypes {
   to:
     | '/'
     | '/features'
+    | '/launch-week'
     | '/mcp'
     | '/mcp-consent'
     | '/pricing'
@@ -436,6 +447,7 @@ export interface FileRouteTypes {
     | '__root__'
     | '/'
     | '/features'
+    | '/launch-week'
     | '/mcp'
     | '/mcp-consent'
     | '/pricing'
@@ -476,6 +488,7 @@ export interface FileRouteTypes {
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   FeaturesRoute: typeof FeaturesRoute
+  LaunchWeekRoute: typeof LaunchWeekRoute
   McpRoute: typeof McpRoute
   McpConsentRoute: typeof McpConsentRoute
   PricingRoute: typeof PricingRoute
@@ -525,6 +538,13 @@ declare module '@tanstack/react-router' {
       path: '/features'
       fullPath: '/features'
       preLoaderRoute: typeof FeaturesRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/launch-week': {
+      id: '/launch-week'
+      path: '/launch-week'
+      fullPath: '/launch-week'
+      preLoaderRoute: typeof LaunchWeekRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/mcp': {
@@ -802,6 +822,7 @@ const ApiHandoffTokenRouteWithChildren = ApiHandoffTokenRoute._addFileChildren(
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   FeaturesRoute: FeaturesRoute,
+  LaunchWeekRoute: LaunchWeekRoute,
   McpRoute: McpRoute,
   McpConsentRoute: McpConsentRoute,
   PricingRoute: PricingRoute,
@@ -840,3 +861,12 @@ const rootRouteChildren: RootRouteChildren = {
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
   ._addFileTypes<FileRouteTypes>()
+
+import type { getRouter } from './router.tsx'
+import type { createStart } from '@tanstack/react-start'
+declare module '@tanstack/react-start' {
+  interface Register {
+    ssr: true
+    router: Awaited<ReturnType<typeof getRouter>>
+  }
+}

@@ -20,6 +20,13 @@ import type { DraftStatus } from './drafts'
 import type { ShortcutConfig } from './shortcuts'
 import { EMPTY_SHORTCUT_CONFIG } from './shortcuts'
 
+export type LaunchWeekDay = {
+  title: string
+  description: string
+  ctaLabel: string
+  ctaUrl: string
+}
+
 export const user = pgTable('user', {
   id: text('id').primaryKey(),
   name: text('name').notNull(),
@@ -44,6 +51,19 @@ export const user = pgTable('user', {
    */
   handle: text('handle').unique(),
   createdAt: timestamp('created_at').defaultNow().notNull(),
+  updatedAt: timestamp('updated_at')
+    .defaultNow()
+    .$onUpdate(() => new Date())
+    .notNull(),
+})
+
+export const launchWeek = pgTable('launch_week', {
+  id: text('id').primaryKey(),
+  enabled: boolean('enabled').default(false).notNull(),
+  startDate: text('start_date').notNull(),
+  headline: text('headline').notNull(),
+  description: text('description').notNull(),
+  days: jsonb('days').$type<LaunchWeekDay[]>().notNull(),
   updatedAt: timestamp('updated_at')
     .defaultNow()
     .$onUpdate(() => new Date())
