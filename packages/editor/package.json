@@ -16,7 +16,8 @@
     "@loora/ui": "workspace:*",
     "@tanstack/react-router": "latest",
     "@hugeicons/core-free-icons": "^4.2.3",
-    "lucide": "^0.544.0"
+    "lucide": "^0.544.0",
+    "motion": "^12.42.2"
   },
   "peerDependencies": {
     "react": "^19.2.7",

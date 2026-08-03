@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { motion, useReducedMotion } from 'motion/react'
 import {
   Dialog,
   DialogDescription,
@@ -36,6 +37,7 @@ export function IconPickerDialog({
 }) {
   const [library, setLibrary] = useState<IconLibraryId>('lucide')
   const [query, setQuery] = useState('')
+  const reduceMotion = useReducedMotion()
 
   const icons = useMemo(() => {
     const all = getIcons(library)
@@ -110,19 +112,28 @@ export function IconPickerDialog({
               </p>
             ) : (
               <div className="grid grid-cols-[repeat(auto-fill,minmax(3rem,1fr))] gap-1">
-                {visible.map((icon) => (
-                  <button
+                {visible.map((icon, index) => (
+                  <motion.button
                     key={icon.id}
                     type="button"
                     title={icon.name}
                     className="flex aspect-square flex-col items-center justify-center gap-0.5 rounded-md border border-transparent p-1.5 text-muted-foreground transition-colors hover:border-border hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    // Only newly mounted icons animate — React keeps the ones
+                    // already on screen, so a loaded page fades in on its own.
+                    initial={{ opacity: 0, scale: reduceMotion ? 1 : 0.92 }}
+                    animate={{ opacity: 1, scale: 1 }}
+                    transition={{
+                      duration: reduceMotion ? 0.12 : 0.18,
+                      ease: [0.4, 0, 0.2, 1],
+                      delay: reduceMotion ? 0 : ((index % PAGE_SIZE) % 12) * 0.012,
+                    }}
                     onClick={() => {
                       onInsert(icon)
                       onOpenChange(false)
                     }}
                   >
                     {icon.render(22)}
-                  </button>
+                  </motion.button>
                 ))}
               </div>
             )}
