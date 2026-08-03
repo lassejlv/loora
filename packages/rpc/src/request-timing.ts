@@ -54,7 +54,7 @@ function isRequestTimingLogEnabled() {
 }
 
 export function logRequestTiming(input: {
-  service: 'web' | 'api' | 'mcp'
+  service: 'web' | 'mcp'
   requestId: string
   method: string
   path: string

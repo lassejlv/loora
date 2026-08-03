@@ -15,6 +15,7 @@
     ]
   },
   "deploy": {
+    "healthcheckPath": "/api/ready",
     "restartPolicyType": "ON_FAILURE",
     "restartPolicyMaxRetries": 5,
     "sleepApplication": false
