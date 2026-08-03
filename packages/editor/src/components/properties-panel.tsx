@@ -379,7 +379,7 @@ function hexSwatch(value: string | null) {
     : `#${digits}`
 }
 
-function ColorCell({
+export function ColorCell({
   label,
   value,
   tokens = [],

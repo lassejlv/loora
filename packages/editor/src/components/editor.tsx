@@ -91,6 +91,7 @@ import type {
 } from '@loora/canvas/engine'
 import { CanvasLayersPanel } from './layers-panel'
 import { CanvasPropertiesPanel } from './properties-panel'
+import { CanvasTokensPanel } from './tokens-panel'
 import { CanvasContextMenu } from './canvas-menu'
 import {
   CanvasCollaboratorPresence,
@@ -360,6 +361,7 @@ function CanvasShell({
     'layers' | 'design' | null
   >(null)
   const [assetsOpen, setAssetsOpen] = useState(false)
+  const [tokensOpen, setTokensOpen] = useState(false)
   const [historyOpen, setHistoryOpen] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [exportOpen, setExportOpen] = useState(false)
@@ -824,6 +826,13 @@ function CanvasShell({
               },
             ]),
         {
+          id: 'tokens',
+          label: 'Tokens',
+          keywords: 'design tokens colors variables theme palette',
+          icon: BracesIcon,
+          run: () => setTokensOpen(true),
+        },
+        {
           id: 'zoom-fit',
           label: 'Zoom to fit',
           icon: MaximizeIcon,
@@ -955,6 +964,16 @@ function CanvasShell({
           </DrawerPopup>
         </Drawer>
 
+        <Drawer open={tokensOpen} onOpenChange={setTokensOpen} position="bottom">
+          <DrawerPopup
+            position="bottom"
+            variant="inset"
+            className="mx-auto h-[min(60svh,32rem)] w-full max-w-lg overflow-hidden rounded-lg bg-surface shadow-panel-lg"
+          >
+            <CanvasTokensPanel onClose={() => setTokensOpen(false)} />
+          </DrawerPopup>
+        </Drawer>
+
         {isMobile ? (
           <Drawer
             open={mobileInspector !== null}
@@ -1072,6 +1091,18 @@ function CanvasShell({
           >
             <CanvasAgentAvatar controller={controller} />
             {topBarEnd}
+            {!isMobile ? (
+              <Button
+                size="icon-xs"
+                variant="ghost"
+                aria-label="Tokens"
+                title="Tokens"
+                className="text-muted-foreground"
+                onClick={() => setTokensOpen(true)}
+              >
+                <BracesIcon />
+              </Button>
+            ) : null}
             {!isMobile ? (
               <Button
                 size="icon-xs"
