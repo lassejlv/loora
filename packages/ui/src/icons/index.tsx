@@ -12,6 +12,7 @@ import {
   Archive02Icon as HugeArchiveIcon,
   ArchiveRestoreIcon as HugeArchiveRestoreIcon,
   BotIcon as HugeBotIcon,
+  CompassIcon as HugeCompassIcon,
   BracesIcon as HugeBracesIcon,
   BringToFrontIcon as HugeBringToFrontIcon,
   Cancel01Icon as HugeXIcon,
@@ -180,6 +181,7 @@ export const ChevronsUpDownIcon = createIcon(
   HugeChevronsUpDownIcon,
   'ChevronsUpDownIcon',
 )
+export const CompassIcon = createIcon(HugeCompassIcon, 'CompassIcon')
 export const CircleAlertIcon = createIcon(HugeCircleAlertIcon, 'CircleAlertIcon')
 export const CircleCheckIcon = createIcon(HugeCircleCheckIcon, 'CircleCheckIcon')
 export const CircleIcon = createIcon(HugeCircleIcon, 'CircleIcon')

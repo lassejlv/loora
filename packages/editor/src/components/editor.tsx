@@ -15,6 +15,7 @@ import {
   BracesIcon,
   CodeXmlIcon,
   ComponentIcon,
+  CompassIcon,
   FileCode2Icon,
   GroupIcon,
   ImageIcon,
@@ -100,6 +101,8 @@ import { CanvasExport } from './export-panel'
 import { CanvasHistory } from './history'
 import { HtmlImportDialog } from './html-import-dialog'
 import { IconPickerDialog } from './icon-picker-dialog'
+import { ProductTour } from './product-tour'
+import { editorTourSteps, hasSeenTour, markTourSeen } from '../lib/tour'
 import type { IconEntry } from '../lib/icon-libraries'
 import { svgStringToVectorDescriptor, looksLikeSvg } from '../lib/svg-to-vector'
 import {
@@ -185,11 +188,14 @@ function CanvasDockedPanel({
   side,
   title,
   storageKey,
+  tourId,
   children,
 }: {
   side: 'left' | 'right'
   title: string
   storageKey: string
+  /** Anchor name for the product tour's spotlight. */
+  tourId?: string
   children: ReactNode
 }) {
   const [width, setWidth] = useState(() => {
@@ -207,6 +213,7 @@ function CanvasDockedPanel({
 
   return (
     <div
+      data-tour={tourId}
       className={`pointer-events-auto relative flex h-full shrink-0 bg-surface ${
         side === 'left' ? 'border-e border-line' : 'border-s border-line'
       }`}
@@ -353,6 +360,7 @@ function CanvasShell({
   const [iconPickerOpen, setIconPickerOpen] = useState(false)
   const [designPanelOpen, setDesignPanelOpen] = useState(() => panelVisible('loora:design-panel-open'))
   const [layersPanelOpen, setLayersPanelOpen] = useState(() => panelVisible('loora:layers-panel-open'))
+  const [tourOpen, setTourOpen] = useState(false)
   const [commandMenuOpen, setCommandMenuOpen] = useState(false)
   const [pasteNotice, setPasteNotice] = useState<string | null>(null)
   const pasteNoticeTimer = useRef<number | null>(null)
@@ -450,6 +458,31 @@ function CanvasShell({
       cancelled = true
     }
   }, [controller.target?.designId])
+
+  const tourSteps = editorTourSteps({
+    isMobile,
+    openLayers: () => {
+      if (isMobile) return
+      setLayersPanelOpen(true)
+      window.localStorage.setItem('loora:layers-panel-open', 'true')
+    },
+    openDesign: () => {
+      if (isMobile) return
+      setDesignPanelOpen(true)
+      window.localStorage.setItem('loora:design-panel-open', 'true')
+    },
+  })
+
+  // First time somebody has a document open and can actually edit it. The
+  // delay lets the panels settle so the first spotlight lands on the real
+  // geometry rather than a half-mounted one.
+  useEffect(() => {
+    if (readOnly || !controller.target || hasSeenTour()) return
+    const timer = window.setTimeout(() => setTourOpen(true), 900)
+    return () => window.clearTimeout(timer)
+    // Keyed by the design, not the target object, which is a fresh identity
+    // every render and would reset this timer forever.
+  }, [readOnly, controller.target?.designId])
 
   const updateShortcutConfig = (next: ShortcutConfig) => {
     const normalized = normalizeConfig(next)
@@ -800,6 +833,13 @@ function CanvasShell({
           disabled: !controller.target,
           run: () => setSettingsOpen(true),
         },
+        {
+          id: 'show-tour',
+          label: 'Take the tour',
+          keywords: 'onboarding walkthrough guide help getting started',
+          icon: CompassIcon,
+          run: () => setTourOpen(true),
+        },
       ],
     },
   ]
@@ -956,6 +996,13 @@ function CanvasShell({
           onOpenChange={setCommandMenuOpen}
           groups={commandGroups}
         />
+
+        <ProductTour
+          steps={tourSteps}
+          open={tourOpen}
+          onOpenChange={setTourOpen}
+          onFinish={markTourSeen}
+        />
       </main>
 
       <div className="pointer-events-none absolute inset-0 z-20 flex flex-col">
@@ -999,7 +1046,10 @@ function CanvasShell({
           </div>
           {/* The right cluster: the agent sits with the human collaborators,
               because to everyone in the document it is one of them. */}
-          <div className="ms-auto flex min-w-0 shrink-0 items-center gap-2">
+          <div
+            data-tour="share"
+            className="ms-auto flex min-w-0 shrink-0 items-center gap-2"
+          >
             <CanvasAgentAvatar controller={controller} />
             {topBarEnd}
             {!isMobile ? (
@@ -1026,6 +1076,7 @@ function CanvasShell({
               side="left"
               title="Layers"
               storageKey="loora:layers-width"
+              tourId="layers"
             >
               {layersPanel}
             </CanvasDockedPanel>
@@ -1065,6 +1116,7 @@ function CanvasShell({
               side="right"
               title="Properties"
               storageKey="loora:properties-width"
+              tourId="design"
             >
               {propertiesPanel}
             </CanvasDockedPanel>
@@ -2232,6 +2284,7 @@ function CanvasMobileStrip({
       role="toolbar"
       aria-label="Tools"
       aria-orientation="horizontal"
+      data-tour="tools"
       className="pointer-events-auto absolute bottom-3 left-1/2 flex max-w-[calc(100%-1.5rem)] -translate-x-1/2 items-center gap-0.5 rounded-lg bg-surface p-0.5 shadow-panel-lg"
     >
       <CanvasToolButton
@@ -2369,6 +2422,7 @@ function CanvasToolStrip({
         role="toolbar"
         aria-label="Tools"
         aria-orientation="horizontal"
+        data-tour="tools"
         className="pointer-events-auto absolute bottom-3 left-1/2 flex max-w-[calc(100%-1.5rem)] -translate-x-1/2 items-center gap-0.5 overflow-x-auto rounded-lg bg-surface p-0.5 shadow-panel-lg"
       >
         <CanvasToolButton

@@ -471,6 +471,7 @@ export function CanvasBranches({
             variant="ghost"
             className="pointer-events-auto max-w-44 font-normal text-muted-foreground"
             aria-label="Branch"
+            data-tour="branches"
             disabled={working}
           >
             <GitBranchIcon />
