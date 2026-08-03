@@ -4,9 +4,11 @@ import {
   useRef,
   useState,
   useSyncExternalStore,
+  type Dispatch,
   type ElementType,
   type ReactNode,
   type RefObject,
+  type SetStateAction,
 } from 'react'
 import { Link } from '@tanstack/react-router'
 import {
@@ -164,6 +166,18 @@ function clampInspectorWidth(width: number) {
       Math.max(INSPECTOR_MIN_WIDTH, width),
     ),
   )
+}
+
+function panelVisible(storageKey: string): boolean {
+  if (typeof window === 'undefined') return true
+  return window.localStorage.getItem(storageKey) !== 'false'
+}
+
+function togglePanel(storageKey: string, setOpen: Dispatch<SetStateAction<boolean>>) {
+  setOpen((open) => {
+    window.localStorage.setItem(storageKey, String(!open))
+    return !open
+  })
 }
 
 function CanvasDockedPanel({
@@ -336,6 +350,8 @@ function CanvasShell({
   const [exportOpen, setExportOpen] = useState(false)
   const [htmlImportOpen, setHtmlImportOpen] = useState(false)
   const [iconPickerOpen, setIconPickerOpen] = useState(false)
+  const [designPanelOpen, setDesignPanelOpen] = useState(() => panelVisible('loora:design-panel-open'))
+  const [layersPanelOpen, setLayersPanelOpen] = useState(() => panelVisible('loora:layers-panel-open'))
   const [commandMenuOpen, setCommandMenuOpen] = useState(false)
   const [pasteNotice, setPasteNotice] = useState<string | null>(null)
   const pasteNoticeTimer = useRef<number | null>(null)
@@ -504,6 +520,10 @@ function CanvasShell({
       const run = () => {
         if (hit === 'toggleAssets') {
           setAssetsOpen((open) => !open)
+        } else if (hit === 'toggleDesignPanel') {
+          togglePanel('loora:design-panel-open', setDesignPanelOpen)
+        } else if (hit === 'toggleLayersPanel') {
+          togglePanel('loora:layers-panel-open', setLayersPanelOpen)
         } else if (hit === 'openCommandMenu') setCommandMenuOpen(true)
         else if (hit === 'openSettings') setSettingsOpen(true)
         else if (hit === 'zoomIn') controlsRef.current?.zoomIn()
@@ -742,7 +762,22 @@ function CanvasShell({
                 run: () => setMobileInspector('design'),
               },
             ]
-          : []),
+          : [
+              {
+                id: 'toggle-layers-panel',
+                label: 'Toggle layers panel',
+                icon: LayersIcon,
+                shortcut: shortcutLabel('toggleLayersPanel'),
+                run: () => togglePanel('loora:layers-panel-open', setLayersPanelOpen),
+              },
+              {
+                id: 'toggle-design-panel',
+                label: 'Toggle design panel',
+                icon: SlidersHorizontalIcon,
+                shortcut: shortcutLabel('toggleDesignPanel'),
+                run: () => togglePanel('loora:design-panel-open', setDesignPanelOpen),
+              },
+            ]),
         {
           id: 'zoom-fit',
           label: 'Zoom to fit',
@@ -970,7 +1005,7 @@ function CanvasShell({
         </header>
 
         <div className="flex min-h-0 flex-1">
-          {!isMobile ? (
+          {!isMobile && layersPanelOpen ? (
             <CanvasDockedPanel
               side="left"
               title="Layers"
@@ -1009,7 +1044,7 @@ function CanvasShell({
             ) : null}
           </div>
 
-          {!isMobile ? (
+          {!isMobile && designPanelOpen ? (
             <CanvasDockedPanel
               side="right"
               title="Properties"
@@ -1352,10 +1387,9 @@ function useCanvasEditorActions(
           x: 48,
           y: 48,
         }),
-        style: defaultStyle({
-          fills: [],
-          stroke: { color: '#475467', width: 1.5 },
-        }),
+        // No node-level stroke: that renders as a border around the SVG box.
+        // The vector paths carry their own stroke.
+        style: defaultStyle({ fills: [] }),
         viewBox: descriptor.viewBox,
         paths: descriptor.paths,
       }),

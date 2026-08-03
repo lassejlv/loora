@@ -78,6 +78,27 @@ describe('resolveBuiltIn / matchShortcut', () => {
     expect(matchShortcut(keyEvent({ key: 'z', metaKey: true }), config)).toBeNull()
     expect(matchShortcut(keyEvent({ key: 'q' }), config)).toBe('tool.select')
   })
+
+  test('panel toggles match by code so macOS Option rewriting key still works', () => {
+    const config: ShortcutConfig = { overrides: {}, custom: [] }
+    // macOS reports ⌥B as key '∫'; the code stays KeyB.
+    expect(
+      matchShortcut(
+        keyEvent({ key: '∫', code: 'KeyB', metaKey: true, altKey: true }),
+        config,
+      ),
+    ).toBe('toggleDesignPanel')
+    expect(
+      matchShortcut(
+        keyEvent({ key: '¬', code: 'KeyL', metaKey: true, altKey: true }),
+        config,
+      ),
+    ).toBe('toggleLayersPanel')
+    // Without Option the chord must not fire.
+    expect(
+      matchShortcut(keyEvent({ key: 'b', code: 'KeyB', metaKey: true }), config),
+    ).toBeNull()
+  })
 })
 
 describe('detectConflicts', () => {

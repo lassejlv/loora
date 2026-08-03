@@ -49,6 +49,8 @@ export const BUILTIN_META: Record<
   nudgeDown: { label: 'Nudge down', group: 'arrange' },
   toggleAssets: { label: 'Toggle assets', group: 'panels' },
   toggleHistory: { label: 'Toggle history', group: 'panels' },
+  toggleDesignPanel: { label: 'Toggle design panel', group: 'panels' },
+  toggleLayersPanel: { label: 'Toggle layers panel', group: 'panels' },
   openCommandMenu: { label: 'Open command menu', group: 'panels' },
   openSettings: { label: 'Open settings', group: 'panels' },
 }
@@ -110,6 +112,9 @@ export const DEFAULT_SHORTCUTS: Record<BuiltInShortcutId, KeyChord | KeyChord[]>
   nudgeDown: key('arrowdown'),
   toggleAssets: key('k', { meta: true, shift: true }),
   toggleHistory: key('y', { meta: true }),
+  // Option chords match on `code`: macOS rewrites `key` (⌥B types '∫').
+  toggleDesignPanel: code('KeyB', 'b', { meta: true, alt: true }),
+  toggleLayersPanel: code('KeyL', 'l', { meta: true, alt: true }),
   openCommandMenu: key('k', { meta: true }),
   openSettings: key(',', { meta: true }),
 }

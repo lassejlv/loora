@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   Dialog,
   DialogDescription,
@@ -46,6 +46,20 @@ export function IconPickerDialog({
 
   const [visibleCount, setVisibleCount] = useState(PAGE_SIZE)
   const visible = icons.slice(0, visibleCount)
+  const sentinelRef = useRef<HTMLDivElement | null>(null)
+
+  // Load the next page whenever the sentinel scrolls into view.
+  useEffect(() => {
+    const sentinel = sentinelRef.current
+    if (!open || !sentinel || visibleCount >= icons.length) return
+    const observer = new IntersectionObserver((entries) => {
+      if (entries.some((entry) => entry.isIntersecting)) {
+        setVisibleCount((count) => count + PAGE_SIZE)
+      }
+    })
+    observer.observe(sentinel)
+    return () => observer.disconnect()
+  }, [open, visibleCount, icons.length])
 
   return (
     <Dialog
@@ -113,17 +127,11 @@ export function IconPickerDialog({
               </div>
             )}
             {visibleCount < icons.length ? (
-              <div className="flex justify-center py-3">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() =>
-                    setVisibleCount((count) => count + PAGE_SIZE)
-                  }
-                >
-                  Show more ({icons.length - visibleCount} remaining)
-                </Button>
-              </div>
+              <div
+                ref={sentinelRef}
+                aria-hidden="true"
+                className="h-px"
+              />
             ) : null}
           </div>
         </DialogPanel>

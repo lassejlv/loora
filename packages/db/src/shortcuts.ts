@@ -44,6 +44,8 @@ export type BuiltInShortcutId =
   | 'nudgeDown'
   | 'toggleAssets'
   | 'toggleHistory'
+  | 'toggleDesignPanel'
+  | 'toggleLayersPanel'
   | 'openCommandMenu'
   | 'openSettings'
 
