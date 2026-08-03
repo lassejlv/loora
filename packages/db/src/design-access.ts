@@ -202,7 +202,11 @@ export async function listSharedDesigns(viewer: DesignViewer) {
     )
     .leftJoin(user, eq(user.id, design.userId))
     .where(
-      or(eq(designShare.userId, viewer.id), eq(designShare.email, email)),
+      and(
+        or(eq(designShare.userId, viewer.id), eq(designShare.email, email)),
+        // An owner's archive is theirs alone; it leaves everybody else's list.
+        isNull(design.archivedAt),
+      ),
     )
     .orderBy(design.updatedAt)
 }

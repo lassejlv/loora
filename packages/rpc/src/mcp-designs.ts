@@ -91,7 +91,7 @@ export async function listDesigns(userId: string) {
       updatedAt: design.updatedAt,
     })
     .from(design)
-    .where(eq(design.userId, userId))
+    .where(and(eq(design.userId, userId), isNull(design.archivedAt)))
     .orderBy(asc(design.createdAt))
   return rows.map((row) => ({
     ...row,
@@ -433,12 +433,23 @@ export async function renameDesign(userId: string, id: string, name: string) {
   return { ...updated, document }
 }
 
-export async function deleteDesign(userId: string, id: string) {
-  const deleted = await db
-    .delete(design)
-    .where(and(eq(design.id, id), eq(design.userId, userId)))
+/**
+ * An agent archives; it never empties the archive. The permanent delete stays
+ * a thing a person does in the app, where they can see what they are losing.
+ */
+export async function archiveDesign(userId: string, id: string) {
+  const archived = await db
+    .update(design)
+    .set({ archivedAt: new Date() })
+    .where(
+      and(
+        eq(design.id, id),
+        eq(design.userId, userId),
+        isNull(design.archivedAt),
+      ),
+    )
     .returning({ id: design.id })
-  return deleted.length > 0
+  return archived.length > 0
 }
 
 export async function listVersions(

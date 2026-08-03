@@ -9,6 +9,8 @@ import {
   AlignStartHorizontalIcon as HugeAlignStartHorizontalIcon,
   AlignStartVerticalIcon as HugeAlignStartVerticalIcon,
   AlignVerticalCenterIcon as HugeAlignCenterVerticalIcon,
+  Archive02Icon as HugeArchiveIcon,
+  ArchiveRestoreIcon as HugeArchiveRestoreIcon,
   BotIcon as HugeBotIcon,
   BracesIcon as HugeBracesIcon,
   BringToFrontIcon as HugeBringToFrontIcon,
@@ -160,6 +162,11 @@ export const AlignStartHorizontalIcon = createIcon(
 export const AlignStartVerticalIcon = createIcon(
   HugeAlignStartVerticalIcon,
   'AlignStartVerticalIcon',
+)
+export const ArchiveIcon = createIcon(HugeArchiveIcon, 'ArchiveIcon')
+export const ArchiveRestoreIcon = createIcon(
+  HugeArchiveRestoreIcon,
+  'ArchiveRestoreIcon',
 )
 export const BotIcon = createIcon(HugeBotIcon, 'BotIcon')
 export const BracesIcon = createIcon(HugeBracesIcon, 'BracesIcon')

@@ -52,11 +52,11 @@ import {
   CanvasUnavailableError,
   applyCanvasTransactions,
   applyDraft,
+  archiveDesign,
   closeDraft,
   compareDraft,
   createDesign,
   createDraft,
-  deleteDesign,
   getCanvasTarget,
   listAssets,
   listDesigns,
@@ -1140,14 +1140,15 @@ function createLooraRuntime(
   server.registerTool(
     'deleteDesign',
     {
-      description: 'Permanently delete a design after explicit confirmation.',
+      description:
+        'Archive a design after explicit confirmation. It leaves every list and stops counting against the plan; the owner restores it, or deletes it for good, from the archive in the app.',
       inputSchema: { designId, confirmed: z.literal(true) },
       annotations: { destructiveHint: true },
     },
     tool(
       'deleteDesign',
       async ({ designId }: { designId: string; confirmed: true }) => ({
-        deleted: await deleteDesign(userId, designId),
+        archived: await archiveDesign(userId, designId),
       }),
     ),
   )

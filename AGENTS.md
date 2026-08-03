@@ -216,7 +216,7 @@ Legacy helpers remain in `@loora/db/canvas` and `@loora/db/drafts` for rollback 
 
 ### `packages/billing`
 
-Polar grants plan access (Free / Pro / Studio). Capacity limits are enforced in product code (`@loora/billing/plan-limits`): Free has 50 design files, 1 open branch per design (`active` or `proposed`), 1 GB asset storage, and 2 days of version history; Pro/Studio have unlimited files/branches, 50 GB asset storage, and 90 days of version history. MCP tool calls are metered weekly via Polar (`mcp-usage`); Free includes 100/week and Pro/Studio 1,000,000/week. There are no prepaid AI credits or top-ups. `billingEntitlement` may still carry unused legacy `meterBalance` / `creditedUnits` / `consumedUnits` columns as zeros.
+Polar grants plan access (Free / Pro / Studio). Capacity limits are enforced in product code (`@loora/billing/plan-limits`): Free has 50 design files (archived files do not count), 1 open branch per design (`active` or `proposed`), 1 GB asset storage, and 2 days of version history; Pro/Studio have unlimited files/branches, 50 GB asset storage, and 90 days of version history. MCP tool calls are metered weekly via Polar (`mcp-usage`); Free includes 100/week and Pro/Studio 1,000,000/week. There are no prepaid AI credits or top-ups. `billingEntitlement` may still carry unused legacy `meterBalance` / `creditedUnits` / `consumedUnits` columns as zeros.
 
 ---
 
@@ -275,6 +275,7 @@ These are easy to break and expensive to fix. Treat them as hard rules.
 6. **External agent input is structured node descriptors**, not source code. Temporary client refs must resolve to permanent IDs. Destructive MCP actions still require confirmation in product UX where applicable.
 7. **Exports are one-way** (HTML/CSS/JS, React/TSX, JSON, PNG, preview). They never round-trip into the editor.
 8. **Pull requests are not a Loora feature.** Drafts are the branch/merge model (`active` → `proposed` → `applied` | `closed`).
+9. **Deleting a design file means archiving it.** `design.archivedAt` takes it out of every list — the owner's, a collaborator's, MCP's — and out of the plan's file count. `design.delete` is the only hard delete, it refuses a file that is not archived, and the Archived tab at `/app` is the only place that reaches it. The MCP `deleteDesign` tool archives.
 
 ### Shared MCP / handoff tool vocabulary
 

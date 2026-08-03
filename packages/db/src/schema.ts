@@ -154,6 +154,10 @@ export const design = pgTable(
       .$type<'restricted' | 'view' | 'edit'>()
       .default('restricted')
       .notNull(),
+    // Archived files are out of the way, not gone: they leave every list and
+    // stop counting against the plan's file allowance, and a permanent delete
+    // is only possible from here.
+    archivedAt: timestamp('archived_at'),
     createdAt: timestamp('created_at').defaultNow().notNull(),
     updatedAt: timestamp('updated_at')
       .defaultNow()

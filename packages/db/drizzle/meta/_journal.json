@@ -295,6 +295,13 @@
       "when": 1785710053698,
       "tag": "0041_ancient_captain_flint",
       "breakpoints": true
+    },
+    {
+      "idx": 42,
+      "version": "7",
+      "when": 1785719208406,
+      "tag": "0042_massive_terror",
+      "breakpoints": true
     }
   ]
 }

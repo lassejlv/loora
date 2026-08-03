@@ -34,6 +34,7 @@
     "db:studio": "bun run --cwd packages/db studio",
     "canvas:repair-layout": "bun run --cwd packages/rpc repair-layout",
     "assets:backfill-urls": "bun run --cwd packages/rpc backfill-asset-urls",
+    "mcp:tools": "bun run --cwd packages/rpc dump-mcp-tools",
     "polar:provision": "bun run --cwd packages/billing polar:provision"
   },
   "trustedDependencies": ["esbuild", "lightningcss"],

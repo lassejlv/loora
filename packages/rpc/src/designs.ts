@@ -2,7 +2,10 @@ import { ORPCError } from '@orpc/server'
 import {
   and,
   asc,
+  desc,
   eq,
+  isNotNull,
+  isNull,
 } from 'drizzle-orm'
 import { z } from 'zod'
 import { db } from '@loora/db'
@@ -34,10 +37,72 @@ export const listDesigns = protectedProcedure.handler(async ({ context }) => {
       updatedAt: design.updatedAt,
     })
     .from(design)
-    .where(eq(design.userId, context.user.id))
+    .where(and(eq(design.userId, context.user.id), isNull(design.archivedAt)))
     .orderBy(asc(design.createdAt))
     .then((rows) => rows.map(({ updatedAt, ...row }) => ({ ...row, updatedAt: updatedAt.getTime() })))
 })
+
+/** The archive, most recently archived first — the order people look in. */
+export const listArchivedDesigns = protectedProcedure.handler(async ({ context }) => {
+  return db
+    .select({
+      id: design.id,
+      name: design.name,
+      revision: design.revision,
+      updatedAt: design.updatedAt,
+      archivedAt: design.archivedAt,
+    })
+    .from(design)
+    .where(and(eq(design.userId, context.user.id), isNotNull(design.archivedAt)))
+    .orderBy(desc(design.archivedAt))
+    .then((rows) =>
+      rows.map(({ updatedAt, archivedAt, ...row }) => ({
+        ...row,
+        updatedAt: updatedAt.getTime(),
+        archivedAt: (archivedAt ?? updatedAt).getTime(),
+      })),
+    )
+})
+
+export const archiveDesign = protectedProcedure
+  .input(z.object({ id: z.string().min(1).max(128) }))
+  .handler(async ({ context, input }) => {
+    const [archived] = await db
+      .update(design)
+      .set({ archivedAt: new Date() })
+      .where(
+        and(
+          eq(design.id, input.id),
+          eq(design.userId, context.user.id),
+          isNull(design.archivedAt),
+        ),
+      )
+      .returning({ id: design.id, archivedAt: design.archivedAt })
+
+    if (!archived) throw new ORPCError('NOT_FOUND')
+    return { archivedAt: (archived.archivedAt ?? new Date()).getTime() }
+  })
+
+export const restoreDesign = protectedProcedure
+  .input(z.object({ id: z.string().min(1).max(128) }))
+  .handler(async ({ context, input }) => {
+    // Restoring puts a file back in the count, so it has to fit the plan.
+    await ensureDesignFileRoom(context.user)
+    const [restored] = await db
+      .update(design)
+      .set({ archivedAt: null })
+      .where(
+        and(
+          eq(design.id, input.id),
+          eq(design.userId, context.user.id),
+          isNotNull(design.archivedAt),
+        ),
+      )
+      .returning({ id: design.id })
+
+    if (!restored) throw new ORPCError('NOT_FOUND')
+    return { restored: true }
+  })
 
 export const getDesign = protectedProcedure
   .input(z.object({ id: z.string().min(1).max(128) }))
@@ -120,9 +185,27 @@ export const saveDesign = protectedProcedure
     return { ...saved, updatedAt: saved.updatedAt.getTime() }
   })
 
+/**
+ * Permanent, and only from the archive. Archiving is the delete people reach
+ * for; this is the one that empties it, so it refuses a file that is still in
+ * use rather than trusting the caller to have asked twice.
+ */
 export const deleteDesign = protectedProcedure
   .input(z.object({ id: z.string().min(1).max(128) }))
   .handler(async ({ context, input }) => {
+    const [existing] = await db
+      .select({ archivedAt: design.archivedAt })
+      .from(design)
+      .where(and(eq(design.id, input.id), eq(design.userId, context.user.id)))
+      .limit(1)
+
+    if (!existing) throw new ORPCError('NOT_FOUND')
+    if (!existing.archivedAt) {
+      throw new ORPCError('CONFLICT', {
+        message: 'Archive this file before deleting it permanently.',
+      })
+    }
+
     const sites = await db
       .select({
         customDomain: publishedSite.customDomain,

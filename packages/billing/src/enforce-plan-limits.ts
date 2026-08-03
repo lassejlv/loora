@@ -1,4 +1,4 @@
-import { and, count, eq, lt, or, sum } from 'drizzle-orm'
+import { and, count, eq, isNull, lt, or, sum } from 'drizzle-orm'
 import { db } from '@loora/db'
 import { asset, design, designDraft, designVersion } from '@loora/db/schema'
 import { authorizeBilling } from './billing'
@@ -36,11 +36,12 @@ async function capacityForUser(user: BillingUser) {
   }
 }
 
+/** Archived files are out of the way, so they are out of the allowance too. */
 export async function countOwnedDesigns(userId: string) {
   const [row] = await db
     .select({ n: count() })
     .from(design)
-    .where(eq(design.userId, userId))
+    .where(and(eq(design.userId, userId), isNull(design.archivedAt)))
   return row?.n ?? 0
 }
 

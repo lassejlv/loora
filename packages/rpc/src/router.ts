@@ -3,10 +3,13 @@
  * this file is only the assembly: what a client can call, on one screen.
  */
 import {
+  archiveDesign,
   deleteDesign,
   getDesign,
+  listArchivedDesigns,
   listDesigns,
   listDesignsSharedWithMe,
+  restoreDesign,
   saveDesign,
 } from './designs'
 import {
@@ -148,9 +151,12 @@ export const appRouter = {
   },
   design: {
     list: listDesigns,
+    listArchived: listArchivedDesigns,
     listShared: listDesignsSharedWithMe,
     get: getDesign,
     save: saveDesign,
+    archive: archiveDesign,
+    restore: restoreDesign,
     delete: deleteDesign,
   },
   share: {

@@ -4,6 +4,9 @@ import { afterEach, beforeEach, describe, expect, vi, test } from 'vitest'
 
 const list = vi.fn()
 const listShared = vi.fn()
+const listArchived = vi.fn()
+const archive = vi.fn()
+const restore = vi.fn()
 const deleteDesign = vi.fn()
 const create = vi.fn()
 const rename = vi.fn()
@@ -11,7 +14,14 @@ const getPreferences = vi.fn()
 
 vi.doMock('@loora/rpc/client', () => ({
   orpc: {
-    design: { list, listShared, delete: deleteDesign },
+    design: {
+      list,
+      listShared,
+      listArchived,
+      archive,
+      restore,
+      delete: deleteDesign,
+    },
     canvas: { create, rename },
     // The dashboard renders the upgrade button, which reads billing status.
     billing: { status: vi.fn(async () => ({ required: false, plan: null })) },
@@ -70,6 +80,23 @@ const { DesignsDashboard } = await import('./designs-dashboard')
 
 const HOUR = 3_600_000
 
+/**
+ * Radix opens a menu on pointerdown, and reaches for pointer-capture and
+ * scroll APIs jsdom does not ship.
+ */
+function openMenu(name: string) {
+  const element = Element.prototype as unknown as Record<string, unknown>
+  element.hasPointerCapture ??= () => false
+  element.setPointerCapture ??= () => {}
+  element.releasePointerCapture ??= () => {}
+  element.scrollIntoView ??= () => {}
+  fireEvent.pointerDown(screen.getByRole('button', { name }), {
+    button: 0,
+    ctrlKey: false,
+    pointerType: 'mouse',
+  })
+}
+
 describe('DesignsDashboard', () => {
   beforeEach(() => {
     window.localStorage.clear()
@@ -78,6 +105,9 @@ describe('DesignsDashboard', () => {
     create.mockReset().mockResolvedValue({ revision: 1 })
     rename.mockReset()
     deleteDesign.mockReset().mockResolvedValue({ deleted: true })
+    archive.mockReset().mockResolvedValue({ archivedAt: Date.now() })
+    restore.mockReset().mockResolvedValue({ restored: true })
+    listArchived.mockReset().mockResolvedValue([])
     listShared.mockReset().mockResolvedValue([])
     list.mockReset().mockResolvedValue([
       { id: 'design-old', name: 'Portfolio Design', revision: 3, updatedAt: Date.now() - 48 * HOUR },
@@ -143,5 +173,79 @@ describe('DesignsDashboard', () => {
 
     expect(await screen.findByText('offline')).toBeTruthy()
     expect(screen.queryByText('Loading your files…')).toBeNull()
+  })
+
+  test('archives instead of deleting, and offers no delete from Recents', async () => {
+    render(<DesignsDashboard />)
+    await screen.findByText('Ideal pine')
+
+    openMenu('Actions for Ideal pine')
+    expect(await screen.findByRole('menuitem', { name: 'Archive' })).toBeTruthy()
+    expect(screen.queryByRole('menuitem', { name: 'Delete' })).toBeNull()
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Archive' }))
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Archive' }))
+    await waitFor(() =>
+      expect(archive).toHaveBeenCalledWith({ id: 'design-new' }),
+    )
+    expect(deleteDesign).not.toHaveBeenCalled()
+    await waitFor(() => expect(screen.queryByText('Ideal pine')).toBeNull())
+    expect(screen.getByText('Portfolio Design')).toBeTruthy()
+  })
+
+  test('lists the archive on demand and restores a file back into Recents', async () => {
+    listArchived.mockResolvedValue([
+      {
+        id: 'design-gone',
+        name: 'Old landing',
+        revision: 2,
+        updatedAt: Date.now() - 72 * HOUR,
+        archivedAt: Date.now() - 2 * HOUR,
+      },
+    ])
+    render(<DesignsDashboard />)
+    await screen.findByText('Ideal pine')
+    // The archive is only read when somebody asks for it.
+    expect(listArchived).not.toHaveBeenCalled()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Archived' }))
+
+    expect(await screen.findByText('Old landing')).toBeTruthy()
+    expect(screen.getByText('Archived 2 hours ago')).toBeTruthy()
+    expect(screen.queryByText('Ideal pine')).toBeNull()
+
+    fireEvent.click(screen.getByRole('button', { name: /Restore/ }))
+    await waitFor(() =>
+      expect(restore).toHaveBeenCalledWith({ id: 'design-gone' }),
+    )
+    await waitFor(() => expect(screen.queryByText('Old landing')).toBeNull())
+
+    fireEvent.click(screen.getByRole('button', { name: 'Recents' }))
+    expect(await screen.findByText('Old landing')).toBeTruthy()
+  })
+
+  test('permanently deletes only from the archive', async () => {
+    listArchived.mockResolvedValue([
+      {
+        id: 'design-gone',
+        name: 'Old landing',
+        revision: 2,
+        updatedAt: Date.now() - 72 * HOUR,
+        archivedAt: Date.now() - 2 * HOUR,
+      },
+    ])
+    render(<DesignsDashboard />)
+    await screen.findByText('Ideal pine')
+    fireEvent.click(screen.getByRole('button', { name: 'Archived' }))
+    await screen.findByText('Old landing')
+
+    openMenu('Actions for Old landing')
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Delete permanently' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Delete permanently' }))
+
+    await waitFor(() =>
+      expect(deleteDesign).toHaveBeenCalledWith({ id: 'design-gone' }),
+    )
+    await waitFor(() => expect(screen.queryByText('Old landing')).toBeNull())
   })
 })

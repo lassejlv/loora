@@ -8,7 +8,8 @@
   },
   "scripts": {
     "repair-layout": "bun --env-file=../../.env run scripts/repair-canvas-layout.ts",
-    "backfill-asset-urls": "bun --env-file=../../.env run scripts/backfill-asset-urls.ts"
+    "backfill-asset-urls": "bun --env-file=../../.env run scripts/backfill-asset-urls.ts",
+    "dump-mcp-tools": "bun run scripts/dump-mcp-tools.ts"
   },
   "dependencies": {
     "@loora/agent": "workspace:*",

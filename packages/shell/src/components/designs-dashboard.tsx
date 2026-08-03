@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useNavigate } from '@tanstack/react-router'
 import {
+  ArchiveIcon,
+  ArchiveRestoreIcon,
   EllipsisIcon,
   FileCode2Icon,
   FilePlus2Icon,
@@ -52,6 +54,13 @@ const VIEW_STORAGE_KEY = 'loora:files-view'
 
 type FilesView = 'grid' | 'list'
 
+type FilesTab = 'recents' | 'archived'
+
+/** An archived file carries when it was put away, which is how the list sorts. */
+interface ArchivedDesign extends DesignSummary {
+  archivedAt: number
+}
+
 function initialView(): FilesView {
   if (typeof window === 'undefined') return 'grid'
   return window.localStorage.getItem(VIEW_STORAGE_KEY) === 'list' ? 'list' : 'grid'
@@ -76,54 +85,104 @@ function searchHint() {
   return formatChord({ key: 'f', meta: true })
 }
 
+function ActionsTrigger({
+  name,
+  className,
+}: {
+  name: string
+  className?: string
+}) {
+  return (
+    <DropdownMenuTrigger asChild>
+      <button
+        type="button"
+        aria-label={`Actions for ${name}`}
+        className={cn(
+          'flex size-5 items-center justify-center rounded-sm text-muted-foreground hover:bg-secondary hover:text-foreground data-[state=open]:bg-secondary data-[state=open]:text-foreground',
+          className,
+        )}
+      >
+        <EllipsisIcon className="size-3" />
+      </button>
+    </DropdownMenuTrigger>
+  )
+}
+
 function FileActions({
   name,
   onRename,
-  onDelete,
+  onArchive,
   className,
 }: {
   name: string
   onRename: () => void
-  onDelete: () => void
+  onArchive: () => void
   className?: string
 }) {
   return (
     <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <button
-          type="button"
-          aria-label={`Actions for ${name}`}
-          className={cn(
-            'flex size-5 items-center justify-center rounded-sm text-muted-foreground hover:bg-secondary hover:text-foreground data-[state=open]:bg-secondary data-[state=open]:text-foreground',
-            className,
-          )}
-        >
-          <EllipsisIcon className="size-3" />
-        </button>
-      </DropdownMenuTrigger>
+      <ActionsTrigger name={name} className={className} />
       <DropdownMenuContent align="end" className="w-40">
         <DropdownMenuItem onClick={onRename}>
           <PencilIcon data-slot="icon" />
           Rename
         </DropdownMenuItem>
         <DropdownMenuSeparator />
-        <DropdownMenuItem variant="destructive" onClick={onDelete}>
-          <Trash2Icon data-slot="icon" />
-          Delete
+        <DropdownMenuItem onClick={onArchive}>
+          <ArchiveIcon data-slot="icon" />
+          Archive
         </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
   )
 }
 
+/** One archived file: restore it, or be the only place it can be destroyed. */
+function ArchivedRow({
+  design,
+  onRestore,
+  onDelete,
+  busy,
+}: {
+  design: ArchivedDesign
+  onRestore: () => void
+  onDelete: () => void
+  busy: boolean
+}) {
+  return (
+    <div className="group flex items-center gap-2.5 border-b border-line px-2.5 py-1.5 last:border-b-0 transition-colors hover:bg-surface-2">
+      <div className="size-7 shrink-0 overflow-hidden rounded-sm bg-cx-canvas shadow-panel">
+        <DesignThumbnail designId={design.id} revision={design.revision} />
+      </div>
+      <p className="min-w-0 flex-1 truncate text-xs font-medium">{design.name}</p>
+      <p className="hidden shrink-0 text-xs text-muted-foreground sm:block">
+        Archived {relativeTime(design.archivedAt)}
+      </p>
+      <Button size="xs" variant="outline" disabled={busy} onClick={onRestore}>
+        {busy ? <Spinner /> : <ArchiveRestoreIcon />}
+        Restore
+      </Button>
+      <DropdownMenu>
+        <ActionsTrigger name={design.name} className="shrink-0" />
+        <DropdownMenuContent align="end" className="w-44">
+          <DropdownMenuItem variant="destructive" onClick={onDelete}>
+            <Trash2Icon data-slot="icon" />
+            Delete permanently
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
+    </div>
+  )
+}
+
 function FileCard({
   design,
   onRename,
-  onDelete,
+  onArchive,
 }: {
   design: DesignSummary
   onRename: () => void
-  onDelete: () => void
+  onArchive: () => void
 }) {
   return (
     <div className="group relative flex flex-col gap-2 rounded-md bg-surface p-1.5 shadow-panel transition duration-200 ease-out hover:-translate-y-0.5 hover:bg-surface-2 hover:shadow-panel-lg motion-reduce:transition-none motion-reduce:hover:translate-y-0">
@@ -147,7 +206,7 @@ function FileCard({
       <FileActions
         name={design.name}
         onRename={onRename}
-        onDelete={onDelete}
+        onArchive={onArchive}
         className="absolute end-2 top-2 bg-surface opacity-0 shadow-panel transition-opacity group-focus-within:opacity-100 group-hover:opacity-100 data-[state=open]:opacity-100"
       />
     </div>
@@ -157,11 +216,11 @@ function FileCard({
 function FileRow({
   design,
   onRename,
-  onDelete,
+  onArchive,
 }: {
   design: DesignSummary
   onRename: () => void
-  onDelete: () => void
+  onArchive: () => void
 }) {
   return (
     <div className="group relative flex items-center gap-2.5 border-b border-line px-2.5 py-1.5 last:border-b-0 transition-colors hover:bg-surface-2">
@@ -183,7 +242,7 @@ function FileRow({
       <FileActions
         name={design.name}
         onRename={onRename}
-        onDelete={onDelete}
+        onArchive={onArchive}
         className="relative shrink-0 opacity-0 transition-opacity group-focus-within:opacity-100 group-hover:opacity-100 data-[state=open]:opacity-100"
       />
     </div>
@@ -242,9 +301,14 @@ export function DesignsDashboard() {
   const [renameTarget, setRenameTarget] = useState<DesignSummary | null>(null)
   const [renameName, setRenameName] = useState('')
   const [renaming, setRenaming] = useState(false)
-  const [deleteTarget, setDeleteTarget] = useState<DesignSummary | null>(null)
+  const [archiveTarget, setArchiveTarget] = useState<DesignSummary | null>(null)
+  const [archiving, setArchiving] = useState(false)
+  const [deleteTarget, setDeleteTarget] = useState<ArchivedDesign | null>(null)
   const [deleting, setDeleting] = useState(false)
+  const [restoringId, setRestoringId] = useState<string | null>(null)
   const [shared, setShared] = useState<SharedDesign[]>([])
+  const [tab, setTab] = useState<FilesTab>('recents')
+  const [archived, setArchived] = useState<ArchivedDesign[] | null>(null)
 
   const loadDesigns = useCallback(async () => {
     setError(null)
@@ -270,9 +334,27 @@ export function DesignsDashboard() {
     setShared(invited.status === 'fulfilled' ? invited.value : [])
   }, [])
 
+  // The archive is the tab most people never open, so it is fetched the first
+  // time somebody does rather than on every dashboard load.
+  const loadArchived = useCallback(async () => {
+    setArchived(null)
+    try {
+      setArchived(await orpc.design.listArchived())
+    } catch (cause) {
+      setArchived([])
+      setError(
+        cause instanceof Error ? cause.message : 'The archive could not be loaded',
+      )
+    }
+  }, [])
+
   useEffect(() => {
     void loadDesigns()
   }, [loadDesigns])
+
+  useEffect(() => {
+    if (tab === 'archived' && archived === null) void loadArchived()
+  }, [tab, archived, loadArchived])
 
   useEffect(() => {
     window.localStorage.setItem(VIEW_STORAGE_KEY, view)
@@ -295,6 +377,13 @@ export function DesignsDashboard() {
     if (!needle) return all
     return all.filter((design) => design.name.toLowerCase().includes(needle))
   }, [designs, query])
+
+  const visibleArchived = useMemo(() => {
+    const needle = query.trim().toLowerCase()
+    const all = archived ?? []
+    if (!needle) return all
+    return all.filter((design) => design.name.toLowerCase().includes(needle))
+  }, [archived, query])
 
   const newFile = async () => {
     if (creating) return
@@ -343,13 +432,50 @@ export function DesignsDashboard() {
     }
   }
 
+  const archiveDesign = async () => {
+    const target = archiveTarget
+    if (!target || archiving) return
+    setArchiving(true)
+    try {
+      const { archivedAt } = await orpc.design.archive({ id: target.id })
+      setDesigns((current) => (current ?? []).filter((design) => design.id !== target.id))
+      // Only patch an archive that has already been read; an unread one still
+      // fetches on first open and would otherwise show this file alone.
+      setArchived((current) =>
+        current === null ? current : [{ ...target, archivedAt }, ...current],
+      )
+      setArchiveTarget(null)
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'The file could not be archived')
+      setArchiveTarget(null)
+    } finally {
+      setArchiving(false)
+    }
+  }
+
+  const restoreDesign = async (target: ArchivedDesign) => {
+    if (restoringId) return
+    setRestoringId(target.id)
+    setError(null)
+    try {
+      await orpc.design.restore({ id: target.id })
+      setArchived((current) => (current ?? []).filter((design) => design.id !== target.id))
+      const { archivedAt: _archivedAt, ...restored } = target
+      setDesigns((current) => [...(current ?? []), restored].sort(byRecent))
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'The file could not be restored')
+    } finally {
+      setRestoringId(null)
+    }
+  }
+
   const deleteDesign = async () => {
     const target = deleteTarget
     if (!target || deleting) return
     setDeleting(true)
     try {
       await orpc.design.delete({ id: target.id })
-      setDesigns((current) => (current ?? []).filter((design) => design.id !== target.id))
+      setArchived((current) => (current ?? []).filter((design) => design.id !== target.id))
       setDeleteTarget(null)
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'The file could not be deleted')
@@ -404,36 +530,55 @@ export function DesignsDashboard() {
               onSignOut={() => void signOut()}
             />
           </div>
-          <h1 className="flex-1 text-sm font-semibold tracking-tight">
-            Recents
-          </h1>
-          <div className="flex items-center gap-0.5 rounded-md border border-line p-0.5">
+          <h1 className="sr-only">Your design files</h1>
+          <div className="flex flex-1 items-center gap-0.5">
             <Button
-              variant={view === 'grid' ? 'secondary' : 'ghost'}
-              size="icon-xs"
-              aria-label="Grid view"
-              aria-pressed={view === 'grid'}
-              onClick={() => setView('grid')}
+              size="xs"
+              variant={tab === 'recents' ? 'secondary' : 'ghost'}
+              aria-pressed={tab === 'recents'}
+              onClick={() => setTab('recents')}
             >
-              <LayoutGridIcon />
+              Recents
             </Button>
             <Button
-              variant={view === 'list' ? 'secondary' : 'ghost'}
-              size="icon-xs"
-              aria-label="List view"
-              aria-pressed={view === 'list'}
-              onClick={() => setView('list')}
+              size="xs"
+              variant={tab === 'archived' ? 'secondary' : 'ghost'}
+              aria-pressed={tab === 'archived'}
+              onClick={() => setTab('archived')}
             >
-              <ListIcon />
+              <ArchiveIcon />
+              Archived
             </Button>
           </div>
+          {tab === 'recents' ? (
+            <div className="flex items-center gap-0.5 rounded-md border border-line p-0.5">
+              <Button
+                variant={view === 'grid' ? 'secondary' : 'ghost'}
+                size="icon-xs"
+                aria-label="Grid view"
+                aria-pressed={view === 'grid'}
+                onClick={() => setView('grid')}
+              >
+                <LayoutGridIcon />
+              </Button>
+              <Button
+                variant={view === 'list' ? 'secondary' : 'ghost'}
+                size="icon-xs"
+                aria-label="List view"
+                aria-pressed={view === 'list'}
+                onClick={() => setView('list')}
+              >
+                <ListIcon />
+              </Button>
+            </div>
+          ) : null}
           <div className="relative w-44">
             <SearchIcon className="pointer-events-none absolute start-2 top-1/2 z-10 size-3.5 -translate-y-1/2 text-muted-foreground" />
             <Input
               ref={searchRef}
               type="search"
               aria-label="Search files"
-              placeholder="Search recents"
+              placeholder={tab === 'archived' ? 'Search archive' : 'Search recents'}
               className="rounded-sm bg-surface-2 text-start [&_[data-slot=input]]:pe-8 [&_[data-slot=input]]:ps-7 [&_[data-slot=input]]:text-start"
               value={query}
               onChange={(event) => setQuery(event.target.value)}
@@ -446,10 +591,12 @@ export function DesignsDashboard() {
               </kbd>
             )}
           </div>
-          <Button onClick={() => void newFile()} disabled={creating}>
-            {creating ? <Spinner /> : <FilePlus2Icon />}
-            New file
-          </Button>
+          {tab === 'recents' ? (
+            <Button onClick={() => void newFile()} disabled={creating}>
+              {creating ? <Spinner /> : <FilePlus2Icon />}
+              New file
+            </Button>
+          ) : null}
         </header>
 
         {error ? (
@@ -464,7 +611,7 @@ export function DesignsDashboard() {
           </div>
         ) : null}
 
-        {shared.length > 0 ? (
+        {shared.length > 0 && tab === 'recents' ? (
           <section className="px-4 pt-4 md:px-4">
             <h2 className="mb-2 px-0.5 text-xs font-medium text-muted-foreground">
               Shared with me
@@ -497,7 +644,36 @@ export function DesignsDashboard() {
         ) : null}
 
         <div className="min-h-0 flex-1 px-4 pt-4 pb-8 md:px-4">
-          {designs === null ? (
+          {tab === 'archived' ? (
+            archived === null ? (
+              <FilesLoading view="list" />
+            ) : visibleArchived.length === 0 ? (
+              <div className="rounded-md border border-dashed border-line bg-surface px-4 py-12 text-center">
+                <p className="text-sm font-medium">
+                  {archived.length === 0
+                    ? 'Nothing archived'
+                    : 'No archived files match that search'}
+                </p>
+                <p className="mx-auto mt-1.5 max-w-xs text-xs text-muted-foreground">
+                  {archived.length === 0
+                    ? 'Archiving a file takes it out of Recents and stops it counting against your plan. You can restore it here, or delete it for good.'
+                    : 'Try a different name.'}
+                </p>
+              </div>
+            ) : (
+              <div className="overflow-hidden rounded-lg bg-surface shadow-panel">
+                {visibleArchived.map((design) => (
+                  <ArchivedRow
+                    key={design.id}
+                    design={design}
+                    busy={restoringId === design.id}
+                    onRestore={() => void restoreDesign(design)}
+                    onDelete={() => setDeleteTarget(design)}
+                  />
+                ))}
+              </div>
+            )
+          ) : designs === null ? (
             <FilesLoading view={view} />
           ) : visible.length === 0 ? (
             <div className="rounded-md border border-dashed border-line bg-surface px-4 py-12 text-center">
@@ -526,7 +702,7 @@ export function DesignsDashboard() {
                     setRenameName(design.name)
                     setRenameTarget(design)
                   }}
-                  onDelete={() => setDeleteTarget(design)}
+                  onArchive={() => setArchiveTarget(design)}
                 />
               ))}
             </div>
@@ -540,7 +716,7 @@ export function DesignsDashboard() {
                     setRenameName(design.name)
                     setRenameTarget(design)
                   }}
-                  onDelete={() => setDeleteTarget(design)}
+                  onArchive={() => setArchiveTarget(design)}
                 />
               ))}
             </div>
@@ -579,12 +755,36 @@ export function DesignsDashboard() {
       </Dialog>
 
       <Dialog
+        open={archiveTarget !== null}
+        onOpenChange={(open) => !open && setArchiveTarget(null)}
+      >
+        <DialogPopup className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Archive “{archiveTarget?.name}”?</DialogTitle>
+            <DialogDescription>
+              It leaves Recents and stops counting against your plan. Nothing is
+              lost — restore it from Archived whenever you want.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setArchiveTarget(null)}>
+              Cancel
+            </Button>
+            <Button disabled={archiving} onClick={() => void archiveDesign()}>
+              {archiving ? <Spinner /> : <ArchiveIcon />}
+              Archive
+            </Button>
+          </DialogFooter>
+        </DialogPopup>
+      </Dialog>
+
+      <Dialog
         open={deleteTarget !== null}
         onOpenChange={(open) => !open && setDeleteTarget(null)}
       >
         <DialogPopup className="max-w-sm">
           <DialogHeader>
-            <DialogTitle>Delete “{deleteTarget?.name}”?</DialogTitle>
+            <DialogTitle>Delete “{deleteTarget?.name}” permanently?</DialogTitle>
             <DialogDescription>
               This removes Main, every branch, history, chats, and public links. It cannot be
               undone.
@@ -595,7 +795,7 @@ export function DesignsDashboard() {
               Cancel
             </Button>
             <Button variant="destructive" disabled={deleting} onClick={() => void deleteDesign()}>
-              Delete
+              Delete permanently
             </Button>
           </DialogFooter>
         </DialogPopup>

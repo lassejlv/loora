@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useNavigate } from '@tanstack/react-router'
 import {
+  ArchiveIcon,
   FilePlus2Icon,
   FolderIcon,
   PencilIcon,
-  Trash2Icon,
 } from '@loora/ui/icons'
 import {
   CheckIcon,
@@ -61,7 +61,7 @@ function CanvasDocSwitcher({
   onAssets,
   onHistory,
   onRename,
-  onDelete,
+  onArchive,
 }: {
   documents: DesignSummary[]
   activeId: string
@@ -70,7 +70,7 @@ function CanvasDocSwitcher({
   onAssets: () => void
   onHistory: () => void
   onRename: () => void
-  onDelete: () => void
+  onArchive: () => void
 }) {
   const active = documents.find((document) => document.id === activeId)
   return (
@@ -123,9 +123,9 @@ function CanvasDocSwitcher({
           <PencilIcon data-slot="icon" />
           Rename
         </DropdownMenuItem>
-        <DropdownMenuItem variant="destructive" onClick={onDelete}>
-          <Trash2Icon data-slot="icon" />
-          Delete document
+        <DropdownMenuItem onClick={onArchive}>
+          <ArchiveIcon data-slot="icon" />
+          Archive document
         </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
@@ -173,7 +173,7 @@ export function CanvasApp({
   const [error, setError] = useState<string | null>(null)
   const [renameOpen, setRenameOpen] = useState(false)
   const [renameName, setRenameName] = useState('')
-  const [deleteOpen, setDeleteOpen] = useState(false)
+  const [archiveOpen, setArchiveOpen] = useState(false)
 
   const openTarget = useCallback(async (target: CanvasSyncTarget) => {
     setLoading(true)
@@ -396,16 +396,16 @@ export function CanvasApp({
     )
     setRenameOpen(false)
   }
-  const deleteDesign = async () => {
+  const archiveDesign = async () => {
     await controller.flush()
     if (controller.pendingCount > 0) {
-      throw new Error('Save or resolve pending changes before deleting.')
+      throw new Error('Save or resolve pending changes before archiving.')
     }
-    await orpc.design.delete({ id: activeId })
+    await orpc.design.archive({ id: activeId })
     await controller.close()
     controllerRef.current = null
     setController(null)
-    setDeleteOpen(false)
+    setArchiveOpen(false)
     await navigate({ to: '/app' })
   }
   const switchDesign = (id: string) => {
@@ -438,7 +438,7 @@ export function CanvasApp({
                 setRenameName(active?.name ?? '')
                 setRenameOpen(true)
               }}
-              onDelete={() => setDeleteOpen(true)}
+              onArchive={() => setArchiveOpen(true)}
             />
             <span className="text-muted-foreground/50">/</span>
             {shareRole === 'owner' ? (
@@ -505,24 +505,22 @@ export function CanvasApp({
           </DialogFooter>
         </DialogPopup>
       </Dialog>
-      <Dialog open={deleteOpen} onOpenChange={setDeleteOpen}>
+      <Dialog open={archiveOpen} onOpenChange={setArchiveOpen}>
         <DialogPopup className="max-w-sm">
           <DialogHeader>
-            <DialogTitle>Delete this design?</DialogTitle>
+            <DialogTitle>Archive this design?</DialogTitle>
             <DialogDescription>
-              This removes Main, every branch, history, chats, and public links.
-              It cannot be undone.
+              It closes here and leaves Recents, keeping Main, every branch, and
+              its history. Restore it from Archived on your files page.
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setDeleteOpen(false)}>
+            <Button variant="outline" onClick={() => setArchiveOpen(false)}>
               Cancel
             </Button>
-            <Button
-              variant="destructive"
-              onClick={() => void deleteDesign()}
-            >
-              Delete
+            <Button onClick={() => void archiveDesign()}>
+              <ArchiveIcon />
+              Archive
             </Button>
           </DialogFooter>
         </DialogPopup>
