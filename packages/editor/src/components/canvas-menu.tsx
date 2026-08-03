@@ -10,6 +10,7 @@ import {
   RectangleHorizontalIcon,
   ScissorsIcon,
   SendToBackIcon,
+  ShapesIcon,
   Trash2Icon,
   TypeIcon,
   UngroupIcon,
@@ -37,11 +38,13 @@ export function CanvasContextMenu({
   actions,
   shortcutLabel,
   onZoomToSelection,
+  onInsertIcon,
   children,
 }: {
   actions: CanvasEditorActions
   shortcutLabel: (id: BuiltInShortcutId) => string
   onZoomToSelection: () => void
+  onInsertIcon: () => void
   children: ReactNode
 }) {
   const hasSelection = actions.selection.length > 0
@@ -184,6 +187,10 @@ export function CanvasContextMenu({
               <RectangleHorizontalIcon data-slot="icon" />
               Rectangle
               <ContextMenuShortcut>{shortcutLabel('tool.box')}</ContextMenuShortcut>
+            </ContextMenuItem>
+            <ContextMenuItem onClick={onInsertIcon}>
+              <ShapesIcon data-slot="icon" />
+              Icon…
             </ContextMenuItem>
             <ContextMenuItem onClick={actions.addComponent}>
               <ComponentIcon data-slot="icon" />

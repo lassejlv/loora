@@ -20,6 +20,7 @@ import {
   PanelsTopLeftIcon,
   Redo2Icon,
   RectangleHorizontalIcon,
+  ShapesIcon,
   Trash2Icon,
   TypeIcon,
   Undo2Icon,
@@ -59,6 +60,7 @@ import {
   createInstanceNode,
   createPageNode,
   createTextNode,
+  createVectorNode,
   defaultLayout,
   defaultStyle,
   orderedChildren,
@@ -69,6 +71,7 @@ import {
   type ImageNode,
   type NodeRef,
   type ShapeNode,
+  type VectorNode,
 } from '@loora/canvas/model'
 import type {
   CanvasAgentActivity,
@@ -93,6 +96,9 @@ import { CanvasAgentAvatar, CanvasAgentOverlay } from './agent-presence'
 import { CanvasExport } from './export-panel'
 import { CanvasHistory } from './history'
 import { HtmlImportDialog } from './html-import-dialog'
+import { IconPickerDialog } from './icon-picker-dialog'
+import type { IconEntry } from '../lib/icon-libraries'
+import { svgStringToVectorDescriptor, looksLikeSvg } from '../lib/svg-to-vector'
 import {
   ASSET_DRAG_TYPE,
   AssetsPanel,
@@ -329,6 +335,7 @@ function CanvasShell({
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [exportOpen, setExportOpen] = useState(false)
   const [htmlImportOpen, setHtmlImportOpen] = useState(false)
+  const [iconPickerOpen, setIconPickerOpen] = useState(false)
   const [commandMenuOpen, setCommandMenuOpen] = useState(false)
   const [pasteNotice, setPasteNotice] = useState<string | null>(null)
   const pasteNoticeTimer = useRef<number | null>(null)
@@ -634,6 +641,14 @@ function CanvasShell({
           run: () => setAssetsOpen(true),
         },
         {
+          id: 'insert-icon',
+          label: 'Insert icon',
+          keywords: 'svg vector lucide hugeicons symbol',
+          icon: ShapesIcon,
+          disabled: readOnly || !actions.parent,
+          run: () => setIconPickerOpen(true),
+        },
+        {
           id: 'import-html',
           label: 'Import HTML & CSS',
           keywords: 'convert web page code',
@@ -778,6 +793,7 @@ function CanvasShell({
           actions={actions}
           shortcutLabel={shortcutLabel}
           onZoomToSelection={() => controlsRef.current?.zoomToSelection()}
+          onInsertIcon={() => setIconPickerOpen(true)}
         >
           <CanvasSurface
             key={cameraKey}
@@ -893,6 +909,12 @@ function CanvasShell({
           onImport={actions.insertDocument}
         />
 
+        <IconPickerDialog
+          open={iconPickerOpen}
+          onOpenChange={setIconPickerOpen}
+          onInsert={actions.insertIcon}
+        />
+
         <EditorCommandMenu
           open={commandMenuOpen}
           onOpenChange={setCommandMenuOpen}
@@ -968,6 +990,7 @@ function CanvasShell({
                 onPreview={() => setExportOpen(true)}
                 onAddPage={addPageAndFocus}
                 onAssetsOpen={() => setAssetsOpen(true)}
+                onOpenIconPicker={() => setIconPickerOpen(true)}
                 onOpenInspector={setMobileInspector}
                 onOpenCommands={() => setCommandMenuOpen(true)}
                 shortcutLabel={shortcutLabel}
@@ -1091,6 +1114,7 @@ export interface CanvasEditorActions {
   pasteFromHtml: (html: string, fallbackText?: string) => Promise<void>
   addShape: () => void
   addComponent: () => void
+  insertIcon: (entry: IconEntry) => void
   insertDocument: (document: CanvasDocument) => void
   insertAsset: (asset: AssetMeta, placement?: CanvasDropPlacement) => void
   duplicateSelection: () => void
@@ -1311,6 +1335,35 @@ function useCanvasEditorActions(
       }),
     })
     insert(frameAsShape(frame))
+  }
+
+  const insertVectorDescriptor = (
+    name: string,
+    descriptor: { viewBox: string; paths: VectorNode['paths'] },
+  ) => {
+    if (!parent || readOnly) return
+    const children = orderedChildren(document, parent.id)
+    insert(
+      createVectorNode(name, {
+        parentId: parent.id,
+        order: (children.at(-1)?.order ?? 0) + 1024,
+        layout: defaultLayout(48, 48, {
+          position: parent.layout.mode === 'absolute' ? 'absolute' : 'flow',
+          x: 48,
+          y: 48,
+        }),
+        style: defaultStyle({
+          fills: [],
+          stroke: { color: '#475467', width: 1.5 },
+        }),
+        viewBox: descriptor.viewBox,
+        paths: descriptor.paths,
+      }),
+    )
+  }
+
+  const insertIcon = (entry: IconEntry) => {
+    insertVectorDescriptor(entry.name, entry.toVector())
   }
 
   const addPage = () => {
@@ -1607,8 +1660,14 @@ function useCanvasEditorActions(
     if (!parent || readOnly || !text) return
     const payload = parseClipboardPayload(text)
     if (!payload) {
-      // Anything that is not ours arrives as copy.
       const plain = text.trim()
+      if (plain && looksLikeSvg(plain)) {
+        const descriptor = svgStringToVectorDescriptor(plain)
+        if (descriptor) {
+          insertVectorDescriptor('Icon', descriptor)
+          return
+        }
+      }
       if (plain) pasteText(plain)
       return
     }
@@ -2014,6 +2073,7 @@ function useCanvasEditorActions(
     pasteFromHtml,
     addShape,
     addComponent,
+    insertIcon,
     insertDocument,
     insertAsset,
     duplicateSelection,
@@ -2098,6 +2158,7 @@ function CanvasMobileStrip({
   onInteractionModeChange,
   onAddPage,
   onAssetsOpen,
+  onOpenIconPicker,
   onOpenInspector,
   onOpenCommands,
   shortcutLabel,
@@ -2107,6 +2168,7 @@ function CanvasMobileStrip({
   onInteractionModeChange: (mode: 'select' | 'pan') => void
   onAddPage: () => void
   onAssetsOpen: () => void
+  onOpenIconPicker: () => void
   onOpenInspector: (which: 'layers' | 'design') => void
   onOpenCommands: () => void
   shortcutLabel: (id: BuiltInShortcutId) => string
@@ -2163,6 +2225,10 @@ function CanvasMobileStrip({
             <RectangleHorizontalIcon data-slot="icon" />
             Rectangle
           </DropdownMenuItem>
+          <DropdownMenuItem disabled={!actions.parent} onClick={insert(onOpenIconPicker)}>
+            <ShapesIcon data-slot="icon" />
+            Icon
+          </DropdownMenuItem>
           <DropdownMenuItem onClick={onAssetsOpen}>
             <ImageIcon data-slot="icon" />
             Image
@@ -2209,6 +2275,7 @@ function CanvasToolStrip({
   onPreview,
   onAddPage,
   onAssetsOpen,
+  onOpenIconPicker,
   onOpenInspector,
   onOpenCommands,
   shortcutLabel,
@@ -2222,6 +2289,7 @@ function CanvasToolStrip({
   onPreview: () => void
   onAddPage: () => void
   onAssetsOpen: () => void
+  onOpenIconPicker: () => void
   onOpenInspector: (which: 'layers' | 'design') => void
   onOpenCommands: () => void
   shortcutLabel: (id: BuiltInShortcutId) => string
@@ -2238,6 +2306,7 @@ function CanvasToolStrip({
         onInteractionModeChange={onInteractionModeChange}
         onAddPage={onAddPage}
         onAssetsOpen={onAssetsOpen}
+        onOpenIconPicker={onOpenIconPicker}
         onOpenInspector={onOpenInspector}
         onOpenCommands={onOpenCommands}
         shortcutLabel={shortcutLabel}
@@ -2309,6 +2378,12 @@ function CanvasToolStrip({
             actions.addShape()
             onInteractionModeChange('select')
           }}
+        />
+        <CanvasToolButton
+          icon={ShapesIcon}
+          label="Icon"
+          disabled={actions.readOnly || !actions.parent}
+          onClick={onOpenIconPicker}
         />
         <CanvasToolButton
           icon={ImageIcon}

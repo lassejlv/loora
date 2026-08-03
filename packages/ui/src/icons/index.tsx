@@ -84,6 +84,7 @@ import {
   SentIcon as HugeSendIcon,
   Settings01Icon as HugeSettingsIcon,
   Share01Icon as HugeShareIcon,
+  Shapes01Icon as HugeShapesIcon,
   ShieldKeyIcon as HugeShieldKeyIcon,
   SidebarBottomIcon as HugePanelBottomIcon,
   SlidersHorizontalIcon as HugeSlidersHorizontalIcon,
@@ -267,6 +268,7 @@ export const TriangleAlertIcon = createIcon(
   HugeTriangleAlertIcon,
   'TriangleAlertIcon',
 )
+export const ShapesIcon = createIcon(HugeShapesIcon, 'ShapesIcon')
 export const TypeIcon = createIcon(HugeTypeIcon, 'TypeIcon')
 export const Undo2Icon = createIcon(HugeUndoIcon, 'Undo2Icon')
 export const UngroupIcon = createIcon(HugeUngroupIcon, 'UngroupIcon')

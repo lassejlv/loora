@@ -9,6 +9,7 @@ import {
   createInstanceNode,
   createPageNode,
   createTextNode,
+  createVectorNode,
   defaultLayout,
   defaultStyle,
   orderedChildren,
@@ -980,10 +981,11 @@ function descriptorNode(
   }
   if (descriptor.type === 'vector') {
     return {
-      ...base,
-      type: 'vector',
-      viewBox: descriptor.viewBox ?? '0 0 100 100',
-      paths: descriptor.paths ?? [],
+      ...createVectorNode(descriptor.name ?? 'Vector', {
+        ...base,
+        viewBox: descriptor.viewBox ?? '0 0 100 100',
+        paths: descriptor.paths ?? [],
+      }),
     }
   }
   if (descriptor.type === 'image') {

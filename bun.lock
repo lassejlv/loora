@@ -172,6 +172,7 @@
     "packages/editor": {
       "name": "@loora/editor",
       "dependencies": {
+        "@hugeicons/core-free-icons": "^4.2.3",
         "@loora/auth": "workspace:*",
         "@loora/canvas": "workspace:*",
         "@loora/db": "workspace:*",
@@ -179,6 +180,7 @@
         "@loora/rpc": "workspace:*",
         "@loora/ui": "workspace:*",
         "@tanstack/react-router": "latest",
+        "lucide": "^0.544.0",
       },
       "devDependencies": {
         "@testing-library/react": "^16.3.2",
@@ -1376,6 +1378,8 @@
     "loose-envify": ["loose-envify@1.4.0", "", { "dependencies": { "js-tokens": "^3.0.0 || ^4.0.0" }, "bin": { "loose-envify": "cli.js" } }, "sha512-lyuxPGr/Wfhrlem2CL/UcnUc1zcqKAImBDzukY7Y5F/yQiNdko6+fRLevlw1HgMySw7f611UIY408EtxRSoK3Q=="],
 
     "lru-cache": ["lru-cache@11.5.2", "", {}, "sha512-4pfM1Ff0x50o0tQwb5ucw/RzNyD0/YJME6IVcStalZuMWxdt3sR3huStTtxz4PUmvZfRguvDejasvQ2kifR11g=="],
+
+    "lucide": ["lucide@0.544.0", "", {}, "sha512-U5ORwr5z9Sx7bNTDFaW55RbjVdQEnAcT3vws9uz3vRT1G4XXJUDAhRZdxhFoIyHEvjmTkzzlEhjSLYM5n4mb5w=="],
 
     "lz-string": ["lz-string@1.5.0", "", { "bin": { "lz-string": "bin/bin.js" } }, "sha512-h5bgJWpxJNswbU7qCrV0tIKQCaS3blPDrqKWx+QxzuzL1zGUzij9XCWLrSLsJPu5t+eWA/ycetzYAO5IOMcWAQ=="],
 

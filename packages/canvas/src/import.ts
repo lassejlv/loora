@@ -975,7 +975,7 @@ function vectorNode(
   }
   visit(snapshot, {})
   if (paths.length === 0) return null
-  const frame = createFrameNode(
+  const { semanticTag: _semanticTag, ...base } = createFrameNode(
     snapshot.attributes['aria-label'] || 'Vector',
     {
       id: canvasId('vector'),
@@ -985,7 +985,6 @@ function vectorNode(
       style: frameStyle(snapshot.style),
     },
   )
-  const { semanticTag: _semanticTag, ...base } = frame
   return {
     ...base,
     type: 'vector',

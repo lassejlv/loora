@@ -6,6 +6,7 @@ import {
   PanelLeftIcon,
   PlusIcon,
   SendToBackIcon,
+  ShapesIcon,
   TypeIcon,
 } from '@loora/ui/icons'
 import {
@@ -205,6 +206,7 @@ function keyFor(ref: NodeRef) {
 function nodeIcon(node: CanvasNode) {
   if (node.type === 'text') return TypeIcon
   if (node.type === 'component' || node.type === 'instance') return ComponentIcon
+  if (node.type === 'vector') return ShapesIcon
   return FrameIcon
 }
 

@@ -587,6 +587,19 @@ export function createInstanceNode(
   } satisfies InstanceNode, patch)
 }
 
+export function createVectorNode(
+  name = 'Vector',
+  patch: Partial<Omit<VectorNode, 'type'>> = {},
+): VectorNode {
+  const { semanticTag: _semanticTag, ...base } = createFrameNode(name)
+  return withDefined({
+    ...base,
+    type: 'vector',
+    viewBox: '0 0 24 24',
+    paths: [],
+  } satisfies VectorNode, patch)
+}
+
 export function createTextNode(
   text = 'Text',
   patch: Partial<Omit<TextNode, 'type' | 'text'>> = {},
