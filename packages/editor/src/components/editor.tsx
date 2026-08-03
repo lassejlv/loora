@@ -19,6 +19,7 @@ import {
   GroupIcon,
   ImageIcon,
   MousePointer2Icon,
+  PanelRightIcon,
   PanelsTopLeftIcon,
   Redo2Icon,
   RectangleHorizontalIcon,
@@ -1001,6 +1002,21 @@ function CanvasShell({
           <div className="ms-auto flex min-w-0 shrink-0 items-center gap-2">
             <CanvasAgentAvatar controller={controller} />
             {topBarEnd}
+            {!isMobile ? (
+              <Button
+                size="icon-xs"
+                variant="ghost"
+                aria-label="Toggle design panel"
+                aria-pressed={designPanelOpen}
+                title={`Design panel · ${shortcutLabel('toggleDesignPanel')}`}
+                className={designPanelOpen ? undefined : 'text-muted-foreground'}
+                onClick={() =>
+                  togglePanel('loora:design-panel-open', setDesignPanelOpen)
+                }
+              >
+                <PanelRightIcon />
+              </Button>
+            ) : null}
           </div>
         </header>
 
