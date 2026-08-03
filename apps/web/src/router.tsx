@@ -1,3 +1,6 @@
+// Runtime configuration must run before the route tree imports auth and RPC clients.
+import './platform'
+
 import { createRouter as createTanStackRouter } from '@tanstack/react-router'
 import { routeTree } from './routeTree.gen'
 

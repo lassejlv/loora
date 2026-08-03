@@ -51,6 +51,14 @@ describe('Polar configuration', () => {
     })
   })
 
+  test('returns to the app when auth is served from a separate origin', () => {
+    expect(resolvePolarConfig({
+      ...complete,
+      APP_ORIGIN: 'https://loora.design/app',
+      BETTER_AUTH_URL: 'https://api.loora.design',
+    }).config?.origin).toBe('https://loora.design')
+  })
+
   test('keeps the legacy Studio product optional', () => {
     expect(resolvePolarConfig({
       ...complete,

@@ -1,5 +1,6 @@
 import { cleanup, fireEvent, render, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, vi, test } from 'vitest'
+import { configureRuntime } from '@loora/platform'
 
 const list = vi.fn()
 const upload = vi.fn()
@@ -9,7 +10,7 @@ vi.doMock('@loora/rpc/client', () => ({
   orpc: { asset: { list, upload, delete: remove } },
 }))
 
-const { AssetsPanel } = await import('./assets-panel')
+const { absoluteAssetSrc, AssetsPanel } = await import('./assets-panel')
 
 const HOUR = 3_600_000
 
@@ -50,7 +51,18 @@ describe('AssetsPanel', () => {
     remove.mockReset().mockResolvedValue({ deleted: true })
   })
 
-  afterEach(() => cleanup())
+  afterEach(() => {
+    cleanup()
+    configureRuntime({ apiOrigin: '' })
+  })
+
+  test('resolves authenticated asset routes against the API origin', () => {
+    configureRuntime({ apiOrigin: 'https://api.loora.test' })
+
+    expect(absoluteAssetSrc({ id: 'a1' })).toBe(
+      'https://api.loora.test/api/asset/a1',
+    )
+  })
 
   test('lists assets with their size and places one on click', async () => {
     const { view, onInsert } = setup()

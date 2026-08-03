@@ -4,6 +4,7 @@ FROM rust:1-bookworm AS builder
 WORKDIR /app
 
 COPY Cargo.toml Cargo.lock ./
+COPY apps/api/package.json apps/api/package.json
 COPY crates/ws-server/Cargo.toml crates/ws-server/Cargo.toml
 COPY crates/mcp-server/Cargo.toml crates/mcp-server/Cargo.toml
 RUN mkdir -p crates/ws-server/src && printf 'fn main() {}\n' > crates/ws-server/src/main.rs

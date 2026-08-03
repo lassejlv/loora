@@ -42,7 +42,7 @@ import {
 import { captureCanvasPng, captureNodePng } from '../lib/canvas-capture'
 import { copyText } from '../lib/copy-text'
 import { orpc } from '@loora/rpc/client'
-import { appUrl } from '@loora/platform'
+import { apiUrl, appUrl } from '@loora/platform'
 import { Button } from '@loora/ui/button'
 import {
   Dialog,
@@ -328,7 +328,11 @@ async function embedImages(sources: string[]) {
         while (cursor < sources.length) {
           const src = sources[cursor++]!
           try {
-            const response = await fetch(src, { credentials: 'same-origin' })
+            const authenticatedAsset = src.startsWith('/api/asset/')
+            const response = await fetch(
+              authenticatedAsset ? apiUrl(src) : src,
+              { credentials: authenticatedAsset ? 'include' : 'same-origin' },
+            )
             if (!response.ok) continue
             const blob = await response.blob()
             const data = await new Promise<string>((resolve, reject) => {
@@ -759,7 +763,7 @@ export function CanvasExport({
         draftId: controller.target.draftId,
       })
       setHandoff({
-        url: appUrl(`/api/handoff/${created.token}`),
+        url: apiUrl(`/api/handoff/${created.token}`),
         expiresAt: created.expiresAt,
       })
     } catch {
