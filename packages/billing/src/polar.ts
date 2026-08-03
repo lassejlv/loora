@@ -50,9 +50,9 @@ export function resolvePolarConfig(
 
   let origin: string
   try {
-    origin = new URL(values.BETTER_AUTH_URL!).origin
+    origin = new URL(env.APP_ORIGIN?.trim() || values.BETTER_AUTH_URL!).origin
   } catch {
-    throw new Error('BETTER_AUTH_URL must be an absolute URL')
+    throw new Error('APP_ORIGIN or BETTER_AUTH_URL must be an absolute URL')
   }
 
   return {

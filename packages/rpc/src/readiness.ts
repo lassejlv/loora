@@ -1,5 +1,5 @@
 export async function serviceReadinessResponse(
-  service: 'web' | 'mcp',
+  service: 'web' | 'api' | 'mcp',
   checkDatabase: () => Promise<void>,
 ) {
   try {

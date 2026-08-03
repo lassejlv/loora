@@ -50,6 +50,7 @@ const KEYRING_ACCOUNT: &str = "session";
 #[derive(Clone)]
 struct Config {
     api_origin: Url,
+    app_origin: Url,
     dev_server: Option<Url>,
     app_root: PathBuf,
 }
@@ -84,7 +85,8 @@ struct OpenRequest {
 
 impl Config {
     fn read(app: &tauri::AppHandle) -> Self {
-        let api_origin = read_origin("LOORA_API_ORIGIN", "https://loora.design");
+        let api_origin = read_origin("LOORA_API_ORIGIN", "https://api.loora.design");
+        let app_origin = read_origin("LOORA_APP_ORIGIN", "https://loora.design");
         let dev_server = env::var("LOORA_DESKTOP_DEV_SERVER")
             .ok()
             .filter(|value| !value.trim().is_empty())
@@ -104,6 +106,7 @@ impl Config {
 
         Self {
             api_origin,
+            app_origin,
             dev_server,
             app_root,
         }
@@ -242,7 +245,7 @@ async fn desktop_sign_in(State(state): State<AppState>) -> Response {
     *state.pending_state.write().await = Some(pending.clone());
     let mut target = state
         .config
-        .api_origin
+        .app_origin
         .join("/desktop/auth")
         .expect("valid desktop auth URL");
     target
@@ -291,8 +294,9 @@ async fn callback(State(state): State<AppState>, request: Request) -> Response {
         .post(target)
         .header(
             ORIGIN.as_str(),
-            state.config.api_origin.as_str().trim_end_matches('/'),
+            state.config.app_origin.as_str().trim_end_matches('/'),
         )
+        .header(REFERER.as_str(), state.config.app_origin.as_str())
         .json(&json!({ "token": token.unwrap() }))
         .send()
         .await;
@@ -338,8 +342,9 @@ async fn desktop_sign_out(State(state): State<AppState>) -> Response {
             .bearer_auth(token)
             .header(
                 ORIGIN.as_str(),
-                state.config.api_origin.as_str().trim_end_matches('/'),
+                state.config.app_origin.as_str().trim_end_matches('/'),
             )
+            .header(REFERER.as_str(), state.config.app_origin.as_str())
             .json(&json!({}))
             .send()
             .await;
@@ -421,9 +426,9 @@ async fn proxy_api(State(state): State<AppState>, request: Request) -> Response 
     upstream = upstream
         .header(
             ORIGIN.as_str(),
-            state.config.api_origin.as_str().trim_end_matches('/'),
+            state.config.app_origin.as_str().trim_end_matches('/'),
         )
-        .header(REFERER.as_str(), state.config.api_origin.as_str());
+        .header(REFERER.as_str(), state.config.app_origin.as_str());
     if let Some(token) = state.session.get().await {
         upstream = upstream.bearer_auth(token);
     }
@@ -565,7 +570,7 @@ async fn realtime(
     let Some(upstream) = upstream else {
         return (StatusCode::SERVICE_UNAVAILABLE, "No realtime target yet").into_response();
     };
-    let origin = state.config.api_origin.to_string();
+    let origin = state.config.app_origin.to_string();
     ws.protocols([REALTIME_PROTOCOL])
         .on_upgrade(move |socket| bridge_realtime(socket, upstream, protocols, origin))
 }

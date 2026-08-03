@@ -1,5 +1,6 @@
-import { afterEach, describe, expect, vi, test } from 'vitest'
+import { afterEach, beforeEach, describe, expect, vi, test } from 'vitest'
 import { createCanvasDocument } from '@loora/canvas/model'
+import { configureRuntime } from '@loora/platform'
 
 vi.doMock('@loora/rpc/client', () => ({
   orpc: {
@@ -15,6 +16,7 @@ const { CanvasSyncController } = await import('./canvas-client')
 interface FetchCall {
   url: string
   body: unknown
+  credentials: RequestCredentials | undefined
 }
 
 /**
@@ -32,7 +34,7 @@ function stubFetch(ticket: (() => Promise<Response>) | null) {
     } catch {
       body = init?.body ?? null
     }
-    calls.push({ url, body })
+    calls.push({ url, body, credentials: init?.credentials })
     if (url.includes('/api/realtime-ticket')) {
       // No ticket source means "stay pending forever" for this test.
       return ticket ? ticket() : new Promise<Response>(() => {})
@@ -43,6 +45,7 @@ function stubFetch(ticket: (() => Promise<Response>) | null) {
 }
 
 const originalFetch = globalThis.fetch
+const originalEventSource = globalThis.EventSource
 
 async function openController() {
   const controller = await CanvasSyncController.open(
@@ -56,8 +59,14 @@ async function openController() {
 }
 
 describe('presence transport', () => {
+  beforeEach(() => {
+    configureRuntime({ apiOrigin: 'https://api.loora.test' })
+  })
+
   afterEach(() => {
     globalThis.fetch = originalFetch
+    globalThis.EventSource = originalEventSource
+    configureRuntime({ apiOrigin: '' })
   })
 
   test('posts nothing over HTTP while the socket is still being ticketed', async () => {
@@ -67,12 +76,34 @@ describe('presence transport', () => {
     controller.publishPresence({ cursor: { x: 12, y: 20 }, selection: ['hero'] })
     await new Promise((resolve) => setTimeout(resolve, 120))
 
-    expect(calls.some((call) => call.url.includes('/api/realtime-ticket'))).toBe(true)
+    expect(
+      calls.some(
+        (call) =>
+          call.url === 'https://api.loora.test/api/realtime-ticket' &&
+          call.credentials === 'include',
+      ),
+    ).toBe(true)
     expect(calls.some((call) => call.url.includes('/api/canvas-presence'))).toBe(false)
     await controller.close()
   })
 
   test('falls back to posting presence when realtime is not configured', async () => {
+    let eventSource:
+      | { url: string; withCredentials: boolean | undefined }
+      | undefined
+    class FakeEventSource {
+      constructor(url: string | URL, init?: EventSourceInit) {
+        eventSource = {
+          url: String(url),
+          withCredentials: init?.withCredentials,
+        }
+      }
+
+      addEventListener() {}
+      removeEventListener() {}
+      close() {}
+    }
+    globalThis.EventSource = FakeEventSource as unknown as typeof EventSource
     const calls = stubFetch(
       async () => new Response(JSON.stringify({ configured: false }), { status: 503 }),
     )
@@ -86,6 +117,16 @@ describe('presence transport', () => {
     expect(presence.at(-1)?.body).toMatchObject({
       designId: 'design-1',
       cursor: { x: 4, y: 8 },
+    })
+    expect(presence.at(-1)?.credentials).toBe('include')
+    expect(presence.at(-1)?.url).toBe(
+      'https://api.loora.test/api/canvas-presence',
+    )
+    expect(eventSource).toMatchObject({
+      url: expect.stringContaining(
+        'https://api.loora.test/api/canvas-events?designId=design-1',
+      ),
+      withCredentials: true,
     })
     await controller.close()
   })

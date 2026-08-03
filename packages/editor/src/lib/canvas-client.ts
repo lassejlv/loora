@@ -563,11 +563,12 @@ export class CanvasSyncController {
       ...(leaving ? { leaving: true } : {}),
     })
     try {
-      const response = await fetch('/api/canvas-presence', {
+      const response = await fetch(apiUrl('/api/canvas-presence'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body,
         keepalive: leaving,
+        credentials: 'include',
       })
       if (response.ok && !leaving) {
         const scoped = (await response.json()) as { sessionId?: unknown }
@@ -932,13 +933,14 @@ export class CanvasSyncController {
     let ticket: { url?: unknown; ticket?: unknown; sessionId?: unknown } | null =
       null
     try {
-      const response = await fetch('/api/realtime-ticket', {
+      const response = await fetch(apiUrl('/api/realtime-ticket'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           designId: this.target.designId,
           draftId: this.target.draftId,
         }),
+        credentials: 'include',
       })
       // 503 is how the app says "no socket service here" — not a failure worth
       // retrying, so this controller stays on the event stream from now on.
@@ -980,7 +982,7 @@ export class CanvasSyncController {
     if (this.target.draftId) {
       url.searchParams.set('draftId', this.target.draftId)
     }
-    const source = new EventSource(url)
+    const source = new EventSource(url, { withCredentials: true })
     this.#eventSource = source
     source.addEventListener('open', this.#realtimeOpen)
     source.addEventListener('ready', this.#realtimeReady)

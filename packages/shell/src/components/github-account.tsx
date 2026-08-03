@@ -9,6 +9,7 @@ import { UnplugIcon } from '@loora/ui/icons'
 import { Button } from '@loora/ui/button'
 import { IntegrationCard, IntegrationStatus } from './integration-card'
 import { orpc } from '@loora/rpc/client'
+import { apiUrl } from '@loora/platform'
 
 type GitHubStatus = Awaited<ReturnType<typeof orpc.github.status>>
 
@@ -87,7 +88,11 @@ export function GitHubAccount() {
         status={<IntegrationStatus>Not connected</IntegrationStatus>}
         description="Give Loora read-only access to repositories you choose. Relevant source files and images may be sent to your selected AI provider when the agent inspects them."
       >
-        <Button size="sm" className="w-fit" onClick={() => window.location.assign('/api/github/connect')}>
+        <Button
+          size="sm"
+          className="w-fit"
+          onClick={() => window.location.assign(apiUrl('/api/github/connect'))}
+        >
           <GithubIcon data-slot="icon" />
           Connect GitHub
         </Button>
@@ -141,7 +146,11 @@ export function GitHubAccount() {
         )}
 
         <div className="flex flex-wrap gap-2">
-          <Button size="sm" variant="outline" onClick={() => window.location.assign('/api/github/install')}>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => window.location.assign(apiUrl('/api/github/install'))}
+          >
             <PlusIcon data-slot="icon" />
             Add repositories
           </Button>

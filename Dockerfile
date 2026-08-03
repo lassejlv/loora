@@ -6,6 +6,7 @@ WORKDIR /app
 # Workspace manifests only, so dependency layers cache until a package.json,
 # the lockfile, or bunfig (isolated linker config) changes.
 COPY package.json bun.lock bunfig.toml ./
+COPY apps/api/package.json apps/api/
 COPY apps/desktop/package.json apps/desktop/
 COPY apps/web/package.json apps/web/
 COPY packages/db/package.json packages/db/
@@ -96,4 +97,4 @@ EXPOSE 3000
 # --smol trades GC frequency for a smaller heap; CPU sits near zero in
 # production so the tradeoff is free memory.
 ENTRYPOINT ["/usr/bin/tini", "--"]
-CMD ["sh", "-c", "bun run --cwd packages/db migrate:deploy && exec bun --smol run apps/web/.output/server/index.mjs"]
+CMD ["bun", "--smol", "run", "apps/web/.output/server/index.mjs"]
