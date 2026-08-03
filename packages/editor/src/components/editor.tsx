@@ -1268,7 +1268,7 @@ export interface CanvasEditorActions {
   pasteFromHtml: (html: string, fallbackText?: string) => Promise<void>
   addShape: () => void
   addComponent: () => void
-  insertIcon: (entry: IconEntry) => void
+  insertIcon: (entry: IconEntry) => Promise<void>
   insertDocument: (document: CanvasDocument) => void
   insertAsset: (asset: AssetMeta, placement?: CanvasDropPlacement) => void
   duplicateSelection: () => void
@@ -1515,8 +1515,10 @@ function useCanvasEditorActions(
     )
   }
 
-  const insertIcon = (entry: IconEntry) => {
-    insertVectorDescriptor(entry.name, entry.toVector())
+  const insertIcon = async (entry: IconEntry) => {
+    const vector = await entry.toVector()
+    if (!vector) return
+    insertVectorDescriptor(entry.name, vector)
   }
 
   const addPage = () => {

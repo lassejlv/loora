@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { looksLikeSvg, svgStringToVectorDescriptor } from './svg-to-vector'
+import type { VectorDescriptor } from './svg-to-vector'
 import { getHugeicons, getLucide } from './icon-libraries'
 
 describe('svgStringToVectorDescriptor', () => {
@@ -60,7 +61,7 @@ describe('icon libraries', () => {
     expect(icons.length).toBeGreaterThan(1000)
     const sample = icons.slice(0, 50)
     for (const icon of sample) {
-      const vector = icon.toVector()
+      const vector = icon.toVector() as VectorDescriptor
       expect(vector.paths.length).toBeGreaterThan(0)
       for (const path of vector.paths) {
         expect(path.d.length).toBeGreaterThan(0)
@@ -73,7 +74,7 @@ describe('icon libraries', () => {
   it('converts lucide shape tuples (circle, line) into path data', () => {
     const circleIcon = getLucide().find((icon) => icon.name === 'Circle')
     expect(circleIcon).toBeDefined()
-    const vector = circleIcon!.toVector()
+    const vector = circleIcon!.toVector() as VectorDescriptor
     expect(vector.paths.length).toBeGreaterThan(0)
     expect(vector.paths[0]?.d).toMatch(/a \d/)
   })
@@ -83,7 +84,7 @@ describe('icon libraries', () => {
     expect(icons.length).toBeGreaterThan(1000)
     const sample = icons.slice(0, 50)
     for (const icon of sample) {
-      const vector = icon.toVector()
+      const vector = icon.toVector() as VectorDescriptor
       expect(vector.paths.length).toBeGreaterThan(0)
       for (const path of vector.paths) {
         expect(path.fill !== undefined || path.stroke !== undefined).toBe(true)

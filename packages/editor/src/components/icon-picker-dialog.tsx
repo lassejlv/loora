@@ -12,8 +12,11 @@ import {
 import { Input } from '@loora/ui/input'
 import { Tabs, TabsList, TabsTrigger } from '@loora/ui/tabs'
 import { Button } from '@loora/ui/button'
+import { Spinner } from '@loora/ui/spinner'
 import {
-  getIcons,
+  getHugeicons,
+  getLucide,
+  getSvgl,
   type IconEntry,
   type IconLibraryId,
 } from '../lib/icon-libraries'
@@ -34,12 +37,41 @@ export function IconPickerDialog({
   const [query, setQuery] = useState('')
   const reduceMotion = useReducedMotion()
 
+  const [svglIcons, setSvglIcons] = useState<IconEntry[]>([])
+  const [svglLoading, setSvglLoading] = useState(false)
+  const [svglError, setSvglError] = useState<string | null>(null)
+
+  // Load svgl icons on demand when the tab is first selected
+  useEffect(() => {
+    if (library !== 'svgl' || svglIcons.length > 0 || svglLoading) return
+    let cancelled = false
+    setSvglLoading(true)
+    setSvglError(null)
+    getSvgl()
+      .then((entries) => {
+        if (!cancelled) setSvglIcons(entries)
+      })
+      .catch((err) => {
+        if (!cancelled) setSvglError(err instanceof Error ? err.message : 'Failed to load')
+      })
+      .finally(() => {
+        if (!cancelled) setSvglLoading(false)
+      })
+    return () => { cancelled = true }
+  }, [library, svglIcons.length, svglLoading])
+
   const icons = useMemo(() => {
-    const all = getIcons(library)
     const q = query.trim().toLowerCase()
-    if (!q) return all
-    return all.filter((icon) => icon.name.toLowerCase().includes(q))
-  }, [library, query])
+    if (library === 'hugeicons') {
+      const all = getHugeicons()
+      return q ? all.filter((icon) => icon.name.toLowerCase().includes(q)) : all
+    }
+    if (library === 'lucide') {
+      const all = getLucide()
+      return q ? all.filter((icon) => icon.name.toLowerCase().includes(q)) : all
+    }
+    return q ? svglIcons.filter((icon) => icon.name.toLowerCase().includes(q)) : svglIcons
+  }, [library, query, svglIcons])
 
   const [visibleCount, setVisibleCount] = useState(PAGE_SIZE)
   const visible = icons.slice(0, visibleCount)
@@ -78,7 +110,7 @@ export function IconPickerDialog({
         <DialogHeader className="border-b px-4 py-2.5">
           <DialogTitle>Insert icon</DialogTitle>
           <DialogDescription>
-            Search {library === 'lucide' ? 'Lucide' : 'Hugeicons'} and insert an
+            Search {library === 'lucide' ? 'Lucide' : library === 'hugeicons' ? 'Hugeicons' : 'svgl'} and insert an
             editable vector icon onto the canvas.
           </DialogDescription>
         </DialogHeader>
@@ -96,6 +128,7 @@ export function IconPickerDialog({
               <TabsList>
                 <TabsTrigger value="lucide">Lucide</TabsTrigger>
                 <TabsTrigger value="hugeicons">Hugeicons</TabsTrigger>
+                <TabsTrigger value="svgl">svgl</TabsTrigger>
               </TabsList>
             </Tabs>
             <Input
@@ -110,7 +143,15 @@ export function IconPickerDialog({
             />
           </div>
           <div ref={setScrollArea} className="h-[min(50svh,24rem)] overflow-y-auto">
-            {visible.length === 0 ? (
+            {library === 'svgl' && svglLoading ? (
+              <div className="flex h-32 items-center justify-center">
+                <Spinner className="size-6" />
+              </div>
+            ) : library === 'svgl' && svglError ? (
+              <p className="flex h-32 items-center justify-center text-sm text-muted-foreground">
+                Failed to load svgl icons: {svglError}
+              </p>
+            ) : visible.length === 0 ? (
               <p className="flex h-32 items-center justify-center text-sm text-muted-foreground">
                 No icons match “{query}”.
               </p>
