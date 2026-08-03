@@ -34,6 +34,7 @@ const configuredAllowedOrigins = (process.env.API_ALLOWED_ORIGINS || '')
   .map((origin) => origin.trim())
   .filter(Boolean)
 const appOrigin = process.env.APP_ORIGIN?.trim().replace(/\/+$/, '') || 'http://localhost:3000'
+const appHostname = new URL(appOrigin).hostname
 const trustedOrigins = Array.from(new Set([
   appOrigin,
   ...(configuredAllowedOrigins.length > 0
@@ -243,7 +244,9 @@ export const auth = betterAuth({
       customPasswordCompromisedMessage:
         'This password has appeared in a data breach. Please choose a different one.',
     }),
-    passkey(),
+    // WebAuthn runs in the app window even though its challenge endpoints are
+    // served by the API subdomain. Keep credentials bound to the app's RP ID.
+    passkey({ rpID: appHostname, rpName: 'Loora', origin: appOrigin }),
     twoFactor({
       issuer: 'Loora',
       otpOptions: {
