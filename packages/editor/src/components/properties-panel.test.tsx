@@ -8,6 +8,7 @@ import {
   createFrameNode,
   createPageNode,
   createTextNode,
+  createVectorNode,
   defaultLayout,
 } from '@loora/canvas/model'
 import { CanvasPropertiesPanel } from './properties-panel'
@@ -38,6 +39,18 @@ function fixture() {
     id: 'label',
     parentId: 'card',
     order: 1_024,
+  })
+  document.nodes.solidIcon = createVectorNode('Solid icon', {
+    id: 'solidIcon',
+    parentId: 'card',
+    order: 2_048,
+    paths: [{ d: 'M 0 0 h 24 v 24 z', fill: '#111827' }],
+  })
+  document.nodes.outlineIcon = createVectorNode('Outline icon', {
+    id: 'outlineIcon',
+    parentId: 'card',
+    order: 3_072,
+    paths: [{ d: 'M 2 2 L 22 22', stroke: '#111827', strokeWidth: 2 }],
   })
   return document
 }
@@ -197,5 +210,48 @@ describe('CanvasPropertiesPanel', () => {
     cleanup()
     const second = setup(['card'])
     expect(second.view.queryByLabelText('Font')).toBeNull()
+  })
+
+  test('recolors a filled vector through its fill', () => {
+    const { engine, view } = setup(['solidIcon'])
+    fireEvent.change(view.getByLabelText('Color'), {
+      target: { value: '#ff0000' },
+    })
+    const node = engine.getNode('solidIcon')
+    expect(node?.type === 'vector' && node.paths).toEqual([
+      { d: 'M 0 0 h 24 v 24 z', fill: '#ff0000' },
+    ])
+    expect(view.queryByLabelText('Weight')).toBeNull()
+  })
+
+  test('recolors an outlined vector through its stroke, and sets its weight', () => {
+    const { engine, view } = setup(['outlineIcon'])
+    fireEvent.change(view.getByLabelText('Color'), {
+      target: { value: '#00ff00' },
+    })
+    commit(view.getByLabelText('Weight'), '1.5')
+    const node = engine.getNode('outlineIcon')
+    expect(node?.type === 'vector' && node.paths).toEqual([
+      { d: 'M 2 2 L 22 22', stroke: '#00ff00', strokeWidth: 1.5 },
+    ])
+  })
+
+  test('recolors every selected vector at once, and hides the section otherwise', () => {
+    const { engine, view } = setup(['solidIcon', 'outlineIcon'])
+    // Both icons paint the same colour through different channels; the field
+    // reads one value rather than "Mixed".
+    expect((view.getByLabelText('Color hex') as HTMLInputElement).value).toBe(
+      '#111827',
+    )
+    fireEvent.change(view.getByLabelText('Color'), {
+      target: { value: '#0000ff' },
+    })
+    const solid = engine.getNode('solidIcon')
+    const outline = engine.getNode('outlineIcon')
+    expect(solid?.type === 'vector' && solid.paths[0]?.fill).toBe('#0000ff')
+    expect(outline?.type === 'vector' && outline.paths[0]?.stroke).toBe('#0000ff')
+
+    cleanup()
+    expect(setup(['card']).view.queryByLabelText('Color')).toBeNull()
   })
 })

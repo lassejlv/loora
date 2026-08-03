@@ -18,6 +18,7 @@ import {
   type NodePatch,
   type NodeRef,
   resolveNodeRef,
+  type VectorNode,
 } from '@loora/canvas/model'
 import {
   useCanvasDocument,
@@ -482,6 +483,28 @@ function solidHex(paint: CanvasPaint | undefined) {
     : null
 }
 
+type VectorPath = VectorNode['paths'][number]
+
+/**
+ * An imported icon paints through fill, through stroke, or through both, and
+ * which one it uses is the icon set's choice, not the user's. The inspector
+ * reads whichever channel the path actually paints so a solid set and an
+ * outline set both answer one Color field.
+ */
+function vectorPaintColor(path: VectorPath) {
+  const color = path.fill ?? path.stroke
+  return typeof color === 'string' ? color : null
+}
+
+function recoloredPath(path: VectorPath, color: string): VectorPath {
+  const next = { ...path }
+  if (path.stroke !== undefined) next.stroke = color
+  // A path that paints neither would be invisible; give it a fill rather than
+  // silently ignoring the edit.
+  if (path.fill !== undefined || path.stroke === undefined) next.fill = color
+  return next
+}
+
 export function CanvasPropertiesPanel({ onClose }: { onClose?: () => void }) {
   const document = useCanvasDocument()
   const selection = useCanvasSelection()
@@ -631,6 +654,45 @@ export function CanvasPropertiesPanel({ onClose }: { onClose?: () => void }) {
       label: 'Update type',
       coalesceKey: `type:${refs.map((item) => item.nodeId).join(',')}:${Object.keys(patch).join(',')}`,
       operations: real,
+    })
+  }
+
+  /**
+   * `paths` is not part of `NodePatch`, so it can travel neither in a
+   * responsive override nor in an instance override. Vector edits therefore
+   * target the source nodes directly and skip anything selected through an
+   * instance.
+   */
+  const vectorTargets = refs
+    .map((target, index) => ({ ref: target, node: nodes[index]! }))
+    .filter(
+      (entry): entry is { ref: NodeRef; node: VectorNode } =>
+        entry.node.type === 'vector' && entry.ref.instancePath.length === 0,
+    )
+  const vectorPaths = vectorTargets.flatMap((entry) => entry.node.paths)
+  const vectorColor = shared(vectorPaths.map(vectorPaintColor))
+  const strokedPaths = vectorPaths.filter((path) => path.stroke !== undefined)
+  const vectorStrokeWidth = shared(
+    strokedPaths.map((path) => path.strokeWidth ?? 1),
+  )
+
+  const patchVectorPaths = (
+    build: (path: VectorPath) => VectorPath,
+    label: string,
+    field: string,
+  ) => {
+    if (vectorTargets.length === 0) return
+    transact({
+      id: canvasId('tx'),
+      label,
+      coalesceKey: `vector:${field}:${vectorTargets
+        .map((entry) => entry.ref.nodeId)
+        .join(',')}`,
+      operations: vectorTargets.map((entry) => ({
+        type: 'node.patch',
+        id: entry.ref.nodeId,
+        patch: { paths: entry.node.paths.map(build) },
+      })),
     })
   }
 
@@ -950,6 +1012,38 @@ export function CanvasPropertiesPanel({ onClose }: { onClose?: () => void }) {
             </Button>
           </div>
         </Section>
+
+        {vectorTargets.length > 0 ? (
+          <Section title="Vector">
+            <ColorCell
+              label="Color"
+              value={vectorColor}
+              onChange={(color) =>
+                patchVectorPaths(
+                  (path) => recoloredPath(path, color),
+                  vectorTargets.length > 1 ? 'Recolor vectors' : 'Recolor vector',
+                  'color',
+                )
+              }
+            />
+            {strokedPaths.length > 0 ? (
+              <NumberCell
+                label="Weight"
+                min={0}
+                step={0.25}
+                value={vectorStrokeWidth}
+                onCommit={(strokeWidth) =>
+                  patchVectorPaths(
+                    (path) =>
+                      path.stroke === undefined ? path : { ...path, strokeWidth },
+                    'Vector weight',
+                    'weight',
+                  )
+                }
+              />
+            ) : null}
+          </Section>
+        ) : null}
 
         <Section title="Appearance">
           {gradient ? (
