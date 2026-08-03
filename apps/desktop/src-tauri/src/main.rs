@@ -85,7 +85,7 @@ struct OpenRequest {
 
 impl Config {
     fn read(app: &tauri::AppHandle) -> Self {
-        let api_origin = read_origin("LOORA_API_ORIGIN", "https://api.loora.design");
+        let api_origin = read_origin("LOORA_API_ORIGIN", "https://loora.design");
         let app_origin = read_origin("LOORA_APP_ORIGIN", "https://loora.design");
         let dev_server = env::var("LOORA_DESKTOP_DEV_SERVER")
             .ok()

@@ -17,7 +17,7 @@ bun run build:desktop   # Vite interface + native Tauri bundle
 **The host** (`src-tauri/`) runs under Rust. It serves a loopback HTTP
 server, opens the window on it, and is the only thing that ever holds the
 session. Everything the window asks for under `/api/*` is forwarded to
-api.loora.design with `Authorization: Bearer <session token>` attached, which is
+loora.design with `Authorization: Bearer <session token>` attached, which is
 why the window needs no cookie, no CORS, and no credential of its own:
 `/api/asset/…` images, the server-sent event stream, and oRPC all behave
 exactly as they do on the web.
@@ -73,7 +73,7 @@ window controls never overlap the editor's top-left canvas controls.
 
 | Variable | Meaning |
 |----------|---------|
-| `LOORA_API_ORIGIN` | API deployment to talk to (default `https://api.loora.design`) |
+| `LOORA_API_ORIGIN` | Web deployment to talk to (default `https://loora.design`) |
 | `LOORA_APP_ORIGIN` | Public app origin used for browser sign-in and trusted-origin headers (default `https://loora.design`) |
 | `LOORA_DESKTOP_PORT` | Loopback port for the host (default: one the OS picks; `4300` in development) |
 | `LOORA_DESKTOP_DEV_SERVER` | Vite dev server the window is handed to |

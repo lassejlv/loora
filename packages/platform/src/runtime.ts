@@ -1,11 +1,10 @@
 /**
  * Where the client is running, and how it reaches Loora.
  *
- * Defaults use the document's own origin. The web entry point configures its
- * separate API service before client modules load. The desktop app is served
- * by a loopback server in its own process that proxies `/api/*` with the
- * session token attached, so its API origin remains its own; only links meant
- * for a browser point at the public app instead of `http://127.0.0.1:<port>`.
+ * Defaults use the document's own origin. The desktop app is served by a
+ * loopback server in its own process that proxies `/api/*` with the session
+ * token attached, so its API origin remains its own; only links meant for a
+ * browser point at the public app instead of `http://127.0.0.1:<port>`.
  *
  * Nothing in here imports anything: it is the one module every layer
  * (`@loora/rpc/client`, `@loora/auth/client`, the editor) may depend on.

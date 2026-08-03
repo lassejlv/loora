@@ -10,6 +10,7 @@ import {
   oneTimeToken,
   twoFactor,
 } from 'better-auth/plugins'
+import { tanstackStartCookies } from 'better-auth/tanstack-start'
 import { polar, portal, webhooks } from '@polar-sh/better-auth'
 import { db } from '@loora/db'
 import * as schema from '@loora/db/schema'
@@ -29,24 +30,13 @@ import {
 const googleClientId = process.env.GOOGLE_CLIENT_ID?.trim()
 const googleClientSecret = process.env.GOOGLE_CLIENT_SECRET?.trim()
 const polarRuntime = getPolarRuntime()
-const configuredAllowedOrigins = (process.env.API_ALLOWED_ORIGINS || '')
-  .split(',')
-  .map((origin) => origin.trim())
-  .filter(Boolean)
 const appOrigin = process.env.APP_ORIGIN?.trim().replace(/\/+$/, '') || 'http://localhost:3000'
 const appHostname = new URL(appOrigin).hostname
-const trustedOrigins = Array.from(new Set([
-  appOrigin,
-  ...(configuredAllowedOrigins.length > 0
-    ? configuredAllowedOrigins
-    : ['http://localhost:3000', 'https://loora.design']),
-]))
 
 export const googleOAuthEnabled = Boolean(googleClientId && googleClientSecret)
 
 export const auth = betterAuth({
   baseURL: process.env.BETTER_AUTH_URL,
-  trustedOrigins,
   database: drizzleAdapter(db, {
     provider: 'pg',
     schema,
@@ -244,8 +234,7 @@ export const auth = betterAuth({
       customPasswordCompromisedMessage:
         'This password has appeared in a data breach. Please choose a different one.',
     }),
-    // WebAuthn runs in the app window even though its challenge endpoints are
-    // served by the API subdomain. Keep credentials bound to the app's RP ID.
+    // Keep credentials bound to the public app hostname for web and desktop.
     passkey({ rpID: appHostname, rpName: 'Loora', origin: appOrigin }),
     twoFactor({
       issuer: 'Loora',
@@ -259,6 +248,9 @@ export const auth = betterAuth({
         },
       },
     }),
+    // Cookie integration must be last so plugins with `hooks.after` (like
+    // twoFactor) still see their Set-Cookie headers forwarded to the framework.
+    tanstackStartCookies(),
   ],
 })
 
