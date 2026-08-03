@@ -142,4 +142,114 @@ describe('ProductTour', () => {
     render(<ProductTour steps={steps} open={false} onOpenChange={() => {}} />)
     expect(screen.queryByText('The canvas')).toBeNull()
   })
+
+  test('resumes at the step it was left on', async () => {
+    render(
+      <ProductTour
+        steps={[steps[0]!, steps[1]!]}
+        open
+        initialIndex={1}
+        onOpenChange={() => {}}
+      />,
+    )
+    await settle()
+    expect(screen.getByText('Add something')).toBeTruthy()
+    expect(screen.getByText('Step 2 of 2')).toBeTruthy()
+  })
+
+  test('clamps a resume index past the end of the run', async () => {
+    render(
+      <ProductTour
+        steps={[steps[0]!, steps[1]!]}
+        open
+        initialIndex={9}
+        onOpenChange={() => {}}
+      />,
+    )
+    await settle()
+    expect(screen.getByText('Step 2 of 2')).toBeTruthy()
+  })
+
+  test('reports each step so the run can be picked up later', async () => {
+    const onIndexChange = vi.fn()
+    render(
+      <ProductTour
+        steps={[steps[0]!, steps[1]!]}
+        open
+        onOpenChange={() => {}}
+        onIndexChange={onIndexChange}
+      />,
+    )
+    await settle()
+    fireEvent.click(screen.getByRole('button', { name: 'Next' }))
+    expect(onIndexChange).toHaveBeenCalledWith(1)
+  })
+})
+
+describe('ProductTour interactive steps', () => {
+  const hands: TourStep[] = [
+    { id: 'canvas', title: 'The canvas', body: 'Everything is a node.' },
+    {
+      id: 'tools',
+      title: 'Add something',
+      body: 'Draw a rectangle.',
+      target: 'tools',
+      waitFor: { hint: 'Press R and drag.', done: () => done },
+    },
+    { id: 'done', title: 'Nice', body: 'That is a node.' },
+  ]
+  let done = false
+
+  afterEach(() => {
+    done = false
+  })
+
+  test('waits for the reader, then advances on its own', async () => {
+    anchor('tools', { top: 400, left: 300, width: 200, height: 44 })
+    render(<ProductTour steps={hands} open onOpenChange={() => {}} />)
+    await settle()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Next' }))
+    await settle()
+    expect(screen.getByText('Press R and drag.')).toBeTruthy()
+    // Nothing has happened yet, so the step is still up.
+    expect(screen.getByText('Add something')).toBeTruthy()
+    // The way forward is doing it, not clicking through it.
+    expect(screen.getByRole('button', { name: 'Skip this' })).toBeTruthy()
+
+    done = true
+    await settle()
+    expect(screen.getByText('Nice')).toBeTruthy()
+  })
+
+  test('lets the editor keep its keys while a step waits', async () => {
+    anchor('tools', { top: 400, left: 300, width: 200, height: 44 })
+    const editorShortcut = vi.fn()
+    window.addEventListener('keydown', editorShortcut)
+    render(<ProductTour steps={hands} open onOpenChange={() => {}} />)
+    await settle()
+
+    // On a normal step the tour swallows the key.
+    fireEvent.keyDown(document.body, { key: 'r' })
+    expect(editorShortcut).not.toHaveBeenCalled()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Next' }))
+    await settle()
+    fireEvent.keyDown(document.body, { key: 'r' })
+    expect(editorShortcut).toHaveBeenCalledTimes(1)
+
+    window.removeEventListener('keydown', editorShortcut)
+  })
+
+  test('a waiting step can still be stepped past by hand', async () => {
+    anchor('tools', { top: 400, left: 300, width: 200, height: 44 })
+    render(<ProductTour steps={hands} open onOpenChange={() => {}} />)
+    await settle()
+    fireEvent.click(screen.getByRole('button', { name: 'Next' }))
+    await settle()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Skip this' }))
+    await settle()
+    expect(screen.getByText('Nice')).toBeTruthy()
+  })
 })

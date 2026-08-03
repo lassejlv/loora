@@ -1,16 +1,21 @@
 import { afterEach, describe, expect, test, vi } from 'vitest'
 import {
+  TOUR_PROGRESS_KEY,
   TOUR_STORAGE_KEY,
+  clearTourProgress,
   clearTourSeen,
   editorTourSteps,
   hasSeenTour,
   markTourSeen,
+  readTourProgress,
+  writeTourProgress,
 } from './tour'
 
 const options = {
   isMobile: false,
   openLayers: () => {},
   openDesign: () => {},
+  nodeCount: () => 0,
 }
 
 afterEach(() => {
@@ -85,12 +90,64 @@ describe('editorTourSteps', () => {
   test('panel steps reveal what they point at', () => {
     const opened: string[] = []
     const steps = editorTourSteps({
-      isMobile: false,
-      openLayers: () => opened.push('layers'),
-      openDesign: () => opened.push('design'),
+      ...options,
+      openLayers: () => {
+        opened.push('layers')
+      },
+      openDesign: () => {
+        opened.push('design')
+      },
     })
     steps.find((step) => step.id === 'layers')?.ensure?.()
     steps.find((step) => step.id === 'design')?.ensure?.()
     expect(opened).toEqual(['layers', 'design'])
+  })
+
+  test('the hands-on step completes once a node lands, not before', () => {
+    let nodes = 4
+    const steps = editorTourSteps({ ...options, nodeCount: () => nodes })
+    const tools = steps.find((step) => step.id === 'tools')
+    expect(tools?.waitFor).toBeDefined()
+
+    tools?.ensure?.()
+    expect(tools?.waitFor?.done()).toBe(false)
+    nodes += 1
+    expect(tools?.waitFor?.done()).toBe(true)
+  })
+
+  test('the hands-on step measures against the document it opened on', () => {
+    // Somebody who already has nodes must still add one for it to complete.
+    let nodes = 12
+    const steps = editorTourSteps({ ...options, nodeCount: () => nodes })
+    const tools = steps.find((step) => step.id === 'tools')
+    tools?.ensure?.()
+    expect(tools?.waitFor?.done()).toBe(false)
+    nodes -= 1
+    // Deleting is not adding.
+    expect(tools?.waitFor?.done()).toBe(false)
+    nodes += 2
+    expect(tools?.waitFor?.done()).toBe(true)
+  })
+
+  test('the last step hands over the MCP endpoint to copy', () => {
+    const agent = editorTourSteps(options).at(-1)
+    expect(agent?.copy?.value).toBe('https://mcp.loora.design/mcp')
+  })
+})
+
+describe('tour progress', () => {
+  test('remembers the step it was on and forgets it when cleared', () => {
+    expect(readTourProgress()).toBe(0)
+    writeTourProgress(3)
+    expect(readTourProgress()).toBe(3)
+    clearTourProgress()
+    expect(readTourProgress()).toBe(0)
+  })
+
+  test('ignores a stored value that is not a step index', () => {
+    window.localStorage.setItem(TOUR_PROGRESS_KEY, 'banana')
+    expect(readTourProgress()).toBe(0)
+    window.localStorage.setItem(TOUR_PROGRESS_KEY, '-2')
+    expect(readTourProgress()).toBe(0)
   })
 })

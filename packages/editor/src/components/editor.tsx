@@ -102,7 +102,14 @@ import { CanvasHistory } from './history'
 import { HtmlImportDialog } from './html-import-dialog'
 import { IconPickerDialog } from './icon-picker-dialog'
 import { ProductTour } from './product-tour'
-import { editorTourSteps, hasSeenTour, markTourSeen } from '../lib/tour'
+import {
+  clearTourProgress,
+  editorTourSteps,
+  hasSeenTour,
+  markTourSeen,
+  readTourProgress,
+  writeTourProgress,
+} from '../lib/tour'
 import type { IconEntry } from '../lib/icon-libraries'
 import { svgStringToVectorDescriptor, looksLikeSvg } from '../lib/svg-to-vector'
 import {
@@ -361,6 +368,9 @@ function CanvasShell({
   const [designPanelOpen, setDesignPanelOpen] = useState(() => panelVisible('loora:design-panel-open'))
   const [layersPanelOpen, setLayersPanelOpen] = useState(() => panelVisible('loora:layers-panel-open'))
   const [tourOpen, setTourOpen] = useState(false)
+  // A reload part way through picks up where it left off; asking for the tour
+  // again from the command menu deliberately starts it over.
+  const [tourResumeIndex, setTourResumeIndex] = useState(() => readTourProgress())
   const [commandMenuOpen, setCommandMenuOpen] = useState(false)
   const [pasteNotice, setPasteNotice] = useState<string | null>(null)
   const pasteNoticeTimer = useRef<number | null>(null)
@@ -471,6 +481,7 @@ function CanvasShell({
       setDesignPanelOpen(true)
       window.localStorage.setItem('loora:design-panel-open', 'true')
     },
+    nodeCount: () => Object.keys(controller.engine.document.nodes).length,
   })
 
   // First time somebody has a document open and can actually edit it. The
@@ -838,7 +849,10 @@ function CanvasShell({
           label: 'Take the tour',
           keywords: 'onboarding walkthrough guide help getting started',
           icon: CompassIcon,
-          run: () => setTourOpen(true),
+          run: () => {
+            setTourResumeIndex(0)
+            setTourOpen(true)
+          },
         },
       ],
     },
@@ -1001,7 +1015,13 @@ function CanvasShell({
           steps={tourSteps}
           open={tourOpen}
           onOpenChange={setTourOpen}
-          onFinish={markTourSeen}
+          initialIndex={tourResumeIndex}
+          onIndexChange={writeTourProgress}
+          onFinish={() => {
+            markTourSeen()
+            clearTourProgress()
+            setTourResumeIndex(0)
+          }}
         />
       </main>
 

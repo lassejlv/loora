@@ -3,7 +3,9 @@ import { createPortal } from 'react-dom'
 import { motion, useReducedMotion } from 'motion/react'
 import { appUrl, isDesktop, openExternal } from '@loora/platform'
 import { Button } from '@loora/ui/button'
+import { CheckIcon, CopyIcon } from '@loora/ui/icons'
 import { cn } from '@loora/ui/utils'
+import { copyText } from '../lib/copy-text'
 
 export type TourSide = 'top' | 'bottom' | 'left' | 'right'
 
@@ -29,7 +31,14 @@ export interface TourStep {
    * pointing at nothing would be worse than one step fewer.
    */
   required?: boolean
+  /**
+   * Hands the editor back while the step is up and advances once the reader
+   * has actually done the thing. `done` is polled on every frame, so keep it
+   * to a cheap read.
+   */
+  waitFor?: { hint: string; done: () => boolean }
   link?: { label: string; href: string }
+  copy?: { label: string; value: string }
 }
 
 interface Box {
@@ -149,12 +158,17 @@ export function ProductTour({
   open,
   onOpenChange,
   onFinish,
+  initialIndex = 0,
+  onIndexChange,
 }: {
   steps: TourStep[]
   open: boolean
   onOpenChange: (open: boolean) => void
   /** Called when the tour is completed or skipped, never when it re-opens. */
   onFinish?: () => void
+  /** Where to pick the tour up, for someone who reloaded part way through. */
+  initialIndex?: number
+  onIndexChange?: (index: number) => void
 }) {
   const reduceMotion = useReducedMotion()
   const [index, setIndex] = useState(0)
@@ -168,8 +182,12 @@ export function ProductTour({
   })
   const cardRef = useRef<HTMLDivElement | null>(null)
 
+  const [copied, setCopied] = useState(false)
   const step = open ? active[index] : undefined
   const isLast = index >= active.length - 1
+  // An interactive step hands the editor back: the overlay stops swallowing
+  // pointers and keys so the reader can do what it just asked for.
+  const waiting = step?.waitFor !== undefined
 
   const close = useCallback(() => {
     onOpenChange(false)
@@ -185,22 +203,24 @@ export function ProductTour({
       }
       // Hide the card until the new step has been measured.
       setPlacement((current) => ({ ...current, ready: false }))
+      setCopied(false)
       setIndex(next)
+      onIndexChange?.(next)
     },
-    [close, active.length],
+    [close, active.length, onIndexChange],
   )
 
   // Settle the step list once, as the tour opens: what is on screen now is
   // what this run is about.
   useEffect(() => {
     if (!open) return
-    setActive(
-      steps.filter(
-        (entry) => !entry.required || readTarget(entry.target, 0) !== null,
-      ),
+    const runnable = steps.filter(
+      (entry) => !entry.required || readTarget(entry.target, 0) !== null,
     )
-    setIndex(0)
+    setActive(runnable)
+    setIndex(clamp(initialIndex, 0, Math.max(0, runnable.length - 1)))
     setPlacement((current) => ({ ...current, ready: false }))
+    setCopied(false)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open])
 
@@ -219,11 +239,19 @@ export function ProductTour({
     const target = active[index]?.target
     const padding = active[index]?.padding ?? 8
     const side = active[index]?.side
+    const waitFor = active[index]?.waitFor
     let frame = 0
     let lastBox: Box | null = null
     let lastPlacement: Omit<Placement, 'ready'> | null = null
+    let advanced = false
 
     const tick = () => {
+      // The reader did the thing — move on without them reaching for Next.
+      if (waitFor && !advanced && waitFor.done()) {
+        advanced = true
+        goTo(index + 1)
+        return
+      }
       const nextBox = readTarget(target, padding)
       if (!sameBox(lastBox, nextBox)) {
         lastBox = nextBox
@@ -255,12 +283,21 @@ export function ProductTour({
     frame = requestAnimationFrame(tick)
     return () => cancelAnimationFrame(frame)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, index, active])
+  }, [open, index, active, goTo])
 
   // The tour is modal, so the editor's own shortcuts stay quiet under it.
   useEffect(() => {
     if (!open) return
     const onKeyDown = (event: KeyboardEvent) => {
+      // While a step waits on the reader, the editor's own keys are the point
+      // — R for a rectangle has to reach it. Only Escape stays the tour's.
+      if (waiting) {
+        if (event.key !== 'Escape') return
+        event.stopPropagation()
+        event.preventDefault()
+        close()
+        return
+      }
       event.stopPropagation()
       // Enter on a focused button belongs to that button, not to "next".
       const onControl =
@@ -282,38 +319,48 @@ export function ProductTour({
     }
     window.addEventListener('keydown', onKeyDown, true)
     return () => window.removeEventListener('keydown', onKeyDown, true)
-  }, [open, index, goTo, close])
+  }, [open, index, waiting, goTo, close])
 
   useEffect(() => {
-    if (open) cardRef.current?.focus()
-  }, [open, index])
+    // Taking focus during a waiting step would steal the keystroke it asks for.
+    if (open && !waiting) cardRef.current?.focus()
+  }, [open, index, waiting])
 
   if (!open || !step || typeof document === 'undefined') return null
 
   const glide = reduceMotion
     ? { duration: 0 }
     : { type: 'spring' as const, stiffness: 420, damping: 38, mass: 0.7 }
+  // A waiting step keeps the room lit enough to work in.
+  const dim = waiting ? 'rgb(9 9 11 / 0.34)' : 'rgb(9 9 11 / 0.64)'
+  // The card leans in from the spotlight it belongs to.
+  const lean = { top: { y: 8 }, bottom: { y: -8 }, left: { x: 8 }, right: { x: -8 } }[
+    placement.side
+  ] as { x?: number; y?: number }
 
   return createPortal(
     <motion.div
       // Above the editor chrome (z-20) and every portalled surface (z-50);
       // the tour is the only thing on screen while it runs.
-      className="fixed inset-0 z-[60]"
+      className={cn('fixed inset-0 z-[60]', waiting && 'pointer-events-none')}
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       transition={{ duration: reduceMotion ? 0 : 0.18 }}
     >
-      {/* Swallows every click so the tour is the only thing you can drive. */}
-      <div
-        className="absolute inset-0"
-        onPointerDown={(event) => event.preventDefault()}
-      />
+      {/* Swallows every click so the tour is the only thing you can drive —
+          except while a step is waiting on the reader to act. */}
+      {waiting ? null : (
+        <div
+          className="absolute inset-0"
+          onPointerDown={(event) => event.preventDefault()}
+        />
+      )}
 
       {box ? (
         <motion.div
           aria-hidden="true"
           className="pointer-events-none absolute rounded-lg"
-          style={{ boxShadow: '0 0 0 9999px rgb(9 9 11 / 0.64)' }}
+          style={{ boxShadow: `0 0 0 9999px ${dim}` }}
           initial={false}
           animate={{
             top: box.top,
@@ -323,17 +370,24 @@ export function ProductTour({
           }}
           transition={glide}
         >
-          <motion.div
-            className="absolute -inset-px rounded-lg ring-2 ring-ring"
-            animate={reduceMotion ? undefined : { opacity: [1, 0.4, 1] }}
-            transition={{ duration: 2.2, repeat: Infinity, ease: 'easeInOut' }}
-          />
+          <div className="absolute -inset-px rounded-lg ring-2 ring-ring/70" />
+          {/* One ripple as the spotlight lands, rather than a ring that never
+              stops asking for attention. */}
+          {reduceMotion ? null : (
+            <motion.div
+              key={step.id}
+              className="absolute -inset-px rounded-lg ring-2 ring-ring"
+              initial={{ opacity: 0.85, scale: 1 }}
+              animate={{ opacity: 0, scale: 1.06 }}
+              transition={{ duration: 0.6, ease: 'easeOut' }}
+            />
+          )}
         </motion.div>
       ) : (
         <div
           aria-hidden="true"
           className="pointer-events-none absolute inset-0"
-          style={{ background: 'rgb(9 9 11 / 0.64)' }}
+          style={{ background: dim }}
         />
       )}
 
@@ -344,11 +398,13 @@ export function ProductTour({
         aria-modal="true"
         aria-labelledby={`tour-title-${step.id}`}
         aria-describedby={`tour-body-${step.id}`}
-        className="absolute rounded-lg border border-line bg-surface p-3 shadow-panel-lg outline-none"
+        className="pointer-events-auto absolute rounded-lg border border-line bg-surface p-3 shadow-panel-lg outline-none"
         style={{ width: CARD_WIDTH, top: placement.top, left: placement.left }}
         animate={{
           opacity: placement.ready ? 1 : 0,
           scale: placement.ready || reduceMotion ? 1 : 0.98,
+          x: placement.ready || reduceMotion ? 0 : (lean.x ?? 0),
+          y: placement.ready || reduceMotion ? 0 : (lean.y ?? 0),
         }}
         transition={{ duration: reduceMotion ? 0 : 0.16, ease: [0.4, 0, 0.2, 1] }}
       >
@@ -384,6 +440,34 @@ export function ProductTour({
             {step.link.label}
           </a>
         ) : null}
+        {step.copy ? (
+          <div className="mt-2 flex items-center gap-1 rounded-md border border-line bg-surface-2 ps-2">
+            <code className="min-w-0 flex-1 truncate font-mono text-2xs text-muted-foreground">
+              {step.copy.value}
+            </code>
+            <Button
+              size="xs"
+              variant="ghost"
+              onClick={() => {
+                void copyText(step.copy!.value).then(() => setCopied(true))
+              }}
+            >
+              {copied ? <CheckIcon /> : <CopyIcon />}
+              {copied ? 'Copied' : step.copy.label}
+            </Button>
+          </div>
+        ) : null}
+        {step.waitFor ? (
+          <p className="mt-2 flex items-center gap-1.5 text-xs font-medium">
+            <motion.span
+              aria-hidden="true"
+              className="size-1.5 shrink-0 rounded-full bg-ring"
+              animate={reduceMotion ? undefined : { opacity: [1, 0.25, 1] }}
+              transition={{ duration: 1.4, repeat: Infinity, ease: 'easeInOut' }}
+            />
+            {step.waitFor.hint}
+          </p>
+        ) : null}
 
         <div className="mt-3 flex items-center gap-2">
           <div className="flex flex-1 items-center gap-1" aria-hidden="true">
@@ -406,8 +490,14 @@ export function ProductTour({
               Back
             </Button>
           )}
-          <Button size="xs" onClick={() => goTo(index + 1)}>
-            {isLast ? 'Done' : 'Next'}
+          {/* A waiting step advances itself. The button stays as a way past it
+              for anyone who would rather not, never as the way through it. */}
+          <Button
+            size="xs"
+            variant={waiting ? 'ghost' : 'default'}
+            onClick={() => goTo(index + 1)}
+          >
+            {waiting ? 'Skip this' : isLast ? 'Done' : 'Next'}
           </Button>
         </div>
       </motion.div>

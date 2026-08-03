@@ -34,6 +34,40 @@ export function clearTourSeen() {
   }
 }
 
+/** Where an interrupted run had got to, so a reload does not start over. */
+export const TOUR_PROGRESS_KEY = 'loora:tour-progress'
+
+export function readTourProgress(): number {
+  if (typeof window === 'undefined') return 0
+  try {
+    const raw = Number(window.localStorage.getItem(TOUR_PROGRESS_KEY))
+    return Number.isInteger(raw) && raw > 0 ? raw : 0
+  } catch {
+    return 0
+  }
+}
+
+export function writeTourProgress(index: number) {
+  if (typeof window === 'undefined') return
+  try {
+    window.localStorage.setItem(TOUR_PROGRESS_KEY, String(index))
+  } catch {
+    // Losing the bookmark only costs a restart from the top.
+  }
+}
+
+export function clearTourProgress() {
+  if (typeof window === 'undefined') return
+  try {
+    window.localStorage.removeItem(TOUR_PROGRESS_KEY)
+  } catch {
+    // Nothing to clear if it could never be written.
+  }
+}
+
+/** Where an agent connects. Same endpoint the integrations page hands out. */
+export const MCP_ENDPOINT = 'https://mcp.loora.design/mcp'
+
 /**
  * What somebody needs to know to use Loora, in the order they meet it. Panel
  * steps open what they point at rather than assuming it is showing; the
@@ -43,11 +77,18 @@ export function editorTourSteps({
   isMobile,
   openLayers,
   openDesign,
+  nodeCount,
 }: {
   isMobile: boolean
   openLayers: () => void
   openDesign: () => void
+  /** How many nodes the document holds right now, for the hands-on step. */
+  nodeCount: () => number
 }): TourStep[] {
+  // Captured when the hands-on step opens, so "did something appear?" is
+  // measured against the document as it was at that moment.
+  let baseline = 0
+
   const steps: TourStep[] = [
     {
       id: 'canvas',
@@ -57,10 +98,17 @@ export function editorTourSteps({
     {
       id: 'tools',
       title: 'Put something on it',
-      body: 'Frames, text, rectangles, icons, and images. Press R for a rectangle, T for text, or pick one here — whatever you drop becomes a node you can style.',
+      body: 'Frames, text, rectangles, icons, and images. Whatever you drop becomes a node you can style, move, and export.',
       target: 'tools',
       side: 'top',
       padding: 10,
+      ensure: () => {
+        baseline = nodeCount()
+      },
+      waitFor: {
+        hint: 'Press R and drag out a rectangle — the tour waits for you.',
+        done: () => nodeCount() > baseline,
+      },
     },
   ]
 
@@ -106,7 +154,8 @@ export function editorTourSteps({
     {
       id: 'agent',
       title: 'Bring your own agent',
-      body: 'There is no chat box here on purpose. Connect Claude, Cursor, or anything else that speaks MCP, and it edits this same document through the same validated transactions you do.',
+      body: 'There is no chat box here on purpose. Point Claude, Cursor, or anything else that speaks MCP at this endpoint and it edits the same document, through the same validated transactions you do.',
+      copy: { label: 'Copy', value: MCP_ENDPOINT },
       link: { label: 'Set up MCP →', href: '/app/integrations' },
     },
   )
