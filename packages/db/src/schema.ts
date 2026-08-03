@@ -25,6 +25,8 @@ export type LaunchWeekDay = {
   description: string
   ctaLabel: string
   ctaUrl: string
+  /** UTC clock time (HH:mm) when this day's release unlocks. */
+  releaseTime: string
 }
 
 export const user = pgTable('user', {
@@ -62,6 +64,8 @@ export const launchWeek = pgTable('launch_week', {
   id: text('id').primaryKey(),
   enabled: boolean('enabled').default(false).notNull(),
   startDate: text('start_date').notNull(),
+  /** UTC clock time (HH:mm) when each day's release unlocks. */
+  releaseTime: text('release_time').default('00:00').notNull(),
   headline: text('headline').notNull(),
   description: text('description').notNull(),
   days: jsonb('days').$type<LaunchWeekDay[]>().notNull(),

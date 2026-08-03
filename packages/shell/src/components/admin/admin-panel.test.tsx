@@ -68,6 +68,7 @@ const revokeDesignLinks = vi.fn(async () => ({ revokedLinks: 1 }))
 const launchWeek = {
   enabled: false,
   startDate: '2026-08-03',
+  releaseTime: '00:00',
   headline: 'Seven days. Seven releases.',
   description: 'A new Loora release lands every day.',
   days: Array.from({ length: 7 }, (_, index) => ({
@@ -75,6 +76,7 @@ const launchWeek = {
     description: 'What ships today.',
     ctaLabel: '',
     ctaUrl: '',
+    releaseTime: '00:00',
   })),
 }
 

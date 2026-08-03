@@ -18,7 +18,7 @@ async function readLaunchWeek() {
 
 export const getPublicLaunchWeek = os.$context<ORPCContext>().handler(async () => {
   const config = await readLaunchWeek()
-  return publicLaunchWeek(config, new Date().toISOString().slice(0, 10))
+  return publicLaunchWeek(config, new Date())
 })
 
 export const adminGetLaunchWeek = adminProcedure.handler(readLaunchWeek)

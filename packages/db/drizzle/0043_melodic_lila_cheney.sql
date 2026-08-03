@@ -1,0 +1,1 @@
+ALTER TABLE "launch_week" ADD COLUMN "release_time" text DEFAULT '00:00' NOT NULL;

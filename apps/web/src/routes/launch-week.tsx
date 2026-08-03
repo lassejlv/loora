@@ -93,6 +93,7 @@ function LaunchWeekContent({
       {nextLaunch ? (
         <LaunchCountdown
           date={nextLaunch.date}
+          releaseTime={nextLaunch.releaseTime}
           dayName={nextLaunch.name}
           onReached={onLaunchReached}
         />
@@ -132,7 +133,7 @@ function LaunchWeekContent({
               {day.name}
             </h2>
             <span className="text-[12px] tabular-nums text-muted-foreground">
-              Day {index + 1} · {readableDate(day.date)}
+              Day {index + 1} · {readableDate(day.date)} · {day.releaseTime} UTC
             </span>
           </div>
 
@@ -150,7 +151,7 @@ function LaunchWeekContent({
             </div>
           ) : (
             <p className="mt-4 text-[13px] text-muted-foreground">
-              Opens on {day.name}, {readableDate(day.date)}.
+              Opens on {day.name}, {readableDate(day.date)} at {day.releaseTime} UTC.
             </p>
           )}
         </section>
@@ -165,8 +166,8 @@ function LaunchWeekContent({
   )
 }
 
-function timeUntil(date: string) {
-  const remaining = Math.max(0, new Date(`${date}T00:00:00Z`).getTime() - Date.now())
+function timeUntil(date: string, releaseTime: string) {
+  const remaining = Math.max(0, new Date(`${date}T${releaseTime}:00Z`).getTime() - Date.now())
   return {
     total: remaining,
     days: Math.floor(remaining / 86_400_000),
@@ -178,21 +179,23 @@ function timeUntil(date: string) {
 
 function LaunchCountdown({
   date,
+  releaseTime,
   dayName,
   onReached,
 }: {
   date: string
+  releaseTime: string
   dayName: string
   onReached: () => Promise<void>
 }) {
   const palette = usePalette()
   const link = { color: palette.accent }
-  const [remaining, setRemaining] = useState(() => timeUntil(date))
+  const [remaining, setRemaining] = useState(() => timeUntil(date, releaseTime))
 
   useEffect(() => {
     let lastRefresh = 0
     const update = () => {
-      const next = timeUntil(date)
+      const next = timeUntil(date, releaseTime)
       setRemaining(next)
       if (next.total === 0 && Date.now() - lastRefresh >= 5_000) {
         lastRefresh = Date.now()
@@ -202,7 +205,7 @@ function LaunchCountdown({
     update()
     const timer = window.setInterval(update, 1_000)
     return () => window.clearInterval(timer)
-  }, [date, onReached])
+  }, [date, releaseTime, onReached])
 
   return (
     <section className="mt-10 border-t border-dashed border-border pt-8">
@@ -210,7 +213,7 @@ function LaunchCountdown({
         Next launch: <span style={link}>{dayName}</span>
       </h2>
       <p className="mt-2 text-[13px] text-muted-foreground">
-        Unlocks {readableDate(date)} at 00:00 UTC.
+        Unlocks {readableDate(date)} at {releaseTime} UTC.
       </p>
       <div
         role="timer"

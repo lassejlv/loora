@@ -2,6 +2,7 @@ import { z } from 'zod'
 import type { LaunchWeekDay } from '@loora/db/schema'
 
 export const LAUNCH_WEEK_ID = 'primary'
+export const DEFAULT_RELEASE_TIME = '00:00'
 export const LAUNCH_WEEK_DAY_NAMES = [
   'Monday',
   'Tuesday',
@@ -12,7 +13,13 @@ export const LAUNCH_WEEK_DAY_NAMES = [
   'Sunday',
 ] as const
 
-const launchWeekDaySchema = z.object({
+/** UTC clock time as HH:mm, e.g. "09:30". */
+export const releaseTimeSchema = z
+  .string()
+  .trim()
+  .regex(/^([01]\d|2[0-3]):[0-5]\d$/, 'Use HH:mm in 24-hour UTC.')
+
+const launchWeekDayInputSchema = z.object({
   title: z.string().trim().min(1).max(120),
   description: z.string().trim().min(1).max(600),
   ctaLabel: z.string().trim().max(80),
@@ -23,6 +30,8 @@ const launchWeekDaySchema = z.object({
       'Use a relative path or an https:// URL.',
     ),
   ]),
+  /** Optional so older stored days without a time still parse; filled from the campaign default. */
+  releaseTime: releaseTimeSchema.optional(),
 }).superRefine((day, context) => {
   if (Boolean(day.ctaLabel) !== Boolean(day.ctaUrl)) {
     context.addIssue({
@@ -32,21 +41,34 @@ const launchWeekDaySchema = z.object({
   }
 })
 
-export const launchWeekConfigSchema = z.object({
+const launchWeekConfigInputSchema = z.object({
   enabled: z.boolean(),
   startDate: z.string().date().refine(
     (value) => new Date(`${value}T00:00:00Z`).getUTCDay() === 1,
     'Launch week must start on a Monday.',
   ),
+  /** Default unlock time for new days and for days that omit their own time. */
+  releaseTime: releaseTimeSchema.default(DEFAULT_RELEASE_TIME),
   headline: z.string().trim().min(1).max(120),
   description: z.string().trim().min(1).max(600),
-  days: z.array(launchWeekDaySchema).refine(
+  days: z.array(launchWeekDayInputSchema).refine(
     (days) => days.length === 5 || days.length === 7,
     'Launch week must have 5 or 7 days.',
   ),
 })
 
-export type LaunchWeekConfig = z.infer<typeof launchWeekConfigSchema>
+export const launchWeekConfigSchema = launchWeekConfigInputSchema.transform((config) => ({
+  ...config,
+  days: config.days.map((day) => ({
+    title: day.title,
+    description: day.description,
+    ctaLabel: day.ctaLabel,
+    ctaUrl: day.ctaUrl,
+    releaseTime: day.releaseTime ?? config.releaseTime,
+  })),
+}))
+
+export type LaunchWeekConfig = z.output<typeof launchWeekConfigSchema>
 
 export type PublicLaunchWeek =
   | { enabled: false }
@@ -58,6 +80,7 @@ export type PublicLaunchWeek =
       days: Array<{
         name: (typeof LAUNCH_WEEK_DAY_NAMES)[number]
         date: string
+        releaseTime: string
         status: 'upcoming' | 'today' | 'released'
         offer: LaunchWeekDay | null
       }>
@@ -67,6 +90,21 @@ function addDays(date: string, amount: number) {
   const value = new Date(`${date}T00:00:00Z`)
   value.setUTCDate(value.getUTCDate() + amount)
   return value.toISOString().slice(0, 10)
+}
+
+/** Instant a day's offer unlocks (UTC). */
+export function releaseInstant(date: string, releaseTime: string) {
+  return new Date(`${date}T${releaseTime}:00Z`)
+}
+
+function dayStatus(
+  date: string,
+  releaseTime: string,
+  now: Date,
+): 'upcoming' | 'today' | 'released' {
+  if (now.getTime() < releaseInstant(date, releaseTime).getTime()) return 'upcoming'
+  const todayUtc = now.toISOString().slice(0, 10)
+  return todayUtc === date ? 'today' : 'released'
 }
 
 export function nextMonday(now = new Date()) {
@@ -80,6 +118,7 @@ export function defaultLaunchWeekConfig(now = new Date()): LaunchWeekConfig {
   return {
     enabled: false,
     startDate: nextMonday(now),
+    releaseTime: DEFAULT_RELEASE_TIME,
     headline: 'Seven days. Seven releases.',
     description: 'A new Loora release lands every day. Return each morning to see what shipped.',
     days: LAUNCH_WEEK_DAY_NAMES.map((day) => ({
@@ -87,12 +126,17 @@ export function defaultLaunchWeekConfig(now = new Date()): LaunchWeekConfig {
       description: 'Describe what launches today and why it matters.',
       ctaLabel: '',
       ctaUrl: '',
+      releaseTime: DEFAULT_RELEASE_TIME,
     })),
   }
 }
 
-export function publicLaunchWeek(config: LaunchWeekConfig, today: string): PublicLaunchWeek {
+export function publicLaunchWeek(config: LaunchWeekConfig, now: Date | string): PublicLaunchWeek {
   if (!config.enabled) return { enabled: false as const }
+
+  const instant = typeof now === 'string'
+    ? new Date(`${now}T00:00:00Z`)
+    : now
 
   return {
     enabled: true as const,
@@ -102,11 +146,12 @@ export function publicLaunchWeek(config: LaunchWeekConfig, today: string): Publi
     days: config.days.map((offer, index) => {
       const name = LAUNCH_WEEK_DAY_NAMES[index]
       const date = addDays(config.startDate, index)
-      const status: 'upcoming' | 'today' | 'released' =
-        today < date ? 'upcoming' : today === date ? 'today' : 'released'
+      const releaseTime = offer.releaseTime
+      const status = dayStatus(date, releaseTime, instant)
       return {
         name,
         date,
+        releaseTime,
         status,
         offer: status === 'upcoming' ? null : offer as LaunchWeekDay,
       }

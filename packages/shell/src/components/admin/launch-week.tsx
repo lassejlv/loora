@@ -9,12 +9,16 @@ import { Textarea } from '@loora/ui/textarea'
 type LaunchWeekConfig = Awaited<ReturnType<typeof orpc.admin.launchWeek.get>>
 const DAY_NAMES = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
 
-function emptyDay(index: number): LaunchWeekConfig['days'][number] {
+function emptyDay(
+  index: number,
+  releaseTime: string,
+): LaunchWeekConfig['days'][number] {
   return {
     title: `${DAY_NAMES[index]} release`,
     description: 'Describe what launches today and why it matters.',
     ctaLabel: '',
     ctaUrl: '',
+    releaseTime,
   }
 }
 
@@ -54,8 +58,18 @@ export function AdminLaunchWeek() {
   }
 
   const setDayCount = (count: 5 | 7) => {
-    const days = Array.from({ length: count }, (_, index) => config.days[index] ?? emptyDay(index))
+    const days = Array.from(
+      { length: count },
+      (_, index) => config.days[index] ?? emptyDay(index, config.releaseTime),
+    )
     setConfig({ ...config, days })
+  }
+
+  const applyDefaultTimeToAll = () => {
+    setConfig({
+      ...config,
+      days: config.days.map((day) => ({ ...day, releaseTime: config.releaseTime })),
+    })
   }
 
   return (
@@ -80,7 +94,7 @@ export function AdminLaunchWeek() {
       </div>
 
       <div className="space-y-5 p-4">
-        <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_180px_140px]">
+        <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_180px_140px_140px]">
           <div className="space-y-1.5">
             <Label htmlFor="launch-week-headline">Headline</Label>
             <Input
@@ -99,6 +113,23 @@ export function AdminLaunchWeek() {
               onChange={(event) => setConfig({ ...config, startDate: event.target.value })}
             />
             <p className="text-2xs text-muted-foreground">Choose a Monday.</p>
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="launch-week-release-time">Default time</Label>
+            <Input
+              id="launch-week-release-time"
+              type="time"
+              nativeInput
+              value={config.releaseTime}
+              onChange={(event) => setConfig({ ...config, releaseTime: event.target.value.slice(0, 5) })}
+            />
+            <button
+              type="button"
+              className="text-2xs text-muted-foreground underline-offset-2 hover:underline"
+              onClick={applyDefaultTimeToAll}
+            >
+              Apply to all days
+            </button>
           </div>
           <div className="space-y-1.5">
             <Label>Campaign length</Label>
@@ -130,9 +161,21 @@ export function AdminLaunchWeek() {
         <div className="grid gap-px overflow-hidden rounded-md border border-line bg-line lg:grid-cols-2">
           {config.days.map((day, index) => (
             <div key={index} className="space-y-3 bg-surface p-4">
-              <div>
-                <p className="text-xs font-semibold">{formatDate(config.startDate, index)}</p>
-                <p className="text-2xs text-muted-foreground">Day {index + 1}</p>
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <p className="text-xs font-semibold">{formatDate(config.startDate, index)}</p>
+                  <p className="text-2xs text-muted-foreground">Day {index + 1}</p>
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor={`launch-day-${index}-time`}>Unlock (UTC)</Label>
+                  <Input
+                    id={`launch-day-${index}-time`}
+                    type="time"
+                    nativeInput
+                    value={day.releaseTime}
+                    onChange={(event) => updateDay(index, { releaseTime: event.target.value.slice(0, 5) })}
+                  />
+                </div>
               </div>
               <div className="space-y-1.5">
                 <Label htmlFor={`launch-day-${index}-title`}>Offer title</Label>
