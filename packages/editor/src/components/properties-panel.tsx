@@ -7,6 +7,7 @@ import {
 } from 'react'
 import {
   canvasId,
+  type CanvasColor,
   type CanvasInsets,
   type CanvasLayout,
   type CanvasLength,
@@ -14,6 +15,7 @@ import {
   type CanvasPaint,
   type CanvasStyle,
   type CanvasTypography,
+  type DesignToken,
   type NodeMutationPatch,
   type NodePatch,
   type NodeRef,
@@ -366,40 +368,86 @@ function ChoiceCell<T extends string>({
   )
 }
 
+/** `<input type="color">` takes six-digit hex and nothing else. */
+function hexSwatch(value: string | null) {
+  if (!value) return '#000000'
+  const match = /^#([\da-f]{3}|[\da-f]{6})[\da-f]{0,2}$/i.exec(value.trim())
+  if (!match) return '#000000'
+  const digits = match[1]!
+  return digits.length === 3
+    ? `#${digits[0]}${digits[0]}${digits[1]}${digits[1]}${digits[2]}${digits[2]}`
+    : `#${digits}`
+}
+
 function ColorCell({
   label,
   value,
+  tokens = [],
   onChange,
 }: {
   label: string
-  /** Hex string, or null for mixed / token-bound. */
-  value: string | null
-  onChange: (color: string) => void
+  /** Hex string, a token reference, or null for mixed. */
+  value: CanvasColor | null
+  /** The document's colour tokens; an empty list hides the token control. */
+  tokens?: DesignToken[]
+  onChange: (color: CanvasColor) => void
 }) {
+  const bound = value !== null && typeof value !== 'string' ? value.token : null
+  const token = bound === null ? undefined : tokens.find((item) => item.id === bound)
+  // A token is shown by name and previewed by its value, so a bound field reads
+  // as the token rather than as whatever hex it happens to resolve to today.
+  const literal =
+    typeof value === 'string'
+      ? value
+      : typeof token?.value === 'string'
+        ? token.value
+        : null
+
   return (
     <label className={cn(control, 'flex items-center gap-1.5 ps-1.5')}>
       <input
         type="color"
         aria-label={label}
-        value={value ?? '#000000'}
+        value={hexSwatch(literal)}
         className="size-4 shrink-0 cursor-pointer rounded border-0 bg-transparent p-0"
         onChange={(event) => onChange(event.target.value)}
       />
       <input
-        key={value ?? MIXED}
+        key={bound ?? literal ?? MIXED}
         aria-label={`${label} hex`}
-        defaultValue={value ?? ''}
+        defaultValue={bound ? (token?.name ?? bound) : (literal ?? '')}
         placeholder={value === null ? MIXED : undefined}
-        className="h-full w-full min-w-0 bg-transparent pe-2 font-mono outline-none"
+        className="h-full w-full min-w-0 bg-transparent pe-1 font-mono outline-none"
         onBlur={(event) => {
           const next = event.currentTarget.value.trim()
           if (/^#[\da-f]{3,8}$/i.test(next)) onChange(next)
-          else event.currentTarget.value = value ?? ''
+          else event.currentTarget.value = bound ? (token?.name ?? bound) : (literal ?? '')
         }}
         onKeyDown={(event) => {
           if (event.key === 'Enter') event.currentTarget.blur()
         }}
       />
+      {tokens.length > 0 ? (
+        <select
+          aria-label={`${label} token`}
+          value={bound ?? ''}
+          className="h-full shrink-0 bg-transparent pe-1 text-right text-muted-foreground outline-none"
+          onChange={(event) => {
+            const id = event.target.value
+            // Leaving a token keeps the colour it was resolving to, so
+            // unbinding never repaints the layer.
+            onChange(id ? { token: id } : (literal ?? '#000000'))
+          }}
+        >
+          <option value="">Custom</option>
+          {bound && !token ? <option value={bound}>{bound}</option> : null}
+          {tokens.map((item) => (
+            <option key={item.id} value={item.id}>
+              {item.name}
+            </option>
+          ))}
+        </select>
+      ) : null}
     </label>
   )
 }
@@ -477,10 +525,8 @@ function LengthCell({
 
 const EMPTY_INSETS: CanvasInsets = { top: 0, right: 0, bottom: 0, left: 0 }
 
-function solidHex(paint: CanvasPaint | undefined) {
-  return paint?.type === 'solid' && typeof paint.color === 'string'
-    ? paint.color
-    : null
+function solidColor(paint: CanvasPaint | undefined): CanvasColor | null {
+  return paint?.type === 'solid' ? paint.color : null
 }
 
 type VectorPath = VectorNode['paths'][number]
@@ -491,12 +537,11 @@ type VectorPath = VectorNode['paths'][number]
  * reads whichever channel the path actually paints so a solid set and an
  * outline set both answer one Color field.
  */
-function vectorPaintColor(path: VectorPath) {
-  const color = path.fill ?? path.stroke
-  return typeof color === 'string' ? color : null
+function vectorPaintColor(path: VectorPath): CanvasColor | null {
+  return path.fill ?? path.stroke ?? null
 }
 
-function recoloredPath(path: VectorPath, color: string): VectorPath {
+function recoloredPath(path: VectorPath, color: CanvasColor): VectorPath {
   const next = { ...path }
   if (path.stroke !== undefined) next.stroke = color
   // A path that paints neither would be invisible; give it a fill rather than
@@ -617,7 +662,10 @@ export function CanvasPropertiesPanel({ onClose }: { onClose?: () => void }) {
   const direction = layout((item) => item.layout.direction ?? 'row')
   const padding = layout((item) => item.layout.padding ?? EMPTY_INSETS)
   const typography = layout((item) => item.style.typography ?? null)
-  const fill = layout((item) => solidHex(item.style.fills[0]))
+  const fill = layout((item) => solidColor(item.style.fills[0]))
+  const colorTokens = Object.values(document.tokens)
+    .filter((token) => token.type === 'color')
+    .sort((left, right) => left.name.localeCompare(right.name))
   const gradient =
     !many && node.style.fills[0]?.type === 'linear-gradient'
       ? node.style.fills[0]
@@ -1018,6 +1066,7 @@ export function CanvasPropertiesPanel({ onClose }: { onClose?: () => void }) {
             <ColorCell
               label="Color"
               value={vectorColor}
+              tokens={colorTokens}
               onChange={(color) =>
                 patchVectorPaths(
                   (path) => recoloredPath(path, color),
@@ -1060,10 +1109,7 @@ export function CanvasPropertiesPanel({ onClose }: { onClose?: () => void }) {
                       fills: [
                         {
                           type: 'solid',
-                          color:
-                            typeof gradient.stops[0]?.color === 'string'
-                              ? gradient.stops[0].color
-                              : '#ffffff',
+                          color: gradient.stops[0]?.color ?? '#ffffff',
                         },
                       ],
                     }))
@@ -1091,7 +1137,8 @@ export function CanvasPropertiesPanel({ onClose }: { onClose?: () => void }) {
                 <ColorCell
                   key={index}
                   label={`Stop ${index + 1}`}
-                  value={typeof stop.color === 'string' ? stop.color : null}
+                  value={stop.color}
+                  tokens={colorTokens}
                   onChange={(color) =>
                     patchStyle((style) => ({
                       ...style,
@@ -1115,6 +1162,7 @@ export function CanvasPropertiesPanel({ onClose }: { onClose?: () => void }) {
               <ColorCell
                 label="Fill"
                 value={fill}
+                tokens={colorTokens}
                 onChange={(color) =>
                   patchStyle((style) => ({
                     ...style,
@@ -1200,7 +1248,8 @@ export function CanvasPropertiesPanel({ onClose }: { onClose?: () => void }) {
               <div className="flex items-center gap-1">
                 <ColorCell
                   label="Stroke"
-                  value={typeof stroke.color === 'string' ? stroke.color : null}
+                  value={stroke.color}
+                  tokens={colorTokens}
                   onChange={(color) =>
                     patchStyle((style) => ({
                       ...style,
@@ -1273,7 +1322,8 @@ export function CanvasPropertiesPanel({ onClose }: { onClose?: () => void }) {
               <div className="flex items-center gap-1">
                 <ColorCell
                   label="Shadow"
-                  value={typeof shadow.color === 'string' ? shadow.color : null}
+                  value={shadow.color}
+                  tokens={colorTokens}
                   onChange={(color) =>
                     patchStyle((style) => ({
                       ...style,

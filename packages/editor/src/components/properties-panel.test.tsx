@@ -55,6 +55,15 @@ function fixture() {
   return document
 }
 
+function withBrandToken(document: ReturnType<typeof fixture>) {
+  document.tokens.brand = {
+    id: 'brand',
+    name: 'Brand',
+    type: 'color',
+    value: '#6d28d9',
+  }
+}
+
 function Select({ ids }: { ids: string[] }) {
   const session = useCanvasSession()
   useEffect(() => {
@@ -68,8 +77,13 @@ function Select({ ids }: { ids: string[] }) {
  * process rewrite the shared document, and `screen` reads whatever body is
  * current rather than the one this panel was mounted into.
  */
-function setup(ids: string[]) {
-  const engine = new CanvasEngine(fixture())
+function setup(
+  ids: string[],
+  prepare: (document: ReturnType<typeof fixture>) => void = () => {},
+) {
+  const document = fixture()
+  prepare(document)
+  const engine = new CanvasEngine(document)
   const view = render(
     <CanvasProvider engine={engine}>
       <Select ids={ids} />
@@ -253,5 +267,37 @@ describe('CanvasPropertiesPanel', () => {
 
     cleanup()
     expect(setup(['card']).view.queryByLabelText('Color')).toBeNull()
+  })
+
+  test('binds a colour to a token, and unbinding keeps what it painted', () => {
+    const { engine, view } = setup(['solidIcon'], withBrandToken)
+    fireEvent.change(view.getByLabelText('Color token'), {
+      target: { value: 'brand' },
+    })
+    const bound = engine.getNode('solidIcon')
+    expect(bound?.type === 'vector' && bound.paths[0]?.fill).toEqual({
+      token: 'brand',
+    })
+    expect((view.getByLabelText('Color hex') as HTMLInputElement).value).toBe(
+      'Brand',
+    )
+
+    fireEvent.change(view.getByLabelText('Color token'), { target: { value: '' } })
+    const unbound = engine.getNode('solidIcon')
+    expect(unbound?.type === 'vector' && unbound.paths[0]?.fill).toBe('#6d28d9')
+  })
+
+  test('offers the same tokens to fill, and none at all without any', () => {
+    const { engine, view } = setup(['card'], withBrandToken)
+    fireEvent.change(view.getByLabelText('Fill token'), {
+      target: { value: 'brand' },
+    })
+    expect(engine.getNode('card')?.style.fills[0]).toEqual({
+      type: 'solid',
+      color: { token: 'brand' },
+    })
+
+    cleanup()
+    expect(setup(['card']).view.queryByLabelText('Fill token')).toBeNull()
   })
 })
