@@ -24,6 +24,7 @@ import { DesignThumbnail } from './design-thumbnail'
 import { AppSettingsDialog } from './settings-dialog'
 import { StatusBadge } from './status-badge'
 import { UpgradeToProButton } from '@loora/editor/upgrade-to-pro'
+import { OpenTabsBar } from '@loora/editor/tabs-bar'
 import { clearWelcomeSeen } from './welcome-dialog'
 import { Button } from '@loora/ui/button'
 import {
@@ -493,236 +494,239 @@ export function DesignsDashboard() {
   const accountName = session?.user?.name ?? session?.user?.email ?? 'Account'
 
   return (
-    <div className="flex h-screen min-h-0 bg-cx-canvas text-foreground">
-      <aside className="hidden w-48 shrink-0 flex-col border-e border-line bg-surface md:flex">
-        <Link to="/app" className="flex h-10 shrink-0 items-center gap-2 px-3">
-          <img
-            src="/logo192.png"
-            alt=""
-            width={16}
-            height={16}
-            className="size-4 shrink-0 rounded-sm"
-          />
-          <span className="text-xs font-semibold tracking-tight">loora</span>
-        </Link>
-        <AppNavigation
-          active="recents"
-          onSettings={() => setSettingsOpen(true)}
-        />
-        <div className="mt-auto flex flex-col gap-2 border-t border-line p-2">
-          <StatusBadge className="-mb-1" />
-          <UpgradeToProButton fullWidth size="sm" />
-          <AppAccountMenu
-            name={accountName}
+    <div className="flex h-screen min-h-0 flex-col bg-cx-canvas text-foreground">
+      <OpenTabsBar />
+      <div className="flex min-h-0 flex-1">
+        <aside className="hidden w-48 shrink-0 flex-col border-e border-line bg-surface md:flex">
+          <Link to="/app" className="flex h-10 shrink-0 items-center gap-2 px-3">
+            <img
+              src="/logo192.png"
+              alt=""
+              width={16}
+              height={16}
+              className="size-4 shrink-0 rounded-sm"
+            />
+            <span className="text-xs font-semibold tracking-tight">loora</span>
+          </Link>
+          <AppNavigation
+            active="recents"
             onSettings={() => setSettingsOpen(true)}
-            onSignOut={() => void signOut()}
           />
-        </div>
-      </aside>
-
-      <main className="flex min-w-0 flex-1 flex-col overflow-y-auto">
-        <header className="sticky top-0 z-10 flex h-10 flex-wrap items-center gap-2 border-b border-line bg-surface px-3 md:px-4">
-          <div className="md:hidden">
+          <div className="mt-auto flex flex-col gap-2 border-t border-line p-2">
+            <StatusBadge className="-mb-1" />
+            <UpgradeToProButton fullWidth size="sm" />
             <AppAccountMenu
-              compact
               name={accountName}
               onSettings={() => setSettingsOpen(true)}
               onSignOut={() => void signOut()}
             />
           </div>
-          <h1 className="sr-only">Your design files</h1>
-          <div className="flex flex-1 items-center gap-0.5">
-            <Button
-              size="xs"
-              variant={tab === 'recents' ? 'secondary' : 'ghost'}
-              aria-pressed={tab === 'recents'}
-              onClick={() => setTab('recents')}
-            >
-              Recents
-            </Button>
-            <Button
-              size="xs"
-              variant={tab === 'archived' ? 'secondary' : 'ghost'}
-              aria-pressed={tab === 'archived'}
-              onClick={() => setTab('archived')}
-            >
-              <ArchiveIcon />
-              Archived
-            </Button>
-          </div>
-          {tab === 'recents' ? (
-            <div className="flex items-center gap-0.5 rounded-md border border-line p-0.5">
+        </aside>
+
+        <main className="flex min-w-0 flex-1 flex-col overflow-y-auto">
+          <header className="sticky top-0 z-10 flex h-10 flex-wrap items-center gap-2 border-b border-line bg-surface px-3 md:px-4">
+            <div className="md:hidden">
+              <AppAccountMenu
+                compact
+                name={accountName}
+                onSettings={() => setSettingsOpen(true)}
+                onSignOut={() => void signOut()}
+              />
+            </div>
+            <h1 className="sr-only">Your design files</h1>
+            <div className="flex flex-1 items-center gap-0.5">
               <Button
-                variant={view === 'grid' ? 'secondary' : 'ghost'}
-                size="icon-xs"
-                aria-label="Grid view"
-                aria-pressed={view === 'grid'}
-                onClick={() => setView('grid')}
+                size="xs"
+                variant={tab === 'recents' ? 'secondary' : 'ghost'}
+                aria-pressed={tab === 'recents'}
+                onClick={() => setTab('recents')}
               >
-                <LayoutGridIcon />
+                Recents
               </Button>
               <Button
-                variant={view === 'list' ? 'secondary' : 'ghost'}
-                size="icon-xs"
-                aria-label="List view"
-                aria-pressed={view === 'list'}
-                onClick={() => setView('list')}
+                size="xs"
+                variant={tab === 'archived' ? 'secondary' : 'ghost'}
+                aria-pressed={tab === 'archived'}
+                onClick={() => setTab('archived')}
               >
-                <ListIcon />
+                <ArchiveIcon />
+                Archived
               </Button>
             </div>
-          ) : null}
-          <div className="relative w-44">
-            <SearchIcon className="pointer-events-none absolute start-2 top-1/2 z-10 size-3.5 -translate-y-1/2 text-muted-foreground" />
-            <Input
-              ref={searchRef}
-              type="search"
-              aria-label="Search files"
-              placeholder={tab === 'archived' ? 'Search archive' : 'Search recents'}
-              className="rounded-sm bg-surface-2 text-start [&_[data-slot=input]]:pe-8 [&_[data-slot=input]]:ps-7 [&_[data-slot=input]]:text-start"
-              value={query}
-              onChange={(event) => setQuery(event.target.value)}
-            />
-            {/* The ⌘F binding above is invisible otherwise; the hint retires
-                once there is a query, where it would sit under the text. */}
-            {query ? null : (
-              <kbd className="pointer-events-none absolute end-1.5 top-1/2 z-10 -translate-y-1/2 rounded-sm border border-line px-1 text-2xs leading-4 text-muted-foreground">
-                {searchHint()}
-              </kbd>
-            )}
-          </div>
-          {tab === 'recents' ? (
-            <Button onClick={() => void newFile()} disabled={creating}>
-              {creating ? <Spinner /> : <FilePlus2Icon />}
-              New file
-            </Button>
-          ) : null}
-        </header>
-
-        {error ? (
-          <div className="mx-4 mt-4 flex items-center gap-2 rounded-md border border-destructive/32 bg-destructive/8 px-3 py-2 text-xs text-destructive-foreground md:mx-5">
-            <span className="min-w-0 flex-1">{error}</span>
-            <Button size="xs" variant="outline" onClick={() => void loadDesigns()}>
-              Try again
-            </Button>
-            <Button size="icon-xs" variant="ghost" aria-label="Dismiss" onClick={() => setError(null)}>
-              <XIcon />
-            </Button>
-          </div>
-        ) : null}
-
-        {shared.length > 0 && tab === 'recents' ? (
-          <section className="px-4 pt-4 md:px-4">
-            <h2 className="mb-2 px-0.5 text-xs font-medium text-muted-foreground">
-              Shared with me
-            </h2>
-            <div className="overflow-hidden rounded-lg bg-surface shadow-panel">
-              {shared.map((entry) => (
-                <Link
-                  key={`${entry.ownerUserId}:${entry.id}`}
-                  to="/design/$id"
-                  params={{ id: entry.id }}
-                  className="flex items-center gap-3 border-b border-line px-3 py-2.5 last:border-b-0 hover:bg-accent/50"
+            {tab === 'recents' ? (
+              <div className="flex items-center gap-0.5 rounded-md border border-line p-0.5">
+                <Button
+                  variant={view === 'grid' ? 'secondary' : 'ghost'}
+                  size="icon-xs"
+                  aria-label="Grid view"
+                  aria-pressed={view === 'grid'}
+                  onClick={() => setView('grid')}
                 >
-                  <FileCode2Icon className="size-4 shrink-0 text-muted-foreground" />
-                  <span className="min-w-0 flex-1 truncate text-sm">
-                    {entry.name}
-                  </span>
-                  <span className="hidden shrink-0 text-xs text-muted-foreground sm:block">
-                    {entry.ownerName || entry.ownerEmail}
-                  </span>
-                  <span className="shrink-0 rounded border border-line px-1.5 py-0.5 text-2xs text-muted-foreground">
-                    {entry.role === 'edit' ? 'Can edit' : 'Can view'}
-                  </span>
-                  <span className="hidden shrink-0 text-xs text-muted-foreground md:block">
-                    {relativeTime(entry.updatedAt)}
-                  </span>
-                </Link>
-              ))}
+                  <LayoutGridIcon />
+                </Button>
+                <Button
+                  variant={view === 'list' ? 'secondary' : 'ghost'}
+                  size="icon-xs"
+                  aria-label="List view"
+                  aria-pressed={view === 'list'}
+                  onClick={() => setView('list')}
+                >
+                  <ListIcon />
+                </Button>
+              </div>
+            ) : null}
+            <div className="relative w-44">
+              <SearchIcon className="pointer-events-none absolute start-2 top-1/2 z-10 size-3.5 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                ref={searchRef}
+                type="search"
+                aria-label="Search files"
+                placeholder={tab === 'archived' ? 'Search archive' : 'Search recents'}
+                className="rounded-sm bg-surface-2 text-start [&_[data-slot=input]]:pe-8 [&_[data-slot=input]]:ps-7 [&_[data-slot=input]]:text-start"
+                value={query}
+                onChange={(event) => setQuery(event.target.value)}
+              />
+              {/* The ⌘F binding above is invisible otherwise; the hint retires
+                  once there is a query, where it would sit under the text. */}
+              {query ? null : (
+                <kbd className="pointer-events-none absolute end-1.5 top-1/2 z-10 -translate-y-1/2 rounded-sm border border-line px-1 text-2xs leading-4 text-muted-foreground">
+                  {searchHint()}
+                </kbd>
+              )}
             </div>
-          </section>
-        ) : null}
+            {tab === 'recents' ? (
+              <Button onClick={() => void newFile()} disabled={creating}>
+                {creating ? <Spinner /> : <FilePlus2Icon />}
+                New file
+              </Button>
+            ) : null}
+          </header>
 
-        <div className="min-h-0 flex-1 px-4 pt-4 pb-8 md:px-4">
-          {tab === 'archived' ? (
-            archived === null ? (
-              <FilesLoading view="list" />
-            ) : visibleArchived.length === 0 ? (
+          {error ? (
+            <div className="mx-4 mt-4 flex items-center gap-2 rounded-md border border-destructive/32 bg-destructive/8 px-3 py-2 text-xs text-destructive-foreground md:mx-5">
+              <span className="min-w-0 flex-1">{error}</span>
+              <Button size="xs" variant="outline" onClick={() => void loadDesigns()}>
+                Try again
+              </Button>
+              <Button size="icon-xs" variant="ghost" aria-label="Dismiss" onClick={() => setError(null)}>
+                <XIcon />
+              </Button>
+            </div>
+          ) : null}
+
+          {shared.length > 0 && tab === 'recents' ? (
+            <section className="px-4 pt-4 md:px-4">
+              <h2 className="mb-2 px-0.5 text-xs font-medium text-muted-foreground">
+                Shared with me
+              </h2>
+              <div className="overflow-hidden rounded-lg bg-surface shadow-panel">
+                {shared.map((entry) => (
+                  <Link
+                    key={`${entry.ownerUserId}:${entry.id}`}
+                    to="/design/$id"
+                    params={{ id: entry.id }}
+                    className="flex items-center gap-3 border-b border-line px-3 py-2.5 last:border-b-0 hover:bg-accent/50"
+                  >
+                    <FileCode2Icon className="size-4 shrink-0 text-muted-foreground" />
+                    <span className="min-w-0 flex-1 truncate text-sm">
+                      {entry.name}
+                    </span>
+                    <span className="hidden shrink-0 text-xs text-muted-foreground sm:block">
+                      {entry.ownerName || entry.ownerEmail}
+                    </span>
+                    <span className="shrink-0 rounded border border-line px-1.5 py-0.5 text-2xs text-muted-foreground">
+                      {entry.role === 'edit' ? 'Can edit' : 'Can view'}
+                    </span>
+                    <span className="hidden shrink-0 text-xs text-muted-foreground md:block">
+                      {relativeTime(entry.updatedAt)}
+                    </span>
+                  </Link>
+                ))}
+              </div>
+            </section>
+          ) : null}
+
+          <div className="min-h-0 flex-1 px-4 pt-4 pb-8 md:px-4">
+            {tab === 'archived' ? (
+              archived === null ? (
+                <FilesLoading view="list" />
+              ) : visibleArchived.length === 0 ? (
+                <div className="rounded-md border border-dashed border-line bg-surface px-4 py-12 text-center">
+                  <p className="text-sm font-medium">
+                    {archived.length === 0
+                      ? 'Nothing archived'
+                      : 'No archived files match that search'}
+                  </p>
+                  <p className="mx-auto mt-1.5 max-w-xs text-xs text-muted-foreground">
+                    {archived.length === 0
+                      ? 'Archiving a file takes it out of Recents and stops it counting against your plan. You can restore it here, or delete it for good.'
+                      : 'Try a different name.'}
+                  </p>
+                </div>
+              ) : (
+                <div className="overflow-hidden rounded-lg bg-surface shadow-panel">
+                  {visibleArchived.map((design) => (
+                    <ArchivedRow
+                      key={design.id}
+                      design={design}
+                      busy={restoringId === design.id}
+                      onRestore={() => void restoreDesign(design)}
+                      onDelete={() => setDeleteTarget(design)}
+                    />
+                  ))}
+                </div>
+              )
+            ) : designs === null ? (
+              <FilesLoading view={view} />
+            ) : visible.length === 0 ? (
               <div className="rounded-md border border-dashed border-line bg-surface px-4 py-12 text-center">
                 <p className="text-sm font-medium">
-                  {archived.length === 0
-                    ? 'Nothing archived'
-                    : 'No archived files match that search'}
+                  {designs.length === 0 ? 'No design files yet' : 'No files match that search'}
                 </p>
                 <p className="mx-auto mt-1.5 max-w-xs text-xs text-muted-foreground">
-                  {archived.length === 0
-                    ? 'Archiving a file takes it out of Recents and stops it counting against your plan. You can restore it here, or delete it for good.'
+                  {designs.length === 0
+                    ? 'Start a file and open it on the canvas.'
                     : 'Try a different name.'}
                 </p>
+                {designs.length === 0 ? (
+                  <Button className="mt-5" onClick={() => void newFile()} disabled={creating}>
+                    {creating ? <Spinner /> : <FilePlus2Icon />}
+                    New file
+                  </Button>
+                ) : null}
               </div>
-            ) : (
-              <div className="overflow-hidden rounded-lg bg-surface shadow-panel">
-                {visibleArchived.map((design) => (
-                  <ArchivedRow
+            ) : view === 'grid' ? (
+              <div className={GRID_CLASSES}>
+                {visible.map((design) => (
+                  <FileCard
                     key={design.id}
                     design={design}
-                    busy={restoringId === design.id}
-                    onRestore={() => void restoreDesign(design)}
-                    onDelete={() => setDeleteTarget(design)}
+                    onRename={() => {
+                      setRenameName(design.name)
+                      setRenameTarget(design)
+                    }}
+                    onArchive={() => setArchiveTarget(design)}
                   />
                 ))}
               </div>
-            )
-          ) : designs === null ? (
-            <FilesLoading view={view} />
-          ) : visible.length === 0 ? (
-            <div className="rounded-md border border-dashed border-line bg-surface px-4 py-12 text-center">
-              <p className="text-sm font-medium">
-                {designs.length === 0 ? 'No design files yet' : 'No files match that search'}
-              </p>
-              <p className="mx-auto mt-1.5 max-w-xs text-xs text-muted-foreground">
-                {designs.length === 0
-                  ? 'Start a file and open it on the canvas.'
-                  : 'Try a different name.'}
-              </p>
-              {designs.length === 0 ? (
-                <Button className="mt-5" onClick={() => void newFile()} disabled={creating}>
-                  {creating ? <Spinner /> : <FilePlus2Icon />}
-                  New file
-                </Button>
-              ) : null}
-            </div>
-          ) : view === 'grid' ? (
-            <div className={GRID_CLASSES}>
-              {visible.map((design) => (
-                <FileCard
-                  key={design.id}
-                  design={design}
-                  onRename={() => {
-                    setRenameName(design.name)
-                    setRenameTarget(design)
-                  }}
-                  onArchive={() => setArchiveTarget(design)}
-                />
-              ))}
-            </div>
-          ) : (
-            <div className="overflow-hidden rounded-lg bg-surface shadow-panel">
-              {visible.map((design) => (
-                <FileRow
-                  key={design.id}
-                  design={design}
-                  onRename={() => {
-                    setRenameName(design.name)
-                    setRenameTarget(design)
-                  }}
-                  onArchive={() => setArchiveTarget(design)}
-                />
-              ))}
-            </div>
-          )}
-        </div>
-      </main>
+            ) : (
+              <div className="overflow-hidden rounded-lg bg-surface shadow-panel">
+                {visible.map((design) => (
+                  <FileRow
+                    key={design.id}
+                    design={design}
+                    onRename={() => {
+                      setRenameName(design.name)
+                      setRenameTarget(design)
+                    }}
+                    onArchive={() => setArchiveTarget(design)}
+                  />
+                ))}
+              </div>
+            )}
+          </div>
+        </main>
+      </div>
 
       <Dialog
         open={renameTarget !== null}

@@ -32,6 +32,11 @@ import {
 } from '../lib/canvas-client'
 import { createStarterCanvas } from '../lib/canvas-fixtures'
 import { createDesign, type DesignSummary } from '../lib/designs'
+import {
+  forgetOpenDesign,
+  rememberOpenDesign,
+} from '../lib/open-designs'
+import { OpenTabsBar } from './tabs-bar'
 import { orpc } from '@loora/rpc/client'
 import { Button } from '@loora/ui/button'
 import { Share2Icon } from '@loora/ui/icons'
@@ -312,6 +317,15 @@ export function CanvasApp({
     [],
   )
 
+  useEffect(() => {
+    if (preview || !activeId) return
+    const name =
+      documents.find((document) => document.id === activeId)?.name ??
+      controller?.engine.document.name ??
+      'Untitled'
+    rememberOpenDesign(activeId, name)
+  }, [preview, activeId, documents, controller])
+
   if (preview) {
     return (
       <div className="h-screen min-h-[42rem] w-full">
@@ -322,52 +336,58 @@ export function CanvasApp({
 
   if (error) {
     return (
-      <main className="grid h-screen place-items-center bg-cx-canvas p-4">
-        <div className="max-w-sm rounded-lg border bg-card p-4 text-center">
-          <h1 className="text-base font-semibold">Canvas could not open</h1>
-          <p className="mt-2 text-sm text-muted-foreground">{error}</p>
-          <div className="mt-4 flex items-center justify-center gap-2">
-            {activeId ? (
-              <Button
-                onClick={() => void openTarget({ designId: activeId, draftId: null })}
-              >
-                <RefreshCwIcon />
-                Retry
+      <div className="flex h-screen min-h-0 flex-col">
+        <OpenTabsBar activeId={activeId} />
+        <main className="grid min-h-0 flex-1 place-items-center bg-cx-canvas p-4">
+          <div className="max-w-sm rounded-lg border bg-card p-4 text-center">
+            <h1 className="text-base font-semibold">Canvas could not open</h1>
+            <p className="mt-2 text-sm text-muted-foreground">{error}</p>
+            <div className="mt-4 flex items-center justify-center gap-2">
+              {activeId ? (
+                <Button
+                  onClick={() => void openTarget({ designId: activeId, draftId: null })}
+                >
+                  <RefreshCwIcon />
+                  Retry
+                </Button>
+              ) : null}
+              <Button variant="outline" render={<Link to="/app" />}>
+                <FolderIcon />
+                All files
               </Button>
-            ) : null}
-            <Button variant="outline" render={<Link to="/app" />}>
-              <FolderIcon />
-              All files
-            </Button>
+            </div>
           </div>
-        </div>
-      </main>
+        </main>
+      </div>
     )
   }
 
   if (loading || !activeId || !controller) {
     return (
-      <main className="grid h-screen place-items-center bg-cx-canvas">
-        <div className="flex flex-col items-center gap-5">
-          <img
-            src="/logo-removebg-preview.png"
-            alt="Loora"
-            width={48}
-            height={48}
-            className="size-12"
-            draggable={false}
-          />
-          <div
-            className="h-0.5 w-32 overflow-hidden rounded-full bg-foreground/10"
-            role="progressbar"
-            aria-valuetext={progress}
-            aria-busy="true"
-          >
-            <div className="cx-load-bar h-full w-2/5 rounded-full bg-foreground/70" />
+      <div className="flex h-screen min-h-0 flex-col">
+        <OpenTabsBar activeId={activeId} />
+        <main className="grid min-h-0 flex-1 place-items-center bg-cx-canvas">
+          <div className="flex flex-col items-center gap-5">
+            <img
+              src="/logo-removebg-preview.png"
+              alt="Loora"
+              width={48}
+              height={48}
+              className="size-12"
+              draggable={false}
+            />
+            <div
+              className="h-0.5 w-32 overflow-hidden rounded-full bg-foreground/10"
+              role="progressbar"
+              aria-valuetext={progress}
+              aria-busy="true"
+            >
+              <div className="cx-load-bar h-full w-2/5 rounded-full bg-foreground/70" />
+            </div>
+            <p className="text-xs text-muted-foreground">{progress}</p>
           </div>
-          <p className="text-xs text-muted-foreground">{progress}</p>
-        </div>
-      </main>
+        </main>
+      </div>
     )
   }
 
@@ -402,6 +422,7 @@ export function CanvasApp({
       throw new Error('Save or resolve pending changes before archiving.')
     }
     await orpc.design.archive({ id: activeId })
+    forgetOpenDesign(activeId)
     await controller.close()
     controllerRef.current = null
     setController(null)
@@ -415,59 +436,62 @@ export function CanvasApp({
     )
   }
   return (
-    <div className="h-screen min-h-0">
-      <CanvasEditor
-        controller={controller}
-        renderSettings={renderSettings}
-        name={active?.name ?? controller.engine.document.name}
-        readOnly={
-          shareRole === 'view' ||
-          activeBranch?.status === 'applied' ||
-          activeBranch?.status === 'closed'
-        }
-        topBar={({ openAssets, openHistory }) => (
-          <>
-            <CanvasDocSwitcher
-              documents={documents}
-              activeId={activeId}
-              onSwitch={switchDesign}
-              onNew={() => void newDesign()}
-              onAssets={openAssets}
-              onHistory={openHistory}
-              onRename={() => {
-                setRenameName(active?.name ?? '')
-                setRenameOpen(true)
-              }}
-              onArchive={() => setArchiveOpen(true)}
-            />
-            <span className="text-muted-foreground/50">/</span>
-            {shareRole === 'owner' ? (
-              <CanvasBranches
-                designId={activeId}
-                activeDraftId={activeDraftId}
-                controller={controller}
-                branches={branches}
-                onBranchesChange={setBranches}
-                onSwitch={switchTarget}
+    <div className="flex h-screen min-h-0 flex-col">
+      <OpenTabsBar activeId={activeId} />
+      <div className="relative min-h-0 flex-1">
+        <CanvasEditor
+          controller={controller}
+          renderSettings={renderSettings}
+          name={active?.name ?? controller.engine.document.name}
+          readOnly={
+            shareRole === 'view' ||
+            activeBranch?.status === 'applied' ||
+            activeBranch?.status === 'closed'
+          }
+          topBar={({ openAssets, openHistory }) => (
+            <>
+              <CanvasDocSwitcher
+                documents={documents}
+                activeId={activeId}
+                onSwitch={switchDesign}
+                onNew={() => void newDesign()}
+                onAssets={openAssets}
+                onHistory={openHistory}
+                onRename={() => {
+                  setRenameName(active?.name ?? '')
+                  setRenameOpen(true)
+                }}
+                onArchive={() => setArchiveOpen(true)}
               />
-            ) : null}
-          </>
-        )}
-        topBarEnd={
-          <>
-            <UpgradeToProButton size="xs" variant="outline" />
-            <CanvasPresenceFacePile controller={controller} />
-            <Button
-              size="xs"
-              variant={shareRole === 'owner' ? 'outline' : 'ghost'}
-              onClick={() => setShareOpen(true)}
-            >
-              <Share2Icon />
-              {shareRole === 'view' ? 'Viewing' : 'Share'}
-            </Button>
-          </>
-        }
-      />
+              <span className="text-muted-foreground/50">/</span>
+              {shareRole === 'owner' ? (
+                <CanvasBranches
+                  designId={activeId}
+                  activeDraftId={activeDraftId}
+                  controller={controller}
+                  branches={branches}
+                  onBranchesChange={setBranches}
+                  onSwitch={switchTarget}
+                />
+              ) : null}
+            </>
+          )}
+          topBarEnd={
+            <>
+              <UpgradeToProButton size="xs" variant="outline" />
+              <CanvasPresenceFacePile controller={controller} />
+              <Button
+                size="xs"
+                variant={shareRole === 'owner' ? 'outline' : 'ghost'}
+                onClick={() => setShareOpen(true)}
+              >
+                <Share2Icon />
+                {shareRole === 'view' ? 'Viewing' : 'Share'}
+              </Button>
+            </>
+          }
+        />
+      </div>
       {activeId ? (
         <ShareDialog
           designId={activeId}
