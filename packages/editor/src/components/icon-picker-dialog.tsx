@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { motion, useReducedMotion } from 'motion/react'
 import {
   Dialog,
@@ -10,12 +10,7 @@ import {
   DialogTitle,
 } from '@loora/ui/dialog'
 import { Input } from '@loora/ui/input'
-import {
-  Tabs,
-  TabsList,
-  TabsTrigger,
-  TabsContent,
-} from '@loora/ui/tabs'
+import { Tabs, TabsList, TabsTrigger } from '@loora/ui/tabs'
 import { Button } from '@loora/ui/button'
 import {
   getIcons,
@@ -48,20 +43,25 @@ export function IconPickerDialog({
 
   const [visibleCount, setVisibleCount] = useState(PAGE_SIZE)
   const visible = icons.slice(0, visibleCount)
-  const sentinelRef = useRef<HTMLDivElement | null>(null)
+  // Callback refs, not ref objects: the dialog mounts its popup after this
+  // effect would first run, and a ref object would still be null then.
+  const [scrollArea, setScrollArea] = useState<HTMLDivElement | null>(null)
+  const [sentinel, setSentinel] = useState<HTMLDivElement | null>(null)
 
-  // Load the next page whenever the sentinel scrolls into view.
+  // Load the next page as the end of the list comes into view.
   useEffect(() => {
-    const sentinel = sentinelRef.current
-    if (!open || !sentinel || visibleCount >= icons.length) return
-    const observer = new IntersectionObserver((entries) => {
-      if (entries.some((entry) => entry.isIntersecting)) {
-        setVisibleCount((count) => count + PAGE_SIZE)
-      }
-    })
+    if (!sentinel || visibleCount >= icons.length) return
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((entry) => entry.isIntersecting)) {
+          setVisibleCount((count) => count + PAGE_SIZE)
+        }
+      },
+      { root: scrollArea, rootMargin: '240px' },
+    )
     observer.observe(sentinel)
     return () => observer.disconnect()
-  }, [open, visibleCount, icons.length])
+  }, [sentinel, scrollArea, visibleCount, icons.length])
 
   return (
     <Dialog
@@ -75,37 +75,41 @@ export function IconPickerDialog({
       }}
     >
       <DialogPopup className="max-w-2xl p-0">
-        <DialogHeader className="border-b px-4 py-3">
+        <DialogHeader className="border-b px-4 py-2.5">
           <DialogTitle>Insert icon</DialogTitle>
           <DialogDescription>
             Search {library === 'lucide' ? 'Lucide' : 'Hugeicons'} and insert an
             editable vector icon onto the canvas.
           </DialogDescription>
         </DialogHeader>
-        <DialogPanel className="space-y-3 p-4">
-          <Tabs
-            value={library}
-            onValueChange={(value) => {
-              setLibrary(value as IconLibraryId)
-              setVisibleCount(PAGE_SIZE)
-            }}
-          >
-            <TabsList>
-              <TabsTrigger value="lucide">Lucide</TabsTrigger>
-              <TabsTrigger value="hugeicons">Hugeicons</TabsTrigger>
-            </TabsList>
-            <TabsContent value={library} />
-          </Tabs>
-          <Input
-            aria-label="Search icons"
-            value={query}
-            onChange={(event) => {
-              setQuery(event.target.value)
-              setVisibleCount(PAGE_SIZE)
-            }}
-            placeholder="Search icons…"
-          />
-          <div className="h-[min(50svh,24rem)] overflow-y-auto">
+        <DialogPanel className="space-y-2 px-4 pt-2.5 pb-0">
+          {/* Library and search share one row: the grid is the thing worth
+              giving height to. */}
+          <div className="flex items-center gap-2">
+            <Tabs
+              value={library}
+              onValueChange={(value) => {
+                setLibrary(value as IconLibraryId)
+                setVisibleCount(PAGE_SIZE)
+              }}
+            >
+              <TabsList>
+                <TabsTrigger value="lucide">Lucide</TabsTrigger>
+                <TabsTrigger value="hugeicons">Hugeicons</TabsTrigger>
+              </TabsList>
+            </Tabs>
+            <Input
+              aria-label="Search icons"
+              className="flex-1"
+              value={query}
+              onChange={(event) => {
+                setQuery(event.target.value)
+                setVisibleCount(PAGE_SIZE)
+              }}
+              placeholder="Search icons…"
+            />
+          </div>
+          <div ref={setScrollArea} className="h-[min(50svh,24rem)] overflow-y-auto">
             {visible.length === 0 ? (
               <p className="flex h-32 items-center justify-center text-sm text-muted-foreground">
                 No icons match “{query}”.
@@ -138,15 +142,11 @@ export function IconPickerDialog({
               </div>
             )}
             {visibleCount < icons.length ? (
-              <div
-                ref={sentinelRef}
-                aria-hidden="true"
-                className="h-px"
-              />
+              <div ref={setSentinel} aria-hidden="true" className="h-px" />
             ) : null}
           </div>
         </DialogPanel>
-        <DialogFooter className="border-t px-4 py-3">
+        <DialogFooter className="border-t px-4 py-2.5">
           <Button variant="outline" onClick={() => onOpenChange(false)}>
             Close
           </Button>
