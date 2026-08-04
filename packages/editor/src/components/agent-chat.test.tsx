@@ -226,6 +226,38 @@ describe('AgentChat', () => {
     )
   })
 
+  test('history marks @names that still resolve to layers', async () => {
+    chatState.messages = [
+      {
+        id: 'm1',
+        role: 'user',
+        parts: [{ type: 'text', text: 'make @Hero section blue' }],
+      },
+      {
+        id: 'm2',
+        role: 'assistant',
+        parts: [{ type: 'text', text: 'Updated the hero.' }],
+      },
+    ]
+    const view = await open(
+      <AgentChat
+        designId="d1"
+        draftId={null}
+        open
+        onOpenChange={() => {}}
+        nodes={() => [
+          { id: 'n1', name: 'Hero section', type: 'frame', path: 'Home' },
+        ]}
+      />,
+    )
+
+    const mark = view.getByText('@Hero section')
+    expect(mark.className).toContain('bg-foreground/10')
+    expect(view.getByLabelText('Conversation history').textContent).toContain(
+      'make @Hero section blue',
+    )
+  })
+
   test('asks before deleting, and passes the answer back', async () => {
     chatState.messages = [
       {

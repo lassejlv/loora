@@ -262,6 +262,44 @@ function mentionSegments(
   return segments
 }
 
+/** Layers whose `@name` still appears in the text — longest name wins ties. */
+function mentionsNamedInText(
+  text: string,
+  nodes: AgentMentionNode[] | undefined,
+) {
+  if (!text || !nodes?.length) return []
+  return nodes
+    .filter((node) => text.includes(`@${node.name}`))
+    .map(({ id, name }) => ({ id, name }))
+}
+
+/** Plain copy with soft chips on resolved @names — composer mirror and history. */
+function MentionsText({
+  text,
+  mentions,
+}: {
+  text: string
+  mentions: { id: string; name: string }[]
+}) {
+  if (mentions.length === 0) return text
+  return (
+    <>
+      {mentionSegments(text, mentions).map((segment, index) =>
+        segment.kind === 'mention' ? (
+          <span
+            key={`${segment.id}-${index}`}
+            className="rounded-sm bg-foreground/10 px-0.5 text-foreground"
+          >
+            {segment.value}
+          </span>
+        ) : (
+          <span key={index}>{segment.value}</span>
+        ),
+      )}
+    </>
+  )
+}
+
 function AgentMenuFooter({ action }: { action: 'run' | 'insert' }) {
   return (
     <div className="flex items-center gap-3 border-t border-line/50 px-2.5 py-1.5 text-2xs text-muted-foreground/80">
@@ -958,8 +996,6 @@ function AgentChatBox({
     [draftMentions, input, inputRef, onInputChange],
   )
 
-  const segments = mentionSegments(input, draftMentions)
-
   const line = approval
     ? null
     : running
@@ -982,9 +1018,16 @@ function AgentChatBox({
                 message.role === 'user' ? (
                   // What was asked sits right, in a quiet bubble; what the
                   // agent said flows left as plain text. No labels needed.
+                  // @names that still resolve to layers keep the same soft chip.
                   <div key={message.id} className="flex justify-end pl-10">
                     <p className="whitespace-pre-wrap rounded-lg rounded-br-sm bg-foreground/8 px-2.5 py-1.5 text-xs text-foreground">
-                      {message.text}
+                      <MentionsText
+                        text={message.text}
+                        mentions={mentionsNamedInText(
+                          message.text,
+                          nodes?.(),
+                        )}
+                      />
                     </p>
                   </div>
                 ) : (
@@ -1229,18 +1272,7 @@ function AgentChatBox({
               aria-hidden
               className="pointer-events-none absolute inset-0 max-h-40 overflow-hidden whitespace-pre-wrap break-words px-1 py-1.5 text-xs text-foreground"
             >
-              {segments.map((segment, index) =>
-                segment.kind === 'mention' ? (
-                  <span
-                    key={`${segment.id}-${index}`}
-                    className="rounded-sm bg-foreground/10 px-0.5 text-foreground"
-                  >
-                    {segment.value}
-                  </span>
-                ) : (
-                  <span key={index}>{segment.value}</span>
-                ),
-              )}
+              <MentionsText text={input} mentions={draftMentions} />
             </div>
           ) : null}
           <textarea
