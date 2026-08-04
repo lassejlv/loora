@@ -24,7 +24,16 @@ import {
 } from '@loora/assistant/protocol'
 import { apiUrl, appUrl, openExternal } from '@loora/platform'
 import { orpc } from '@loora/rpc/client'
-import { BotIcon, SendIcon, SquareIcon, XIcon } from '@loora/ui/icons'
+import {
+  BotIcon,
+  LogOutIcon,
+  PlusIcon,
+  SendIcon,
+  ShieldKeyIcon,
+  SquareIcon,
+  XIcon,
+} from '@loora/ui/icons'
+import { Kbd } from '@loora/ui/kbd'
 import { cn } from '@loora/ui/utils'
 
 /**
@@ -41,9 +50,78 @@ import { cn } from '@loora/ui/utils'
 const THREAD_COMMAND = '/new'
 
 interface AgentChatStatus {
+  /** Whether this account is inside the in-app-agent feature flag. */
+  enabled: boolean
   configured: boolean
   connection: { email: string | null; planType: string | null } | null
   model: string
+}
+
+interface SlashCommand {
+  name: string
+  description: string
+  icon: typeof BotIcon
+  /** Hidden when it would do nothing — no point offering a disconnect twice. */
+  when?: (status: AgentChatStatus | null) => boolean
+}
+
+const SLASH_COMMANDS: SlashCommand[] = [
+  {
+    name: CHATGPT_LOGIN_COMMAND,
+    description: 'Connect your ChatGPT account',
+    icon: ShieldKeyIcon,
+  },
+  {
+    name: CHATGPT_LOGOUT_COMMAND,
+    description: 'Disconnect it',
+    icon: LogOutIcon,
+    when: (status) => Boolean(status?.connection),
+  },
+  {
+    name: THREAD_COMMAND,
+    description: 'Start a new thread',
+    icon: PlusIcon,
+  },
+]
+
+/**
+ * One status read per page, shared by every mount. The editor asks this before
+ * it draws the agent button, so it must not cost a request each time a panel
+ * rerenders.
+ */
+let availability: Promise<AgentChatStatus | null> | undefined
+
+function readAvailability() {
+  return (availability ??= orpc.assistant
+    .status()
+    .then((status) => status as AgentChatStatus)
+    .catch(() => {
+      availability = undefined
+      return null
+    }))
+}
+
+/** Cleared after connecting or disconnecting, so the box catches up at once. */
+export function resetAgentAvailability() {
+  availability = undefined
+}
+
+/**
+ * Whether to offer the agent at all. False until the flag says otherwise, so an
+ * account outside it never sees a button that would only refuse.
+ */
+export function useAgentAvailable() {
+  const [enabled, setEnabled] = useState(false)
+  useEffect(() => {
+    let cancelled = false
+    void readAvailability().then((status) => {
+      if (!cancelled) setEnabled(Boolean(status?.enabled))
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [])
+  return enabled
 }
 
 type AnyToolPart = ToolUIPart | DynamicToolUIPart
@@ -159,7 +237,7 @@ export function AgentChat({
     let cancelled = false
     void (async () => {
       const [found, conversation] = await Promise.all([
-        orpc.assistant.status().catch(() => null),
+        readAvailability(),
         orpc.assistant
           .thread({ designId, draftId })
           .catch(() => null),
@@ -297,6 +375,11 @@ function AgentChatBox({
     sendAutomaticallyWhen: lastAssistantMessageIsCompleteWithApprovalResponses,
   })
 
+  const [highlighted, setHighlighted] = useState(0)
+  // Escape closes the menu before it closes the box, so a mistyped slash costs
+  // one key rather than the whole conversation.
+  const [menuDismissed, setMenuDismissed] = useState(false)
+
   const running = chat.status === 'submitted' || chat.status === 'streaming'
   const tool = activeToolPart(chat.messages)
   const approval = pendingApproval(chat.messages)
@@ -326,12 +409,16 @@ function AgentChatBox({
   const runCommand = useCallback(
     async (command: string) => {
       if (command === CHATGPT_LOGIN_COMMAND) {
+        // The browser leaves and comes back with `?chatgpt=connected`; the
+        // cached status would be stale by then.
+        resetAgentAvailability()
         connect()
         return true
       }
       if (command === CHATGPT_LOGOUT_COMMAND) {
         await orpc.assistant.disconnect().catch(() => null)
-        const next = await orpc.assistant.status().catch(() => null)
+        resetAgentAvailability()
+        const next = await readAvailability()
         if (next) onStatusChange(next)
         onNotice('ChatGPT disconnected.')
         return true
@@ -346,6 +433,18 @@ function AgentChatBox({
     [connect, onNewThread, onNotice, onStatusChange],
   )
 
+  /** Run a command the menu picked, rather than whatever is half-typed. */
+  const choose = useCallback(
+    async (name: string) => {
+      onInputChange('')
+      setMenuDismissed(false)
+      setHighlighted(0)
+      await runCommand(name)
+      inputRef.current?.focus()
+    },
+    [inputRef, onInputChange, runCommand],
+  )
+
   const submit = useCallback(async () => {
     const text = input.trim()
     if (!text || running) return
@@ -355,6 +454,9 @@ function AgentChatBox({
         onInputChange('')
         return
       }
+      // A slash that matches nothing is a typo, not a design instruction.
+      onNotice(`Unknown command ${text}. Type / to see what there is.`)
+      return
     }
     if (!connected) {
       onNotice(
@@ -367,11 +469,15 @@ function AgentChatBox({
     void chat.sendMessage({ text })
   }, [chat, connected, input, onInputChange, onNotice, runCommand, running])
 
-  const commandHint = input.startsWith('/')
-    ? [CHATGPT_LOGIN_COMMAND, CHATGPT_LOGOUT_COMMAND, THREAD_COMMAND].filter(
-        (command) => command.startsWith(input.trim()),
-      )
-    : []
+  const query = input.trim()
+  const matches =
+    query.startsWith('/') && !menuDismissed
+      ? SLASH_COMMANDS.filter(
+          (command) =>
+            (command.when?.(status) ?? true) && command.name.startsWith(query),
+        )
+      : []
+  const active = matches[Math.min(highlighted, matches.length - 1)]
 
   const line = approval
     ? null
@@ -442,18 +548,51 @@ function AgentChatBox({
         </div>
       ) : null}
 
-      {commandHint.length > 0 ? (
-        <ul className="border-b border-line/70 px-3 py-1.5">
-          {commandHint.map((command) => (
-            <li key={command} className="text-2xs text-muted-foreground">
-              <span className="font-mono text-foreground">{command}</span>
-              {command === CHATGPT_LOGIN_COMMAND
-                ? ' — connect your ChatGPT account'
-                : command === CHATGPT_LOGOUT_COMMAND
-                  ? ' — disconnect it'
-                  : ' — start a new thread'}
-            </li>
-          ))}
+      {matches.length > 0 ? (
+        <ul
+          role="listbox"
+          aria-label="Commands"
+          className="max-h-56 overflow-y-auto border-b border-line/70 p-1"
+        >
+          {matches.map((command, index) => {
+            const Icon = command.icon
+            const selected = command.name === active?.name
+            return (
+              <li key={command.name}>
+                <button
+                  type="button"
+                  role="option"
+                  aria-selected={selected}
+                  // The textarea keeps focus so typing never stops; the mouse
+                  // only moves the highlight the keyboard is already driving.
+                  onMouseDown={(event) => event.preventDefault()}
+                  onMouseEnter={() => setHighlighted(index)}
+                  onClick={() => void choose(command.name)}
+                  className={cn(
+                    'flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-start',
+                    selected ? 'bg-foreground/8' : 'hover:bg-foreground/5',
+                  )}
+                >
+                  <Icon
+                    size={13}
+                    className={cn(
+                      'shrink-0',
+                      selected ? 'text-foreground' : 'text-muted-foreground',
+                    )}
+                  />
+                  <span className="font-mono text-xs text-foreground">
+                    {command.name}
+                  </span>
+                  <span className="min-w-0 flex-1 truncate text-2xs text-muted-foreground">
+                    {command.description}
+                  </span>
+                  {selected ? (
+                    <Kbd className="h-4 min-w-4 bg-transparent text-2xs">↵</Kbd>
+                  ) : null}
+                </button>
+              </li>
+            )
+          })}
         </ul>
       ) : null}
 
@@ -470,16 +609,38 @@ function AgentChatBox({
               : `Type ${CHATGPT_LOGIN_COMMAND} to connect ChatGPT`
           }
           className="max-h-40 flex-1 resize-none bg-transparent px-1 py-1 text-sm text-foreground outline-none placeholder:text-muted-foreground"
-          onChange={(event) => onInputChange(event.target.value)}
+          onChange={(event) => {
+            onInputChange(event.target.value)
+            setMenuDismissed(false)
+            setHighlighted(0)
+          }}
           onKeyDown={(event) => {
+            const open = matches.length > 0
             if (event.key === 'Escape') {
               event.preventDefault()
-              onClose()
+              // The menu first, the box second.
+              if (open) setMenuDismissed(true)
+              else onClose()
+              return
+            }
+            if (open && (event.key === 'ArrowDown' || event.key === 'ArrowUp')) {
+              event.preventDefault()
+              const step = event.key === 'ArrowDown' ? 1 : matches.length - 1
+              setHighlighted((current) =>
+                (Math.min(current, matches.length - 1) + step) % matches.length,
+              )
+              return
+            }
+            if (open && event.key === 'Tab' && active) {
+              // Completes without running, for anybody who wants to look first.
+              event.preventDefault()
+              onInputChange(active.name)
               return
             }
             if (event.key === 'Enter' && !event.shiftKey) {
               event.preventDefault()
-              void submit()
+              if (open && active) void choose(active.name)
+              else void submit()
             }
           }}
         />

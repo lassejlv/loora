@@ -19,6 +19,7 @@ import {
   saveAssistantMessages,
   type StoredAssistantMessage,
 } from '@loora/rpc/assistant'
+import { isInAppAgentEnabled } from '@loora/railway'
 import { AccessDeniedError, requireAppAccess } from '@loora/rpc/mcp-access'
 import { createLooraToolExecutor } from '@loora/rpc/mcp-server'
 import { createAgentUsageController } from '@loora/rpc/mcp-usage'
@@ -78,6 +79,15 @@ export async function assistantChatResponse(request: Request) {
     rateLimits.assistant,
   )
   if (!decision.ok) return tooManyRequestsResponse(decision)
+
+  // The flag decides before anything else does. An account outside it never
+  // sees the chat box, so reaching here means somebody went around the UI.
+  if (!(await isInAppAgentEnabled(session.user))) {
+    return failure(
+      { error: 'The agent is not available.', code: 'ACCESS_DENIED' },
+      403,
+    )
+  }
 
   if (!chatgptEnabled) {
     return failure(

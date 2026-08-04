@@ -5,8 +5,9 @@ canvas; remote MCP clients (and agent handoff consumers) mutate the same
 document through typed transactions. Designs have version history, isolated
 drafts/branches, one-way exports, and GitHub integration.
 The editor also has its own agent: one chat box over the canvas, running on
-the person's own ChatGPT account, driving the same typed tools. Bringing your
-own agent over MCP or handoff stays a first-class path.
+the person's own ChatGPT account, driving the same typed tools. It is behind
+the `in-app-agent` Railway flag, so it is invisible to an account outside it.
+Bringing your own agent over MCP or handoff stays a first-class path.
 
 It ships as a web app and as a desktop app — the same interface, from the same
 packages, over a native window.
@@ -176,6 +177,12 @@ oRPC or React, and it takes its executor as a parameter.
 | `@loora/assistant/tools` | The AI SDK tool set over `createLooraToolExecutor` |
 | `@loora/assistant/system-prompt` | The brief the agent works from |
 | `@loora/assistant/agent` | `runAssistant` / `assistantStreamResponse` |
+
+The whole surface is behind the `in-app-agent` Railway flag. `assistant.status`
+answers `enabled`, the editor asks once per page before it draws anything, and
+both `assistant.*` and `/api/assistant/chat` refuse for an account outside the
+flag. Admins are always inside it; without `RAILWAY_TOKEN` everybody else is
+outside — the same rule `publish-sites` uses.
 
 Every tool goes down `createLooraToolExecutor` — the same path the remote MCP
 transport takes — so engine validation, compare-and-swap persistence, plan
@@ -512,6 +519,7 @@ History uses Conventional Commits with scopes when useful:
 | Weekly tool-call meters (MCP and agent) | `packages/billing/src/mcp-usage.ts` |
 | Agent chat box | `packages/editor/src/components/agent-chat.tsx` |
 | Sign in with ChatGPT | `packages/auth/src/chatgpt.ts` |
+| Feature flags (`publish-sites`, `in-app-agent`) | `packages/railway/src/flags.ts` |
 | MCP tools / transport | `packages/rpc/src/mcp-server.ts` / `crates/mcp-server/src/` |
 | Realtime transport, rooms, presence | `crates/ws-server/src/` (protocol in `packages/realtime/src/`) |
 | Schema / migrations | `packages/db/src/schema.ts` → `db:generate` |

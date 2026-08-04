@@ -99,7 +99,7 @@ import {
   type PresenceCamera,
 } from './presence'
 import { CanvasAgentAvatar, CanvasAgentOverlay } from './agent-presence'
-import { AgentChat } from './agent-chat'
+import { AgentChat, useAgentAvailable } from './agent-chat'
 import { CanvasExport } from './export-panel'
 import { CanvasHistory } from './history'
 import { HtmlImportDialog } from './html-import-dialog'
@@ -377,6 +377,9 @@ function CanvasShell({
   const [tourResumeIndex, setTourResumeIndex] = useState(() => readTourProgress())
   const [commandMenuOpen, setCommandMenuOpen] = useState(false)
   const [agentOpen, setAgentOpen] = useState(false)
+  // Behind the `in-app-agent` flag: no button, no command, no shortcut until
+  // the account is in it.
+  const agentAvailable = useAgentAvailable() && Boolean(controller.target)
   const [pasteNotice, setPasteNotice] = useState<string | null>(null)
   const pasteNoticeTimer = useRef<number | null>(null)
   const [interactionMode, setInteractionMode] = useState<'select' | 'pan'>(
@@ -576,9 +579,7 @@ function CanvasShell({
           togglePanel('loora:layers-panel-open', setLayersPanelOpen)
         } else if (hit === 'openCommandMenu') setCommandMenuOpen(true)
         else if (hit === 'openAgent') {
-          // Only where there is a document to work on — the marketing preview
-          // mounts the same editor with no target behind it.
-          if (!controller.target) return false
+          if (!agentAvailable) return false
           setAgentOpen(true)
         }
         else if (hit === 'openSettings') setSettingsOpen(true)
@@ -671,7 +672,7 @@ function CanvasShell({
   }, [actions, readOnly])
 
   const commandGroups: EditorCommandGroup[] = [
-    ...(controller.target
+    ...(agentAvailable
       ? [
           {
             label: 'Agent',
@@ -1117,7 +1118,7 @@ function CanvasShell({
           >
             <CanvasAgentAvatar controller={controller} />
             {topBarEnd}
-            {controller.target ? (
+            {agentAvailable ? (
               <Button
                 size="icon-xs"
                 variant="ghost"
@@ -1201,7 +1202,7 @@ function CanvasShell({
             ) : null}
             {/* In here with the tool clusters, for the same reason: it centres
                 on the canvas somebody is looking at, not on the viewport. */}
-            {controller.target ? (
+            {agentAvailable && controller.target ? (
               <AgentChat
                 designId={controller.target.designId}
                 draftId={controller.target.draftId ?? null}

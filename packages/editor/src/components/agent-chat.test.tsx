@@ -31,7 +31,9 @@ vi.mock('@ai-sdk/react', () => ({ useChat: () => chatState }))
 const { act, cleanup, fireEvent, render, within } = await import(
   '@testing-library/react'
 )
-const { AgentChat } = await import('./agent-chat')
+const { AgentChat, resetAgentAvailability, useAgentAvailable } = await import(
+  './agent-chat'
+)
 
 async function open(node: Parameters<typeof render>[0]) {
   let view!: ReturnType<typeof render>
@@ -42,6 +44,7 @@ async function open(node: Parameters<typeof render>[0]) {
 }
 
 const connected = {
+  enabled: true,
   configured: true,
   connection: { email: 'someone@example.com', planType: 'plus' },
   model: 'gpt-5.6-terra',
@@ -56,6 +59,8 @@ describe('AgentChat', () => {
     stop.mockReset()
     addToolApprovalResponse.mockReset()
     openExternal.mockReset()
+    // The status read is cached per page, so each test starts from nothing.
+    resetAgentAvailability()
     status.mockReset().mockResolvedValue(connected)
     thread.mockReset().mockResolvedValue({ threadId: 'athread_1', messages: [] })
     newThread.mockReset().mockResolvedValue({ threadId: 'athread_2', messages: [] })
@@ -267,6 +272,137 @@ describe('AgentChat', () => {
     expect(openExternal).toHaveBeenCalled()
   })
 
+  test('typing a slash offers the commands, with the first one ready', async () => {
+    const view = await open(
+      <AgentChat designId="d1" draftId={null} open onOpenChange={() => {}} />,
+    )
+    const field = view.getByLabelText('Ask the agent')
+
+    fireEvent.change(field, { target: { value: '/' } })
+
+    const options = view.getAllByRole('option')
+    expect(options.map((option) => option.textContent)).toEqual([
+      expect.stringContaining('/login-with-chatgpt'),
+      expect.stringContaining('/logout-chatgpt'),
+      expect.stringContaining('/new'),
+    ])
+    expect(options[0].getAttribute('aria-selected')).toBe('true')
+  })
+
+  test('hides a command that would do nothing', async () => {
+    status.mockResolvedValue({ ...connected, connection: null })
+    const view = await open(
+      <AgentChat designId="d1" draftId={null} open onOpenChange={() => {}} />,
+    )
+    fireEvent.change(view.getByLabelText('Ask the agent'), {
+      target: { value: '/' },
+    })
+
+    const names = view.getAllByRole('option').map((option) => option.textContent)
+    expect(names.some((name) => name?.includes('/logout-chatgpt'))).toBe(false)
+  })
+
+  test('narrows as you type', async () => {
+    const view = await open(
+      <AgentChat designId="d1" draftId={null} open onOpenChange={() => {}} />,
+    )
+    fireEvent.change(view.getByLabelText('Ask the agent'), {
+      target: { value: '/log' },
+    })
+
+    expect(view.getAllByRole('option')).toHaveLength(2)
+  })
+
+  test('arrows move the selection and enter runs it', async () => {
+    const view = await open(
+      <AgentChat designId="d1" draftId={null} open onOpenChange={() => {}} />,
+    )
+    const field = view.getByLabelText('Ask the agent')
+
+    fireEvent.change(field, { target: { value: '/' } })
+    fireEvent.keyDown(field, { key: 'ArrowDown' })
+    expect(
+      view.getAllByRole('option')[1].getAttribute('aria-selected'),
+    ).toBe('true')
+
+    await act(async () => {
+      fireEvent.keyDown(field, { key: 'Enter' })
+    })
+    expect(disconnect).toHaveBeenCalled()
+    expect(sendMessage).not.toHaveBeenCalled()
+  })
+
+  test('arrow up from the top wraps to the bottom', async () => {
+    const view = await open(
+      <AgentChat designId="d1" draftId={null} open onOpenChange={() => {}} />,
+    )
+    const field = view.getByLabelText('Ask the agent')
+
+    fireEvent.change(field, { target: { value: '/' } })
+    fireEvent.keyDown(field, { key: 'ArrowUp' })
+
+    const options = view.getAllByRole('option')
+    expect(options.at(-1)?.getAttribute('aria-selected')).toBe('true')
+  })
+
+  test('tab completes without running', async () => {
+    const view = await open(
+      <AgentChat designId="d1" draftId={null} open onOpenChange={() => {}} />,
+    )
+    const field = view.getByLabelText('Ask the agent') as HTMLTextAreaElement
+
+    fireEvent.change(field, { target: { value: '/lo' } })
+    fireEvent.keyDown(field, { key: 'Tab' })
+
+    expect(field.value).toBe('/login-with-chatgpt')
+    expect(openExternal).not.toHaveBeenCalled()
+  })
+
+  test('clicking a command runs it', async () => {
+    const view = await open(
+      <AgentChat designId="d1" draftId={null} open onOpenChange={() => {}} />,
+    )
+    fireEvent.change(view.getByLabelText('Ask the agent'), {
+      target: { value: '/' },
+    })
+
+    await act(async () => {
+      fireEvent.click(view.getAllByRole('option')[2])
+    })
+    expect(newThread).toHaveBeenCalled()
+  })
+
+  test('escape closes the menu before it closes the box', async () => {
+    const onOpenChange = vi.fn()
+    const view = await open(
+      <AgentChat designId="d1" draftId={null} open onOpenChange={onOpenChange} />,
+    )
+    const field = view.getByLabelText('Ask the agent')
+
+    fireEvent.change(field, { target: { value: '/' } })
+    fireEvent.keyDown(field, { key: 'Escape' })
+    expect(view.queryAllByRole('option')).toHaveLength(0)
+    expect(onOpenChange).not.toHaveBeenCalled()
+
+    fireEvent.keyDown(field, { key: 'Escape' })
+    expect(onOpenChange).toHaveBeenCalledWith(false)
+  })
+
+  test('a slash that matches nothing is not sent as a prompt', async () => {
+    const view = await open(
+      <AgentChat designId="d1" draftId={null} open onOpenChange={() => {}} />,
+    )
+    const field = view.getByLabelText('Ask the agent')
+
+    fireEvent.change(field, { target: { value: '/nope' } })
+    await act(async () => {
+      fireEvent.keyDown(field, { key: 'Enter' })
+    })
+
+    expect(sendMessage).not.toHaveBeenCalled()
+    expect(view.getByText(/Unknown command \/nope/)).toBeTruthy()
+  })
+
   test('escape closes it', async () => {
     const onOpenChange = vi.fn()
     const view = await open(
@@ -274,5 +410,47 @@ describe('AgentChat', () => {
     )
     fireEvent.keyDown(view.getByLabelText('Ask the agent'), { key: 'Escape' })
     expect(onOpenChange).toHaveBeenCalledWith(false)
+  })
+})
+
+describe('useAgentAvailable', () => {
+  function Probe() {
+    return <span data-testid="flag">{String(useAgentAvailable())}</span>
+  }
+
+  beforeEach(() => {
+    resetAgentAvailability()
+    status.mockReset()
+  })
+  afterEach(cleanup)
+
+  test('is false until the flag says otherwise', async () => {
+    status.mockResolvedValue({ ...connected, enabled: false })
+    const view = await open(<Probe />)
+    expect(view.getByTestId('flag').textContent).toBe('false')
+  })
+
+  test('is true for an account inside the flag', async () => {
+    status.mockResolvedValue(connected)
+    const view = await open(<Probe />)
+    expect(view.getByTestId('flag').textContent).toBe('true')
+  })
+
+  test('a failed status read leaves the agent hidden', async () => {
+    status.mockRejectedValue(new Error('down'))
+    const view = await open(<Probe />)
+    expect(view.getByTestId('flag').textContent).toBe('false')
+  })
+
+  test('reads the status once per page, however many mount', async () => {
+    status.mockResolvedValue(connected)
+    await open(
+      <>
+        <Probe />
+        <Probe />
+        <Probe />
+      </>,
+    )
+    expect(status).toHaveBeenCalledTimes(1)
   })
 })

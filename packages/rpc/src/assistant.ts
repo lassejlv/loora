@@ -23,6 +23,7 @@ import {
   getChatGptConnection,
 } from '@loora/auth/chatgpt'
 import { assistantModelId } from '@loora/assistant/model'
+import { isInAppAgentEnabled } from '@loora/railway'
 import { protectedProcedure, requireDesignAccess } from './procedures'
 
 /** How much of a thread is replayed into the editor and back to the model. */
@@ -224,9 +225,12 @@ export async function saveAssistantMessages(
  * the first tool call instead of a sentence they can act on.
  */
 export async function requireAssistantTarget(
-  user: { id: string; email: string } & Record<string, unknown>,
+  user: { id: string; email: string; isAdmin?: boolean | null } & Record<string, unknown>,
   target: AssistantTargetInput,
 ) {
+  if (!(await isInAppAgentEnabled(user))) {
+    throw new ORPCError('FORBIDDEN', { message: 'The agent is not available.' })
+  }
   const access = await requireDesignAccess(user, target.designId, 'edit')
   if (access.role !== 'owner') {
     throw new ORPCError('FORBIDDEN', {
@@ -236,12 +240,27 @@ export async function requireAssistantTarget(
   return access
 }
 
+/**
+ * What the editor needs before it can decide whether to show the agent at all:
+ * whether this account is in the flag, whether the server can run it, and who
+ * it would run as. Cheap enough to call on every editor mount.
+ */
 export const getAssistantStatus = protectedProcedure.handler(
   async ({ context }) => {
+    const enabled = await isInAppAgentEnabled(context.user)
+    if (!enabled) {
+      return {
+        enabled: false as const,
+        configured: false,
+        connection: null,
+        model: assistantModelId(),
+      }
+    }
     const connection = chatgptEnabled
       ? await getChatGptConnection(context.user.id)
       : null
     return {
+      enabled: true as const,
       configured: chatgptEnabled,
       connection,
       model: assistantModelId(),

@@ -24,6 +24,7 @@
     "@loora/db": "workspace:*",
     "@loora/editor": "workspace:*",
     "@loora/platform": "workspace:*",
+    "@loora/railway": "workspace:*",
     "@loora/realtime": "workspace:*",
     "@loora/rpc": "workspace:*",
     "@loora/shell": "workspace:*",

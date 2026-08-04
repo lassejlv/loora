@@ -1,5 +1,6 @@
 export { flags } from 'railway'
 export {
+  isInAppAgentEnabled,
   isPublishSitesEnabled,
   type FeatureFlagUser,
 } from './flags'
