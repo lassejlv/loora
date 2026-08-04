@@ -26,7 +26,7 @@ use tower_http::cors::{Any, CorsLayer};
 use url::Url;
 
 use crate::{
-    auth::AuthVerifier,
+    auth::{AuthError, AuthVerifier},
     config::Config,
     rate_limit::{Decision, RateLimiter},
 };
@@ -325,24 +325,37 @@ async fn authorize_mcp(
     if !by_address.ok {
         return rate_limited(by_address);
     }
-    let Some(session) = state.auth.get_session(request.headers()).await else {
-        let anonymous = state.allow("mcp-anonymous", &address, 60).await;
-        if !anonymous.ok {
-            return rate_limited(anonymous);
+    let session = match state.auth.get_session(request.headers()).await {
+        Ok(session) => session,
+        Err(AuthError::InvalidToken) => {
+            let anonymous = state.allow("mcp-anonymous", &address, 60).await;
+            if !anonymous.ok {
+                return rate_limited(anonymous);
+            }
+            let mut result = json_response(
+                StatusCode::UNAUTHORIZED,
+                rpc_error("Unauthorized: Authentication required"),
+            );
+            result.headers_mut().insert(
+                header::WWW_AUTHENTICATE,
+                HeaderValue::from_str(&format!(
+                    "Bearer resource_metadata=\"{}/.well-known/oauth-protected-resource\"",
+                    state.config.public_url
+                ))
+                .expect("valid resource metadata challenge"),
+            );
+            return result;
         }
-        let mut result = json_response(
-            StatusCode::UNAUTHORIZED,
-            rpc_error("Unauthorized: Authentication required"),
-        );
-        result.headers_mut().insert(
-            header::WWW_AUTHENTICATE,
-            HeaderValue::from_str(&format!(
-                "Bearer resource_metadata=\"{}/.well-known/oauth-protected-resource\"",
-                state.config.public_url
-            ))
-            .expect("valid resource metadata challenge"),
-        );
-        return result;
+        Err(AuthError::ServiceUnavailable) => {
+            let mut result = json_response(
+                StatusCode::SERVICE_UNAVAILABLE,
+                rpc_error("Authentication service is temporarily unavailable. Try again shortly."),
+            );
+            result
+                .headers_mut()
+                .insert(header::RETRY_AFTER, HeaderValue::from_static("1"));
+            return result;
+        }
     };
     let by_account = state
         .allow("mcp", &format!("user:{}", session.user_id), 240)
@@ -414,7 +427,7 @@ async fn ready(State(state): State<Arc<AppState>>) -> Response {
 async fn metadata(State(state): State<Arc<AppState>>) -> Response {
     json_response(
         StatusCode::OK,
-        json!({"resource":format!("{}/mcp",state.config.public_url),"authorization_servers":[state.config.auth_origin],"bearer_methods_supported":["header"]}),
+        json!({"resource":format!("{}/mcp",state.config.public_url),"authorization_servers":[state.config.authorization_server_url],"bearer_methods_supported":["header"]}),
     )
 }
 
@@ -545,6 +558,7 @@ mod tests {
             port: 4100,
             public_url: "http://localhost:4100".into(),
             auth_origin: "http://localhost:3000".into(),
+            authorization_server_url: "http://localhost:3000".into(),
             auth_timeout_ms: 5_000,
             auth_cache_ttl_ms: 60_000,
             internal_api_url: "http://localhost:3000/api/internal/mcp".into(),
@@ -636,6 +650,7 @@ mod tests {
             port: 4100,
             public_url: "http://localhost:4100".into(),
             auth_origin: origin.clone(),
+            authorization_server_url: "https://loora.test".into(),
             auth_timeout_ms: 5_000,
             auth_cache_ttl_ms: 60_000,
             internal_api_url: format!("{origin}/api/internal/mcp"),
@@ -670,5 +685,86 @@ mod tests {
         assert_eq!(status, StatusCode::OK, "{body}");
         assert_eq!(body["result"]["content"][0]["text"], "forwarded");
         task.abort();
+    }
+
+    #[tokio::test]
+    async fn auth_service_failures_are_retryable_without_a_login_challenge() {
+        let internal = Router::new().route(
+            "/api/auth/mcp/get-session",
+            get(|| async { StatusCode::SERVICE_UNAVAILABLE }),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let origin = format!("http://{}", listener.local_addr().unwrap());
+        let task = tokio::spawn(async move {
+            axum::serve(listener, internal).await.unwrap();
+        });
+        let state = AppState::new(Config {
+            port: 4100,
+            public_url: "http://localhost:4100".into(),
+            auth_origin: origin.clone(),
+            authorization_server_url: "https://loora.test".into(),
+            auth_timeout_ms: 5_000,
+            auth_cache_ttl_ms: 60_000,
+            internal_api_url: format!("{origin}/api/internal/mcp"),
+            internal_token: "shared-secret".into(),
+            rate_limit_redis_url: None,
+        })
+        .await
+        .unwrap();
+        let request = Request::builder()
+            .method(Method::POST)
+            .uri("/mcp")
+            .header(header::AUTHORIZATION, "Bearer oauth-token")
+            .header(header::CONTENT_TYPE, "application/json")
+            .header(header::ACCEPT, "application/json, text/event-stream")
+            .header(header::HOST, "localhost:4100")
+            .body(Body::from(
+                json!({ "jsonrpc": "2.0", "id": 1, "method": "initialize" }).to_string(),
+            ))
+            .unwrap();
+
+        let response = router(state).oneshot(request).await.unwrap();
+
+        assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(response.headers().get(header::RETRY_AFTER).unwrap(), "1");
+        assert!(response.headers().get(header::WWW_AUTHENTICATE).is_none());
+        let body: Value =
+            serde_json::from_slice(&to_bytes(response.into_body(), 1024 * 1024).await.unwrap())
+                .unwrap();
+        assert_eq!(
+            body["error"]["message"],
+            "Authentication service is temporarily unavailable. Try again shortly."
+        );
+        task.abort();
+    }
+
+    #[tokio::test]
+    async fn advertises_the_pinned_authorization_server() {
+        let state = AppState::new(Config {
+            port: 4100,
+            public_url: "http://localhost:4100".into(),
+            auth_origin: "http://internal.loora.test".into(),
+            authorization_server_url: "https://loora.test".into(),
+            auth_timeout_ms: 5_000,
+            auth_cache_ttl_ms: 60_000,
+            internal_api_url: "http://internal.loora.test/api/internal/mcp".into(),
+            internal_token: "shared-secret".into(),
+            rate_limit_redis_url: None,
+        })
+        .await
+        .unwrap();
+        let request = Request::builder()
+            .method(Method::GET)
+            .uri("/.well-known/oauth-protected-resource")
+            .header(header::HOST, "localhost:4100")
+            .body(Body::empty())
+            .unwrap();
+
+        let response = router(state).oneshot(request).await.unwrap();
+        let body: Value =
+            serde_json::from_slice(&to_bytes(response.into_body(), 1024 * 1024).await.unwrap())
+                .unwrap();
+
+        assert_eq!(body["authorization_servers"], json!(["https://loora.test"]));
     }
 }

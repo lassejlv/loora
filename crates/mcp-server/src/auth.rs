@@ -6,7 +6,7 @@ use std::{
 
 use axum::http::{header, HeaderMap};
 use chrono::{DateTime, Utc};
-use reqwest::Client;
+use reqwest::{Client, StatusCode};
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
 use tokio::sync::Mutex;
@@ -18,6 +18,12 @@ const CLEANUP_BATCH_SIZE: usize = 64;
 pub struct VerifiedSession {
     pub user_id: String,
     pub access_token_expires_at: Option<DateTime<Utc>>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum AuthError {
+    InvalidToken,
+    ServiceUnavailable,
 }
 
 #[derive(Clone)]
@@ -64,20 +70,22 @@ impl AuthVerifier {
         }
     }
 
-    pub async fn get_session(&self, headers: &HeaderMap) -> Option<VerifiedSession> {
+    pub async fn get_session(&self, headers: &HeaderMap) -> Result<VerifiedSession, AuthError> {
         let token = headers
-            .get(header::AUTHORIZATION)?
+            .get(header::AUTHORIZATION)
+            .ok_or(AuthError::InvalidToken)?
             .to_str()
-            .ok()?
-            .strip_prefix("Bearer ")?
+            .map_err(|_| AuthError::InvalidToken)?
+            .strip_prefix("Bearer ")
+            .ok_or(AuthError::InvalidToken)?
             .trim();
         if token.is_empty() {
-            return None;
+            return Err(AuthError::InvalidToken);
         }
         self.verify_token(token).await
     }
 
-    pub async fn verify_token(&self, token: &str) -> Option<VerifiedSession> {
+    pub async fn verify_token(&self, token: &str) -> Result<VerifiedSession, AuthError> {
         let key: [u8; 32] = Sha256::digest(token.as_bytes()).into();
         let now = Instant::now();
 
@@ -85,7 +93,7 @@ impl AuthVerifier {
             let cache = self.cache.lock().await;
             if let Some(entry) = cache.entries.get(&key) {
                 if entry.expires_at > now {
-                    return Some(entry.session.clone());
+                    return Ok(entry.session.clone());
                 }
             }
         }
@@ -96,13 +104,25 @@ impl AuthVerifier {
             .bearer_auth(token)
             .send()
             .await
-            .ok()?;
-        if !response.status().is_success() {
-            return None;
+            .map_err(|error| {
+                tracing::warn!(%error, "MCP authentication service request failed");
+                AuthError::ServiceUnavailable
+            })?;
+        let status = response.status();
+        if matches!(status, StatusCode::UNAUTHORIZED | StatusCode::FORBIDDEN) {
+            return Err(AuthError::InvalidToken);
         }
-        let response: SessionResponse = response.json().await.ok()?;
+        if !status.is_success() {
+            tracing::warn!(%status, "MCP authentication service rejected verification request");
+            return Err(AuthError::ServiceUnavailable);
+        }
+        let response: SessionResponse = response.json().await.map_err(|error| {
+            tracing::warn!(%error, "MCP authentication service returned an invalid response");
+            AuthError::ServiceUnavailable
+        })?;
         if response.user_id.is_empty() {
-            return None;
+            tracing::warn!("MCP authentication service returned an empty user id");
+            return Err(AuthError::ServiceUnavailable);
         }
         let session = VerifiedSession {
             user_id: response.user_id,
@@ -110,7 +130,7 @@ impl AuthVerifier {
         };
 
         if self.cache_ttl.is_zero() {
-            return Some(session);
+            return Ok(session);
         }
 
         let cache_duration = match session.access_token_expires_at {
@@ -121,12 +141,12 @@ impl AuthVerifier {
             None => self.cache_ttl,
         };
         if cache_duration.is_zero() {
-            return Some(session);
+            return Ok(session);
         }
 
         let mut cache = self.cache.lock().await;
         cache.insert(key, session.clone(), now + cache_duration);
-        Some(session)
+        Ok(session)
     }
 }
 
@@ -199,7 +219,7 @@ impl SessionCache {
 mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
 
-    use axum::{routing::get, Json, Router};
+    use axum::{response::IntoResponse, routing::get, Json, Router};
     use serde_json::json;
     use tokio::net::TcpListener;
 
@@ -260,7 +280,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn does_not_cache_failures_or_when_ttl_is_zero() {
+    async fn does_not_cache_invalid_tokens_or_when_ttl_is_zero() {
         let requests = Arc::new(AtomicUsize::new(0));
         let request_count = requests.clone();
         let (origin, server) = mock_auth(move || {
@@ -281,12 +301,58 @@ mod tests {
         let verifier = AuthVerifier::new(&origin, 5_000, 0);
         let headers = bearer("token");
 
-        assert!(verifier.get_session(&headers).await.is_none());
-        assert!(verifier.get_session(&headers).await.is_none());
-        assert!(verifier.get_session(&headers).await.is_some());
-        assert!(verifier.get_session(&headers).await.is_some());
+        assert_eq!(
+            verifier.get_session(&headers).await,
+            Err(AuthError::InvalidToken)
+        );
+        assert_eq!(
+            verifier.get_session(&headers).await,
+            Err(AuthError::InvalidToken)
+        );
+        assert!(verifier.get_session(&headers).await.is_ok());
+        assert!(verifier.get_session(&headers).await.is_ok());
         assert_eq!(requests.load(Ordering::Relaxed), 4);
         server.abort();
+    }
+
+    #[tokio::test]
+    async fn treats_invalid_upstream_responses_as_service_failures() {
+        let requests = Arc::new(AtomicUsize::new(0));
+        let request_count = requests.clone();
+        let (origin, server) = mock_auth(move || {
+            let request_count = request_count.clone();
+            async move {
+                match request_count.fetch_add(1, Ordering::Relaxed) {
+                    0 => StatusCode::SERVICE_UNAVAILABLE.into_response(),
+                    1 => (StatusCode::OK, "not-json").into_response(),
+                    2 => Json(json!({ "userId": "" })).into_response(),
+                    _ => Json(json!({ "userId": "user-id" })).into_response(),
+                }
+            }
+        })
+        .await;
+        let verifier = AuthVerifier::new(&origin, 5_000, 60_000);
+        let headers = bearer("token");
+
+        for _ in 0..3 {
+            assert_eq!(
+                verifier.get_session(&headers).await,
+                Err(AuthError::ServiceUnavailable)
+            );
+        }
+        assert!(verifier.get_session(&headers).await.is_ok());
+        assert_eq!(requests.load(Ordering::Relaxed), 4);
+        server.abort();
+    }
+
+    #[tokio::test]
+    async fn rejects_missing_credentials_as_an_invalid_token() {
+        let verifier = AuthVerifier::new("http://localhost:1", 100, 0);
+
+        assert_eq!(
+            verifier.get_session(&HeaderMap::new()).await,
+            Err(AuthError::InvalidToken)
+        );
     }
 
     #[tokio::test]
@@ -309,9 +375,9 @@ mod tests {
         let verifier = AuthVerifier::new(&origin, 5_000, 60_000);
         let headers = bearer("token");
 
-        assert!(verifier.get_session(&headers).await.is_some());
+        assert!(verifier.get_session(&headers).await.is_ok());
         tokio::time::sleep(Duration::from_millis(80)).await;
-        assert!(verifier.get_session(&headers).await.is_some());
+        assert!(verifier.get_session(&headers).await.is_ok());
         assert_eq!(requests.load(Ordering::Relaxed), 2);
         server.abort();
     }

@@ -7,6 +7,7 @@ pub struct Config {
     pub port: u16,
     pub public_url: String,
     pub auth_origin: String,
+    pub authorization_server_url: String,
     pub auth_timeout_ms: u64,
     pub auth_cache_ttl_ms: u64,
     pub internal_api_url: String,
@@ -42,6 +43,10 @@ impl Config {
             "BETTER_AUTH_URL",
             get("BETTER_AUTH_URL").unwrap_or_else(|| "http://localhost:3000".into()),
         )?;
+        let authorization_server_url = clean_origin(
+            "MCP_AUTHORIZATION_SERVER_URL",
+            get("MCP_AUTHORIZATION_SERVER_URL").unwrap_or_else(|| auth_origin.clone()),
+        )?;
         let internal_api_url = clean_url(
             "MCP_INTERNAL_API_URL",
             get("MCP_INTERNAL_API_URL")
@@ -51,6 +56,7 @@ impl Config {
             port,
             public_url,
             auth_origin,
+            authorization_server_url,
             auth_timeout_ms: bounded_u64(get("MCP_AUTH_TIMEOUT_MS"), 100, 30_000, 5_000),
             auth_cache_ttl_ms: bounded_u64(get("MCP_AUTH_CACHE_TTL_MS"), 0, 600_000, 60_000),
             internal_api_url,
@@ -104,17 +110,37 @@ mod tests {
                 "BETTER_AUTH_URL",
                 "https://loora.test:8443/some/path?ignored=true".to_owned(),
             ),
+            (
+                "MCP_AUTHORIZATION_SERVER_URL",
+                "https://accounts.loora.test/oauth?ignored=true".to_owned(),
+            ),
             ("MCP_AUTH_TIMEOUT_MS", "100".to_owned()),
             ("MCP_AUTH_CACHE_TTL_MS", "600000".to_owned()),
         ]);
         let config = Config::from_values(|key| values.get(key).cloned()).unwrap();
         assert_eq!(config.auth_origin, "https://loora.test:8443");
         assert_eq!(
+            config.authorization_server_url,
+            "https://accounts.loora.test"
+        );
+        assert_eq!(
             config.internal_api_url,
             "https://loora.test:8443/api/internal/mcp"
         );
         assert_eq!(config.auth_timeout_ms, 100);
         assert_eq!(config.auth_cache_ttl_ms, 600_000);
+    }
+
+    #[test]
+    fn defaults_the_authorization_server_to_the_auth_origin() {
+        let values = HashMap::from([
+            ("MCP_INTERNAL_TOKEN", "secret".to_owned()),
+            ("BETTER_AUTH_URL", "https://loora.test/auth".to_owned()),
+        ]);
+
+        let config = Config::from_values(|key| values.get(key).cloned()).unwrap();
+
+        assert_eq!(config.authorization_server_url, "https://loora.test");
     }
 
     #[test]

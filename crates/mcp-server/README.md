@@ -15,6 +15,12 @@ Set `MCP_INTERNAL_TOKEN` to the same private secret on the web and MCP services.
 `MCP_INTERNAL_API_URL` defaults to `${BETTER_AUTH_URL}/api/internal/mcp`; set it
 to the web service's private Railway URL in production when available.
 
+Set `MCP_AUTHORIZATION_SERVER_URL` to the stable public OAuth authority that MCP
+clients originally authenticate against (for production, `https://loora.design`).
+Keep it unchanged when `BETTER_AUTH_URL` or the internal API moves between
+services. If it is unset, it defaults to `BETTER_AUTH_URL` for local development
+and backwards compatibility.
+
 ```sh
 cargo run -p loora-mcp-server
 ```
