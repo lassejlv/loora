@@ -98,12 +98,3 @@ export interface AssistantErrorBody {
 /** The slash command that starts the ChatGPT connection from the chat box. */
 export const CHATGPT_LOGIN_COMMAND = '/login-with-chatgpt'
 export const CHATGPT_LOGOUT_COMMAND = '/logout-chatgpt'
-
-export const ASSISTANT_CONNECT_PATH = '/api/chatgpt/connect'
-
-export function chatgptConnectUrl(returnTo?: string) {
-  const params = returnTo
-    ? `?returnTo=${encodeURIComponent(returnTo)}`
-    : ''
-  return `${ASSISTANT_CONNECT_PATH}${params}`
-}

@@ -22,7 +22,7 @@ import {
   CHATGPT_LOGIN_COMMAND,
   CHATGPT_LOGOUT_COMMAND,
 } from '@loora/assistant/protocol'
-import { apiUrl, appUrl, openExternal } from '@loora/platform'
+import { apiUrl } from '@loora/platform'
 import { orpc } from '@loora/rpc/client'
 import {
   BotIcon,
@@ -388,10 +388,8 @@ function AgentChatBox({
   const connected = Boolean(status?.connection)
 
   const connect = useCallback(() => {
-    const returnTo = `${window.location.pathname}${window.location.search}`
-    openExternal(
-      appUrl(`/api/chatgpt/connect?returnTo=${encodeURIComponent(returnTo)}`),
-    )
+    window.history.pushState({}, '', '/app/integrations?integration=chatgpt')
+    window.dispatchEvent(new Event('popstate'))
   }, [])
 
   useLayoutEffect(() => {
@@ -416,7 +414,10 @@ function AgentChatBox({
         return true
       }
       if (command === CHATGPT_LOGOUT_COMMAND) {
-        await orpc.assistant.disconnect().catch(() => null)
+        await fetch(apiUrl('/api/chatgpt/logout'), {
+          method: 'POST',
+          credentials: 'include',
+        }).catch(() => null)
         resetAgentAvailability()
         const next = await readAvailability()
         if (next) onStatusChange(next)

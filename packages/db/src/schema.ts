@@ -808,15 +808,8 @@ export const twoFactor = pgTable(
   (table) => [index('two_factor_user_id_idx').on(table.userId)],
 )
 
-/**
- * A user's ChatGPT connection. `chatgptUserId` is the OpenID `sub` claim: the
- * binding between a Loora account and the ChatGPT account whose plan pays for
- * assistant runs. One connection per user — reconnecting as somebody else
- * replaces the row rather than adding a second identity.
- *
- * Every token is encrypted at rest with `CHATGPT_DATA_ENCRYPTION_KEY`, the same
- * AES-GCM envelope the GitHub integration uses.
- */
+/** Legacy authorization-code connections. Login-with-ChatGPT now uses the
+ * encrypted `chatgptSession` store above; retain this table for existing data. */
 export const chatgptAccount = pgTable('chatgpt_account', {
   userId: text('user_id')
     .primaryKey()

@@ -62,7 +62,7 @@ packages/billing  Polar plan access / entitlements (`@loora/billing`)
 | `/design/$id/b/$branchId` | Editor on an active branch. |
 | `/api/rpc/$` | oRPC |
 | `/api/assistant/chat` | The in-app agent's streaming run |
-| `/api/chatgpt/connect`, `/api/chatgpt/callback` | Sign in with ChatGPT (PKCE) |
+| `/api/chatgpt/$` | Login-with-ChatGPT device flow, session, models, and response proxy |
 | `/api/realtime-ticket` | Mints a signed WebSocket ticket after the usual access checks |
 | `/api/canvas-events`, `/api/canvas-presence` | Server-sent-events fallback for realtime |
 | `/api/auth/$` | Better Auth |
@@ -173,7 +173,7 @@ oRPC or React, and it takes its executor as a parameter.
 | Export | Role |
 |--------|------|
 | `@loora/assistant/protocol` | Tool names, labels, error codes, the slash commands. Imports nothing. |
-| `@loora/assistant/model` | Builds a `LanguageModel` from one person's ChatGPT credentials |
+| `@loora/assistant/model` | Builds a request-scoped `LanguageModel` through the ChatGPT proxy |
 | `@loora/assistant/tools` | The AI SDK tool set over `createLooraToolExecutor` |
 | `@loora/assistant/system-prompt` | The brief the agent works from |
 | `@loora/assistant/agent` | `runAssistant` / `assistantStreamResponse` |

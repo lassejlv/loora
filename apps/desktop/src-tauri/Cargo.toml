@@ -17,7 +17,7 @@ http-body-util = "0.1"
 keyring = { version = "3", features = ["apple-native", "windows-native", "sync-secret-service"] }
 mime_guess = "2"
 rand = "0.9"
-reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "stream"] }
+reqwest = { version = "0.12", default-features = false, features = ["cookies", "json", "rustls-tls", "stream"] }
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

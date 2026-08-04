@@ -3,13 +3,15 @@ import { createFileRoute } from '@tanstack/react-router'
 import type { UIMessage } from 'ai'
 import { requireSession } from '@loora/auth'
 import {
-  ChatGptError,
+  chatgptAuth,
   chatgptEnabled,
-  resolveChatGptCredentials,
 } from '@loora/auth/chatgpt'
 import { resolveDesignAccess } from '@loora/db/design-access'
 import { assistantStreamResponse } from '@loora/assistant/agent'
-import { assistantModel } from '@loora/assistant/model'
+import {
+  assistantModel,
+  selectAssistantModel,
+} from '@loora/assistant/model'
 import { assistantSystemPrompt } from '@loora/assistant/system-prompt'
 import { createAssistantTools } from '@loora/assistant/tools'
 import type { AssistantErrorBody } from '@loora/assistant/protocol'
@@ -150,27 +152,36 @@ export async function assistantChatResponse(request: Request) {
     )
   }
 
-  let credentials
+  const chatgptSession = await chatgptAuth.getSession(request)
+  if (chatgptSession.status !== 'authenticated') {
+    return failure(
+      {
+        error: 'Connect ChatGPT to use the agent.',
+        code: 'CHATGPT_NOT_CONNECTED',
+      },
+      428,
+    )
+  }
+
+  const requestFetch = chatgptAuth.proxyFetch(request)
+  let modelId: string | undefined
   try {
-    credentials = await resolveChatGptCredentials(session.user.id)
-  } catch (error) {
-    if (error instanceof ChatGptError) {
-      return failure(
-        {
-          error: error.message,
-          code:
-            error.code === 'NOT_CONNECTED'
-              ? 'CHATGPT_NOT_CONNECTED'
-              : error.code === 'RECONNECT_REQUIRED'
-                ? 'CHATGPT_RECONNECT_REQUIRED'
-                : error.code === 'NOT_CONFIGURED'
-                  ? 'CHATGPT_NOT_CONFIGURED'
-                  : 'PROVIDER_ERROR',
-        },
-        error.code === 'NOT_CONNECTED' ? 428 : 401,
-      )
-    }
-    throw error
+    const models = await chatgptAuth.getModels(request)
+    modelId = selectAssistantModel(models ?? [])
+  } catch {
+    return failure(
+      {
+        error: 'The ChatGPT connection expired. Reconnect to keep using the agent.',
+        code: 'CHATGPT_RECONNECT_REQUIRED',
+      },
+      401,
+    )
+  }
+  if (!modelId) {
+    return failure(
+      { error: 'No ChatGPT models are available for this account.', code: 'PROVIDER_ERROR' },
+      502,
+    )
   }
 
   const target = { designId, draftId }
@@ -209,7 +220,7 @@ export async function assistantChatResponse(request: Request) {
   await saveAssistantMessages(threadId, storable(messages))
 
   return assistantStreamResponse({
-    model: assistantModel(credentials),
+    model: assistantModel(requestFetch, modelId),
     system: assistantSystemPrompt({
       ...target,
       designName: names.designName,

@@ -114,6 +114,7 @@
       "dependencies": {
         "@ai-sdk/openai": "^4.0.29",
         "@loora/agent": "workspace:*",
+        "@opencoredev/loginwithchatgpt-ai": "^0.2.0",
         "ai": "^7.0.51",
         "zod": "catalog:",
       },
@@ -131,6 +132,7 @@
         "@loora/db": "workspace:*",
         "@loora/email": "workspace:*",
         "@loora/platform": "workspace:*",
+        "@opencoredev/loginwithchatgpt-server": "^0.2.0",
         "@polar-sh/better-auth": "1.8.4",
         "better-auth": "catalog:",
         "drizzle-orm": "catalog:",
@@ -292,6 +294,7 @@
         "@loora/platform": "workspace:*",
         "@loora/rpc": "workspace:*",
         "@loora/ui": "workspace:*",
+        "@opencoredev/loginwithchatgpt-react": "^0.2.0",
         "@tanstack/react-router": "latest",
         "motion": "^12.42.2",
         "nuqs": "^2.9.1",
@@ -593,6 +596,14 @@
     "@opencoredev/domain-sdk": ["@opencoredev/domain-sdk@0.2.0", "", { "dependencies": { "tldts": "^7.0.19" } }, "sha512-pUNWxyHwSsiJPx+cT3ZuVqqekLV7KqWdjBbx/arXLOW29nUI+zLU2LRlUNWS4LmQlNy3y3oISYncbIb1Wsmd4w=="],
 
     "@opencoredev/email-sdk": ["@opencoredev/email-sdk@1.0.0", "", { "peerDependencies": { "@react-email/render": "^2.1.0", "ai": "^6.0.182 || ^7.0.0", "react": "^18.0.0 || ^19.0.0", "react-dom": "^18.0.0 || ^19.0.0" }, "optionalPeers": ["@react-email/render", "ai", "react", "react-dom"], "bin": { "email-sdk": "dist/cli.js" } }, "sha512-JdUFj1Cu9BNrInQrTmE8f/K3jBiBFLu8DwrJzz62Foi0TfjAVaRGvqYhVyXcE4zgi2i6BY8frmXmFAkvHWIsPg=="],
+
+    "@opencoredev/loginwithchatgpt-ai": ["@opencoredev/loginwithchatgpt-ai@0.2.0", "", { "dependencies": { "@opencoredev/loginwithchatgpt-core": "^0.2.0" }, "peerDependencies": { "@ai-sdk/openai": "^4.0.0", "ai": "^7.0.0" } }, "sha512-UlXeMUqQ0AngYOBunGAt+9oU/hrMCcIzV4Pq6V3eIaCV8TBYu9vgARyiipyrmG1d7YX60himqxI8k9LhacU7HA=="],
+
+    "@opencoredev/loginwithchatgpt-core": ["@opencoredev/loginwithchatgpt-core@0.2.0", "", {}, "sha512-PRzUWEYJepxkcYVvk/Uc7bc8YfUr50PWqNMjfNs/AZOF6/H73QykzFhjZJIG5cphIKrNdjOmvofuy25cH1F8ow=="],
+
+    "@opencoredev/loginwithchatgpt-react": ["@opencoredev/loginwithchatgpt-react@0.2.0", "", { "dependencies": { "@opencoredev/loginwithchatgpt-core": "^0.2.0" }, "peerDependencies": { "react": "^18.0.0 || ^19.0.0" } }, "sha512-WZ+CH3+7lM60TMSUa3nGkfyGxRON713ZQFAszNOpLvUQUR1+EXf6hD/Ftn25nOQFix9aJsqkRY5N7LWsYsQ4oA=="],
+
+    "@opencoredev/loginwithchatgpt-server": ["@opencoredev/loginwithchatgpt-server@0.2.0", "", { "dependencies": { "@opencoredev/loginwithchatgpt-core": "^0.2.0" } }, "sha512-G9TcnBNAbaI8wVoLJIWi5DryinwnpYtfy/RnWcMv6o94oHn5sIgyHESFFdn7fSCt6Sl2Vo9QRLalNfRgkuBJQQ=="],
 
     "@opentelemetry/semantic-conventions": ["@opentelemetry/semantic-conventions@1.43.0", "", {}, "sha512-eSYWTm620tTk45EKSedaUL8MFYI8hW164hIXsgIHyxu3VobUB3fFCu5t0hQby6OoWRPsG1KkKUG2M5UadiLiVg=="],
 

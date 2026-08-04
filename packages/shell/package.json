@@ -16,6 +16,7 @@
     "@loora/platform": "workspace:*",
     "@loora/rpc": "workspace:*",
     "@loora/ui": "workspace:*",
+    "@opencoredev/loginwithchatgpt-react": "^0.2.0",
     "@tanstack/react-router": "latest",
     "motion": "^12.42.2",
     "nuqs": "^2.9.1"

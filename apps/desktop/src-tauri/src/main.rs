@@ -785,6 +785,10 @@ fn main() {
                     config,
                     client: reqwest::Client::builder()
                         .redirect(Policy::none())
+                        // Login-with-ChatGPT uses an HttpOnly cookie. Keep it in
+                        // the native host: proxy requests can use the session,
+                        // while the webview still never receives the cookie.
+                        .cookie_store(true)
                         .build()
                         .map_err(|error| format!("could not create HTTP client: {error}"))?,
                     port,

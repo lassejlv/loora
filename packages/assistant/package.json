@@ -12,6 +12,7 @@
   "dependencies": {
     "@ai-sdk/openai": "^4.0.29",
     "@loora/agent": "workspace:*",
+    "@opencoredev/loginwithchatgpt-ai": "^0.2.0",
     "ai": "^7.0.51",
     "zod": "catalog:"
   },

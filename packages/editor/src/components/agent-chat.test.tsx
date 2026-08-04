@@ -3,8 +3,7 @@ import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 const status = vi.fn()
 const thread = vi.fn()
 const newThread = vi.fn()
-const disconnect = vi.fn()
-const openExternal = vi.fn()
+const fetchRequest = vi.fn()
 
 const sendMessage = vi.fn()
 const stop = vi.fn()
@@ -19,12 +18,10 @@ const chatState = {
 }
 
 vi.mock('@loora/rpc/client', () => ({
-  orpc: { assistant: { status, thread, newThread, disconnect } },
+  orpc: { assistant: { status, thread, newThread } },
 }))
 vi.mock('@loora/platform', () => ({
   apiUrl: (path: string) => path,
-  appUrl: (path: string) => `https://loora.design${path}`,
-  openExternal,
 }))
 vi.mock('@ai-sdk/react', () => ({ useChat: () => chatState }))
 
@@ -58,13 +55,14 @@ describe('AgentChat', () => {
     sendMessage.mockReset()
     stop.mockReset()
     addToolApprovalResponse.mockReset()
-    openExternal.mockReset()
+    fetchRequest.mockReset().mockResolvedValue(new Response(null, { status: 200 }))
+    vi.stubGlobal('fetch', fetchRequest)
+    window.history.replaceState({}, '', '/')
     // The status read is cached per page, so each test starts from nothing.
     resetAgentAvailability()
     status.mockReset().mockResolvedValue(connected)
     thread.mockReset().mockResolvedValue({ threadId: 'athread_1', messages: [] })
     newThread.mockReset().mockResolvedValue({ threadId: 'athread_2', messages: [] })
-    disconnect.mockReset().mockResolvedValue({ connected: false })
   })
   afterEach(cleanup)
 
@@ -112,7 +110,7 @@ describe('AgentChat', () => {
     expect(sendMessage).not.toHaveBeenCalled()
   })
 
-  test('/login-with-chatgpt opens the connect flow and comes back here', async () => {
+  test('/login-with-chatgpt opens the ChatGPT integration', async () => {
     const view = await open(
       <AgentChat designId="d1" draftId={null} open onOpenChange={() => {}} />,
     )
@@ -124,9 +122,8 @@ describe('AgentChat', () => {
     })
 
     expect(sendMessage).not.toHaveBeenCalled()
-    expect(openExternal).toHaveBeenCalledTimes(1)
-    const url = openExternal.mock.calls[0]?.[0] as string
-    expect(url).toContain('/api/chatgpt/connect?returnTo=')
+    expect(window.location.pathname).toBe('/app/integrations')
+    expect(window.location.search).toBe('?integration=chatgpt')
   })
 
   test('refuses to run before ChatGPT is connected, and says how', async () => {
@@ -269,7 +266,7 @@ describe('AgentChat', () => {
     await act(async () => {
       fireEvent.click(view.getByRole('button', { name: 'Connect ChatGPT' }))
     })
-    expect(openExternal).toHaveBeenCalled()
+    expect(window.location.pathname).toBe('/app/integrations')
   })
 
   test('typing a slash offers the commands, with the first one ready', async () => {
@@ -328,7 +325,10 @@ describe('AgentChat', () => {
     await act(async () => {
       fireEvent.keyDown(field, { key: 'Enter' })
     })
-    expect(disconnect).toHaveBeenCalled()
+    expect(fetchRequest).toHaveBeenCalledWith('/api/chatgpt/logout', {
+      method: 'POST',
+      credentials: 'include',
+    })
     expect(sendMessage).not.toHaveBeenCalled()
   })
 
@@ -355,7 +355,7 @@ describe('AgentChat', () => {
     fireEvent.keyDown(field, { key: 'Tab' })
 
     expect(field.value).toBe('/login-with-chatgpt')
-    expect(openExternal).not.toHaveBeenCalled()
+    expect(window.location.pathname).toBe('/')
   })
 
   test('clicking a command runs it', async () => {

@@ -1,4 +1,4 @@
-import { createOpenAI } from '@ai-sdk/openai'
+import { createChatGPTProxyProvider } from '@opencoredev/loginwithchatgpt-ai'
 import type { LanguageModel } from 'ai'
 
 /**
@@ -11,34 +11,21 @@ export function assistantModelId() {
   return process.env.LOORA_ASSISTANT_MODEL?.trim() || DEFAULT_ASSISTANT_MODEL
 }
 
-export interface AssistantProviderCredentials {
-  /** The bearer credential: an exchanged inference key, or the OAuth token. */
-  apiKey: string
-  /** Overrides the OpenAI base URL. */
-  baseUrl?: string | null
-  /** Sent when a plan-backed endpoint needs to know which account to bill. */
-  chatgptAccountId?: string | null
+export function selectAssistantModel(
+  models: string[],
+  preferred = assistantModelId(),
+) {
+  return models.includes(preferred) ? preferred : models[0]
 }
 
 /**
- * A model bound to one person's ChatGPT connection. Never a process-wide
- * provider: the credential belongs to the signed-in user, so the instance is
- * built per run and thrown away with it.
+ * A model bound to the ChatGPT session on the current request. The handler's
+ * proxy injects credentials server-side, so bearer tokens never enter this
+ * package or application code.
  */
 export function assistantModel(
-  credentials: AssistantProviderCredentials,
+  requestFetch: typeof fetch,
   modelId = assistantModelId(),
 ): LanguageModel {
-  const provider = createOpenAI({
-    apiKey: credentials.apiKey,
-    baseURL: credentials.baseUrl ?? undefined,
-    headers: credentials.chatgptAccountId
-      ? { 'chatgpt-account-id': credentials.chatgptAccountId }
-      : undefined,
-  })
-  // Responses is the default. `chat` exists for a base URL that speaks only
-  // Chat Completions — some plan-backed endpoints do.
-  return process.env.LOORA_ASSISTANT_API?.trim() === 'chat'
-    ? provider.chat(modelId)
-    : provider.responses(modelId)
+  return createChatGPTProxyProvider({ fetch: requestFetch })(modelId)
 }

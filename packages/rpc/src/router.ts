@@ -67,7 +67,6 @@ import {
   revokeMcpSession,
 } from './mcp-procedures'
 import {
-  disconnectAssistantChatGpt,
   getAssistantStatus,
   getAssistantThread,
   newAssistantThread,
@@ -239,7 +238,6 @@ export const appRouter = {
     status: getAssistantStatus,
     thread: getAssistantThread,
     newThread: newAssistantThread,
-    disconnect: disconnectAssistantChatGpt,
   },
   admin: {
     overview: adminOverview,

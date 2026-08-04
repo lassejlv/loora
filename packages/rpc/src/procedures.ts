@@ -39,6 +39,7 @@ export type Session = Awaited<ReturnType<typeof getSession>>
 
 export interface ORPCContext {
   session: Session
+  request: Request
 }
 
 export const shapeSchema = z.object({
@@ -90,7 +91,7 @@ export const requireUser = os.$context<ORPCContext>().middleware(async ({ contex
   if (!(await authorizeBilling(context.session.user)).access) {
     throw new ORPCError('FORBIDDEN', { message: 'An active Loora plan is required.' })
   }
-  return next({ context: { user: context.session.user } })
+  return next({ context: { user: context.session.user, request: context.request } })
 })
 
 export const protectedProcedure = os.$context<ORPCContext>().use(requireUser)
@@ -155,7 +156,7 @@ export function scheduleHistoryPrune(user: { id: string; isAdmin?: boolean | nul
 
 export const requireSignedInUser = os.$context<ORPCContext>().middleware(async ({ context, next }) => {
   if (!context.session) throw new ORPCError('UNAUTHORIZED')
-  return next({ context: { user: context.session.user } })
+  return next({ context: { user: context.session.user, request: context.request } })
 })
 
 export const signedInProcedure = os.$context<ORPCContext>().use(requireSignedInUser)
@@ -167,7 +168,7 @@ export const requireConsentedUser = os.$context<ORPCContext>().middleware(async 
       message: 'The current Terms of Service and Privacy Policy must be accepted.',
     })
   }
-  return next({ context: { user: context.session.user } })
+  return next({ context: { user: context.session.user, request: context.request } })
 })
 
 export const consentedProcedure = os.$context<ORPCContext>().use(requireConsentedUser)
@@ -182,7 +183,7 @@ export const requirePreviewUser = os.$context<ORPCContext>().middleware(async ({
   if (!canUseApp(context.session.user)) {
     throw new ORPCError('FORBIDDEN', { message: 'Preview access is required.' })
   }
-  return next({ context: { user: context.session.user } })
+  return next({ context: { user: context.session.user, request: context.request } })
 })
 
 export const previewProcedure = os.$context<ORPCContext>().use(requirePreviewUser)
@@ -195,7 +196,7 @@ export const requireAdmin = os.$context<ORPCContext>().middleware(async ({ conte
     })
   }
   if (!context.session.user.isAdmin) throw new ORPCError('FORBIDDEN')
-  return next({ context: { user: context.session.user } })
+  return next({ context: { user: context.session.user, request: context.request } })
 })
 
 export const adminProcedure = os.$context<ORPCContext>().use(requireAdmin)

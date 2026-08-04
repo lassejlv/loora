@@ -18,9 +18,8 @@ import {
   designDraft,
 } from '@loora/db/schema'
 import {
+  chatgptAuth,
   chatgptEnabled,
-  disconnectChatGpt,
-  getChatGptConnection,
 } from '@loora/auth/chatgpt'
 import { assistantModelId } from '@loora/assistant/model'
 import { isInAppAgentEnabled } from '@loora/railway'
@@ -256,8 +255,15 @@ export const getAssistantStatus = protectedProcedure.handler(
         model: assistantModelId(),
       }
     }
-    const connection = chatgptEnabled
-      ? await getChatGptConnection(context.user.id)
+    const session = chatgptEnabled
+      ? await chatgptAuth.getSession(context.request)
+      : null
+    const connection = session?.status === 'authenticated'
+      ? {
+          email: session.user?.email ?? null,
+          name: session.user?.name ?? null,
+          planType: session.user?.plan ?? null,
+        }
       : null
     return {
       enabled: true as const,
@@ -285,10 +291,3 @@ export const newAssistantThread = protectedProcedure
       messages: [] as StoredAssistantMessage[],
     }
   })
-
-export const disconnectAssistantChatGpt = protectedProcedure.handler(
-  async ({ context }) => {
-    await disconnectChatGpt(context.user.id)
-    return { connected: false as const }
-  },
-)

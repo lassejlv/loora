@@ -41,7 +41,7 @@ async function handle(request: Request) {
   const handlerStartedAt = performance.now()
   const { response } = await handler.handle(request, {
     prefix: '/api/rpc',
-    context: { session },
+    context: { session, request },
   })
   const handlerMs = elapsedMilliseconds(handlerStartedAt)
   const resolved = response ?? new Response('Not Found', { status: 404 })
