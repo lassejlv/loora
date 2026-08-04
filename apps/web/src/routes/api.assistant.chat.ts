@@ -29,7 +29,7 @@ import {
 import { isInAppAgentEnabled } from '@loora/railway'
 import { AccessDeniedError, requireAppAccess } from '@loora/rpc/mcp-access'
 import { createLooraToolExecutor } from '@loora/rpc/mcp-server'
-import { createAgentUsageController } from '@loora/rpc/mcp-usage'
+import { createMcpUsageController } from '@loora/rpc/mcp-usage'
 import { McpUsageLimitError } from '@loora/billing/mcp-usage'
 import {
   rateLimit,
@@ -207,19 +207,27 @@ export async function assistantChatResponse(request: Request) {
     assistantTargetNames(session.user.id, target),
   ])
 
-  // The agent's own meter, separate from MCP: a week of agent work never eats
-  // into what an external MCP client is allowed, and the reverse.
-  const usage = createAgentUsageController(
+  // One shared Agent Calls allowance: an in-app message spends one call, just
+  // like one tool request from an external MCP client.
+  const usage = createMcpUsageController(
     session.user.id,
     access.mcpPlan,
-    access.agentUsageOptions,
+    access.mcpUsageOptions,
   )
+  let runUsage: Awaited<ReturnType<typeof usage.current>> | undefined
+  const messageUsage = {
+    current: async () => (runUsage ??= await usage.current()),
+    reserve: async () => (runUsage ??= await usage.reserve()),
+  }
   try {
-    const current = await usage.current()
-    if (current.remaining === 0) throw new McpUsageLimitError(current)
+    // A submitted user message spends one call. Tool calls reuse that same
+    // reservation, and an approval continuation only reads it, so neither a
+    // complex run nor clicking Delete can spend the allowance twice.
+    if (messages.at(-1)?.role === 'user') await messageUsage.reserve()
+    else await messageUsage.current()
   } catch (error) {
     // Only a hard "you are out" stops the run here. A metering outage is the
-    // executor's problem to report per call, not a reason to refuse to start.
+    // executor's problem to report, not a reason to refuse to start.
     if (error instanceof McpUsageLimitError) {
       return failure({ error: error.message, code: 'RATE_LIMITED' }, 429)
     }
@@ -227,7 +235,7 @@ export async function assistantChatResponse(request: Request) {
 
   const execute = createLooraToolExecutor(
     session.user.id,
-    usage,
+    messageUsage,
     async () => (await requireAppAccess(session.user.id)).mcpPlan,
   )
   const tools = createAssistantTools({ execute, target })

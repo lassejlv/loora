@@ -58,7 +58,7 @@ const FAQ = [
       'Yes. Tool calls commit the same validated transactions the editor commits, and the canvas is pushed over realtime — so an edit made from a terminal shows up in an open browser tab without a reload.',
   },
   {
-    question: 'How many MCP calls do I get?',
+    question: 'How many Agent Calls do I get?',
     answer:
       'Calls are metered weekly: 100 a week on Free and 1,000,000 a week on Pro and Studio.',
   },
@@ -206,7 +206,7 @@ function McpPage() {
       <Section title="Limits and troubleshooting">
         <Bullets
           items={[
-            'MCP calls are counted per week: 100 on Free, 1,000,000 on Pro.',
+            'Agent Calls are counted per week: 100 on Free, 1,000,000 on Pro.',
             'A 401 means the token expired or was never granted — run the client’s login step again.',
             'Tools are scoped to your own designs; there is no shared or public access.',
             'If a client silently ignores the server, the key name is usually wrong: url, serverUrl, httpUrl, and uri all mean the same thing to a different product.',

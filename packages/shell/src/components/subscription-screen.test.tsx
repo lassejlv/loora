@@ -54,6 +54,7 @@ describe('SubscriptionScreen', () => {
 
     expect(await screen.findByText('$0')).toBeTruthy()
     expect(await screen.findByText('$20')).toBeTruthy()
+    expect(screen.getByText(/100 Agent Calls a week/)).toBeTruthy()
     expect(screen.getByText('No card required')).toBeTruthy()
     expect(screen.getByRole('button', { name: 'Go Pro — $20/month' })).toBeTruthy()
     expect(screen.getByRole('button', { name: 'Go Pro — $200/year' })).toBeTruthy()

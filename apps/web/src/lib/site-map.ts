@@ -58,7 +58,7 @@ const STATIC_PAGES: SitemapEntry[] = [
     changefreq: 'monthly',
     lastmod: SITE_UPDATED,
     title: 'Pricing',
-    summary: 'Free at $0/month, Pro at $20/month. Limits on files, assets, MCP calls, and history.',
+    summary: 'Free at $0/month, Pro at $20/month. Limits on files, assets, Agent Calls, and history.',
   },
   {
     path: '/learn',

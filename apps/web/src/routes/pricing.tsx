@@ -7,7 +7,7 @@ import { breadcrumbSchema, jsonLd, seo, softwareApplicationSchema } from '#/lib/
 const TITLE = 'Pricing — Loora'
 
 const DESCRIPTION =
-  'Free is $0/month with 50 design files, 1 GB of assets, 100 MCP calls a week, 2 days of version history, and 1 open branch per design. Pro is $20/month, or $200 a year, for unlimited files, 50 GB, 1M MCP calls a week, 90-day history, and unlimited branches.'
+  'Free is $0/month with 50 design files, 1 GB of assets, 100 Agent Calls a week, 2 days of version history, and 1 open branch per design. Pro is $20/month, or $200 a year, for unlimited files, 50 GB, 1M Agent Calls a week, 90-day history, and unlimited branches.'
 
 export const Route = createFileRoute('/pricing')({
   head: () => ({
@@ -45,7 +45,7 @@ function PricingContent() {
 
       <p className="mt-6 text-muted-foreground">
         Start free and keep the whole editor. Pro raises the limits: more files, more storage, more
-        MCP calls, and a longer history window. Capacity is the only thing you pay for.
+        Agent Calls, and a longer history window. Capacity is the only thing you pay for.
       </p>
 
       {/* Hairline grid: the parent border carries the outer rule, `gap-px` over a
@@ -137,9 +137,9 @@ function PricingContent() {
         Polar.
       </p>
       <p className="mt-4 text-muted-foreground">
-        MCP calls are counted per week and reset weekly. Asset storage is the total size of the
-        images and files in your account. Version history is a rolling window: 2 days on Free, 90
-        days on Pro. An external agent you connect over{' '}
+        Each message sent to the in-app agent uses one Agent Call. Agent Calls reset weekly. Asset
+        storage is the total size of the images and files in your account. Version history is a
+        rolling window: 2 days on Free, 90 days on Pro. An external agent you connect over{' '}
         <a
           href="https://mcp.loora.design"
           target="_blank"

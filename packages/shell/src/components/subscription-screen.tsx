@@ -31,7 +31,7 @@ const plans = [
     id: 'free' as const,
     name: 'Free',
     price: '$0',
-    summary: '50 files, 1 open branch per design, and 100 MCP calls a week',
+    summary: '50 files, 1 open branch per design, and 100 Agent Calls a week',
     note: 'No card required',
   },
   {

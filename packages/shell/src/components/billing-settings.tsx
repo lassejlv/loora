@@ -1,9 +1,6 @@
 import { useEffect, useState } from 'react'
 import { authClient } from '@loora/auth/client'
-import {
-  AGENT_WEEKLY_INCLUDED,
-  MCP_WEEKLY_INCLUDED,
-} from '@loora/billing/mcp-usage'
+import { MCP_WEEKLY_INCLUDED } from '@loora/billing/mcp-usage'
 import { Button } from '@loora/ui/button'
 import { PanelLoading } from '@loora/ui/panel-shell'
 import { orpc } from '@loora/rpc/client'
@@ -23,10 +20,6 @@ function formatResetDate(iso: string) {
   }).format(new Date(iso))
 }
 
-/**
- * MCP and the in-app agent are metered separately, so they get a card each
- * rather than one number that would hide which surface ran out.
- */
 interface UsageCopy {
   title: string
   /** What an account with no ceiling is told. */
@@ -36,20 +29,12 @@ interface UsageCopy {
   loadError: string
 }
 
-const MCP_COPY: UsageCopy = {
-  title: 'MCP calls this week',
-  unmetered: 'MCP tool calls are not metered on this account.',
-  noPlan: `Subscribe to a plan to use the MCP server. Free includes ${formatCount(MCP_WEEKLY_INCLUDED.free)} calls per week; Pro and Studio include ${formatCount(MCP_WEEKLY_INCLUDED.pro)}.`,
-  meterLabel: 'MCP calls used this week',
-  loadError: 'Could not load MCP usage. Please try again.',
-}
-
-const AGENT_COPY: UsageCopy = {
-  title: 'Agent calls this week',
-  unmetered: 'In-app agent calls are not metered on this account.',
-  noPlan: `Subscribe to a plan to use the in-app agent. Free includes ${formatCount(AGENT_WEEKLY_INCLUDED.free)} calls per week; Pro and Studio include ${formatCount(AGENT_WEEKLY_INCLUDED.pro)}.`,
-  meterLabel: 'Agent calls used this week',
-  loadError: 'Could not load agent usage. Please try again.',
+const AGENT_CALLS_COPY: UsageCopy = {
+  title: 'Agent Calls this week',
+  unmetered: 'Agent Calls are not metered on this account.',
+  noPlan: `Subscribe to a plan to use agents with Loora. Free includes ${formatCount(MCP_WEEKLY_INCLUDED.free)} calls per week; Pro and Studio include ${formatCount(MCP_WEEKLY_INCLUDED.pro)}.`,
+  meterLabel: 'Agent Calls used this week',
+  loadError: 'Could not load Agent Calls. Please try again.',
 }
 
 function UsageCard({ usage, copy }: { usage: McpUsage; copy: UsageCopy }) {
@@ -150,7 +135,6 @@ function UsageSection({
   return <UsageCard usage={usage} copy={copy} />
 }
 
-/** One surface's number, loaded on its own so neither hides the other. */
 function useToolUsage(
   read: () => Promise<{ usage: McpUsage | null }>,
   copy: UsageCopy,
@@ -178,8 +162,10 @@ export function BillingSettings() {
   const [billing, setBilling] = useState<BillingStatus | null>(null)
   const [error, setError] = useState('')
   const [openingPortal, setOpeningPortal] = useState(false)
-  const mcp = useToolUsage(() => orpc.billing.mcpUsage(), MCP_COPY)
-  const agent = useToolUsage(() => orpc.billing.agentUsage(), AGENT_COPY)
+  const agentCalls = useToolUsage(
+    () => orpc.billing.mcpUsage(),
+    AGENT_CALLS_COPY,
+  )
 
   const loadBilling = async () => {
     try {
@@ -192,25 +178,16 @@ export function BillingSettings() {
 
   useEffect(() => {
     void loadBilling()
-    void mcp.load()
-    void agent.load()
+    void agentCalls.load()
   }, [])
 
   const usageSection = (
-    <div className="grid gap-3 sm:grid-cols-2">
-      <UsageSection
-        usage={mcp.usage}
-        usageError={mcp.error}
-        copy={MCP_COPY}
-        onRetry={() => void mcp.load()}
-      />
-      <UsageSection
-        usage={agent.usage}
-        usageError={agent.error}
-        copy={AGENT_COPY}
-        onRetry={() => void agent.load()}
-      />
-    </div>
+    <UsageSection
+      usage={agentCalls.usage}
+      usageError={agentCalls.error}
+      copy={AGENT_CALLS_COPY}
+      onRetry={() => void agentCalls.load()}
+    />
   )
 
   if (session?.user?.isAdmin) {

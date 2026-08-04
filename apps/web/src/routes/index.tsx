@@ -48,7 +48,7 @@ const FAQ = [
   {
     question: 'Is Loora free?',
     answer:
-      'There is a free plan: 50 design files, 1 GB of asset storage, 100 MCP calls a week, 2 days of version history, and one open branch per design. Pro is $20 a month for unlimited files and branches, 50 GB, a million MCP calls a week, and 90 days of history.',
+      'There is a free plan: 50 design files, 1 GB of asset storage, 100 Agent Calls a week, 2 days of version history, and one open branch per design. Pro is $20 a month for unlimited files and branches, 50 GB, a million Agent Calls a week, and 90 days of history.',
   },
   {
     question: 'How is this different from prompting an agent for React?',
@@ -238,7 +238,7 @@ function Pricing() {
   return (
     <Section title="Pricing">
       <p className="mt-4 text-muted-foreground">
-        Free is $0/month with 50 design files and 100 MCP calls a week. Pro is $20/month for
+        Free is $0/month with 50 design files and 100 Agent Calls a week. Pro is $20/month for
         unlimited files, branches, 50 GB of assets, and a million calls a week.
       </p>
       <p className="mt-4">

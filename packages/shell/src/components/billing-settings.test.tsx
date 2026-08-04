@@ -3,12 +3,11 @@ import { afterEach, beforeEach, describe, expect, vi, test } from 'vitest'
 
 const status = vi.fn()
 const mcpUsage = vi.fn()
-const agentUsage = vi.fn()
 const portal = vi.fn()
 
 vi.doMock('@loora/rpc/client', () => ({
   orpc: {
-    billing: { status, mcpUsage, agentUsage },
+    billing: { status, mcpUsage },
   },
 }))
 
@@ -51,17 +50,6 @@ const proUsage = {
   resetsAt: '2026-08-03T00:00:00.000Z',
 }
 
-/** The agent card loads from its own procedure, so it needs its own number. */
-const proAgentUsage = {
-  metric: 'agent_tool_calls' as const,
-  plan: 'pro' as const,
-  included: 1_000_000,
-  used: 7,
-  remaining: 999_993,
-  periodStart: '2026-07-27T00:00:00.000Z',
-  resetsAt: '2026-08-03T00:00:00.000Z',
-}
-
 const freeUsage = {
   metric: 'mcp_tool_calls' as const,
   plan: 'free' as const,
@@ -76,7 +64,6 @@ describe('BillingSettings', () => {
   beforeEach(() => {
     status.mockReset().mockResolvedValue(proBilling)
     mcpUsage.mockReset().mockResolvedValue({ usage: proUsage })
-    agentUsage.mockReset().mockResolvedValue({ usage: proAgentUsage })
     portal.mockReset().mockResolvedValue(undefined)
   })
 
@@ -91,56 +78,35 @@ describe('BillingSettings', () => {
     await waitFor(() => expect(portal).toHaveBeenCalledTimes(1))
   })
 
-  /** The two cards look alike, so every assertion is scoped to one of them. */
   const usageCard = (title: string) =>
     within(screen.getByText(title).closest('div')!)
 
-  test('shows weekly MCP call usage for the current plan', async () => {
+  test('shows weekly Agent Calls from the existing usage meter', async () => {
     render(<BillingSettings />)
 
-    expect(await screen.findByText('MCP calls this week')).toBeTruthy()
-    const mcp = usageCard('MCP calls this week')
-    expect(mcp.getByText('42')).toBeTruthy()
-    expect(mcp.getByText(/\/ 1,000,000/)).toBeTruthy()
-    expect(mcp.getByText(/999,958 remaining/)).toBeTruthy()
-    expect(mcp.getByRole('meter', { name: 'MCP calls used this week' })).toBeTruthy()
-  })
-
-  test('counts agent calls on their own card, from their own meter', async () => {
-    render(<BillingSettings />)
-
-    expect(await screen.findByText('Agent calls this week')).toBeTruthy()
-    const agent = usageCard('Agent calls this week')
-    expect(agent.getByText('7')).toBeTruthy()
-    expect(agent.getByText(/999,993 remaining/)).toBeTruthy()
+    expect(await screen.findByText('Agent Calls this week')).toBeTruthy()
+    const agent = usageCard('Agent Calls this week')
+    expect(agent.getByText('42')).toBeTruthy()
+    expect(agent.getByText(/\/ 1,000,000/)).toBeTruthy()
+    expect(agent.getByText(/999,958 remaining/)).toBeTruthy()
     expect(
-      agent.getByRole('meter', { name: 'Agent calls used this week' }),
+      agent.getByRole('meter', { name: 'Agent Calls used this week' }),
     ).toBeTruthy()
-    expect(agentUsage).toHaveBeenCalledTimes(1)
   })
 
-  test('one surface failing leaves the other readable', async () => {
-    agentUsage.mockRejectedValue(new Error('agent meter down'))
-
-    render(<BillingSettings />)
-
-    expect(await screen.findByText('agent meter down')).toBeTruthy()
-    expect(usageCard('MCP calls this week').getByText('42')).toBeTruthy()
-  })
-
-  test('shows when the weekly MCP limit is exhausted', async () => {
+  test('shows when the weekly Agent Calls limit is exhausted', async () => {
     status.mockResolvedValue({ ...proBilling, plan: 'free' as const })
     mcpUsage.mockResolvedValue({ usage: freeUsage })
 
     render(<BillingSettings />)
 
     expect(await screen.findByText('Weekly limit reached')).toBeTruthy()
-    const mcp = usageCard('MCP calls this week')
-    expect(mcp.getByText('200')).toBeTruthy()
-    expect(mcp.getByText(/\/ 200/)).toBeTruthy()
+    const agent = usageCard('Agent Calls this week')
+    expect(agent.getByText('200')).toBeTruthy()
+    expect(agent.getByText(/\/ 200/)).toBeTruthy()
   })
 
-  test('shows the no-plan MCP card when usage is null', async () => {
+  test('shows the no-plan Agent Calls card when usage is null', async () => {
     status.mockResolvedValue({
       ...proBilling,
       access: false,
@@ -150,9 +116,11 @@ describe('BillingSettings', () => {
 
     render(<BillingSettings />)
 
-    expect(await screen.findAllByText('No plan')).toHaveLength(2)
-    expect(screen.getByText(/Free includes 100 calls per week/)).toBeTruthy()
-    expect(screen.getByText(/Pro and Studio include 1,000,000/)).toBeTruthy()
+    expect(await screen.findByText('Agent Calls this week')).toBeTruthy()
+    const agent = usageCard('Agent Calls this week')
+    expect(agent.getByText('No plan')).toBeTruthy()
+    expect(agent.getByText(/Free includes 100 calls per week/)).toBeTruthy()
+    expect(agent.getByText(/Pro and Studio include 1,000,000/)).toBeTruthy()
   })
 
   test('explains when billing is disabled for the environment', async () => {
@@ -179,18 +147,18 @@ describe('BillingSettings', () => {
     expect(await screen.findByText('Unlimited')).toBeTruthy()
   })
 
-  test('surfaces MCP usage load failures without blocking plan info', async () => {
-    mcpUsage.mockRejectedValue(new Error('MCP usage is temporarily unavailable.'))
+  test('surfaces Agent Calls load failures without blocking plan info', async () => {
+    mcpUsage.mockRejectedValue(new Error('Agent Calls are temporarily unavailable.'))
 
     render(<BillingSettings />)
 
     expect(await screen.findByText('Pro')).toBeTruthy()
     expect(
-      await screen.findByText('MCP usage is temporarily unavailable.'),
+      await screen.findByText('Agent Calls are temporarily unavailable.'),
     ).toBeTruthy()
   })
 
-  test('retries MCP usage after a load failure', async () => {
+  test('retries Agent Calls usage after a load failure', async () => {
     mcpUsage
       .mockRejectedValueOnce(new Error('down'))
       .mockResolvedValueOnce({ usage: proUsage })
@@ -198,7 +166,6 @@ describe('BillingSettings', () => {
     render(<BillingSettings />)
 
     expect(await screen.findByText('down')).toBeTruthy()
-    // Two usage cards now, so retry the one that actually failed.
     const failedCard = screen.getByText('down').closest('div')!
     fireEvent.click(
       within(failedCard).getByRole('button', { name: 'Try again' }),

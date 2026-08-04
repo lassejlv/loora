@@ -21,7 +21,7 @@ function BillingPage() {
       <AppPageShell
         active="billing"
         title="Billing"
-        description="Manage your Loora plan, subscription, and MCP usage."
+        description="Manage your Loora plan, subscription, and Agent Calls."
       >
         <BillingSettings />
       </AppPageShell>

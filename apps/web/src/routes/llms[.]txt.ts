@@ -71,7 +71,7 @@ ${sections}
   httpUrl, and uri all mean the same thing to a different product. See the
   per-client pages under ${SITE_URL}/mcp.
 - Export is one-way. Edited code never returns to the canvas document.
-- MCP calls are metered weekly: 100/week on Free, 1,000,000/week on Pro.
+- Agent Calls are metered weekly: 100/week on Free, 1,000,000/week on Pro.
 `
 }
 

@@ -82,7 +82,7 @@ export const COMPARISONS: readonly Comparison[] = [
       },
       {
         aspect: 'Free tier',
-        loora: '50 design files, 1 GB assets, 100 MCP calls a week, 2 days of history',
+        loora: '50 design files, 1 GB assets, 100 Agent Calls a week, 2 days of history',
         other: 'A generous free tier with limits on files per project and on Dev Mode',
       },
       {
