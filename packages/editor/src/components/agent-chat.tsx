@@ -787,51 +787,75 @@ function AgentChatBox({
       ) : null}
 
       {matches.length > 0 ? (
-        <ul
-          role="listbox"
-          aria-label="Commands"
-          className="max-h-56 overflow-y-auto border-b border-line/70 p-1"
-        >
-          {matches.map((command, index) => {
-            const Icon = command.icon
-            const selected = command.name === active?.name
-            return (
-              <li key={command.name}>
-                <button
-                  type="button"
-                  role="option"
-                  aria-selected={selected}
-                  // The textarea keeps focus so typing never stops; the mouse
-                  // only moves the highlight the keyboard is already driving.
-                  onMouseDown={(event) => event.preventDefault()}
-                  onMouseEnter={() => setHighlighted(index)}
-                  onClick={() => void choose(command.name)}
-                  className={cn(
-                    'flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-start',
-                    selected ? 'bg-foreground/8' : 'hover:bg-foreground/5',
-                  )}
-                >
-                  <Icon
-                    size={13}
+        <div className="border-b border-line/70">
+          <ul
+            role="listbox"
+            aria-label="Commands"
+            className="max-h-56 overflow-y-auto p-1"
+          >
+            {matches.map((command, index) => {
+              const Icon = command.icon
+              const selected = command.name === active?.name
+              return (
+                <li key={command.name}>
+                  <button
+                    type="button"
+                    role="option"
+                    aria-selected={selected}
+                    // The textarea keeps focus so typing never stops; the mouse
+                    // only moves the highlight the keyboard is already driving.
+                    onMouseDown={(event) => event.preventDefault()}
+                    onMouseEnter={() => setHighlighted(index)}
+                    onClick={() => void choose(command.name)}
                     className={cn(
-                      'shrink-0',
-                      selected ? 'text-foreground' : 'text-muted-foreground',
+                      'flex w-full items-center gap-2.5 rounded-md px-1.5 py-1 text-start transition-colors duration-75',
+                      selected && 'bg-foreground/8',
                     )}
-                  />
-                  <span className="font-mono text-xs text-foreground">
-                    {command.name}
-                  </span>
-                  <span className="min-w-0 flex-1 truncate text-2xs text-muted-foreground">
-                    {command.description}
-                  </span>
-                  {selected ? (
-                    <Kbd className="h-4 min-w-4 bg-transparent text-2xs">↵</Kbd>
-                  ) : null}
-                </button>
-              </li>
-            )
-          })}
-        </ul>
+                  >
+                    <span
+                      className={cn(
+                        'grid size-6 shrink-0 place-items-center rounded-md border transition-colors duration-75',
+                        selected
+                          ? 'border-line/80 bg-surface text-foreground shadow-sm'
+                          : 'border-transparent text-muted-foreground',
+                      )}
+                    >
+                      <Icon size={13} />
+                    </span>
+                    <span className="font-mono text-xs text-foreground">
+                      {command.name}
+                    </span>
+                    <span className="min-w-0 flex-1 truncate text-2xs text-muted-foreground">
+                      {command.description}
+                    </span>
+                    <Kbd
+                      className={cn(
+                        'h-4 min-w-4 bg-transparent text-2xs transition-opacity duration-75',
+                        selected ? 'opacity-100' : 'opacity-0',
+                      )}
+                    >
+                      ↵
+                    </Kbd>
+                  </button>
+                </li>
+              )
+            })}
+          </ul>
+          <div className="flex items-center gap-3 border-t border-line/50 px-2.5 py-1.5 text-2xs text-muted-foreground/80">
+            <span className="flex items-center gap-1">
+              <Kbd className="h-4 min-w-4 bg-transparent text-2xs">↑↓</Kbd>
+              navigate
+            </span>
+            <span className="flex items-center gap-1">
+              <Kbd className="h-4 min-w-4 bg-transparent text-2xs">⇥</Kbd>
+              complete
+            </span>
+            <span className="flex items-center gap-1">
+              <Kbd className="h-4 min-w-4 bg-transparent text-2xs">↵</Kbd>
+              run
+            </span>
+          </div>
+        </div>
       ) : null}
 
       <div className="flex items-end gap-1.5 px-2.5 py-2">
