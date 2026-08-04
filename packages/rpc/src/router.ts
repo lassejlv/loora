@@ -67,6 +67,12 @@ import {
   revokeMcpSession,
 } from './mcp-procedures'
 import {
+  disconnectAssistantChatGpt,
+  getAssistantStatus,
+  getAssistantThread,
+  newAssistantThread,
+} from './assistant'
+import {
   acceptLegal,
   deleteAccount,
   getAuthConfig,
@@ -224,6 +230,12 @@ export const appRouter = {
   mcp: {
     sessions: listMcpSessions,
     revoke: revokeMcpSession,
+  },
+  assistant: {
+    status: getAssistantStatus,
+    thread: getAssistantThread,
+    newThread: newAssistantThread,
+    disconnect: disconnectAssistantChatGpt,
   },
   admin: {
     overview: adminOverview,

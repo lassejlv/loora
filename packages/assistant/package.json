@@ -1,0 +1,23 @@
+{
+  "name": "@loora/assistant",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./agent": "./src/agent.ts",
+    "./model": "./src/model.ts",
+    "./protocol": "./src/protocol.ts",
+    "./system-prompt": "./src/system-prompt.ts",
+    "./tools": "./src/tools.ts"
+  },
+  "dependencies": {
+    "@ai-sdk/openai": "^4.0.29",
+    "@loora/agent": "workspace:*",
+    "ai": "^7.0.51",
+    "zod": "catalog:"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.3.14",
+    "@types/node": "^22.20.1",
+    "typescript": "catalog:"
+  }
+}

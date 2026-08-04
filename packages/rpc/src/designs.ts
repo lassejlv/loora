@@ -9,7 +9,7 @@ import {
 } from 'drizzle-orm'
 import { z } from 'zod'
 import { db } from '@loora/db'
-import { design, publishedSite } from '@loora/db/schema'
+import { assistantThread, design, publishedSite } from '@loora/db/schema'
 import {
   claimDesignShares,
   listSharedDesigns,
@@ -226,6 +226,18 @@ export const deleteDesign = protectedProcedure
     } catch (error) {
       customDomainOrpcError(error)
     }
+
+    // Agent threads have no foreign key onto `design` (it is keyed on
+    // `(id, user_id)`), so a permanent delete takes them out by hand — the
+    // conversation about a file should not outlive the file.
+    await db
+      .delete(assistantThread)
+      .where(
+        and(
+          eq(assistantThread.designId, input.id),
+          eq(assistantThread.userId, context.user.id),
+        ),
+      )
 
     const deleted = await db
       .delete(design)

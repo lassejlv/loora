@@ -1,4 +1,5 @@
 import { useQueryStates } from 'nuqs'
+import { ChatGptAccount } from './chatgpt-account'
 import { GitHubAccount } from './github-account'
 import { McpSessions } from './mcp-sessions'
 import { Tabs, TabsList, TabsPanel, TabsTab } from '@loora/ui/tabs'
@@ -21,12 +22,16 @@ export function IntegrationsSettings() {
       }}
       className="flex flex-col gap-5"
     >
-      <TabsList className="grid w-full grid-cols-2">
+      <TabsList className="grid w-full grid-cols-3">
         <TabsTab value="mcp">MCP</TabsTab>
+        <TabsTab value="chatgpt">ChatGPT</TabsTab>
         <TabsTab value="github">GitHub</TabsTab>
       </TabsList>
       <TabsPanel value="mcp" id="integration-mcp">
         <McpSessions />
+      </TabsPanel>
+      <TabsPanel value="chatgpt" id="integration-chatgpt">
+        <ChatGptAccount />
       </TabsPanel>
       <TabsPanel value="github" id="integration-github">
         <GitHubAccount />

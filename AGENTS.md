@@ -4,7 +4,9 @@ Loora is an infinite-canvas design tool. Users arrange structured UI nodes on a
 canvas; remote MCP clients (and agent handoff consumers) mutate the same
 document through typed transactions. Designs have version history, isolated
 drafts/branches, one-way exports, and GitHub integration.
-There is no in-app chat agent — bring your own agent via MCP or handoff.
+The editor also has its own agent: one chat box over the canvas, running on
+the person's own ChatGPT account, driving the same typed tools. Bringing your
+own agent over MCP or handoff stays a first-class path.
 
 It ships as a web app and as a desktop app — the same interface, from the same
 packages, over a native window.
@@ -30,6 +32,7 @@ packages/canvas   Canvas model, engine, merge, React surface, import, export
 packages/db       Drizzle schema, Neon client, migrations (`@loora/db`)
 packages/rpc      oRPC `appRouter`, storage, history, handoff (`@loora/rpc`)
 packages/agent    Shared canvas tools + layout repair for MCP (`@loora/agent`)
+packages/assistant The in-app agent: model, tools, run loop (`@loora/assistant`)
 packages/realtime Realtime wire protocol, connection tickets, ingest client (`@loora/realtime`)
 packages/auth     Better Auth, preview access, GitHub (`@loora/auth`)
 packages/billing  Polar plan access / entitlements (`@loora/billing`)
@@ -53,10 +56,12 @@ packages/billing  Polar plan access / entitlements (`@loora/billing`)
 | `/` | Public landing |
 | `/app` | Design file browser (via `AccountGate`) |
 | `/app/billing` | Plan and subscription management |
-| `/app/integrations` | MCP sessions and connected external accounts |
+| `/app/integrations` | MCP sessions, ChatGPT, and connected external accounts |
 | `/design/$id` | Editor on Main. Route supplies `designId` and remounts on change — the editor never picks a document itself. |
 | `/design/$id/b/$branchId` | Editor on an active branch. |
 | `/api/rpc/$` | oRPC |
+| `/api/assistant/chat` | The in-app agent's streaming run |
+| `/api/chatgpt/connect`, `/api/chatgpt/callback` | Sign in with ChatGPT (PKCE) |
 | `/api/realtime-ticket` | Mints a signed WebSocket ticket after the usual access checks |
 | `/api/canvas-events`, `/api/canvas-presence` | Server-sent-events fallback for realtime |
 | `/api/auth/$` | Better Auth |
@@ -149,7 +154,7 @@ Dependency-light canvas core. **Must never** import db, RPC, auth, web, drafts, 
 | `@loora/canvas/export` | One-way HTML, JSX, Tailwind, React/TSX, JSON, PNG compile |
 | `@loora/canvas/import` | HTML/CSS snapshot conversion into validated structured nodes |
 
-Editor UI lives in `packages/editor` (branch panel, sync target, history, export, layers, properties). Keep branch/sync controllers outside the canvas package. There is no in-app agent panel.
+Editor UI lives in `packages/editor` (branch panel, sync target, history, export, layers, properties, agent chat). Keep branch/sync controllers outside the canvas package. The canvas package knows nothing about agents.
 
 ### `packages/agent` (`@loora/agent`)
 
@@ -158,11 +163,40 @@ Shared canvas mutation vocabulary for MCP (and handoff consumers), not models or
 - `canvas-tools` — typed tool handlers over the same transaction path as the editor/RPC
 - `repair-layout` — layout repair utility used by `bun run canvas:repair-layout`
 
+### `packages/assistant` (`@loora/assistant`)
+
+The in-app agent, and only the parts of it that are not product state. It knows
+about a model, a tool set and a run loop; it has never heard of the database,
+oRPC or React, and it takes its executor as a parameter.
+
+| Export | Role |
+|--------|------|
+| `@loora/assistant/protocol` | Tool names, labels, error codes, the slash commands. Imports nothing. |
+| `@loora/assistant/model` | Builds a `LanguageModel` from one person's ChatGPT credentials |
+| `@loora/assistant/tools` | The AI SDK tool set over `createLooraToolExecutor` |
+| `@loora/assistant/system-prompt` | The brief the agent works from |
+| `@loora/assistant/agent` | `runAssistant` / `assistantStreamResponse` |
+
+Every tool goes down `createLooraToolExecutor` — the same path the remote MCP
+transport takes — so engine validation, compare-and-swap persistence, plan
+limits, the weekly MCP meter, realtime invalidation and the agent-activity ring
+all behave exactly as they do for an external agent. Two things differ on
+purpose: the canvas target is injected rather than accepted, so the model cannot
+name a design other than the open one; and `deleteNodes` carries
+`needsApproval`, which is the destructive-action invariant expressed as a tool
+option.
+
+`@loora/agent` stays what it was — the shared tool *vocabulary*. This package is
+the *runtime* that drives it.
+
 ### `packages/rpc` (`appRouter` namespaces)
 
-`auth` · `preferences` · `billing` · `design` · `canvas` · `draft` · `handoff` · `history` · `asset` · `github` · `mcp` · `admin`
+`auth` · `preferences` · `billing` · `design` · `canvas` · `draft` · `handoff` · `history` · `asset` · `github` · `mcp` · `assistant` · `admin`
 
-Most product mutations go through oRPC. External agents use MCP or handoff — there is no `/api/chat` streaming path.
+Most product mutations go through oRPC. External agents use MCP or handoff.
+The in-app agent streams from `/api/assistant/chat` rather than oRPC, because a
+token stream is not an oRPC call; `assistant` covers everything around it —
+the ChatGPT connection and the threads.
 
 The browser client is `@loora/rpc/client` (`orpc`). It imports `appRouter` as a
 type only, so no server implementation follows it into the bundle.
@@ -255,11 +289,13 @@ Deploy: Railway via root `Dockerfile` / `railway.json`, with `crates/mcp-server`
 `crates/ws-server` carrying their own `Dockerfile` + `railway.json` for the MCP and
 realtime services.
 
-A **new workspace package** has to be added to all three Dockerfiles. Each
-copies workspace manifests one at a time before `bun install
---frozen-lockfile`, and a member the image never copies cannot resolve — the
-build fails at install, before any app code compiles. Local installs succeed
-either way, so this only ever shows up on Railway.
+A **new workspace package** has to be added to the root `Dockerfile` in all
+three places it lists members: the manifest copies before `bun install
+--frozen-lockfile`, the `node_modules` copies into the runtime stage, and the
+source/manifest copies after them. A member the image never copies cannot
+resolve — the build fails at install, before any app code compiles. Local
+installs succeed either way, so this only ever shows up on Railway. (The two
+crate Dockerfiles build Rust only and copy no workspace manifests.)
 
 ---
 
@@ -272,7 +308,7 @@ These are easy to break and expensive to fix. Treat them as hard rules.
 3. **All mutations are validated `CanvasTransaction`s.** Same ops and engine for React UI, oRPC, MCP tools, and handoff consumers. Transactions need stable idempotency IDs and touched-field preconditions.
 4. **Do not full-document replace on every move.** Pointer previews may use temporary DOM transforms; commit one transaction on pointer-up.
 5. **Render is real DOM/SVG** with `data-loora-node` and instance-path metadata. One camera transform + viewport-space SVG overlay. Document state lives in the engine; camera, selection, hover, tool, and isolation are ephemeral. Subscribe nodes to their own revision/parent order — avoid full-tree rerenders.
-6. **External agent input is structured node descriptors**, not source code. Temporary client refs must resolve to permanent IDs. Destructive MCP actions still require confirmation in product UX where applicable.
+6. **Agent input is structured node descriptors**, not source code — the in-app agent included. Temporary client refs must resolve to permanent IDs. Destructive actions require confirmation in product UX: `deleteNodes` is `needsApproval` for the in-app agent and takes `confirmed: true` over MCP.
 7. **Exports are one-way** (HTML/CSS/JS, React/TSX, JSON, PNG, preview). They never round-trip into the editor.
 8. **Pull requests are not a Loora feature.** Drafts are the branch/merge model (`active` → `proposed` → `applied` | `closed`).
 9. **Deleting a design file means archiving it.** `design.archivedAt` takes it out of every list — the owner's, a collaborator's, MCP's — and out of the plan's file count. `design.delete` is the only hard delete, it refuses a file that is not archived, and the Archived tab at `/app` is the only place that reaches it. The MCP `deleteDesign` tool archives.
@@ -464,6 +500,9 @@ History uses Conventional Commits with scopes when useful:
 | Client sync / runtime | `packages/editor/src/lib/canvas-*.ts` |
 | API procedures | One module per namespace in `packages/rpc/src/` (`canvas-procedures.ts`, `branches.ts`, `versions.ts`, `admin.ts`, …); `router.ts` only assembles them, and shared gates live in `procedures.ts` |
 | Shared MCP canvas tools / layout repair | `packages/agent/src/` |
+| In-app agent model, tools, prompt, run loop | `packages/assistant/src/` |
+| Agent chat box | `packages/editor/src/components/agent-chat.tsx` |
+| Sign in with ChatGPT | `packages/auth/src/chatgpt.ts` |
 | MCP tools / transport | `packages/rpc/src/mcp-server.ts` / `crates/mcp-server/src/` |
 | Realtime transport, rooms, presence | `crates/ws-server/src/` (protocol in `packages/realtime/src/`) |
 | Schema / migrations | `packages/db/src/schema.ts` → `db:generate` |

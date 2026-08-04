@@ -17,6 +17,7 @@
   },
   "dependencies": {
     "@databuddy/sdk": "^2.6.0",
+    "@loora/assistant": "workspace:*",
     "@loora/auth": "workspace:*",
     "@loora/billing": "workspace:*",
     "@loora/canvas": "workspace:*",

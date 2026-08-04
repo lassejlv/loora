@@ -41,7 +41,10 @@ import { Route as LearnSlugRouteImport } from './routes/learn.$slug'
 import { Route as McpIndexRouteImport } from './routes/mcp.index'
 import { Route as McpClientRouteImport } from './routes/mcp.$client'
 import { Route as ApiAssetIdRouteImport } from './routes/api.asset.$id'
+import { Route as ApiAssistantChatRouteImport } from './routes/api.assistant.chat'
 import { Route as ApiAuthSplatRouteImport } from './routes/api.auth.$'
+import { Route as ApiChatgptCallbackRouteImport } from './routes/api.chatgpt.callback'
+import { Route as ApiChatgptConnectRouteImport } from './routes/api.chatgpt.connect'
 import { Route as ApiGithubCallbackRouteImport } from './routes/api.github.callback'
 import { Route as ApiGithubConnectRouteImport } from './routes/api.github.connect'
 import { Route as ApiGithubInstallRouteImport } from './routes/api.github.install'
@@ -217,9 +220,24 @@ const ApiAssetIdRoute = ApiAssetIdRouteImport.update({
   path: '/api/asset/$id',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiAssistantChatRoute = ApiAssistantChatRouteImport.update({
+  id: '/api/assistant/chat',
+  path: '/api/assistant/chat',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ApiAuthSplatRoute = ApiAuthSplatRouteImport.update({
   id: '/api/auth/$',
   path: '/api/auth/$',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiChatgptCallbackRoute = ApiChatgptCallbackRouteImport.update({
+  id: '/api/chatgpt/callback',
+  path: '/api/chatgpt/callback',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiChatgptConnectRoute = ApiChatgptConnectRouteImport.update({
+  id: '/api/chatgpt/connect',
+  path: '/api/chatgpt/connect',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ApiGithubCallbackRoute = ApiGithubCallbackRouteImport.update({
@@ -322,7 +340,10 @@ export interface FileRoutesByFullPath {
   '/learn/': typeof LearnIndexRoute
   '/mcp/': typeof McpIndexRoute
   '/api/asset/$id': typeof ApiAssetIdRoute
+  '/api/assistant/chat': typeof ApiAssistantChatRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
+  '/api/chatgpt/callback': typeof ApiChatgptCallbackRoute
+  '/api/chatgpt/connect': typeof ApiChatgptConnectRoute
   '/api/github/callback': typeof ApiGithubCallbackRoute
   '/api/github/connect': typeof ApiGithubConnectRoute
   '/api/github/install': typeof ApiGithubInstallRoute
@@ -370,7 +391,10 @@ export interface FileRoutesByTo {
   '/learn': typeof LearnIndexRoute
   '/mcp': typeof McpIndexRoute
   '/api/asset/$id': typeof ApiAssetIdRoute
+  '/api/assistant/chat': typeof ApiAssistantChatRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
+  '/api/chatgpt/callback': typeof ApiChatgptCallbackRoute
+  '/api/chatgpt/connect': typeof ApiChatgptConnectRoute
   '/api/github/callback': typeof ApiGithubCallbackRoute
   '/api/github/connect': typeof ApiGithubConnectRoute
   '/api/github/install': typeof ApiGithubInstallRoute
@@ -419,7 +443,10 @@ export interface FileRoutesById {
   '/learn/': typeof LearnIndexRoute
   '/mcp/': typeof McpIndexRoute
   '/api/asset/$id': typeof ApiAssetIdRoute
+  '/api/assistant/chat': typeof ApiAssistantChatRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
+  '/api/chatgpt/callback': typeof ApiChatgptCallbackRoute
+  '/api/chatgpt/connect': typeof ApiChatgptConnectRoute
   '/api/github/callback': typeof ApiGithubCallbackRoute
   '/api/github/connect': typeof ApiGithubConnectRoute
   '/api/github/install': typeof ApiGithubInstallRoute
@@ -469,7 +496,10 @@ export interface FileRouteTypes {
     | '/learn/'
     | '/mcp/'
     | '/api/asset/$id'
+    | '/api/assistant/chat'
     | '/api/auth/$'
+    | '/api/chatgpt/callback'
+    | '/api/chatgpt/connect'
     | '/api/github/callback'
     | '/api/github/connect'
     | '/api/github/install'
@@ -517,7 +547,10 @@ export interface FileRouteTypes {
     | '/learn'
     | '/mcp'
     | '/api/asset/$id'
+    | '/api/assistant/chat'
     | '/api/auth/$'
+    | '/api/chatgpt/callback'
+    | '/api/chatgpt/connect'
     | '/api/github/callback'
     | '/api/github/connect'
     | '/api/github/install'
@@ -565,7 +598,10 @@ export interface FileRouteTypes {
     | '/learn/'
     | '/mcp/'
     | '/api/asset/$id'
+    | '/api/assistant/chat'
     | '/api/auth/$'
+    | '/api/chatgpt/callback'
+    | '/api/chatgpt/connect'
     | '/api/github/callback'
     | '/api/github/connect'
     | '/api/github/install'
@@ -614,7 +650,10 @@ export interface RootRouteChildren {
   LearnIndexRoute: typeof LearnIndexRoute
   McpIndexRoute: typeof McpIndexRoute
   ApiAssetIdRoute: typeof ApiAssetIdRoute
+  ApiAssistantChatRoute: typeof ApiAssistantChatRoute
   ApiAuthSplatRoute: typeof ApiAuthSplatRoute
+  ApiChatgptCallbackRoute: typeof ApiChatgptCallbackRoute
+  ApiChatgptConnectRoute: typeof ApiChatgptConnectRoute
   ApiGithubCallbackRoute: typeof ApiGithubCallbackRoute
   ApiGithubConnectRoute: typeof ApiGithubConnectRoute
   ApiGithubInstallRoute: typeof ApiGithubInstallRoute
@@ -854,11 +893,32 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiAssetIdRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/assistant/chat': {
+      id: '/api/assistant/chat'
+      path: '/api/assistant/chat'
+      fullPath: '/api/assistant/chat'
+      preLoaderRoute: typeof ApiAssistantChatRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/auth/$': {
       id: '/api/auth/$'
       path: '/api/auth/$'
       fullPath: '/api/auth/$'
       preLoaderRoute: typeof ApiAuthSplatRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/chatgpt/callback': {
+      id: '/api/chatgpt/callback'
+      path: '/api/chatgpt/callback'
+      fullPath: '/api/chatgpt/callback'
+      preLoaderRoute: typeof ApiChatgptCallbackRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/chatgpt/connect': {
+      id: '/api/chatgpt/connect'
+      path: '/api/chatgpt/connect'
+      fullPath: '/api/chatgpt/connect'
+      preLoaderRoute: typeof ApiChatgptConnectRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/api/github/callback': {
@@ -1013,7 +1073,10 @@ const rootRouteChildren: RootRouteChildren = {
   LearnIndexRoute: LearnIndexRoute,
   McpIndexRoute: McpIndexRoute,
   ApiAssetIdRoute: ApiAssetIdRoute,
+  ApiAssistantChatRoute: ApiAssistantChatRoute,
   ApiAuthSplatRoute: ApiAuthSplatRoute,
+  ApiChatgptCallbackRoute: ApiChatgptCallbackRoute,
+  ApiChatgptConnectRoute: ApiChatgptConnectRoute,
   ApiGithubCallbackRoute: ApiGithubCallbackRoute,
   ApiGithubConnectRoute: ApiGithubConnectRoute,
   ApiGithubInstallRoute: ApiGithubInstallRoute,

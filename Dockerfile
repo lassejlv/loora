@@ -13,6 +13,7 @@ COPY packages/auth/package.json packages/auth/
 COPY packages/email/package.json packages/email/
 COPY packages/billing/package.json packages/billing/
 COPY packages/agent/package.json packages/agent/
+COPY packages/assistant/package.json packages/assistant/
 COPY packages/canvas/package.json packages/canvas/
 COPY packages/platform/package.json packages/platform/
 COPY packages/shell/package.json packages/shell/
@@ -65,6 +66,7 @@ COPY --from=deps /app/packages/auth/node_modules ./packages/auth/node_modules
 COPY --from=deps /app/packages/email/node_modules ./packages/email/node_modules
 COPY --from=deps /app/packages/billing/node_modules ./packages/billing/node_modules
 COPY --from=deps /app/packages/agent/node_modules ./packages/agent/node_modules
+COPY --from=deps /app/packages/assistant/node_modules ./packages/assistant/node_modules
 COPY --from=deps /app/packages/canvas/node_modules ./packages/canvas/node_modules
 COPY --from=deps /app/packages/platform/node_modules ./packages/platform/node_modules
 COPY --from=deps /app/packages/shell/node_modules ./packages/shell/node_modules
@@ -79,6 +81,7 @@ COPY packages/auth/package.json packages/auth/
 COPY packages/email ./packages/email
 COPY packages/billing/package.json packages/billing/
 COPY packages/agent/package.json packages/agent/
+COPY packages/assistant/package.json packages/assistant/
 COPY packages/canvas ./packages/canvas
 COPY packages/platform ./packages/platform
 COPY packages/shell/package.json packages/shell/

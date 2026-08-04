@@ -12,6 +12,7 @@ import {
 } from 'react'
 import { Link } from '@tanstack/react-router'
 import {
+  BotIcon,
   BracesIcon,
   CodeXmlIcon,
   ComponentIcon,
@@ -98,6 +99,7 @@ import {
   type PresenceCamera,
 } from './presence'
 import { CanvasAgentAvatar, CanvasAgentOverlay } from './agent-presence'
+import { AgentChat } from './agent-chat'
 import { CanvasExport } from './export-panel'
 import { CanvasHistory } from './history'
 import { HtmlImportDialog } from './html-import-dialog'
@@ -374,6 +376,7 @@ function CanvasShell({
   // again from the command menu deliberately starts it over.
   const [tourResumeIndex, setTourResumeIndex] = useState(() => readTourProgress())
   const [commandMenuOpen, setCommandMenuOpen] = useState(false)
+  const [agentOpen, setAgentOpen] = useState(false)
   const [pasteNotice, setPasteNotice] = useState<string | null>(null)
   const pasteNoticeTimer = useRef<number | null>(null)
   const [interactionMode, setInteractionMode] = useState<'select' | 'pan'>(
@@ -572,6 +575,12 @@ function CanvasShell({
         } else if (hit === 'toggleLayersPanel') {
           togglePanel('loora:layers-panel-open', setLayersPanelOpen)
         } else if (hit === 'openCommandMenu') setCommandMenuOpen(true)
+        else if (hit === 'openAgent') {
+          // Only where there is a document to work on — the marketing preview
+          // mounts the same editor with no target behind it.
+          if (!controller.target) return false
+          setAgentOpen(true)
+        }
         else if (hit === 'openSettings') setSettingsOpen(true)
         else if (hit === 'zoomIn') controlsRef.current?.zoomIn()
         else if (hit === 'zoomOut') controlsRef.current?.zoomOut()
@@ -662,6 +671,23 @@ function CanvasShell({
   }, [actions, readOnly])
 
   const commandGroups: EditorCommandGroup[] = [
+    ...(controller.target
+      ? [
+          {
+            label: 'Agent',
+            commands: [
+              {
+                id: 'ask-agent',
+                label: 'Ask the agent',
+                keywords: 'ai chat assistant chatgpt prompt',
+                icon: BotIcon,
+                shortcut: shortcutLabel('openAgent'),
+                run: () => setAgentOpen(true),
+              },
+            ],
+          } satisfies EditorCommandGroup,
+        ]
+      : []),
     {
       label: 'Insert',
       commands: [
@@ -1091,6 +1117,19 @@ function CanvasShell({
           >
             <CanvasAgentAvatar controller={controller} />
             {topBarEnd}
+            {controller.target ? (
+              <Button
+                size="icon-xs"
+                variant="ghost"
+                aria-label="Ask the agent"
+                aria-pressed={agentOpen}
+                title={`Ask the agent · ${shortcutLabel('openAgent')}`}
+                className="text-muted-foreground"
+                onClick={() => setAgentOpen((open) => !open)}
+              >
+                <BotIcon />
+              </Button>
+            ) : null}
             {!isMobile ? (
               <Button
                 size="icon-xs"
@@ -1159,6 +1198,17 @@ function CanvasShell({
               >
                 {pasteNotice}
               </div>
+            ) : null}
+            {/* In here with the tool clusters, for the same reason: it centres
+                on the canvas somebody is looking at, not on the viewport. */}
+            {controller.target ? (
+              <AgentChat
+                designId={controller.target.designId}
+                draftId={controller.target.draftId ?? null}
+                open={agentOpen}
+                onOpenChange={setAgentOpen}
+                selection={actions.selection.map((ref) => ref.nodeId)}
+              />
             ) : null}
           </div>
 

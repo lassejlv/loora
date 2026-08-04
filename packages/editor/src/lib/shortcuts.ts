@@ -53,6 +53,7 @@ export const BUILTIN_META: Record<
   toggleLayersPanel: { label: 'Toggle layers panel', group: 'panels' },
   openCommandMenu: { label: 'Open command menu', group: 'panels' },
   openSettings: { label: 'Open settings', group: 'panels' },
+  openAgent: { label: 'Ask the agent', group: 'panels' },
 }
 
 export const SHORTCUT_GROUPS: { id: ShortcutGroupId; label: string }[] = [
@@ -117,6 +118,9 @@ export const DEFAULT_SHORTCUTS: Record<BuiltInShortcutId, KeyChord | KeyChord[]>
   toggleLayersPanel: code('KeyL', 'l', { meta: true, alt: true }),
   openCommandMenu: key('k', { meta: true }),
   openSettings: key(',', { meta: true }),
+  // ⌘I is free here — the Interact tool is bare `i` — and it is the chord
+  // people already reach for to talk to an agent inside an editor.
+  openAgent: code('KeyI', 'i', { meta: true }),
 }
 
 export function normalizeConfig(input: unknown): ShortcutConfig {

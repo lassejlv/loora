@@ -13,6 +13,7 @@
   },
   "dependencies": {
     "@loora/agent": "workspace:*",
+    "@loora/assistant": "workspace:*",
     "@loora/auth": "workspace:*",
     "@loora/billing": "workspace:*",
     "@loora/canvas": "workspace:*",

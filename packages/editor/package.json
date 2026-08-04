@@ -8,6 +8,9 @@
     "./*": "./src/components/*.tsx"
   },
   "dependencies": {
+    "@ai-sdk/react": "^4.0.54",
+    "@hugeicons/core-free-icons": "^4.2.3",
+    "@loora/assistant": "workspace:*",
     "@loora/auth": "workspace:*",
     "@loora/canvas": "workspace:*",
     "@loora/db": "workspace:*",
@@ -15,7 +18,7 @@
     "@loora/rpc": "workspace:*",
     "@loora/ui": "workspace:*",
     "@tanstack/react-router": "latest",
-    "@hugeicons/core-free-icons": "^4.2.3",
+    "ai": "^7.0.51",
     "lucide": "^0.544.0",
     "motion": "^12.42.2"
   },

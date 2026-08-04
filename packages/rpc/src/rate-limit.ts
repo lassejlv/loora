@@ -320,6 +320,14 @@ export const rateLimits = {
   publishedSite: { limit: 240, windowMs: 60_000 },
   /** GitHub OAuth and app-install round trips, per address. */
   github: { limit: 30, windowMs: 60_000 },
+  /** ChatGPT connect and callback round trips, per address. */
+  chatgpt: { limit: 30, windowMs: 60_000 },
+  /**
+   * Assistant runs, per account. One run is one request no matter how many
+   * tool calls it makes, and those calls are metered separately by the MCP
+   * quota — this only stops a tab from starting runs faster than a person can.
+   */
+  assistant: { limit: 40, windowMs: 60_000 },
   /** GitHub's own webhook deliveries. Signed, so this is only a ceiling. */
   githubWebhook: { limit: 600, windowMs: 60_000 },
 

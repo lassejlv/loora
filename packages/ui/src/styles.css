@@ -298,6 +298,27 @@ body {
   }
 }
 
+/* The agent chat box, and the one place in the app that is translucent.
+   Everything else is opaque on purpose (see "Chrome materials" above); this
+   floats over the canvas while the agent edits it, and letting the work show
+   through is the point of it. Kept here rather than as utilities at the call
+   site so the exception stays one rule somebody can find and delete. */
+.cx-agent-box {
+  background: --alpha(var(--surface) / 72%);
+  border: 1px solid --alpha(var(--line) / 90%);
+  box-shadow: var(--panel-shadow-lg);
+  backdrop-filter: blur(20px) saturate(160%);
+  -webkit-backdrop-filter: blur(20px) saturate(160%);
+}
+
+/* No backdrop-filter (Firefox by default, older engines): fall back to an
+   opaque panel rather than an unreadable one. */
+@supports not (backdrop-filter: blur(1px)) {
+  .cx-agent-box {
+    background: var(--surface);
+  }
+}
+
 /* An external agent working in this document. The badge borrows the inverted
    tooltip material so it reads as chrome and never as part of the design. */
 .cx-agent-badge {

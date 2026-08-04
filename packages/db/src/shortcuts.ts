@@ -48,6 +48,7 @@ export type BuiltInShortcutId =
   | 'toggleLayersPanel'
   | 'openCommandMenu'
   | 'openSettings'
+  | 'openAgent'
 
 /** Kept for DB row shape compatibility. App no longer creates these. */
 export type CustomShortcut = {

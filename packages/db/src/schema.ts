@@ -1,6 +1,7 @@
 import { relations, sql } from 'drizzle-orm'
 import {
   bigint,
+  bigserial,
   boolean,
   check,
   foreignKey,
@@ -801,6 +802,100 @@ export const twoFactor = pgTable(
     lockedUntil: timestamp('locked_until'),
   },
   (table) => [index('two_factor_user_id_idx').on(table.userId)],
+)
+
+/**
+ * A user's ChatGPT connection. `chatgptUserId` is the OpenID `sub` claim: the
+ * binding between a Loora account and the ChatGPT account whose plan pays for
+ * assistant runs. One connection per user — reconnecting as somebody else
+ * replaces the row rather than adding a second identity.
+ *
+ * Every token is encrypted at rest with `CHATGPT_DATA_ENCRYPTION_KEY`, the same
+ * AES-GCM envelope the GitHub integration uses.
+ */
+export const chatgptAccount = pgTable('chatgpt_account', {
+  userId: text('user_id')
+    .primaryKey()
+    .references(() => user.id, { onDelete: 'cascade' }),
+  /** OpenID `sub`. Stable for the life of the ChatGPT account. */
+  chatgptUserId: text('chatgpt_user_id').notNull(),
+  /** Workspace/account the plan hangs off, when the issuer reports one. */
+  chatgptAccountId: text('chatgpt_account_id'),
+  email: text('email'),
+  name: text('name'),
+  avatarUrl: text('avatar_url'),
+  /** `free` | `plus` | `pro` | … as reported by the issuer. Display only. */
+  planType: text('plan_type'),
+  accessToken: text('access_token').notNull(),
+  accessTokenExpiresAt: timestamp('access_token_expires_at'),
+  refreshToken: text('refresh_token'),
+  /** Exchanged inference credential, when the issuer grants one. */
+  apiKey: text('api_key'),
+  apiKeyExpiresAt: timestamp('api_key_expires_at'),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  updatedAt: timestamp('updated_at')
+    .defaultNow()
+    .$onUpdate(() => new Date())
+    .notNull(),
+})
+
+/**
+ * One assistant conversation against one canvas target. The editor resumes the
+ * newest thread for the open document, so a reload keeps the conversation the
+ * canvas edits belong to.
+ */
+export const assistantThread = pgTable(
+  'assistant_thread',
+  {
+    id: text('id').primaryKey(),
+    userId: text('user_id')
+      .notNull()
+      .references(() => user.id, { onDelete: 'cascade' }),
+    /**
+     * Not a foreign key: `design` is keyed on `(id, user_id)`, so a single
+     * column cannot reference it — the same reason `design_share.design_id` is
+     * plain text. `design.delete` clears these rows explicitly.
+     */
+    designId: text('design_id').notNull(),
+    /** Branch this thread is scoped to, or null for Main. */
+    draftId: text('draft_id'),
+    title: text('title'),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+    updatedAt: timestamp('updated_at')
+      .defaultNow()
+      .$onUpdate(() => new Date())
+      .notNull(),
+  },
+  (table) => [
+    index('assistant_thread_target_idx').on(
+      table.userId,
+      table.designId,
+      table.updatedAt,
+    ),
+  ],
+)
+
+/** UIMessage parts verbatim, so a resumed thread replays exactly as it ran. */
+export const assistantMessage = pgTable(
+  'assistant_message',
+  {
+    id: text('id').primaryKey(),
+    /**
+     * Conversation order. `created_at` cannot carry it: a whole turn is written
+     * in one statement, so every row in it gets the same `now()` and the thread
+     * would come back shuffled.
+     */
+    seq: bigserial('seq', { mode: 'number' }).notNull(),
+    threadId: text('thread_id')
+      .notNull()
+      .references(() => assistantThread.id, { onDelete: 'cascade' }),
+    role: text('role').$type<'user' | 'assistant'>().notNull(),
+    parts: jsonb('parts').$type<unknown[]>().notNull(),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+  },
+  (table) => [
+    index('assistant_message_thread_idx').on(table.threadId, table.seq),
+  ],
 )
 
 export const userRelations = relations(user, ({ many }) => ({

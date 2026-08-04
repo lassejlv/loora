@@ -8,7 +8,7 @@ import {
 export const SETTINGS_TABS = ['account', 'shortcuts'] as const
 export type SettingsTab = (typeof SETTINGS_TABS)[number]
 
-export const INTEGRATION_TABS = ['github', 'mcp'] as const
+export const INTEGRATION_TABS = ['github', 'mcp', 'chatgpt'] as const
 export type IntegrationTab = (typeof INTEGRATION_TABS)[number]
 
 export const editorSearchParams = {
@@ -28,6 +28,7 @@ export const editorValidateSearch = createStandardSchemaV1(editorSearchParams, {
 export const integrationsSearchParams = {
   integration: parseAsStringLiteral(INTEGRATION_TABS),
   github: parseAsString,
+  chatgpt: parseAsString,
 }
 
 export const integrationsValidateSearch = createStandardSchemaV1(
