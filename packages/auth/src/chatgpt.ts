@@ -21,7 +21,16 @@ const TOKEN_REFRESH_SKEW_MS = 5 * 60 * 1000
 
 export const CHATGPT_FLOW_COOKIE = 'loora_chatgpt_flow'
 
-const clientId = process.env.CHATGPT_OAUTH_CLIENT_ID?.trim()
+/**
+ * OpenAI's public "Sign in with ChatGPT" client — the one the Codex CLI uses.
+ * It is a public PKCE client, so there is no secret to hold and nothing to
+ * register before this works. Override it with `CHATGPT_OAUTH_CLIENT_ID` when
+ * you have a client of your own.
+ */
+const DEFAULT_CLIENT_ID = 'app_EMoamEEZ73f0CkXaXp7hrann'
+
+const clientId =
+  process.env.CHATGPT_OAUTH_CLIENT_ID?.trim() || DEFAULT_CLIENT_ID
 const clientSecret = process.env.CHATGPT_OAUTH_CLIENT_SECRET?.trim()
 const dataEncryptionKey = process.env.CHATGPT_DATA_ENCRYPTION_KEY?.trim()
 
