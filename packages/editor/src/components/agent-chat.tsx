@@ -34,12 +34,17 @@ import { apiUrl } from '@loora/platform'
 import { orpc } from '@loora/rpc/client'
 import {
   BotIcon,
+  CheckIcon,
+  ComponentIcon,
+  FrameIcon,
   LogOutIcon,
   PlusIcon,
   SendIcon,
   SettingsIcon,
+  ShapesIcon,
   ShieldKeyIcon,
   SquareIcon,
+  TypeIcon,
   XIcon,
 } from '@loora/ui/icons'
 import { Kbd } from '@loora/ui/kbd'
@@ -70,10 +75,35 @@ interface AgentChatOffset {
   y: number
 }
 
+/** A layer the input can name with @ — enough to list, pick, and resolve it. */
+export interface AgentMentionNode {
+  id: string
+  name: string
+  type: string
+  /**
+   * Ancestry above this node, e.g. `Home / Hero`. Built so two layers with the
+   * same name stay distinguishable without dumping the whole tree.
+   */
+  path?: string
+}
+
+function mentionIcon(type: string) {
+  if (type === 'text') return TypeIcon
+  if (type === 'component' || type === 'instance') return ComponentIcon
+  if (type === 'vector') return ShapesIcon
+  return FrameIcon
+}
+
+/** The `@token` being typed at the end of the input, if any. */
+const MENTION_TOKEN = /(^|\s)@([^\s@]*)$/
+
 interface SlashCommand {
   name: string
+  /** Human label — what the row leads with. */
   description: string
   icon: typeof BotIcon
+  /** The choice in effect right now — a checkmark, not a word. */
+  current?: boolean
   /** Hidden when it would do nothing — no point offering a disconnect twice. */
   when?: (status: AgentChatStatus | null) => boolean
 }
@@ -81,31 +111,200 @@ interface SlashCommand {
 const SLASH_COMMANDS: SlashCommand[] = [
   {
     name: CHATGPT_LOGIN_COMMAND,
-    description: 'Connect your ChatGPT account',
+    description: 'Connect ChatGPT',
     icon: ShieldKeyIcon,
   },
   {
     name: CHATGPT_LOGOUT_COMMAND,
-    description: 'Disconnect it',
+    description: 'Disconnect ChatGPT',
     icon: LogOutIcon,
     when: (status) => Boolean(status?.connection),
   },
   {
     name: MODEL_COMMAND,
-    description: 'Choose the ChatGPT model',
+    description: 'Choose model',
     icon: BotIcon,
   },
   {
     name: EFFORT_COMMAND,
-    description: 'Set reasoning effort',
+    description: 'Reasoning effort',
     icon: SettingsIcon,
   },
   {
     name: THREAD_COMMAND,
-    description: 'Start a new thread',
+    description: 'New thread',
     icon: PlusIcon,
   },
 ]
+
+/** Exact → prefix → earlier substring. Equal scores keep document order. */
+function rankMentionNodes(nodes: AgentMentionNode[], query: string) {
+  const needle = query.toLowerCase()
+  const scored = nodes
+    .map((node, index) => {
+      const name = node.name.toLowerCase()
+      let score = 0
+      if (!needle) score = 1
+      else if (name === needle) score = 300
+      else if (name.startsWith(needle)) score = 200
+      else {
+        const at = name.indexOf(needle)
+        if (at < 0) return null
+        // Earlier matches rank above later ones; still below any prefix hit.
+        score = 100 - Math.min(at, 99)
+      }
+      return { node, score, index }
+    })
+    .filter(
+      (
+        entry,
+      ): entry is { node: AgentMentionNode; score: number; index: number } =>
+        entry !== null,
+    )
+  scored.sort(
+    (left, right) => right.score - left.score || left.index - right.index,
+  )
+  return scored.slice(0, 8).map((entry) => entry.node)
+}
+
+/** True when every typed token starts a word in the label or command name. */
+function softMatchesSlash(haystack: string, raw: string) {
+  const tokens = raw.split(/\s+/).filter((token) => token.length >= 2)
+  if (tokens.length === 0) return false
+  const parts = haystack.toLowerCase().split(/[\s/_-]+/).filter(Boolean)
+  return tokens.every((token) =>
+    parts.some((part) => part.startsWith(token)),
+  )
+}
+
+/**
+ * Prefix match first; then soft match on the human label and name tokens so
+ * typing `connect` or `/model sol` still finds the right row without also
+ * hitting `Disconnect`.
+ */
+function matchesSlashCommand(command: SlashCommand, query: string) {
+  if (command.name.startsWith(query)) return true
+  const raw = query.slice(1).toLowerCase()
+  if (raw.length < 2) return false
+  return (
+    softMatchesSlash(command.description, raw) ||
+    softMatchesSlash(command.name, raw)
+  )
+}
+
+/** Drop the first `@name` (and a trailing space if present) from the draft. */
+function stripMentionToken(text: string, name: string) {
+  const token = `@${name}`
+  const withSpace = `${token} `
+  const next = text.includes(withSpace)
+    ? text.replace(withSpace, '')
+    : text.replace(token, '')
+  return next.replace(/ {2,}/g, ' ')
+}
+
+/** Wrap the first case-insensitive match so the row can light the typed chars. */
+function highlightMatch(text: string, query: string) {
+  if (!query) return text
+  const index = text.toLowerCase().indexOf(query.toLowerCase())
+  if (index < 0) return text
+  return (
+    <>
+      <span className="text-muted-foreground">{text.slice(0, index)}</span>
+      <span className="font-medium text-foreground">
+        {text.slice(index, index + query.length)}
+      </span>
+      <span className="text-muted-foreground">
+        {text.slice(index + query.length)}
+      </span>
+    </>
+  )
+}
+
+/** Split the draft so resolved @names can render as chips over the textarea. */
+function mentionSegments(
+  text: string,
+  mentions: { id: string; name: string }[],
+) {
+  if (!text || mentions.length === 0) {
+    return [{ kind: 'text' as const, value: text }]
+  }
+  const ordered = [...mentions].sort((a, b) => b.name.length - a.name.length)
+  const segments: Array<
+    | { kind: 'text'; value: string }
+    | { kind: 'mention'; value: string; id: string }
+  > = []
+  let cursor = 0
+  while (cursor < text.length) {
+    let best: { index: number; mention: { id: string; name: string } } | null = null
+    for (const mention of ordered) {
+      const token = `@${mention.name}`
+      const index = text.indexOf(token, cursor)
+      if (index < 0) continue
+      if (
+        !best ||
+        index < best.index ||
+        (index === best.index && mention.name.length > best.mention.name.length)
+      ) {
+        best = { index, mention }
+      }
+    }
+    if (!best) {
+      segments.push({ kind: 'text', value: text.slice(cursor) })
+      break
+    }
+    if (best.index > cursor) {
+      segments.push({ kind: 'text', value: text.slice(cursor, best.index) })
+    }
+    const token = `@${best.mention.name}`
+    segments.push({ kind: 'mention', value: token, id: best.mention.id })
+    cursor = best.index + token.length
+  }
+  return segments
+}
+
+function AgentMenuFooter({ action }: { action: 'run' | 'insert' }) {
+  return (
+    <div className="flex items-center gap-3 border-t border-line/50 px-2.5 py-1.5 text-2xs text-muted-foreground/80">
+      <span className="flex items-center gap-1">
+        <Kbd className="h-4 min-w-4 bg-transparent text-2xs">↑↓</Kbd>
+        navigate
+      </span>
+      <span className="flex items-center gap-1">
+        <Kbd className="h-4 min-w-4 bg-transparent text-2xs">⇥</Kbd>
+        complete
+      </span>
+      <span className="flex items-center gap-1">
+        <Kbd className="h-4 min-w-4 bg-transparent text-2xs">↵</Kbd>
+        {action}
+      </span>
+      <span className="ms-auto flex items-center gap-1">
+        <Kbd className="h-4 min-w-4 bg-transparent text-2xs">esc</Kbd>
+        close
+      </span>
+    </div>
+  )
+}
+
+function MenuIconTile({
+  selected,
+  children,
+}: {
+  selected: boolean
+  children: React.ReactNode
+}) {
+  return (
+    <span
+      className={cn(
+        'grid size-6 shrink-0 place-items-center rounded-md border transition-colors duration-75',
+        selected
+          ? 'border-line/80 bg-surface text-foreground shadow-sm'
+          : 'border-transparent text-muted-foreground',
+      )}
+    >
+      {children}
+    </span>
+  )
+}
 
 /**
  * One status read per page, shared by every mount. The editor asks this before
@@ -244,6 +443,7 @@ export function AgentChat({
   open,
   onOpenChange,
   selection,
+  nodes,
 }: {
   designId: string
   draftId: string | null
@@ -251,6 +451,8 @@ export function AgentChat({
   onOpenChange: (open: boolean) => void
   /** Node ids selected right now, so "make this bigger" resolves. */
   selection?: string[]
+  /** Layers @ can offer, read when the menu opens so it never goes stale. */
+  nodes?: () => AgentMentionNode[]
 }) {
   const [status, setStatus] = useState<AgentChatStatus | null>(null)
   const [thread, setThread] = useState<{
@@ -323,6 +525,7 @@ export function AgentChat({
       onNotice={setNotice}
       inputRef={inputRef}
       selectionRef={selectionRef}
+      nodes={nodes}
       onClose={() => onOpenChange(false)}
       onNewThread={async () => {
         const next = await orpc.assistant
@@ -478,6 +681,7 @@ function AgentChatBox({
   onNotice,
   inputRef,
   selectionRef,
+  nodes,
   onClose,
   onNewThread,
   onStatusChange,
@@ -499,6 +703,7 @@ function AgentChatBox({
   onNotice: (value: string | null) => void
   inputRef: React.RefObject<HTMLTextAreaElement | null>
   selectionRef: React.RefObject<string[] | undefined>
+  nodes?: () => AgentMentionNode[]
   onClose: () => void
   onNewThread: () => Promise<void>
   onStatusChange: (status: AgentChatStatus) => void
@@ -509,6 +714,13 @@ function AgentChatBox({
   reasoningEffort: ChatGptReasoningEffort
   onReasoningEffortChange: (effort: ChatGptReasoningEffort) => void
 }) {
+  // What @-picks have been made this draft; only the ones whose @name still
+  // appears in the text travel with the send. State so the chip overlay redraws.
+  const [draftMentions, setDraftMentions] = useState<
+    { id: string; name: string; type: string }[]
+  >([])
+  const sentMentionsRef = useRef<{ id: string; name: string }[]>([])
+
   const transport = useMemo(
     () =>
       new DefaultChatTransport({
@@ -518,6 +730,7 @@ function AgentChatBox({
           designId,
           draftId,
           selection: selectionRef.current,
+          mentions: sentMentionsRef.current,
           model,
           reasoningEffort,
         }),
@@ -663,34 +876,89 @@ function AgentChatBox({
     }
     onNotice(null)
     onInputChange('')
+    // Only mentions still named in the text count; a deleted @name is retracted.
+    sentMentionsRef.current = draftMentions
+      .filter((mention) => text.includes(`@${mention.name}`))
+      .map(({ id, name }) => ({ id, name }))
+    setDraftMentions([])
     void chat.sendMessage({ text })
-  }, [chat, connected, input, onInputChange, onNotice, runCommand, running])
+  }, [chat, connected, draftMentions, input, onInputChange, onNotice, runCommand, running])
 
   // Keep the trailing space: `/model` is the parent command, while `/model `
   // opens its choices.
   const query = input.trimStart()
   const modelCommands: SlashCommand[] = CHATGPT_MODELS.map((item) => ({
     name: `${MODEL_COMMAND} ${item.id}`,
-    description: item.label + (item.id === model ? ' · selected' : ''),
+    description: item.label,
     icon: BotIcon,
+    current: item.id === model,
   }))
   const effortCommands: SlashCommand[] = CHATGPT_REASONING_EFFORTS.map((item) => ({
     name: `${EFFORT_COMMAND} ${item.id}`,
-    description: item.label + (item.id === reasoningEffort ? ' · selected' : ''),
+    description: item.label,
     icon: SettingsIcon,
+    current: item.id === reasoningEffort,
   }))
-  const commandPool = query.startsWith(`${MODEL_COMMAND} `)
-    ? modelCommands
+  const [commandPool, menuLabel] = query.startsWith(`${MODEL_COMMAND} `)
+    ? ([modelCommands, 'Models'] as const)
     : query.startsWith(`${EFFORT_COMMAND} `)
-      ? effortCommands
-      : SLASH_COMMANDS
-  const matches = query.startsWith('/') && !menuDismissed
+      ? ([effortCommands, 'Reasoning effort'] as const)
+      : ([SLASH_COMMANDS, 'Commands'] as const)
+  const slashOpen = query.startsWith('/') && !menuDismissed
+  const matches = slashOpen
     ? commandPool.filter(
         (command) =>
-          (command.when?.(status) ?? true) && command.name.startsWith(query),
+          (command.when?.(status) ?? true) && matchesSlashCommand(command, query),
       )
     : []
   const active = matches[Math.min(highlighted, matches.length - 1)]
+
+  // An @token at the end of what is typed offers the document's layers.
+  const mentionToken =
+    !slashOpen && !menuDismissed && nodes ? MENTION_TOKEN.exec(input) : null
+  const mentionQuery = mentionToken?.[2] ?? ''
+  const mentionOpen = Boolean(mentionToken)
+  const mentionMatches =
+    mentionOpen && nodes
+      ? rankMentionNodes(nodes(), mentionQuery)
+      : []
+  const activeMention =
+    mentionMatches[Math.min(highlighted, mentionMatches.length - 1)]
+
+  // Drop picks whose @name the person already deleted or half-edited away.
+  useEffect(() => {
+    setDraftMentions((current) => {
+      const next = current.filter((mention) => input.includes(`@${mention.name}`))
+      return next.length === current.length ? current : next
+    })
+  }, [input])
+
+  const chooseMention = useCallback(
+    (node: AgentMentionNode) => {
+      onInputChange(input.replace(/@[^\s@]*$/, `@${node.name} `))
+      setDraftMentions((current) => [
+        ...current.filter((mention) => mention.id !== node.id),
+        { id: node.id, name: node.name, type: node.type },
+      ])
+      setMenuDismissed(false)
+      setHighlighted(0)
+      inputRef.current?.focus()
+    },
+    [input, inputRef, onInputChange],
+  )
+
+  const removeMention = useCallback(
+    (id: string) => {
+      const target = draftMentions.find((mention) => mention.id === id)
+      if (!target) return
+      onInputChange(stripMentionToken(input, target.name))
+      setDraftMentions((current) => current.filter((mention) => mention.id !== id))
+      inputRef.current?.focus()
+    },
+    [draftMentions, input, inputRef, onInputChange],
+  )
+
+  const segments = mentionSegments(input, draftMentions)
 
   const line = approval
     ? null
@@ -775,7 +1043,7 @@ function AgentChatBox({
             className={cn(
               'max-h-32 min-w-0 overflow-y-auto whitespace-pre-wrap text-xs',
               running
-                ? 'cx-agent-thinking text-muted-foreground'
+                ? 'cx-shimmer text-muted-foreground'
                 : error
                   ? 'text-destructive-foreground'
                   : 'text-foreground',
@@ -786,126 +1054,266 @@ function AgentChatBox({
         </div>
       ) : null}
 
-      {matches.length > 0 ? (
+      {slashOpen ? (
         <div className="border-b border-line/70">
-          <ul
-            role="listbox"
-            aria-label="Commands"
-            className="max-h-56 overflow-y-auto p-1"
-          >
-            {matches.map((command, index) => {
-              const Icon = command.icon
-              const selected = command.name === active?.name
-              return (
-                <li key={command.name}>
-                  <button
-                    type="button"
-                    role="option"
-                    aria-selected={selected}
-                    // The textarea keeps focus so typing never stops; the mouse
-                    // only moves the highlight the keyboard is already driving.
-                    onMouseDown={(event) => event.preventDefault()}
-                    onMouseEnter={() => setHighlighted(index)}
-                    onClick={() => void choose(command.name)}
-                    className={cn(
-                      'flex w-full items-center gap-2.5 rounded-md px-1.5 py-1 text-start transition-colors duration-75',
-                      selected && 'bg-foreground/8',
-                    )}
-                  >
-                    <span
+          <p className="px-3 pt-2 text-2xs font-medium uppercase tracking-wider text-muted-foreground/70">
+            {menuLabel}
+          </p>
+          {matches.length > 0 ? (
+            <ul
+              role="listbox"
+              aria-label="Commands"
+              className="max-h-56 overflow-y-auto p-1"
+            >
+              {matches.map((command, index) => {
+                const Icon = command.icon
+                const selected = command.name === active?.name
+                return (
+                  <li key={command.name}>
+                    <button
+                      type="button"
+                      role="option"
+                      aria-selected={selected}
+                      // The textarea keeps focus so typing never stops; the mouse
+                      // only moves the highlight the keyboard is already driving.
+                      onMouseDown={(event) => event.preventDefault()}
+                      onMouseEnter={() => setHighlighted(index)}
+                      onClick={() => void choose(command.name)}
                       className={cn(
-                        'grid size-6 shrink-0 place-items-center rounded-md border transition-colors duration-75',
-                        selected
-                          ? 'border-line/80 bg-surface text-foreground shadow-sm'
-                          : 'border-transparent text-muted-foreground',
+                        'flex w-full items-center gap-2.5 rounded-md px-1.5 py-1.5 text-start transition-colors duration-75',
+                        selected && 'bg-foreground/8',
                       )}
                     >
-                      <Icon size={13} />
-                    </span>
-                    <span className="font-mono text-xs text-foreground">
-                      {command.name}
-                    </span>
-                    <span className="min-w-0 flex-1 truncate text-2xs text-muted-foreground">
-                      {command.description}
-                    </span>
-                    <Kbd
+                      <MenuIconTile selected={selected}>
+                        <Icon size={13} />
+                      </MenuIconTile>
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate text-xs text-foreground">
+                          {command.description}
+                        </span>
+                        {/* What is typed stays bright; the rest of the command
+                            is a ghost. A bare slash dims nothing. */}
+                        <span className="block truncate font-mono text-2xs text-muted-foreground">
+                          {command.name.startsWith(query) && query.length > 1 ? (
+                            <>
+                              <span className="text-foreground/80">
+                                {command.name.slice(0, query.length)}
+                              </span>
+                              {command.name.slice(query.length)}
+                            </>
+                          ) : (
+                            command.name
+                          )}
+                        </span>
+                      </span>
+                      {command.current ? (
+                        <CheckIcon size={12} className="shrink-0 text-foreground" />
+                      ) : (
+                        <Kbd
+                          className={cn(
+                            'h-4 min-w-4 bg-transparent text-2xs transition-opacity duration-75',
+                            selected ? 'opacity-100' : 'opacity-0',
+                          )}
+                        >
+                          ↵
+                        </Kbd>
+                      )}
+                    </button>
+                  </li>
+                )
+              })}
+            </ul>
+          ) : (
+            <p className="px-3 py-2.5 text-xs text-muted-foreground">
+              No matching command.
+            </p>
+          )}
+          <AgentMenuFooter action="run" />
+        </div>
+      ) : null}
+
+      {mentionOpen ? (
+        <div className="border-b border-line/70">
+          <p className="px-3 pt-2 text-2xs font-medium uppercase tracking-wider text-muted-foreground/70">
+            Layers
+          </p>
+          {mentionMatches.length > 0 ? (
+            <ul
+              role="listbox"
+              aria-label="Layers"
+              className="max-h-56 overflow-y-auto p-1"
+            >
+              {mentionMatches.map((node, index) => {
+                const Icon = mentionIcon(node.type)
+                const selected = node.id === activeMention?.id
+                return (
+                  <li key={node.id}>
+                    <button
+                      type="button"
+                      role="option"
+                      aria-selected={selected}
+                      onMouseDown={(event) => event.preventDefault()}
+                      onMouseEnter={() => setHighlighted(index)}
+                      onClick={() => chooseMention(node)}
                       className={cn(
-                        'h-4 min-w-4 bg-transparent text-2xs transition-opacity duration-75',
-                        selected ? 'opacity-100' : 'opacity-0',
+                        'flex w-full items-center gap-2.5 rounded-md px-1.5 py-1.5 text-start transition-colors duration-75',
+                        selected && 'bg-foreground/8',
                       )}
                     >
-                      ↵
-                    </Kbd>
-                  </button>
-                </li>
-              )
-            })}
-          </ul>
-          <div className="flex items-center gap-3 border-t border-line/50 px-2.5 py-1.5 text-2xs text-muted-foreground/80">
-            <span className="flex items-center gap-1">
-              <Kbd className="h-4 min-w-4 bg-transparent text-2xs">↑↓</Kbd>
-              navigate
-            </span>
-            <span className="flex items-center gap-1">
-              <Kbd className="h-4 min-w-4 bg-transparent text-2xs">⇥</Kbd>
-              complete
-            </span>
-            <span className="flex items-center gap-1">
-              <Kbd className="h-4 min-w-4 bg-transparent text-2xs">↵</Kbd>
-              run
-            </span>
-          </div>
+                      <MenuIconTile selected={selected}>
+                        <Icon size={13} />
+                      </MenuIconTile>
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate text-xs text-foreground">
+                          {highlightMatch(node.name, mentionQuery)}
+                        </span>
+                        <span className="block truncate text-2xs text-muted-foreground">
+                          {node.path ? `${node.path} · ${node.type}` : node.type}
+                        </span>
+                      </span>
+                      <Kbd
+                        className={cn(
+                          'h-4 min-w-4 bg-transparent text-2xs transition-opacity duration-75',
+                          selected ? 'opacity-100' : 'opacity-0',
+                        )}
+                      >
+                        ↵
+                      </Kbd>
+                    </button>
+                  </li>
+                )
+              })}
+            </ul>
+          ) : (
+            <p className="px-3 py-2.5 text-xs text-muted-foreground">
+              No layers match.
+            </p>
+          )}
+          <AgentMenuFooter action="insert" />
+        </div>
+      ) : null}
+
+      {draftMentions.length > 0 ? (
+        <div className="flex flex-wrap gap-1 border-b border-line/50 px-2.5 pb-1.5 pt-2">
+          {draftMentions.map((mention) => {
+            const Icon = mentionIcon(mention.type)
+            return (
+              <span
+                key={mention.id}
+                className="inline-flex max-w-full items-center gap-1 rounded-md bg-foreground/8 py-0.5 pl-1.5 pr-0.5 text-2xs text-foreground"
+              >
+                <Icon size={11} className="shrink-0 text-muted-foreground" />
+                <span className="min-w-0 truncate">{mention.name}</span>
+                <button
+                  type="button"
+                  aria-label={`Remove ${mention.name}`}
+                  className="grid size-4 shrink-0 place-items-center rounded-sm text-muted-foreground hover:bg-foreground/10 hover:text-foreground"
+                  onMouseDown={(event) => event.preventDefault()}
+                  onClick={() => removeMention(mention.id)}
+                >
+                  <XIcon size={10} />
+                </button>
+              </span>
+            )
+          })}
         </div>
       ) : null}
 
       <div className="flex items-end gap-1.5 px-2.5 py-2">
-        <textarea
-          ref={inputRef}
-          rows={1}
-          value={input}
-          spellCheck={false}
-          aria-label="Ask the agent"
-          placeholder={
-            connected
-              ? 'Ask the agent to design something…'
-              : `Type ${CHATGPT_LOGIN_COMMAND} to connect ChatGPT`
-          }
-          className="max-h-40 flex-1 resize-none bg-transparent px-1 py-1.5 text-xs text-foreground outline-none placeholder:text-muted-foreground"
-          onChange={(event) => {
-            onInputChange(event.target.value)
-            setMenuDismissed(false)
-            setHighlighted(0)
-          }}
-          onKeyDown={(event) => {
-            const open = matches.length > 0
-            if (event.key === 'Escape') {
-              event.preventDefault()
-              // The menu first, the box second.
-              if (open) setMenuDismissed(true)
-              else onClose()
-              return
+        <div className="relative min-w-0 flex-1">
+          {/* Mirror of the draft: plain text plus chips for resolved @names.
+              The textarea sits on top, transparent when non-empty so chips show.
+              Removable chips live in the strip above — the overlay is visual only. */}
+          {input ? (
+            <div
+              aria-hidden
+              className="pointer-events-none absolute inset-0 max-h-40 overflow-hidden whitespace-pre-wrap break-words px-1 py-1.5 text-xs text-foreground"
+            >
+              {segments.map((segment, index) =>
+                segment.kind === 'mention' ? (
+                  <span
+                    key={`${segment.id}-${index}`}
+                    className="rounded-sm bg-foreground/10 px-0.5 text-foreground"
+                  >
+                    {segment.value}
+                  </span>
+                ) : (
+                  <span key={index}>{segment.value}</span>
+                ),
+              )}
+            </div>
+          ) : null}
+          <textarea
+            ref={inputRef}
+            rows={1}
+            value={input}
+            spellCheck={false}
+            aria-label="Ask the agent"
+            placeholder={
+              connected
+                ? 'Ask the agent…  / commands  @ layers'
+                : `Type ${CHATGPT_LOGIN_COMMAND} to connect ChatGPT`
             }
-            if (open && (event.key === 'ArrowDown' || event.key === 'ArrowUp')) {
-              event.preventDefault()
-              const step = event.key === 'ArrowDown' ? 1 : matches.length - 1
-              setHighlighted((current) =>
-                (Math.min(current, matches.length - 1) + step) % matches.length,
-              )
-              return
-            }
-            if (open && event.key === 'Tab' && active) {
-              // Completes without running, for anybody who wants to look first.
-              event.preventDefault()
-              onInputChange(active.name)
-              return
-            }
-            if (event.key === 'Enter' && !event.shiftKey) {
-              event.preventDefault()
-              if (open && active) void choose(active.name)
-              else void submit()
-            }
-          }}
-        />
+            className={cn(
+              'max-h-40 w-full resize-none bg-transparent px-1 py-1.5 text-xs outline-none placeholder:text-muted-foreground',
+              input
+                ? 'relative caret-foreground text-transparent'
+                : 'text-foreground',
+            )}
+            onChange={(event) => {
+              onInputChange(event.target.value)
+              setMenuDismissed(false)
+              setHighlighted(0)
+            }}
+            onScroll={(event) => {
+              const mirror = event.currentTarget.previousElementSibling
+              if (mirror instanceof HTMLElement) {
+                mirror.scrollTop = event.currentTarget.scrollTop
+              }
+            }}
+            onKeyDown={(event) => {
+              const count =
+                matches.length > 0
+                  ? matches.length
+                  : mentionMatches.length > 0
+                    ? mentionMatches.length
+                    : 0
+              const menuActive = slashOpen || mentionOpen
+              if (event.key === 'Escape') {
+                event.preventDefault()
+                // The menu first, the box second.
+                if (menuActive) setMenuDismissed(true)
+                else onClose()
+                return
+              }
+              if (
+                count > 0 &&
+                (event.key === 'ArrowDown' || event.key === 'ArrowUp')
+              ) {
+                event.preventDefault()
+                const step = event.key === 'ArrowDown' ? 1 : count - 1
+                setHighlighted((current) =>
+                  (Math.min(current, count - 1) + step) % count,
+                )
+                return
+              }
+              if (count > 0 && event.key === 'Tab') {
+                // Completes without running, for anybody who wants to look first.
+                event.preventDefault()
+                if (matches.length > 0 && active) onInputChange(active.name)
+                else if (activeMention) chooseMention(activeMention)
+                return
+              }
+              if (event.key === 'Enter' && !event.shiftKey) {
+                event.preventDefault()
+                if (matches.length > 0 && active) void choose(active.name)
+                else if (mentionMatches.length > 0 && activeMention)
+                  chooseMention(activeMention)
+                else void submit()
+              }
+            }}
+          />
+        </div>
         {running ? (
           <button
             type="button"

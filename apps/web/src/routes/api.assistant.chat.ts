@@ -56,6 +56,7 @@ interface ChatRequestBody {
   designId?: string
   draftId?: string | null
   selection?: string[]
+  mentions?: { id?: unknown; name?: unknown }[]
   model?: string
   reasoningEffort?: string
 }
@@ -252,6 +253,19 @@ export async function assistantChatResponse(request: Request) {
       branchName: names.branchName,
       selection: Array.isArray(body.selection)
         ? body.selection.slice(0, 20).filter((id) => typeof id === 'string')
+        : undefined,
+      mentions: Array.isArray(body.mentions)
+        ? body.mentions
+            .slice(0, 20)
+            .filter(
+              (mention): mention is { id: string; name: string } =>
+                typeof mention?.id === 'string' &&
+                typeof mention?.name === 'string',
+            )
+            .map((mention) => ({
+              id: mention.id,
+              name: mention.name.slice(0, 120),
+            }))
         : undefined,
       imageInputs: true,
     }),

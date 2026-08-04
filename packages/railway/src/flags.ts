@@ -26,7 +26,7 @@ export async function isPublishSitesEnabled(user: FeatureFlagUser) {
   return flags.getBoolean('publish-sites', { key: user.id, is_admin: false }, false)
 }
 
-/** The agent chat is restricted to staff while it is being validated. */
-export async function isInAppAgentEnabled(user: FeatureFlagUser) {
-  return Boolean(user.isAdmin)
+/** The agent chat is open to every account. */
+export async function isInAppAgentEnabled(_user: FeatureFlagUser) {
+  return true
 }

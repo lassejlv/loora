@@ -5,6 +5,8 @@ export interface AssistantPromptContext extends AssistantTarget {
   branchName?: string | null
   /** Nodes the person has selected right now, if any. */
   selection?: string[]
+  /** Layers the person named with @ in their message, if any. */
+  mentions?: { id: string; name: string }[]
   /** Whether the model can be handed rendered images of the canvas. */
   imageInputs?: boolean
 }
@@ -22,6 +24,13 @@ export function assistantSystemPrompt(context: AssistantPromptContext) {
       ? `\nThe person currently has these nodes selected: ${context.selection
           .slice(0, 20)
           .join(', ')}. When they say “this” or “it”, they mean the selection.`
+      : ''
+  const mentions =
+    context.mentions && context.mentions.length > 0
+      ? `\nThe person named layers with @ in their message. Resolve each @name to its node id: ${context.mentions
+          .slice(0, 20)
+          .map((mention) => `“@${mention.name}” is ${mention.id}`)
+          .join(', ')}.`
       : ''
   const images = context.imageInputs
     ? 'Use viewCanvas, viewPage, or viewNode to look at your work after a meaningful edit, and fix what looks wrong.'
@@ -45,7 +54,7 @@ There is no code node. Never send HTML, JSX, CSS, class strings, or source code 
 ## Scope
 Do what was asked and stop. Do not restyle, rename, reorganise or "improve" things nobody mentioned. If a request is ambiguous in a way that changes the work, ask one short question instead of guessing — but if a sensible reading exists, take it and say which one you took.
 
-Deleting is destructive and is confirmed by the person before it runs. Do not work around that, and do not delete as a shortcut to moving or restyling something.${selection}
+Deleting is destructive and is confirmed by the person before it runs. Do not work around that, and do not delete as a shortcut to moving or restyling something.${selection}${mentions}
 
 ## Talking
 The person sees your work on the canvas, not a transcript. Keep replies to a sentence or two: what you changed, and anything they need to decide. No preamble, no bulleted summary of every tool call, no restating the request back at them.`

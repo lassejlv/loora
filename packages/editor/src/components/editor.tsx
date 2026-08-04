@@ -1209,6 +1209,32 @@ function CanvasShell({
                 open={agentOpen}
                 onOpenChange={setAgentOpen}
                 selection={actions.selection.map((ref) => ref.nodeId)}
+                nodes={() => {
+                  const { nodes } = controller.engine.document
+                  return Object.values(nodes).map((node) => {
+                    const parts: string[] = []
+                    let parentId = node.parentId
+                    while (parentId) {
+                      const parent = nodes[parentId]
+                      if (!parent) break
+                      parts.unshift(parent.name)
+                      parentId = parent.parentId
+                    }
+                    // Short path: full when shallow, root / … / parent when deep.
+                    let path: string | undefined
+                    if (parts.length === 1) path = parts[0]
+                    else if (parts.length === 2 || parts.length === 3)
+                      path = parts.join(' / ')
+                    else if (parts.length > 3)
+                      path = `${parts[0]} / … / ${parts[parts.length - 1]}`
+                    return {
+                      id: node.id,
+                      name: node.name,
+                      type: node.type,
+                      path,
+                    }
+                  })
+                }}
               />
             ) : null}
           </div>

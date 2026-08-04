@@ -349,29 +349,8 @@ body {
   }
 }
 
-/* Thinking text shimmers — a band of light sweeping through the words. */
-.cx-agent-thinking {
-  background: linear-gradient(
-    90deg,
-    --alpha(var(--muted-foreground) / 55%) 35%,
-    var(--foreground) 50%,
-    --alpha(var(--muted-foreground) / 55%) 65%
-  );
-  background-size: 250% 100%;
-  -webkit-background-clip: text;
-  background-clip: text;
-  -webkit-text-fill-color: transparent;
-  animation: cx-agent-shimmer 1.8s linear infinite;
-}
-
-@keyframes cx-agent-shimmer {
-  from {
-    background-position: 175% 0;
-  }
-  to {
-    background-position: -75% 0;
-  }
-}
+/* Thinking and tool-call lines use `cx-shimmer`, the same sweep the page
+   itself loads with — one shimmer in the product, not two. */
 
 /* No backdrop-filter (Firefox by default, older engines): fall back to an
    opaque panel rather than an unreadable one. */
@@ -382,11 +361,6 @@ body {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .cx-agent-thinking {
-    animation: none;
-    background: none;
-    -webkit-text-fill-color: currentColor;
-  }
   .cx-agent-box[data-running='true']::before {
     animation: none;
     background-position: 50% 0;

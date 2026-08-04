@@ -186,8 +186,7 @@ describe('AgentChat', () => {
       <AgentChat designId="d1" draftId={null} open onOpenChange={() => {}} />,
     )
     const statusLine = view.getByText('Adding elements…')
-    expect(statusLine.classList.contains('cx-agent-thinking')).toBe(true)
-    expect(statusLine.classList.contains('cx-shimmer')).toBe(false)
+    expect(statusLine.classList.contains('cx-shimmer')).toBe(true)
     await act(async () => {
       fireEvent.click(view.getByLabelText('Stop the agent'))
     })
@@ -323,14 +322,28 @@ describe('AgentChat', () => {
     fireEvent.change(field, { target: { value: '/' } })
 
     const options = view.getAllByRole('option')
+    // Soft label first, command name underneath.
     expect(options.map((option) => option.textContent)).toEqual([
-      expect.stringContaining('/login-with-chatgpt'),
-      expect.stringContaining('/logout-chatgpt'),
-      expect.stringContaining('/model'),
-      expect.stringContaining('/effort'),
-      expect.stringContaining('/new'),
+      expect.stringMatching(/Connect ChatGPT.*\/login-with-chatgpt/s),
+      expect.stringMatching(/Disconnect ChatGPT.*\/logout-chatgpt/s),
+      expect.stringMatching(/Choose model.*\/model/s),
+      expect.stringMatching(/Reasoning effort.*\/effort/s),
+      expect.stringMatching(/New thread.*\/new/s),
     ])
     expect(options[0].getAttribute('aria-selected')).toBe('true')
+    expect(view.getByText('navigate')).toBeTruthy()
+    expect(view.getByText('close')).toBeTruthy()
+  })
+
+  test('an unmatched slash shows an empty state instead of vanishing', async () => {
+    const view = await open(
+      <AgentChat designId="d1" draftId={null} open onOpenChange={() => {}} />,
+    )
+    fireEvent.change(view.getByLabelText('Ask the agent'), {
+      target: { value: '/nope' },
+    })
+    expect(view.getByText('No matching command.')).toBeTruthy()
+    expect(view.queryAllByRole('option')).toHaveLength(0)
   })
 
   test('hides a command that would do nothing', async () => {
@@ -355,6 +368,19 @@ describe('AgentChat', () => {
     })
 
     expect(view.getAllByRole('option')).toHaveLength(2)
+  })
+
+  test('soft-filters slash rows by their human label', async () => {
+    const view = await open(
+      <AgentChat designId="d1" draftId={null} open onOpenChange={() => {}} />,
+    )
+    fireEvent.change(view.getByLabelText('Ask the agent'), {
+      target: { value: '/connect' },
+    })
+
+    const options = view.getAllByRole('option')
+    expect(options).toHaveLength(1)
+    expect(options[0].textContent).toMatch(/Connect ChatGPT.*\/login-with-chatgpt/s)
   })
 
   test('arrows move the selection and enter runs it', async () => {
@@ -527,6 +553,134 @@ describe('AgentChat', () => {
     )
     fireEvent.keyDown(view.getByLabelText('Ask the agent'), { key: 'Escape' })
     expect(onOpenChange).toHaveBeenCalledWith(false)
+  })
+
+  test('@ offers layers by name and completes the one picked', async () => {
+    const view = await open(
+      <AgentChat
+        designId="d1"
+        draftId={null}
+        open
+        onOpenChange={() => {}}
+        nodes={() => [
+          { id: 'n1', name: 'Hero section', type: 'frame', path: 'Home' },
+          {
+            id: 'n2',
+            name: 'Heading',
+            type: 'text',
+            path: 'Home / Hero section',
+          },
+          { id: 'n3', name: 'Footer', type: 'frame' },
+        ]}
+      />,
+    )
+    const field = view.getByLabelText('Ask the agent') as HTMLTextAreaElement
+
+    fireEvent.change(field, { target: { value: 'make @he' } })
+    const options = view.getAllByRole('option')
+    // Prefix rank: Hero section before Heading; ancestry path disambiguates.
+    expect(options.map((option) => option.textContent)).toEqual([
+      expect.stringMatching(/Hero section.*Home · frame/s),
+      expect.stringMatching(/Heading.*Home \/ Hero section · text/s),
+    ])
+    expect(view.getByText('insert')).toBeTruthy()
+
+    await act(async () => {
+      fireEvent.click(options[0])
+    })
+    expect(field.value).toBe('make @Hero section ')
+    // Removable chip strip + mirror highlight over the transparent field.
+    expect(view.getByRole('button', { name: 'Remove Hero section' })).toBeTruthy()
+    expect(view.getByText('@Hero section')).toBeTruthy()
+
+    fireEvent.change(field, { target: { value: 'make @Hero section blue' } })
+    await act(async () => {
+      fireEvent.keyDown(field, { key: 'Enter' })
+    })
+    expect(sendMessage).toHaveBeenCalledWith({ text: 'make @Hero section blue' })
+  })
+
+  test('a mention chip can be removed without clearing the rest of the draft', async () => {
+    const view = await open(
+      <AgentChat
+        designId="d1"
+        draftId={null}
+        open
+        onOpenChange={() => {}}
+        nodes={() => [{ id: 'n1', name: 'Hero', type: 'frame', path: 'Home' }]}
+      />,
+    )
+    const field = view.getByLabelText('Ask the agent') as HTMLTextAreaElement
+
+    fireEvent.change(field, { target: { value: '@' } })
+    await act(async () => {
+      fireEvent.click(view.getAllByRole('option')[0])
+    })
+    expect(field.value).toBe('@Hero ')
+
+    fireEvent.change(field, { target: { value: 'restyle @Hero carefully' } })
+    await act(async () => {
+      fireEvent.click(view.getByRole('button', { name: 'Remove Hero' }))
+    })
+    expect(field.value).toBe('restyle carefully')
+    expect(view.queryByRole('button', { name: 'Remove Hero' })).toBeNull()
+  })
+
+  test('@ rows show a shortened deep ancestry path', async () => {
+    const view = await open(
+      <AgentChat
+        designId="d1"
+        draftId={null}
+        open
+        onOpenChange={() => {}}
+        nodes={() => [
+          {
+            id: 'n1',
+            name: 'Button',
+            type: 'frame',
+            path: 'Home / … / Card',
+          },
+        ]}
+      />,
+    )
+    fireEvent.change(view.getByLabelText('Ask the agent'), {
+      target: { value: '@' },
+    })
+    expect(view.getByRole('option').textContent).toMatch(
+      /Button.*Home \/ … \/ Card · frame/s,
+    )
+  })
+
+  test('an unmatched @ shows an empty state', async () => {
+    const view = await open(
+      <AgentChat
+        designId="d1"
+        draftId={null}
+        open
+        onOpenChange={() => {}}
+        nodes={() => [{ id: 'n1', name: 'Hero', type: 'frame' }]}
+      />,
+    )
+    fireEvent.change(view.getByLabelText('Ask the agent'), {
+      target: { value: 'make @zzz' },
+    })
+    expect(view.getByText('No layers match.')).toBeTruthy()
+  })
+
+  test('a retracted @name does not reopen the menu on plain text', async () => {
+    const view = await open(
+      <AgentChat
+        designId="d1"
+        draftId={null}
+        open
+        onOpenChange={() => {}}
+        nodes={() => [{ id: 'n1', name: 'Hero', type: 'frame' }]}
+      />,
+    )
+    const field = view.getByLabelText('Ask the agent')
+
+    fireEvent.change(field, { target: { value: 'make it blue' } })
+    expect(view.queryAllByRole('option')).toHaveLength(0)
   })
 })
 
