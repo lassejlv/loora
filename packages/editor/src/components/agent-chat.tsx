@@ -870,7 +870,7 @@ function AgentChatBox({
               ? 'Ask the agent to design something…'
               : `Type ${CHATGPT_LOGIN_COMMAND} to connect ChatGPT`
           }
-          className="max-h-40 flex-1 resize-none bg-transparent px-1 py-1 text-sm text-foreground outline-none placeholder:text-muted-foreground"
+          className="max-h-40 flex-1 resize-none bg-transparent px-1 py-1.5 text-xs text-foreground outline-none placeholder:text-muted-foreground"
           onChange={(event) => {
             onInputChange(event.target.value)
             setMenuDismissed(false)
