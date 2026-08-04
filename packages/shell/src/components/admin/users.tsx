@@ -188,6 +188,21 @@ function UserRowActions({
               Reset MCP usage
             </DropdownMenuItem>
           ) : null}
+          {!account.isAdmin ? (
+            <DropdownMenuItem onClick={() => onAction('setAgentLimit', account)}>
+              Set agent weekly limit
+            </DropdownMenuItem>
+          ) : null}
+          {account.agentWeeklyLimit != null ? (
+            <DropdownMenuItem onClick={() => onAction('restoreAgentLimit', account)}>
+              Restore plan agent limit
+            </DropdownMenuItem>
+          ) : null}
+          {!account.isAdmin ? (
+            <DropdownMenuItem onClick={() => onAction('resetAgentUsage', account)}>
+              Reset agent usage
+            </DropdownMenuItem>
+          ) : null}
           <DropdownMenuItem onClick={() => onAction('copyId', account)}>
             Copy user ID
           </DropdownMenuItem>
@@ -224,6 +239,9 @@ export type AdminUserAction =
   | 'setMcpLimit'
   | 'restoreMcpLimit'
   | 'resetMcpUsage'
+  | 'setAgentLimit'
+  | 'restoreAgentLimit'
+  | 'resetAgentUsage'
   | 'revokeSessions'
   | 'revokeMcp'
   | 'copyId'
@@ -312,20 +330,31 @@ export function AdminUsers({
     ) {
       return
     }
+    if (
+      action === 'resetAgentUsage' &&
+      !window.confirm(`Reset ${account.email}'s agent usage to zero for this week?`)
+    ) {
+      return
+    }
 
+    // MCP and the agent meter separately, so their limits are prompted for and
+    // written separately — one number cannot stand for both.
+    const paidPlan = account.plan === 'pro' || account.plan === 'studio'
     let requestedLimit: number | null = null
-    if (action === 'setMcpLimit') {
+    if (action === 'setMcpLimit' || action === 'setAgentLimit') {
+      const agent = action === 'setAgentLimit'
+      const label = agent ? 'agent' : 'MCP'
       const value = window.prompt(
-        `Weekly MCP call limit for ${account.email}`,
+        `Weekly ${label} call limit for ${account.email}`,
         String(
-          account.mcpWeeklyLimit ??
-            (account.plan === 'pro' || account.plan === 'studio' ? 1_000_000 : 100),
+          (agent ? account.agentWeeklyLimit : account.mcpWeeklyLimit) ??
+            (paidPlan ? 1_000_000 : agent ? 500 : 100),
         ),
       )
       if (value === null) return
       requestedLimit = Number(value.replaceAll(',', '').trim())
       if (!Number.isSafeInteger(requestedLimit) || requestedLimit < 1) {
-        setError('Enter a positive whole number for the weekly MCP limit.')
+        setError(`Enter a positive whole number for the weekly ${label} limit.`)
         return
       }
     }
@@ -387,6 +416,22 @@ export function AdminUsers({
         const updated = await orpc.admin.resetMcpUsage({ userId: account.id })
         patchUser(account.id, { mcpUsageResetAt: updated.resetAt })
         setStatus(`Reset ${account.email}'s MCP usage for this week.`)
+      } else if (action === 'setAgentLimit' || action === 'restoreAgentLimit') {
+        const weeklyLimit = action === 'setAgentLimit' ? requestedLimit : null
+        const updated = await orpc.admin.setAgentLimit({
+          userId: account.id,
+          weeklyLimit,
+        })
+        patchUser(account.id, { agentWeeklyLimit: updated.weeklyLimit })
+        setStatus(
+          updated.weeklyLimit === null
+            ? `Restored ${account.email}'s plan agent limit.`
+            : `Set ${account.email}'s agent limit to ${updated.weeklyLimit.toLocaleString()} calls per week.`,
+        )
+      } else if (action === 'resetAgentUsage') {
+        const updated = await orpc.admin.resetAgentUsage({ userId: account.id })
+        patchUser(account.id, { agentUsageResetAt: updated.resetAt })
+        setStatus(`Reset ${account.email}'s agent usage for this week.`)
       } else if (action === 'revokeSessions') {
         const { revoked } = await orpc.admin.revokeSessions({ userId: account.id })
         patchUser(account.id, { lastSeenAt: null })
@@ -547,6 +592,11 @@ export function AdminUsers({
                       {account.mcpWeeklyLimit !== null ? (
                         <span className="text-2xs text-muted-foreground">
                           MCP {account.mcpWeeklyLimit.toLocaleString()}/week
+                        </span>
+                      ) : null}
+                      {account.agentWeeklyLimit != null ? (
+                        <span className="text-2xs text-muted-foreground">
+                          Agent {account.agentWeeklyLimit.toLocaleString()}/week
                         </span>
                       ) : null}
                       {account.subscriptionStatus ? (

@@ -21,7 +21,8 @@ import {
 } from '@loora/rpc/assistant'
 import { AccessDeniedError, requireAppAccess } from '@loora/rpc/mcp-access'
 import { createLooraToolExecutor } from '@loora/rpc/mcp-server'
-import { createMcpUsageController } from '@loora/rpc/mcp-usage'
+import { createAgentUsageController } from '@loora/rpc/mcp-usage'
+import { McpUsageLimitError } from '@loora/billing/mcp-usage'
 import {
   rateLimit,
   rateLimits,
@@ -168,13 +169,27 @@ export async function assistantChatResponse(request: Request) {
     assistantTargetNames(session.user.id, target),
   ])
 
+  // The agent's own meter, separate from MCP: a week of agent work never eats
+  // into what an external MCP client is allowed, and the reverse.
+  const usage = createAgentUsageController(
+    session.user.id,
+    access.mcpPlan,
+    access.agentUsageOptions,
+  )
+  try {
+    const current = await usage.current()
+    if (current.remaining === 0) throw new McpUsageLimitError(current)
+  } catch (error) {
+    // Only a hard "you are out" stops the run here. A metering outage is the
+    // executor's problem to report per call, not a reason to refuse to start.
+    if (error instanceof McpUsageLimitError) {
+      return failure({ error: error.message, code: 'RATE_LIMITED' }, 429)
+    }
+  }
+
   const execute = createLooraToolExecutor(
     session.user.id,
-    createMcpUsageController(
-      session.user.id,
-      access.mcpPlan,
-      access.mcpUsageOptions,
-    ),
+    usage,
     async () => (await requireAppAccess(session.user.id)).mcpPlan,
   )
   const tools = createAssistantTools({ execute, target })

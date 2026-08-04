@@ -45,6 +45,7 @@ describe('Polar configuration', () => {
         proYearlyProductId: 'pro-yearly',
         studioProductId: 'studio',
         mcpMeterId: 'mcp-meter',
+        agentMeterId: null,
         accessBenefitId: 'access',
         origin: 'https://loora.example',
       },

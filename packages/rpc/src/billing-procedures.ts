@@ -10,14 +10,19 @@ import {
   refreshBillingStatus,
 } from '@loora/billing/billing'
 import {
+  getAgentUsage,
   getMcpUsage,
   McpUsageUnavailableError,
   resolveMcpUsagePlan,
+  type McpUsageOptions,
+  type McpUsagePlan,
+  type ToolUsage,
 } from '@loora/billing/mcp-usage'
 import { previewProcedure } from './procedures'
 
 /**
- * The `billing` namespace: plan status, checkout, and metered MCP usage.
+ * The `billing` namespace: plan status, checkout, and the two metered
+ * tool-call surfaces — MCP and the in-app agent, counted separately.
  */
 
 export const getCurrentBilling = previewProcedure.handler(({ context }) =>
@@ -56,10 +61,25 @@ export const createSubscriptionCheckout = previewProcedure
     )
   })
 
-export const getCurrentMcpUsage = previewProcedure.handler(async ({ context }) => {
-  // Same refresh path as billing.status so plan labels and weekly included
-  // limits stay aligned when both load in parallel on the billing page.
-  const status = await getBillingStatus(context.user)
+/**
+ * Both usage procedures do the same three things: refresh billing so the plan
+ * label matches `billing.status` when they load together, read this account's
+ * override for the surface, then ask that surface's meter.
+ */
+async function currentUsage(
+  account: { id: string } & Record<string, unknown>,
+  read: (
+    userId: string,
+    plan: McpUsagePlan,
+    now: Date,
+    options: McpUsageOptions,
+  ) => Promise<ToolUsage>,
+  columns: {
+    weeklyLimit: typeof user.mcpWeeklyLimit | typeof user.agentWeeklyLimit
+    resetAt: typeof user.mcpUsageResetAt | typeof user.agentUsageResetAt
+  },
+) {
+  const status = await getBillingStatus(account as Parameters<typeof getBillingStatus>[0])
   const plan = resolveMcpUsagePlan({
     source: status.source,
     access: status.access,
@@ -67,23 +87,32 @@ export const getCurrentMcpUsage = previewProcedure.handler(async ({ context }) =
   })
   if (!plan) return { usage: null }
   try {
-    const [account] = await db
-      .select({
-        weeklyLimit: user.mcpWeeklyLimit,
-        resetAt: user.mcpUsageResetAt,
-      })
+    const [override] = await db
+      .select({ weeklyLimit: columns.weeklyLimit, resetAt: columns.resetAt })
       .from(user)
-      .where(eq(user.id, context.user.id))
+      .where(eq(user.id, account.id))
       .limit(1)
-    return {
-      usage: await getMcpUsage(context.user.id, plan, new Date(), account),
-    }
+    return { usage: await read(account.id, plan, new Date(), override ?? {}) }
   } catch (error) {
     if (error instanceof McpUsageUnavailableError) {
       throw new ORPCError('INTERNAL_SERVER_ERROR', {
-        message: 'MCP usage is temporarily unavailable.',
+        message: 'Usage metering is temporarily unavailable.',
       })
     }
     throw error
   }
-})
+}
+
+export const getCurrentMcpUsage = previewProcedure.handler(({ context }) =>
+  currentUsage(context.user, getMcpUsage, {
+    weeklyLimit: user.mcpWeeklyLimit,
+    resetAt: user.mcpUsageResetAt,
+  }),
+)
+
+export const getCurrentAgentUsage = previewProcedure.handler(({ context }) =>
+  currentUsage(context.user, getAgentUsage, {
+    weeklyLimit: user.agentWeeklyLimit,
+    resetAt: user.agentUsageResetAt,
+  }),
+)

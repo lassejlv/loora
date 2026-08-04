@@ -250,7 +250,15 @@ Legacy helpers remain in `@loora/db/canvas` and `@loora/db/drafts` for rollback 
 
 ### `packages/billing`
 
-Polar grants plan access (Free / Pro / Studio). Capacity limits are enforced in product code (`@loora/billing/plan-limits`): Free has 50 design files (archived files do not count), 1 open branch per design (`active` or `proposed`), 1 GB asset storage, and 2 days of version history; Pro/Studio have unlimited files/branches, 50 GB asset storage, and 90 days of version history. MCP tool calls are metered weekly via Polar (`mcp-usage`); Free includes 100/week and Pro/Studio 1,000,000/week. There are no prepaid AI credits or top-ups. `billingEntitlement` may still carry unused legacy `meterBalance` / `creditedUnits` / `consumedUnits` columns as zeros.
+Polar grants plan access (Free / Pro / Studio). Capacity limits are enforced in product code (`@loora/billing/plan-limits`): Free has 50 design files (archived files do not count), 1 open branch per design (`active` or `proposed`), 1 GB asset storage, and 2 days of version history; Pro/Studio have unlimited files/branches, 50 GB asset storage, and 90 days of version history. Tool calls are metered weekly via Polar over **two independent surfaces**
+(`@loora/billing/mcp-usage`): `mcp` for the remote MCP transport and `agent`
+for the in-app agent. Separate Polar meters, separate event names
+(`loora.mcp_call.v1` / `loora.agent_call.v1`), separate allowances (MCP: Free
+100/week, Pro/Studio 1,000,000; agent: Free 500/week, Pro/Studio 1,000,000),
+and separate per-account overrides (`user.mcpWeeklyLimit` /
+`user.agentWeeklyLimit` and their reset timestamps). One surface running out
+never blocks the other. `POLAR_AGENT_METER_ID` is optional: until it is set the
+agent surface reports unmetered rather than failing. There are no prepaid AI credits or top-ups. `billingEntitlement` may still carry unused legacy `meterBalance` / `creditedUnits` / `consumedUnits` columns as zeros.
 
 ---
 
@@ -501,6 +509,7 @@ History uses Conventional Commits with scopes when useful:
 | API procedures | One module per namespace in `packages/rpc/src/` (`canvas-procedures.ts`, `branches.ts`, `versions.ts`, `admin.ts`, …); `router.ts` only assembles them, and shared gates live in `procedures.ts` |
 | Shared MCP canvas tools / layout repair | `packages/agent/src/` |
 | In-app agent model, tools, prompt, run loop | `packages/assistant/src/` |
+| Weekly tool-call meters (MCP and agent) | `packages/billing/src/mcp-usage.ts` |
 | Agent chat box | `packages/editor/src/components/agent-chat.tsx` |
 | Sign in with ChatGPT | `packages/auth/src/chatgpt.ts` |
 | MCP tools / transport | `packages/rpc/src/mcp-server.ts` / `crates/mcp-server/src/` |

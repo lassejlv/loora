@@ -31,7 +31,13 @@ import {
   user,
 } from '@loora/db/schema'
 import { refreshEntitlement } from '@loora/billing/billing'
-import { includedMcpCalls, type McpUsagePlan } from '@loora/billing/mcp-usage'
+import {
+  AGENT_USAGE_SURFACE,
+  includedCalls,
+  MCP_USAGE_SURFACE,
+  type McpUsagePlan,
+  type UsageSurface,
+} from '@loora/billing/mcp-usage'
 import { adminProcedure } from './procedures'
 import { deleteUserAccountData } from './account'
 
@@ -188,6 +194,8 @@ export const listUsersWithUsage = adminProcedure
         previewAccessRequestedAt: user.previewAccessRequestedAt,
         mcpWeeklyLimit: user.mcpWeeklyLimit,
         mcpUsageResetAt: user.mcpUsageResetAt,
+        agentWeeklyLimit: user.agentWeeklyLimit,
+        agentUsageResetAt: user.agentUsageResetAt,
         createdAt: user.createdAt,
       })
       .from(user)
@@ -377,58 +385,99 @@ export const refreshUserBilling = adminProcedure
     }
   })
 
-export const setUserMcpLimit = adminProcedure
-  .input(z.object({
-    userId: z.string().min(1).max(128),
-    weeklyLimit: z.number().int().min(1).max(2_000_000_000).nullable(),
-  }))
-  .handler(async ({ input }) => {
-    const [target] = await db
-      .select({
-        id: user.id,
-        isAdmin: user.isAdmin,
-        plan: billingEntitlement.plan,
-      })
-      .from(user)
-      .leftJoin(billingEntitlement, eq(billingEntitlement.userId, user.id))
-      .where(eq(user.id, input.userId))
-      .limit(1)
-    if (!target) throw new ORPCError('NOT_FOUND')
-    if (target.isAdmin && input.weeklyLimit !== null) {
-      throw new ORPCError('BAD_REQUEST', { message: 'Admin accounts already have unlimited MCP calls.' })
-    }
+/**
+ * MCP and the agent meter separately, so their overrides are separate columns
+ * and separate procedures over one shared body. A limit below the plan's own
+ * allowance is refused rather than silently ignored — the snapshot takes the
+ * larger of the two, so a lower number would do nothing.
+ */
+function setWeeklyLimit(
+  surface: UsageSurface,
+  column: typeof user.mcpWeeklyLimit | typeof user.agentWeeklyLimit,
+  set: (weeklyLimit: number | null) => Partial<typeof user.$inferInsert>,
+) {
+  return adminProcedure
+    .input(z.object({
+      userId: z.string().min(1).max(128),
+      weeklyLimit: z.number().int().min(1).max(2_000_000_000).nullable(),
+    }))
+    .handler(async ({ input }) => {
+      const [target] = await db
+        .select({
+          id: user.id,
+          isAdmin: user.isAdmin,
+          plan: billingEntitlement.plan,
+        })
+        .from(user)
+        .leftJoin(billingEntitlement, eq(billingEntitlement.userId, user.id))
+        .where(eq(user.id, input.userId))
+        .limit(1)
+      if (!target) throw new ORPCError('NOT_FOUND')
+      if (target.isAdmin && input.weeklyLimit !== null) {
+        throw new ORPCError('BAD_REQUEST', {
+          message: `Admin accounts already have unlimited ${surface.label} calls.`,
+        })
+      }
 
-    const plan: McpUsagePlan = target.plan === 'pro' || target.plan === 'studio'
-      ? target.plan
-      : 'free'
-    const planLimit = includedMcpCalls(plan) ?? 0
-    if (input.weeklyLimit !== null && input.weeklyLimit < planLimit) {
-      throw new ORPCError('BAD_REQUEST', {
-        message: `The custom limit cannot be lower than the plan limit of ${planLimit.toLocaleString()}.`,
-      })
-    }
+      const plan: McpUsagePlan = target.plan === 'pro' || target.plan === 'studio'
+        ? target.plan
+        : 'free'
+      const planLimit = includedCalls(surface, plan) ?? 0
+      if (input.weeklyLimit !== null && input.weeklyLimit < planLimit) {
+        throw new ORPCError('BAD_REQUEST', {
+          message: `The custom limit cannot be lower than the plan limit of ${planLimit.toLocaleString()}.`,
+        })
+      }
 
-    const [updated] = await db
-      .update(user)
-      .set({ mcpWeeklyLimit: input.weeklyLimit, updatedAt: new Date() })
-      .where(eq(user.id, input.userId))
-      .returning({ weeklyLimit: user.mcpWeeklyLimit })
-    if (!updated) throw new ORPCError('NOT_FOUND')
-    return updated
-  })
+      const [updated] = await db
+        .update(user)
+        .set({ ...set(input.weeklyLimit), updatedAt: new Date() })
+        .where(eq(user.id, input.userId))
+        .returning({ weeklyLimit: column })
+      if (!updated) throw new ORPCError('NOT_FOUND')
+      return updated
+    })
+}
 
-export const resetUserMcpUsage = adminProcedure
-  .input(z.object({ userId: z.string().min(1).max(128) }))
-  .handler(async ({ input }) => {
-    const resetAt = new Date()
-    const [updated] = await db
-      .update(user)
-      .set({ mcpUsageResetAt: resetAt, updatedAt: resetAt })
-      .where(eq(user.id, input.userId))
-      .returning({ resetAt: user.mcpUsageResetAt })
-    if (!updated) throw new ORPCError('NOT_FOUND')
-    return updated
-  })
+function resetWeeklyUsage(
+  column: typeof user.mcpUsageResetAt | typeof user.agentUsageResetAt,
+  set: (resetAt: Date) => Partial<typeof user.$inferInsert>,
+) {
+  return adminProcedure
+    .input(z.object({ userId: z.string().min(1).max(128) }))
+    .handler(async ({ input }) => {
+      const resetAt = new Date()
+      const [updated] = await db
+        .update(user)
+        .set({ ...set(resetAt), updatedAt: resetAt })
+        .where(eq(user.id, input.userId))
+        .returning({ resetAt: column })
+      if (!updated) throw new ORPCError('NOT_FOUND')
+      return updated
+    })
+}
+
+export const setUserMcpLimit = setWeeklyLimit(
+  MCP_USAGE_SURFACE,
+  user.mcpWeeklyLimit,
+  (mcpWeeklyLimit) => ({ mcpWeeklyLimit }),
+)
+
+export const resetUserMcpUsage = resetWeeklyUsage(
+  user.mcpUsageResetAt,
+  (mcpUsageResetAt) => ({ mcpUsageResetAt }),
+)
+
+export const setUserAgentLimit = setWeeklyLimit(
+  AGENT_USAGE_SURFACE,
+  user.agentWeeklyLimit,
+  (agentWeeklyLimit) => ({ agentWeeklyLimit }),
+)
+
+export const resetUserAgentUsage = resetWeeklyUsage(
+  user.agentUsageResetAt,
+  (agentUsageResetAt) => ({ agentUsageResetAt }),
+)
 
 /** Sign an account out of every browser session. Their data is untouched. */
 export const revokeUserSessions = adminProcedure

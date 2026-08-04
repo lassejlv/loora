@@ -41,6 +41,10 @@ export const user = pgTable('user', {
   usageMultiplier: integer('usage_multiplier').default(1).notNull(),
   mcpWeeklyLimit: integer('mcp_weekly_limit'),
   mcpUsageResetAt: timestamp('mcp_usage_reset_at'),
+  // The in-app agent meters separately from MCP, so its per-account override
+  // and its mid-week reset are separate too.
+  agentWeeklyLimit: integer('agent_weekly_limit'),
+  agentUsageResetAt: timestamp('agent_usage_reset_at'),
   acceptedTerms: boolean('accepted_terms').default(false).notNull(),
   acceptedPrivacy: boolean('accepted_privacy').default(false).notNull(),
   termsAcceptedAt: timestamp('terms_accepted_at'),

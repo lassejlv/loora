@@ -9,6 +9,12 @@ export interface PolarConfig {
   proYearlyProductId: string
   studioProductId: string | null
   mcpMeterId: string
+  /**
+   * The in-app agent's own meter. Optional so a deploy that predates it keeps
+   * working: until it is set, agent calls are not counted (see
+   * `unmeteredSnapshot` in mcp-usage.ts). Run `bun run polar:provision`.
+   */
+  agentMeterId: string | null
   accessBenefitId: string
   origin: string
 }
@@ -66,6 +72,7 @@ export function resolvePolarConfig(
       proYearlyProductId: values.POLAR_PRO_YEARLY_PRODUCT_ID!,
       studioProductId: env.POLAR_STUDIO_PRODUCT_ID?.trim() || null,
       mcpMeterId: values.POLAR_MCP_METER_ID!,
+      agentMeterId: env.POLAR_AGENT_METER_ID?.trim() || null,
       accessBenefitId: values.POLAR_ACCESS_BENEFIT_ID!,
       origin,
     },

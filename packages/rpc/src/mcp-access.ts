@@ -26,6 +26,8 @@ export async function requireAppAccess(userId: string) {
         privacyVersion: user.privacyVersion,
         mcpWeeklyLimit: user.mcpWeeklyLimit,
         mcpUsageResetAt: user.mcpUsageResetAt,
+        agentWeeklyLimit: user.agentWeeklyLimit,
+        agentUsageResetAt: user.agentUsageResetAt,
       },
       entitlement: {
         accessGranted: billingEntitlement.accessGranted,
@@ -64,12 +66,18 @@ export async function requireAppAccess(userId: string) {
   if (!mcpPlan) {
     throw new AccessDeniedError('A recognized Loora plan is required.')
   }
+  // One plan, two meters. `mcpPlan` decides the allowance on either surface;
+  // the options pick which account override and which mid-week reset apply.
   return {
     account,
     mcpPlan,
     mcpUsageOptions: {
       weeklyLimit: account.mcpWeeklyLimit,
       resetAt: account.mcpUsageResetAt,
+    },
+    agentUsageOptions: {
+      weeklyLimit: account.agentWeeklyLimit,
+      resetAt: account.agentUsageResetAt,
     },
   }
 }

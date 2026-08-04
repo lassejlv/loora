@@ -83,6 +83,7 @@ import {
 import {
   createSubscriptionCheckout,
   getCurrentBilling,
+  getCurrentAgentUsage,
   getCurrentMcpUsage,
   refreshCurrentBilling,
 } from './billing-procedures'
@@ -93,11 +94,13 @@ import {
   listRecentDesigns,
   listUsersWithUsage,
   refreshUserBilling,
+  resetUserAgentUsage,
   resetUserMcpUsage,
   revokeDesignLinks,
   revokeUserMcpAccess,
   revokeUserSessions,
   setUserAdmin,
+  setUserAgentLimit,
   setUserMcpLimit,
   setUserPreviewAccess,
 } from './admin'
@@ -154,6 +157,7 @@ export const appRouter = {
     refresh: refreshCurrentBilling,
     checkout: createSubscriptionCheckout,
     mcpUsage: getCurrentMcpUsage,
+    agentUsage: getCurrentAgentUsage,
   },
   design: {
     list: listDesigns,
@@ -246,6 +250,8 @@ export const appRouter = {
     refreshBilling: refreshUserBilling,
     setMcpLimit: setUserMcpLimit,
     resetMcpUsage: resetUserMcpUsage,
+    setAgentLimit: setUserAgentLimit,
+    resetAgentUsage: resetUserAgentUsage,
     revokeSessions: revokeUserSessions,
     revokeMcpAccess: revokeUserMcpAccess,
     deleteUser: deleteUserAccount,

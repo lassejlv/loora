@@ -2,6 +2,11 @@ import { Polar } from '@polar-sh/sdk'
 import type { Benefit } from '@polar-sh/sdk/models/components/benefit.js'
 import type { Meter } from '@polar-sh/sdk/models/components/meter.js'
 import type { Product } from '@polar-sh/sdk/models/components/product.js'
+import {
+  AGENT_USAGE_EVENT,
+  AGENT_WEEKLY_INCLUDED,
+  MCP_USAGE_EVENT,
+} from '../src/mcp-usage'
 
 const args = new Set(process.argv.slice(2))
 const dryRun = args.has('--dry-run')
@@ -72,6 +77,11 @@ const freeBenefits: BenefitSpec[] = [
     note: 'Weekly allowance that resets every week.',
   },
   {
+    key: 'agent_calls_free_week',
+    description: `${AGENT_WEEKLY_INCLUDED.free.toLocaleString('en-US')} agent calls / week`,
+    note: 'Metered separately from MCP, so one never eats the other.',
+  },
+  {
     key: 'version_history_2_days',
     description: '2 days of version history',
     note: 'Rolling two-day version history window.',
@@ -103,6 +113,11 @@ const proBenefits: BenefitSpec[] = [
     note: 'Weekly allowance that resets every week.',
   },
   {
+    key: 'agent_calls_pro_week',
+    description: `${AGENT_WEEKLY_INCLUDED.pro.toLocaleString('en-US')} agent calls / week`,
+    note: 'Metered separately from MCP, so one never eats the other.',
+  },
+  {
     key: 'version_history_90_days',
     description: '90 days of version history',
     note: 'Rolling 90-day version history window.',
@@ -125,6 +140,7 @@ const freeDescription = [
   '- 50 design files',
   '- 1 GB asset storage',
   '- 100 MCP calls per week',
+  '- 500 in-app agent calls per week',
   '- 2 days of version history',
   '- 1 open branch per design',
   '- Full canvas editor, MCP server, and exports',
@@ -136,6 +152,7 @@ const proDescription = [
   '- Unlimited design files',
   '- 50 GB asset storage',
   '- 1,000,000 MCP calls per week',
+  '- 1,000,000 in-app agent calls per week',
   '- 90 days of version history',
   '- Unlimited branches: fork, compare, merge',
   '- In-app agent access',
@@ -164,61 +181,90 @@ function logChange(message: string) {
   console.error(`${dryRun ? '[dry-run] ' : ''}${message}`)
 }
 
-const mcpMeterDefinition = {
-  name: 'loora_mcp_calls',
-  unit: 'custom' as const,
-  customLabel: 'MCP calls',
-  customMultiplier: 1,
-  filter: {
-    conjunction: 'and' as const,
-    clauses: [{
-      property: 'name',
-      operator: 'eq' as const,
-      value: 'loora.mcp_call.v1',
-    }],
-  },
-  aggregation: { func: 'count' as const },
-  metadata: {
-    ...catalogMetadata,
-    catalog_kind: 'mcp_calls_meter',
-  },
+/**
+ * One meter per tool-call surface. They are separate on purpose: MCP usage and
+ * in-app agent usage are billed and limited independently, and a shared meter
+ * would make one surface's traffic exhaust the other's allowance.
+ */
+function callMeterDefinition(input: {
+  name: string
+  customLabel: string
+  event: string
+  kind: string
+}) {
+  return {
+    name: input.name,
+    unit: 'custom' as const,
+    customLabel: input.customLabel,
+    customMultiplier: 1,
+    filter: {
+      conjunction: 'and' as const,
+      clauses: [{
+        property: 'name',
+        operator: 'eq' as const,
+        value: input.event,
+      }],
+    },
+    aggregation: { func: 'count' as const },
+    metadata: {
+      ...catalogMetadata,
+      catalog_kind: input.kind,
+    },
+  }
 }
 
-async function findMcpMeter() {
+const mcpMeterDefinition = callMeterDefinition({
+  name: 'loora_mcp_calls',
+  customLabel: 'MCP calls',
+  event: MCP_USAGE_EVENT,
+  kind: 'mcp_calls_meter',
+})
+
+const agentMeterDefinition = callMeterDefinition({
+  name: 'loora_agent_calls',
+  customLabel: 'Agent calls',
+  event: AGENT_USAGE_EVENT,
+  kind: 'agent_calls_meter',
+})
+
+type CallMeterDefinition = ReturnType<typeof callMeterDefinition>
+
+async function findCallMeter(definition: CallMeterDefinition, label: string) {
+  const kind = definition.metadata.catalog_kind
   const all = await items<Meter>(await polar.meters.list({
-    metadata: { app: 'loora', catalog_kind: 'mcp_calls_meter' },
+    metadata: { app: 'loora', catalog_kind: kind },
     limit: 100,
   }))
   return assertSingle(all.filter((meter) =>
     meter.metadata.app === 'loora' &&
-    meter.metadata.catalog_kind === 'mcp_calls_meter'
-  ), 'MCP calls meter')
+    meter.metadata.catalog_kind === kind
+  ), label)
 }
 
-async function ensureMcpMeter() {
-  const found = await findMcpMeter()
+async function ensureCallMeter(definition: CallMeterDefinition, label: string) {
+  const found = await findCallMeter(definition, label)
   if (!found) {
-    logChange('Create MCP calls meter')
-    if (dryRun) return '<create:loora_mcp_calls>'
-    return (await polar.meters.create(mcpMeterDefinition)).id
+    logChange(`Create ${label}`)
+    if (dryRun) return `<create:${definition.name}>`
+    return (await polar.meters.create(definition)).id
   }
 
   const compatible =
-    found.name === mcpMeterDefinition.name &&
-    found.unit === mcpMeterDefinition.unit &&
-    found.customLabel === mcpMeterDefinition.customLabel &&
-    found.customMultiplier === mcpMeterDefinition.customMultiplier &&
-    sameJson(found.filter, mcpMeterDefinition.filter) &&
-    sameJson(found.aggregation, mcpMeterDefinition.aggregation) &&
+    found.name === definition.name &&
+    found.unit === definition.unit &&
+    found.customLabel === definition.customLabel &&
+    found.customMultiplier === definition.customMultiplier &&
+    sameJson(found.filter, definition.filter) &&
+    sameJson(found.aggregation, definition.aggregation) &&
     found.metadata.catalog_version === catalogMetadata.catalog_version &&
     !found.archivedAt
   if (!compatible) {
-    logChange('Update MCP calls meter')
+    logChange(`Update ${label}`)
     if (!dryRun) {
       await polar.meters.update({
         id: found.id,
         meterUpdate: {
-          ...mcpMeterDefinition,
+          ...definition,
           isArchived: false,
         },
       })
@@ -226,6 +272,10 @@ async function ensureMcpMeter() {
   }
   return found.id
 }
+
+const ensureMcpMeter = () => ensureCallMeter(mcpMeterDefinition, 'MCP calls meter')
+const ensureAgentMeter = () =>
+  ensureCallMeter(agentMeterDefinition, 'agent calls meter')
 
 async function findAccessBenefit() {
   const all = await items<Benefit>(await polar.benefits.list({
@@ -541,6 +591,7 @@ async function removeLegacyAiUsage() {
 }
 
 const mcpMeterId = await ensureMcpMeter()
+const agentMeterId = await ensureAgentMeter()
 const accessBenefitId = await ensureAccessBenefit()
 const benefitIds = new Map<string, string>()
 for (const spec of [...commonBenefits, ...freeBenefits, ...proBenefits]) {
@@ -581,6 +632,7 @@ await removeLegacyAiUsage()
 console.log(JSON.stringify({
   POLAR_ACCESS_BENEFIT_ID: accessBenefitId,
   POLAR_MCP_METER_ID: mcpMeterId,
+  POLAR_AGENT_METER_ID: agentMeterId,
   POLAR_FREE_PRODUCT_ID: freeProductId,
   POLAR_PRO_PRODUCT_ID: proProductId,
   POLAR_PRO_YEARLY_PRODUCT_ID: proYearlyProductId,

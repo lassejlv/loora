@@ -1,13 +1,14 @@
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, vi, test } from 'vitest'
 
 const status = vi.fn()
 const mcpUsage = vi.fn()
+const agentUsage = vi.fn()
 const portal = vi.fn()
 
 vi.doMock('@loora/rpc/client', () => ({
   orpc: {
-    billing: { status, mcpUsage },
+    billing: { status, mcpUsage, agentUsage },
   },
 }))
 
@@ -50,6 +51,17 @@ const proUsage = {
   resetsAt: '2026-08-03T00:00:00.000Z',
 }
 
+/** The agent card loads from its own procedure, so it needs its own number. */
+const proAgentUsage = {
+  metric: 'agent_tool_calls' as const,
+  plan: 'pro' as const,
+  included: 1_000_000,
+  used: 7,
+  remaining: 999_993,
+  periodStart: '2026-07-27T00:00:00.000Z',
+  resetsAt: '2026-08-03T00:00:00.000Z',
+}
+
 const freeUsage = {
   metric: 'mcp_tool_calls' as const,
   plan: 'free' as const,
@@ -64,6 +76,7 @@ describe('BillingSettings', () => {
   beforeEach(() => {
     status.mockReset().mockResolvedValue(proBilling)
     mcpUsage.mockReset().mockResolvedValue({ usage: proUsage })
+    agentUsage.mockReset().mockResolvedValue({ usage: proAgentUsage })
     portal.mockReset().mockResolvedValue(undefined)
   })
 
@@ -78,14 +91,41 @@ describe('BillingSettings', () => {
     await waitFor(() => expect(portal).toHaveBeenCalledTimes(1))
   })
 
+  /** The two cards look alike, so every assertion is scoped to one of them. */
+  const usageCard = (title: string) =>
+    within(screen.getByText(title).closest('div')!)
+
   test('shows weekly MCP call usage for the current plan', async () => {
     render(<BillingSettings />)
 
     expect(await screen.findByText('MCP calls this week')).toBeTruthy()
-    expect(screen.getByText('42')).toBeTruthy()
-    expect(screen.getByText(/\/ 1,000,000/)).toBeTruthy()
-    expect(screen.getByText(/999,958 remaining/)).toBeTruthy()
-    expect(screen.getByRole('meter', { name: 'MCP calls used this week' })).toBeTruthy()
+    const mcp = usageCard('MCP calls this week')
+    expect(mcp.getByText('42')).toBeTruthy()
+    expect(mcp.getByText(/\/ 1,000,000/)).toBeTruthy()
+    expect(mcp.getByText(/999,958 remaining/)).toBeTruthy()
+    expect(mcp.getByRole('meter', { name: 'MCP calls used this week' })).toBeTruthy()
+  })
+
+  test('counts agent calls on their own card, from their own meter', async () => {
+    render(<BillingSettings />)
+
+    expect(await screen.findByText('Agent calls this week')).toBeTruthy()
+    const agent = usageCard('Agent calls this week')
+    expect(agent.getByText('7')).toBeTruthy()
+    expect(agent.getByText(/999,993 remaining/)).toBeTruthy()
+    expect(
+      agent.getByRole('meter', { name: 'Agent calls used this week' }),
+    ).toBeTruthy()
+    expect(agentUsage).toHaveBeenCalledTimes(1)
+  })
+
+  test('one surface failing leaves the other readable', async () => {
+    agentUsage.mockRejectedValue(new Error('agent meter down'))
+
+    render(<BillingSettings />)
+
+    expect(await screen.findByText('agent meter down')).toBeTruthy()
+    expect(usageCard('MCP calls this week').getByText('42')).toBeTruthy()
   })
 
   test('shows when the weekly MCP limit is exhausted', async () => {
@@ -95,8 +135,9 @@ describe('BillingSettings', () => {
     render(<BillingSettings />)
 
     expect(await screen.findByText('Weekly limit reached')).toBeTruthy()
-    expect(screen.getByText('200')).toBeTruthy()
-    expect(screen.getByText(/\/ 200/)).toBeTruthy()
+    const mcp = usageCard('MCP calls this week')
+    expect(mcp.getByText('200')).toBeTruthy()
+    expect(mcp.getByText(/\/ 200/)).toBeTruthy()
   })
 
   test('shows the no-plan MCP card when usage is null', async () => {
@@ -157,7 +198,11 @@ describe('BillingSettings', () => {
     render(<BillingSettings />)
 
     expect(await screen.findByText('down')).toBeTruthy()
-    fireEvent.click(screen.getByRole('button', { name: 'Try again' }))
+    // Two usage cards now, so retry the one that actually failed.
+    const failedCard = screen.getByText('down').closest('div')!
+    fireEvent.click(
+      within(failedCard).getByRole('button', { name: 'Try again' }),
+    )
 
     expect(await screen.findByText(/999,958 remaining/)).toBeTruthy()
     expect(mcpUsage).toHaveBeenCalledTimes(2)

@@ -1,8 +1,17 @@
 import { describe, expect, test } from 'vitest'
 import {
+  AGENT_USAGE_EVENT,
+  AGENT_USAGE_SURFACE,
+  AGENT_WEEKLY_INCLUDED,
+  MCP_USAGE_EVENT,
+  MCP_USAGE_SURFACE,
   McpUsageLimitError,
   MCP_WEEKLY_INCLUDED,
+  UsageMeterUnconfiguredError,
+  createAgentUsageService,
   createMcpUsageService,
+  createUsageService,
+  includedAgentCalls,
   includedMcpCalls,
   mcpUsageWindow,
   resolveMcpUsagePlan,
@@ -249,5 +258,113 @@ describe('MCP included usage', () => {
       access: true,
       plan: null,
     })).toBeNull()
+  })
+})
+
+describe('two separate meters', () => {
+  function countingMeter() {
+    const records: Parameters<McpUsageMeter['record']>[0][] = []
+    let total = 0
+    const meter: McpUsageMeter = {
+      readTotal: async () => total,
+      record: async (input) => {
+        records.push(input)
+        total += 1
+        return true
+      },
+    }
+    return { meter, records, used: () => total }
+  }
+
+  test('the agent has its own allowance, not MCP’s', () => {
+    expect(AGENT_WEEKLY_INCLUDED.free).not.toBe(MCP_WEEKLY_INCLUDED.free)
+    expect(includedAgentCalls('free')).toBe(AGENT_WEEKLY_INCLUDED.free)
+    expect(includedMcpCalls('free')).toBe(MCP_WEEKLY_INCLUDED.free)
+    expect(includedAgentCalls('admin')).toBeNull()
+  })
+
+  test('the two surfaces are different Polar events', () => {
+    expect(AGENT_USAGE_EVENT).not.toBe(MCP_USAGE_EVENT)
+    expect(AGENT_USAGE_SURFACE.metric).toBe('agent_tool_calls')
+    expect(MCP_USAGE_SURFACE.metric).toBe('mcp_tool_calls')
+  })
+
+  test('agent calls land on the agent meter and are labelled as such', async () => {
+    const agent = countingMeter()
+    const service = createAgentUsageService(() => agent.meter)
+    const now = new Date('2026-07-29T12:00:00Z')
+
+    const usage = await service.reserve('user-1', 'free', now)
+
+    expect(usage.metric).toBe('agent_tool_calls')
+    expect(usage.included).toBe(AGENT_WEEKLY_INCLUDED.free)
+    expect(agent.records).toHaveLength(1)
+  })
+
+  test('spending one surface does not spend the other', async () => {
+    const mcp = countingMeter()
+    const agent = countingMeter()
+    const mcpService = createMcpUsageService(() => mcp.meter)
+    const agentService = createAgentUsageService(() => agent.meter)
+    const now = new Date('2026-07-29T12:00:00Z')
+
+    for (let call = 0; call < 5; call += 1) {
+      await agentService.reserve('user-1', 'free', now)
+    }
+    const mcpUsage = await mcpService.reserve('user-1', 'free', now)
+
+    expect(agent.used()).toBe(5)
+    expect(mcp.used()).toBe(1)
+    expect(mcpUsage.used).toBe(1)
+    expect(mcpUsage.remaining).toBe(MCP_WEEKLY_INCLUDED.free - 1)
+  })
+
+  test('exhausting the agent leaves MCP alone', async () => {
+    const mcp = countingMeter()
+    const agentService = createUsageService(
+      { ...AGENT_USAGE_SURFACE, included: { free: 1, pro: 1, studio: 1 } },
+      () => countingMeter().meter,
+    )
+    const mcpService = createMcpUsageService(() => mcp.meter)
+    const now = new Date('2026-07-29T12:00:00Z')
+
+    await agentService.reserve('user-1', 'free', now)
+    await expect(
+      agentService.reserve('user-1', 'free', now),
+    ).rejects.toBeInstanceOf(McpUsageLimitError)
+
+    await expect(
+      mcpService.reserve('user-1', 'free', now),
+    ).resolves.toMatchObject({ metric: 'mcp_tool_calls', used: 1 })
+  })
+
+  test('names the surface that ran out', async () => {
+    const agentService = createUsageService(
+      { ...AGENT_USAGE_SURFACE, included: { free: 0, pro: 0, studio: 0 } },
+      () => countingMeter().meter,
+    )
+    await expect(
+      agentService.reserve('user-1', 'free', new Date('2026-07-29T12:00:00Z')),
+    ).rejects.toThrow(/Weekly agent limit reached/)
+  })
+
+  test('an unprovisioned meter reports unmetered instead of blocking', async () => {
+    const service = createUsageService(
+      { ...AGENT_USAGE_SURFACE, meterId: () => null },
+      () => {
+        throw new UsageMeterUnconfiguredError(AGENT_USAGE_SURFACE)
+      },
+    )
+    const now = new Date('2026-07-29T12:00:00Z')
+
+    await expect(service.reserve('user-1', 'free', now)).resolves.toMatchObject({
+      metric: 'agent_tool_calls',
+      plan: 'disabled',
+      included: null,
+      remaining: null,
+    })
+    await expect(service.current('user-1', 'free', now)).resolves.toMatchObject({
+      included: null,
+    })
   })
 })
