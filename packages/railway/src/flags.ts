@@ -26,14 +26,7 @@ export async function isPublishSitesEnabled(user: FeatureFlagUser) {
   return flags.getBoolean('publish-sites', { key: user.id, is_admin: false }, false)
 }
 
-/**
- * The agent chat in the editor. Off unless the flag says otherwise, so an
- * environment with no Railway token — a local checkout, a preview deploy —
- * simply does not show it. Admins always see it, same as publishing.
- */
+/** The agent chat is restricted to staff while it is being validated. */
 export async function isInAppAgentEnabled(user: FeatureFlagUser) {
-  if (user.isAdmin) return true
-  if (!process.env.RAILWAY_TOKEN) return false
-  await ensureInit()
-  return flags.getBoolean('in-app-agent', { key: user.id, is_admin: false }, false)
+  return Boolean(user.isAdmin)
 }

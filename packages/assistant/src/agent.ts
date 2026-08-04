@@ -13,6 +13,7 @@ import {
   type ToolSet,
   type UIMessage,
 } from 'ai'
+import type { ChatGptReasoningEffort } from './protocol'
 
 /**
  * A real design task takes a handful of reads and several batched writes. This
@@ -29,6 +30,7 @@ export interface AssistantRunOptions {
   tools: ToolSet
   maxSteps?: number
   abortSignal?: AbortSignal
+  reasoningEffort?: ChatGptReasoningEffort
 }
 
 export async function runAssistant(options: AssistantRunOptions) {
@@ -43,6 +45,9 @@ export async function runAssistant(options: AssistantRunOptions) {
     }),
     stopWhen: isStepCount(options.maxSteps ?? DEFAULT_ASSISTANT_MAX_STEPS),
     abortSignal: options.abortSignal,
+    providerOptions: options.reasoningEffort
+      ? { openai: { reasoningEffort: options.reasoningEffort } }
+      : undefined,
   })
 }
 

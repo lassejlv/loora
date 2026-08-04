@@ -16,6 +16,11 @@ import { assistantSystemPrompt } from '@loora/assistant/system-prompt'
 import { createAssistantTools } from '@loora/assistant/tools'
 import type { AssistantErrorBody } from '@loora/assistant/protocol'
 import {
+  chatGptModel,
+  chatGptReasoningEffort,
+  DEFAULT_CHATGPT_REASONING_EFFORT,
+} from '@loora/assistant/protocol'
+import {
   assistantTargetNames,
   ensureAssistantThread,
   saveAssistantMessages,
@@ -51,6 +56,8 @@ interface ChatRequestBody {
   designId?: string
   draftId?: string | null
   selection?: string[]
+  model?: string
+  reasoningEffort?: string
 }
 
 function failure(body: AssistantErrorBody, status: number) {
@@ -82,7 +89,7 @@ export async function assistantChatResponse(request: Request) {
   )
   if (!decision.ok) return tooManyRequestsResponse(decision)
 
-  // The flag decides before anything else does. An account outside it never
+  // The admin gate decides before anything else does. An account outside it never
   // sees the chat box, so reaching here means somebody went around the UI.
   if (!(await isInAppAgentEnabled(session.user))) {
     return failure(
@@ -164,10 +171,20 @@ export async function assistantChatResponse(request: Request) {
   }
 
   const requestFetch = chatgptAuth.proxyFetch(request)
+  const requestedModel = chatGptModel(body.model)
+  const reasoningEffort =
+    chatGptReasoningEffort(body.reasoningEffort) ??
+    DEFAULT_CHATGPT_REASONING_EFFORT
   let modelId: string | undefined
   try {
     const models = await chatgptAuth.getModels(request)
-    modelId = selectAssistantModel(models ?? [])
+    if (requestedModel && !models?.includes(requestedModel)) {
+      return failure(
+        { error: `${requestedModel} is not available for this ChatGPT account.`, code: 'PROVIDER_ERROR' },
+        400,
+      )
+    }
+    modelId = requestedModel ?? selectAssistantModel(models ?? [])
   } catch {
     return failure(
       {
@@ -232,6 +249,7 @@ export async function assistantChatResponse(request: Request) {
     }),
     messages,
     tools,
+    reasoningEffort,
     abortSignal: request.signal,
     generateMessageId: () => `amsg_${globalThis.crypto.randomUUID()}`,
     onEnd: async ({ messages: finished }) => {

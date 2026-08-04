@@ -19,16 +19,26 @@ import {
 } from 'ai'
 import {
   assistantToolLabel,
+  CHATGPT_MODELS,
+  CHATGPT_REASONING_EFFORTS,
+  chatGptModel,
+  chatGptReasoningEffort,
   CHATGPT_LOGIN_COMMAND,
   CHATGPT_LOGOUT_COMMAND,
+  DEFAULT_CHATGPT_MODEL,
+  DEFAULT_CHATGPT_REASONING_EFFORT,
+  type ChatGptModel,
+  type ChatGptReasoningEffort,
 } from '@loora/assistant/protocol'
 import { apiUrl } from '@loora/platform'
 import { orpc } from '@loora/rpc/client'
 import {
   BotIcon,
+  GripVerticalIcon,
   LogOutIcon,
   PlusIcon,
   SendIcon,
+  SettingsIcon,
   ShieldKeyIcon,
   SquareIcon,
   XIcon,
@@ -39,22 +49,26 @@ import { cn } from '@loora/ui/utils'
 /**
  * The agent chat.
  *
- * One input, floating over the canvas. There is no transcript on purpose: the
- * work shows up as it happens on the canvas itself — the agent-activity ring
- * and badge that already exist for MCP light up for this agent too, because it
- * goes down the same executor and publishes the same realtime events. What is
- * left here is the one line the agent needs to be able to say back, the tool it
- * is on right now, and a confirmation when it wants to delete something.
+ * One input, floating over the canvas. The resting box keeps only the latest
+ * response visible; hovering or focusing it reveals the earlier conversation
+ * without permanently covering the work being changed underneath.
  */
 
 const THREAD_COMMAND = '/new'
+const MODEL_COMMAND = '/model'
+const EFFORT_COMMAND = '/effort'
 
 interface AgentChatStatus {
-  /** Whether this account is inside the in-app-agent feature flag. */
+  /** Whether this account may use the admin-only in-app agent. */
   enabled: boolean
   configured: boolean
   connection: { email: string | null; planType: string | null } | null
   model: string
+}
+
+interface AgentChatOffset {
+  x: number
+  y: number
 }
 
 interface SlashCommand {
@@ -76,6 +90,16 @@ const SLASH_COMMANDS: SlashCommand[] = [
     description: 'Disconnect it',
     icon: LogOutIcon,
     when: (status) => Boolean(status?.connection),
+  },
+  {
+    name: MODEL_COMMAND,
+    description: 'Choose the ChatGPT model',
+    icon: BotIcon,
+  },
+  {
+    name: EFFORT_COMMAND,
+    description: 'Set reasoning effort',
+    icon: SettingsIcon,
   },
   {
     name: THREAD_COMMAND,
@@ -178,6 +202,14 @@ function lastAssistantText(messages: UIMessage[]) {
   return null
 }
 
+function messageText(message: UIMessage) {
+  return message.parts
+    .filter((part) => part.type === 'text')
+    .map((part) => (part as { text: string }).text)
+    .join('')
+    .trim()
+}
+
 /**
  * The endpoint answers a refused run with `{ error, code }`; the AI SDK hands
  * that body over as the error message. Reading it back beats showing somebody
@@ -228,6 +260,20 @@ export function AgentChat({
   } | null>(null)
   const [input, setInput] = useState('')
   const [notice, setNotice] = useState<string | null>(null)
+  const [offset, setOffset] = useState<AgentChatOffset>({ x: 0, y: 0 })
+  const [model, setModel] = useState<ChatGptModel>(() =>
+    chatGptModel(
+      typeof localStorage === 'undefined' ? null : localStorage.getItem('loora:chatgpt-model'),
+    ) ?? DEFAULT_CHATGPT_MODEL,
+  )
+  const [reasoningEffort, setReasoningEffort] = useState<ChatGptReasoningEffort>(
+    () =>
+      chatGptReasoningEffort(
+        typeof localStorage === 'undefined'
+          ? null
+          : localStorage.getItem('loora:reasoning-effort'),
+      ) ?? DEFAULT_CHATGPT_REASONING_EFFORT,
+  )
   const inputRef = useRef<HTMLTextAreaElement>(null)
   const selectionRef = useRef<string[] | undefined>(selection)
   selectionRef.current = selection
@@ -259,7 +305,9 @@ export function AgentChat({
   }, [designId, draftId, open])
 
   if (!open || !thread) {
-    return open ? <AgentChatSkeleton /> : null
+    return open ? (
+      <AgentChatSkeleton offset={offset} onOffsetChange={setOffset} />
+    ) : null
   }
 
   return (
@@ -284,6 +332,18 @@ export function AgentChat({
         if (next) setThread({ id: next.threadId, messages: [] })
       }}
       onStatusChange={setStatus}
+      offset={offset}
+      onOffsetChange={setOffset}
+      model={model}
+      onModelChange={(next) => {
+        setModel(next)
+        localStorage.setItem('loora:chatgpt-model', next)
+      }}
+      reasoningEffort={reasoningEffort}
+      onReasoningEffortChange={(next) => {
+        setReasoningEffort(next)
+        localStorage.setItem('loora:reasoning-effort', next)
+      }}
     />
   )
 }
@@ -291,31 +351,131 @@ export function AgentChat({
 function AgentChatShell({
   children,
   className,
+  offset,
+  onOffsetChange,
 }: {
   children: React.ReactNode
   className?: string
+  offset: AgentChatOffset
+  onOffsetChange: (offset: AgentChatOffset) => void
 }) {
+  const boxRef = useRef<HTMLDivElement>(null)
+  const dragRef = useRef<{
+    pointerX: number
+    pointerY: number
+    offset: AgentChatOffset
+    minX: number
+    maxX: number
+    minY: number
+    maxY: number
+  } | null>(null)
+
+  const bounds = () => {
+    const box = boxRef.current
+    const parent = box?.parentElement?.parentElement
+    if (!box || !parent) return null
+    const boxRect = box.getBoundingClientRect()
+    const parentRect = parent.getBoundingClientRect()
+    const inset = 8
+    return {
+      minX: offset.x + parentRect.left + inset - boxRect.left,
+      maxX: offset.x + parentRect.right - inset - boxRect.right,
+      minY: offset.y + parentRect.top + inset - boxRect.top,
+      maxY: offset.y + parentRect.bottom - inset - boxRect.bottom,
+    }
+  }
+
+  const clampOffset = (next: AgentChatOffset, limits = bounds()) => {
+    if (!limits) return next
+    return {
+      x: Math.min(limits.maxX, Math.max(limits.minX, next.x)),
+      y: Math.min(limits.maxY, Math.max(limits.minY, next.y)),
+    }
+  }
+
   return (
     // Clears the tool strip below it (`bottom-3`, ~2rem tall) rather than
     // landing on top of it.
     <div className="pointer-events-none absolute inset-x-0 bottom-16 z-30 flex justify-center px-4">
       <div
+        ref={boxRef}
+        style={{ transform: `translate3d(${offset.x}px, ${offset.y}px, 0)` }}
         className={cn(
-          'cx-agent-box pointer-events-auto w-full max-w-xl overflow-hidden rounded-lg',
+          'cx-agent-box group/agent pointer-events-auto w-full max-w-xl overflow-hidden rounded-lg will-change-transform',
           className,
         )}
       >
+        <div
+          role="button"
+          tabIndex={0}
+          aria-label="Move agent chat"
+          className="flex h-5 touch-none cursor-grab items-center justify-center border-b border-line/50 text-muted-foreground/60 outline-none hover:text-muted-foreground active:cursor-grabbing focus-visible:bg-foreground/5 focus-visible:text-foreground"
+          onPointerDown={(event) => {
+            if (!event.isPrimary || event.button !== 0) return
+            const limits = bounds()
+            if (!limits) return
+            event.currentTarget.setPointerCapture(event.pointerId)
+            dragRef.current = {
+              pointerX: event.clientX,
+              pointerY: event.clientY,
+              offset,
+              ...limits,
+            }
+          }}
+          onPointerMove={(event) => {
+            const drag = dragRef.current
+            if (!drag || !event.currentTarget.hasPointerCapture(event.pointerId)) return
+            onOffsetChange(
+              clampOffset(
+                {
+                  x: drag.offset.x + event.clientX - drag.pointerX,
+                  y: drag.offset.y + event.clientY - drag.pointerY,
+                },
+                drag,
+              ),
+            )
+          }}
+          onPointerUp={(event) => {
+            if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+              event.currentTarget.releasePointerCapture(event.pointerId)
+            }
+            dragRef.current = null
+          }}
+          onPointerCancel={() => {
+            dragRef.current = null
+          }}
+          onKeyDown={(event) => {
+            const movement = {
+              ArrowLeft: { x: -16, y: 0 },
+              ArrowRight: { x: 16, y: 0 },
+              ArrowUp: { x: 0, y: -16 },
+              ArrowDown: { x: 0, y: 16 },
+            }[event.key]
+            if (!movement) return
+            event.preventDefault()
+            onOffsetChange(
+              clampOffset({ x: offset.x + movement.x, y: offset.y + movement.y }),
+            )
+          }}
+        >
+          <GripVerticalIcon size={12} className="rotate-90" />
+        </div>
         {children}
       </div>
     </div>
   )
 }
 
-function AgentChatSkeleton() {
+function AgentChatSkeleton({
+  offset,
+  onOffsetChange,
+}: {
+  offset: AgentChatOffset
+  onOffsetChange: (offset: AgentChatOffset) => void
+}) {
   return (
-    <AgentChatShell>
-      <div className="flex h-11 items-center gap-2 px-3">
-        <BotIcon size={14} className="shrink-0 text-muted-foreground" />
+    <AgentChatShell offset={offset} onOffsetChange={onOffsetChange}>
+      <div className="flex h-11 items-center px-3">
         <span className="text-xs text-muted-foreground">Opening the agent…</span>
       </div>
     </AgentChatShell>
@@ -337,6 +497,12 @@ function AgentChatBox({
   onClose,
   onNewThread,
   onStatusChange,
+  offset,
+  onOffsetChange,
+  model,
+  onModelChange,
+  reasoningEffort,
+  onReasoningEffortChange,
 }: {
   threadId: string
   initialMessages: UIMessage[]
@@ -352,6 +518,12 @@ function AgentChatBox({
   onClose: () => void
   onNewThread: () => Promise<void>
   onStatusChange: (status: AgentChatStatus) => void
+  offset: AgentChatOffset
+  onOffsetChange: (offset: AgentChatOffset) => void
+  model: ChatGptModel
+  onModelChange: (model: ChatGptModel) => void
+  reasoningEffort: ChatGptReasoningEffort
+  onReasoningEffortChange: (effort: ChatGptReasoningEffort) => void
 }) {
   const transport = useMemo(
     () =>
@@ -362,9 +534,11 @@ function AgentChatBox({
           designId,
           draftId,
           selection: selectionRef.current,
+          model,
+          reasoningEffort,
         }),
       }),
-    [designId, draftId, selectionRef],
+    [designId, draftId, model, reasoningEffort, selectionRef],
   )
 
   const chat = useChat({
@@ -384,6 +558,13 @@ function AgentChatBox({
   const tool = activeToolPart(chat.messages)
   const approval = pendingApproval(chat.messages)
   const answer = lastAssistantText(chat.messages)
+  const conversation = chat.messages
+    .map((message) => ({
+      id: message.id,
+      role: message.role,
+      text: messageText(message),
+    }))
+    .filter((message) => message.text)
   const error = readableError(chat.error)
   const connected = Boolean(status?.connection)
 
@@ -424,6 +605,30 @@ function AgentChatBox({
         onNotice('ChatGPT disconnected.')
         return true
       }
+      if (command === MODEL_COMMAND) {
+        onInputChange(`${MODEL_COMMAND} `)
+        return true
+      }
+      if (command.startsWith(`${MODEL_COMMAND} `)) {
+        const next = chatGptModel(command.slice(MODEL_COMMAND.length + 1))
+        if (!next) return false
+        onModelChange(next)
+        onNotice(`Model set to ${CHATGPT_MODELS.find((item) => item.id === next)?.label}.`)
+        return true
+      }
+      if (command === EFFORT_COMMAND) {
+        onInputChange(`${EFFORT_COMMAND} `)
+        return true
+      }
+      if (command.startsWith(`${EFFORT_COMMAND} `)) {
+        const next = chatGptReasoningEffort(command.slice(EFFORT_COMMAND.length + 1))
+        if (!next) return false
+        onReasoningEffortChange(next)
+        onNotice(
+          `Reasoning effort set to ${CHATGPT_REASONING_EFFORTS.find((item) => item.id === next)?.label}.`,
+        )
+        return true
+      }
       if (command === THREAD_COMMAND) {
         await onNewThread()
         onNotice(null)
@@ -431,7 +636,14 @@ function AgentChatBox({
       }
       return false
     },
-    [connect, onNewThread, onNotice, onStatusChange],
+    [
+      connect,
+      onModelChange,
+      onNewThread,
+      onNotice,
+      onReasoningEffortChange,
+      onStatusChange,
+    ],
   )
 
   /** Run a command the menu picked, rather than whatever is half-typed. */
@@ -470,14 +682,30 @@ function AgentChatBox({
     void chat.sendMessage({ text })
   }, [chat, connected, input, onInputChange, onNotice, runCommand, running])
 
-  const query = input.trim()
-  const matches =
-    query.startsWith('/') && !menuDismissed
-      ? SLASH_COMMANDS.filter(
-          (command) =>
-            (command.when?.(status) ?? true) && command.name.startsWith(query),
-        )
-      : []
+  // Keep the trailing space: `/model` is the parent command, while `/model `
+  // opens its choices.
+  const query = input.trimStart()
+  const modelCommands: SlashCommand[] = CHATGPT_MODELS.map((item) => ({
+    name: `${MODEL_COMMAND} ${item.id}`,
+    description: item.label + (item.id === model ? ' · selected' : ''),
+    icon: BotIcon,
+  }))
+  const effortCommands: SlashCommand[] = CHATGPT_REASONING_EFFORTS.map((item) => ({
+    name: `${EFFORT_COMMAND} ${item.id}`,
+    description: item.label + (item.id === reasoningEffort ? ' · selected' : ''),
+    icon: SettingsIcon,
+  }))
+  const commandPool = query.startsWith(`${MODEL_COMMAND} `)
+    ? modelCommands
+    : query.startsWith(`${EFFORT_COMMAND} `)
+      ? effortCommands
+      : SLASH_COMMANDS
+  const matches = query.startsWith('/') && !menuDismissed
+    ? commandPool.filter(
+        (command) =>
+          (command.when?.(status) ?? true) && command.name.startsWith(query),
+      )
+    : []
   const active = matches[Math.min(highlighted, matches.length - 1)]
 
   const line = approval
@@ -485,13 +713,37 @@ function AgentChatBox({
     : running
       ? (tool ? assistantToolLabel(getToolOrDynamicToolName(tool)) : 'Thinking') + '…'
       : (notice ?? error ?? answer)
+  const history = line === answer && conversation.at(-1)?.role === 'assistant'
+    ? conversation.slice(0, -1)
+    : conversation
 
   return (
-    <AgentChatShell>
+    <AgentChatShell offset={offset} onOffsetChange={onOffsetChange}>
+      {history.length > 0 ? (
+        <div className="grid grid-rows-[0fr] opacity-0 transition-[grid-template-rows,opacity] duration-200 ease-out group-hover/agent:grid-rows-[1fr] group-hover/agent:opacity-100">
+          <div className="min-h-0 overflow-hidden">
+            <div
+              aria-label="Conversation history"
+              className="max-h-56 space-y-3 overflow-y-auto border-b border-line/70 px-3 py-3 overscroll-contain"
+            >
+              {history.map((message) => (
+                <div key={message.id} className="text-xs">
+                  <p className="mb-0.5 text-2xs font-medium text-muted-foreground">
+                    {message.role === 'user' ? 'You' : 'Agent'}
+                  </p>
+                  <p className="whitespace-pre-wrap text-foreground">
+                    {message.text}
+                  </p>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      ) : null}
+
       {approval ? (
-        <div className="flex items-start gap-2 border-b border-line/70 px-3 py-2">
-          <BotIcon size={13} className="mt-0.5 shrink-0 text-muted-foreground" />
-          <div className="min-w-0 flex-1">
+        <div className="border-b border-line/70 px-3 py-2">
+          <div className="min-w-0">
             <p className="text-xs text-foreground">
               Delete{' '}
               {approvalCount(approval.part)} on the canvas?
@@ -526,19 +778,12 @@ function AgentChatBox({
           </div>
         </div>
       ) : line ? (
-        <div className="flex items-start gap-2 border-b border-line/70 px-3 py-2">
-          <BotIcon
-            size={13}
-            className={cn(
-              'mt-0.5 shrink-0',
-              error ? 'text-destructive-foreground' : 'text-muted-foreground',
-            )}
-          />
+        <div className="border-b border-line/70 px-3 py-2">
           <p
             className={cn(
-              'max-h-32 min-w-0 flex-1 overflow-y-auto whitespace-pre-wrap text-xs',
+              'max-h-32 min-w-0 overflow-y-auto whitespace-pre-wrap text-xs',
               running
-                ? 'cx-shimmer'
+                ? 'cx-agent-thinking text-muted-foreground'
                 : error
                   ? 'text-destructive-foreground'
                   : 'text-foreground',

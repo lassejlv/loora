@@ -5,8 +5,8 @@ canvas; remote MCP clients (and agent handoff consumers) mutate the same
 document through typed transactions. Designs have version history, isolated
 drafts/branches, one-way exports, and GitHub integration.
 The editor also has its own agent: one chat box over the canvas, running on
-the person's own ChatGPT account, driving the same typed tools. It is behind
-the `in-app-agent` Railway flag, so it is invisible to an account outside it.
+the person's own ChatGPT account, driving the same typed tools. It is currently
+admin-only, so it is invisible to every non-admin account.
 Bringing your own agent over MCP or handoff stays a first-class path.
 
 It ships as a web app and as a desktop app — the same interface, from the same
@@ -178,11 +178,9 @@ oRPC or React, and it takes its executor as a parameter.
 | `@loora/assistant/system-prompt` | The brief the agent works from |
 | `@loora/assistant/agent` | `runAssistant` / `assistantStreamResponse` |
 
-The whole surface is behind the `in-app-agent` Railway flag. `assistant.status`
-answers `enabled`, the editor asks once per page before it draws anything, and
-both `assistant.*` and `/api/assistant/chat` refuse for an account outside the
-flag. Admins are always inside it; without `RAILWAY_TOKEN` everybody else is
-outside — the same rule `publish-sites` uses.
+The whole surface is admin-only. `assistant.status` answers `enabled`, the
+editor asks once per page before it draws anything, and both `assistant.*` and
+`/api/assistant/chat` refuse every non-admin account.
 
 Every tool goes down `createLooraToolExecutor` — the same path the remote MCP
 transport takes — so engine validation, compare-and-swap persistence, plan

@@ -98,3 +98,35 @@ export interface AssistantErrorBody {
 /** The slash command that starts the ChatGPT connection from the chat box. */
 export const CHATGPT_LOGIN_COMMAND = '/login-with-chatgpt'
 export const CHATGPT_LOGOUT_COMMAND = '/logout-chatgpt'
+
+export const CHATGPT_MODELS = [
+  { id: 'gpt-5.6-sol', label: 'GPT-5.6 Sol' },
+  { id: 'gpt-5.6-terra', label: 'GPT-5.6 Terra' },
+  { id: 'gpt-5.6-luna', label: 'GPT-5.6 Luna' },
+] as const
+
+export type ChatGptModel = (typeof CHATGPT_MODELS)[number]['id']
+
+export const CHATGPT_REASONING_EFFORTS = [
+  { id: 'low', label: 'Light' },
+  { id: 'medium', label: 'Medium' },
+  { id: 'high', label: 'High' },
+  { id: 'xhigh', label: 'Xhigh' },
+  { id: 'max', label: 'Max' },
+] as const
+
+export type ChatGptReasoningEffort =
+  (typeof CHATGPT_REASONING_EFFORTS)[number]['id']
+
+export const DEFAULT_CHATGPT_MODEL: ChatGptModel = 'gpt-5.6-terra'
+export const DEFAULT_CHATGPT_REASONING_EFFORT: ChatGptReasoningEffort = 'medium'
+
+export function chatGptModel(value: unknown): ChatGptModel | undefined {
+  return CHATGPT_MODELS.find((model) => model.id === value)?.id
+}
+
+export function chatGptReasoningEffort(
+  value: unknown,
+): ChatGptReasoningEffort | undefined {
+  return CHATGPT_REASONING_EFFORTS.find((effort) => effort.id === value)?.id
+}

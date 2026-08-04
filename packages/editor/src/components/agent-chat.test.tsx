@@ -4,6 +4,12 @@ const status = vi.fn()
 const thread = vi.fn()
 const newThread = vi.fn()
 const fetchRequest = vi.fn()
+const preferences = new Map<string, string>()
+const localStorageMock = {
+  getItem: vi.fn((key: string) => preferences.get(key) ?? null),
+  setItem: vi.fn((key: string, value: string) => preferences.set(key, value)),
+  clear: vi.fn(() => preferences.clear()),
+}
 
 const sendMessage = vi.fn()
 const stop = vi.fn()
@@ -57,7 +63,11 @@ describe('AgentChat', () => {
     addToolApprovalResponse.mockReset()
     fetchRequest.mockReset().mockResolvedValue(new Response(null, { status: 200 }))
     vi.stubGlobal('fetch', fetchRequest)
+    vi.stubGlobal('localStorage', localStorageMock)
     window.history.replaceState({}, '', '/')
+    localStorageMock.clear()
+    localStorageMock.getItem.mockClear()
+    localStorageMock.setItem.mockClear()
     // The status read is cached per page, so each test starts from nothing.
     resetAgentAvailability()
     status.mockReset().mockResolvedValue(connected)
@@ -175,11 +185,46 @@ describe('AgentChat', () => {
     const view = await open(
       <AgentChat designId="d1" draftId={null} open onOpenChange={() => {}} />,
     )
-    expect(view.getByText('Adding elements…')).toBeTruthy()
+    const statusLine = view.getByText('Adding elements…')
+    expect(statusLine.classList.contains('cx-agent-thinking')).toBe(true)
+    expect(statusLine.classList.contains('cx-shimmer')).toBe(false)
     await act(async () => {
       fireEvent.click(view.getByLabelText('Stop the agent'))
     })
     expect(stop).toHaveBeenCalled()
+  })
+
+  test('reveals earlier messages in a bounded hover transcript', async () => {
+    chatState.messages = [
+      {
+        id: 'm1',
+        role: 'user',
+        parts: [{ type: 'text', text: 'Build a settings screen' }],
+      },
+      {
+        id: 'm2',
+        role: 'assistant',
+        parts: [{ type: 'text', text: 'I added the account settings.' }],
+      },
+      {
+        id: 'm3',
+        role: 'assistant',
+        parts: [{ type: 'text', text: 'The billing section is ready.' }],
+      },
+    ]
+    const view = await open(
+      <AgentChat designId="d1" draftId={null} open onOpenChange={() => {}} />,
+    )
+
+    const history = view.getByLabelText('Conversation history')
+    expect(history.textContent).toContain('Build a settings screen')
+    expect(history.textContent).toContain('I added the account settings.')
+    expect(history.textContent).not.toContain('The billing section is ready.')
+    expect(history.className).toContain('max-h-56')
+    expect(history.className).toContain('overflow-y-auto')
+    expect(history.parentElement?.parentElement?.className).toContain(
+      'group-hover/agent:opacity-100',
+    )
   })
 
   test('asks before deleting, and passes the answer back', async () => {
@@ -281,6 +326,8 @@ describe('AgentChat', () => {
     expect(options.map((option) => option.textContent)).toEqual([
       expect.stringContaining('/login-with-chatgpt'),
       expect.stringContaining('/logout-chatgpt'),
+      expect.stringContaining('/model'),
+      expect.stringContaining('/effort'),
       expect.stringContaining('/new'),
     ])
     expect(options[0].getAttribute('aria-selected')).toBe('true')
@@ -367,9 +414,60 @@ describe('AgentChat', () => {
     })
 
     await act(async () => {
-      fireEvent.click(view.getAllByRole('option')[2])
+      fireEvent.click(view.getAllByRole('option')[4])
     })
     expect(newThread).toHaveBeenCalled()
+  })
+
+  test('/model selects and remembers an old ChatGPT model', async () => {
+    const view = await open(
+      <AgentChat designId="d1" draftId={null} open onOpenChange={() => {}} />,
+    )
+    const field = view.getByLabelText('Ask the agent')
+
+    fireEvent.change(field, { target: { value: '/model ' } })
+    expect(view.getAllByRole('option')).toHaveLength(3)
+    await act(async () => {
+      fireEvent.click(view.getByRole('option', { name: /GPT-5.6 Sol/ }))
+    })
+
+    expect(view.getByText('Model set to GPT-5.6 Sol.')).toBeTruthy()
+    expect(localStorageMock.setItem).toHaveBeenCalledWith(
+      'loora:chatgpt-model',
+      'gpt-5.6-sol',
+    )
+  })
+
+  test('/effort selects and remembers the old reasoning efforts', async () => {
+    const view = await open(
+      <AgentChat designId="d1" draftId={null} open onOpenChange={() => {}} />,
+    )
+    const field = view.getByLabelText('Ask the agent')
+
+    fireEvent.change(field, { target: { value: '/effort ' } })
+    expect(view.getAllByRole('option')).toHaveLength(5)
+    await act(async () => {
+      fireEvent.click(view.getByRole('option', { name: /Max/ }))
+    })
+
+    expect(view.getByText('Reasoning effort set to Max.')).toBeTruthy()
+    expect(localStorageMock.setItem).toHaveBeenCalledWith(
+      'loora:reasoning-effort',
+      'max',
+    )
+  })
+
+  test('the chat can be moved from its keyboard-accessible handle', async () => {
+    const view = await open(
+      <AgentChat designId="d1" draftId={null} open onOpenChange={() => {}} />,
+    )
+    const handle = view.getByRole('button', { name: 'Move agent chat' })
+    const box = handle.parentElement as HTMLElement
+    const before = box.style.transform
+
+    fireEvent.keyDown(handle, { key: 'ArrowUp' })
+
+    expect(box.style.transform).not.toBe(before)
   })
 
   test('escape closes the menu before it closes the box', async () => {

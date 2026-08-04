@@ -377,7 +377,7 @@ function CanvasShell({
   const [tourResumeIndex, setTourResumeIndex] = useState(() => readTourProgress())
   const [commandMenuOpen, setCommandMenuOpen] = useState(false)
   const [agentOpen, setAgentOpen] = useState(false)
-  // Behind the `in-app-agent` flag: no button, no command, no shortcut until
+  // Admin-only: no button, no command, no shortcut until
   // the account is in it.
   const agentAvailable = useAgentAvailable() && Boolean(controller.target)
   const [pasteNotice, setPasteNotice] = useState<string | null>(null)

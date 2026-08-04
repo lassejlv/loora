@@ -304,11 +304,24 @@ body {
    through is the point of it. Kept here rather than as utilities at the call
    site so the exception stays one rule somebody can find and delete. */
 .cx-agent-box {
-  background: --alpha(var(--surface) / 72%);
+  background: --alpha(var(--surface) / 76%);
   border: 1px solid --alpha(var(--line) / 90%);
   box-shadow: var(--panel-shadow-lg);
-  backdrop-filter: blur(20px) saturate(160%);
-  -webkit-backdrop-filter: blur(20px) saturate(160%);
+  backdrop-filter: blur(24px) saturate(150%);
+  -webkit-backdrop-filter: blur(24px) saturate(150%);
+}
+
+.cx-agent-thinking {
+  animation: cx-agent-thinking 1.4s ease-in-out infinite alternate;
+}
+
+@keyframes cx-agent-thinking {
+  from {
+    opacity: 0.52;
+  }
+  to {
+    opacity: 1;
+  }
 }
 
 /* No backdrop-filter (Firefox by default, older engines): fall back to an
@@ -316,6 +329,12 @@ body {
 @supports not (backdrop-filter: blur(1px)) {
   .cx-agent-box {
     background: var(--surface);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cx-agent-thinking {
+    animation: none;
   }
 }
 
