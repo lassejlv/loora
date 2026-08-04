@@ -75,4 +75,29 @@ describe('custom-domain sync route', () => {
     expect(response.status).toBe(200)
     await expect(response.json()).resolves.toMatchObject({ enabled: false })
   })
+
+  it('surfaces partial provider failures to the Worker', async () => {
+    syncPublishedSiteDomains.mockResolvedValue({
+      enabled: true,
+      configured: true,
+      checked: 3,
+      active: 0,
+      failed: 2,
+    })
+    const { customDomainSyncResponse } = await import(
+      './api.internal.custom-domain-sync'
+    )
+    const response = await customDomainSyncResponse(
+      new Request('http://localhost/api/internal/custom-domain-sync', {
+        method: 'POST',
+        headers: { authorization: 'Bearer internal-test-secret' },
+      }),
+    )
+
+    expect(response.status).toBe(502)
+    await expect(response.json()).resolves.toMatchObject({
+      checked: 3,
+      failed: 2,
+    })
+  })
 })

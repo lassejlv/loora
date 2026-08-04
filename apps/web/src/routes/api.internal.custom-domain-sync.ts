@@ -20,7 +20,12 @@ export async function customDomainSyncResponse(request: Request) {
 
   const result = await syncPublishedSiteDomains()
   return Response.json(result, {
-    status: result.enabled && !result.configured ? 503 : 200,
+    status:
+      result.enabled && !result.configured
+        ? 503
+        : result.failed > 0
+          ? 502
+          : 200,
     headers: { 'Cache-Control': 'no-store' },
   })
 }

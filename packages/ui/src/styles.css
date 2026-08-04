@@ -307,8 +307,8 @@ body {
   background: --alpha(var(--surface) / 76%);
   border: 1px solid --alpha(var(--line) / 90%);
   box-shadow: var(--panel-shadow-lg);
-  backdrop-filter: blur(24px) saturate(150%);
   -webkit-backdrop-filter: blur(24px) saturate(150%);
+  backdrop-filter: blur(24px) saturate(150%);
 }
 
 .cx-agent-thinking {

@@ -33,9 +33,11 @@ import { assetPublicUrl, s3 } from './storage'
 import {
   canUseCustomDomains,
   customDomainClient,
+  customDomainDnsZone,
   customDomainOrpcError,
   customDomainsEnabled,
   normalizeCustomDomain,
+  requireCustomDomainHostnameSupported,
   requireCustomDomainClient,
   requireCustomDomainPlan,
   requireCustomDomainsEnabled,
@@ -78,6 +80,7 @@ function siteSummary(row: {
     customDomain: row.customDomain
       ? {
           hostname: row.customDomain,
+          dnsZone: customDomainDnsZone(row.customDomain),
           providerId: row.customDomainProviderId,
           status: row.customDomainStatus ?? 'unknown',
           records: row.customDomainRecords ?? [],
@@ -448,6 +451,7 @@ export const connectPublishedSiteDomain = protectedProcedure
     await requireCustomDomainPlan(context.user)
     const client = requireCustomDomainClient()
     const hostname = normalizeCustomDomain(input.hostname)
+    requireCustomDomainHostnameSupported(client, hostname)
     const site = await requireOwnedPublishedSite(context.user.id, input.siteId)
 
     if (site.customDomain && site.customDomain !== hostname) {

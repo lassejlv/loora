@@ -7,6 +7,7 @@ import {
 } from '@opencoredev/domain-sdk'
 import { cloudflareSaaS } from '@opencoredev/domain-sdk/cloudflare'
 import { ORPCError } from '@orpc/server'
+import { getDomain } from 'tldts'
 import { authorizeBilling } from '@loora/billing/billing'
 import type {
   PublishedSiteDomainRecord,
@@ -114,6 +115,25 @@ export function normalizeCustomDomain(value: string) {
     })
   }
   return hostname
+}
+
+export function customDomainDnsZone(hostname: string) {
+  return getDomain(hostname, { allowPrivateDomains: true }) ?? hostname
+}
+
+export function requireCustomDomainHostnameSupported(
+  client: Pick<DomainClient, 'capabilities'>,
+  hostname: string,
+) {
+  if (
+    !client.capabilities.apexDomains &&
+    customDomainDnsZone(hostname) === hostname
+  ) {
+    throw new ORPCError('BAD_REQUEST', {
+      message:
+        'Root domains are not supported yet. Use a subdomain such as www.example.com.',
+    })
+  }
 }
 
 export function storedDomainState(domain: Domain) {

@@ -2,8 +2,10 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { Domain } from '@opencoredev/domain-sdk'
 import {
   billingIncludesCustomDomains,
+  customDomainDnsZone,
   customDomainsEnabled,
   normalizeCustomDomain,
+  requireCustomDomainHostnameSupported,
   storedDomainState,
 } from './publish-domain'
 
@@ -55,6 +57,24 @@ describe('published site custom domains', () => {
     expect(customDomainsEnabled()).toBe(true)
     vi.stubEnv('CUSTOM_DOMAINS_ENABLED', 'false')
     expect(customDomainsEnabled()).toBe(false)
+  })
+
+  it('returns the authoritative DNS zone for provider-friendly record names', () => {
+    expect(customDomainDnsZone('www.example.com')).toBe('example.com')
+    expect(customDomainDnsZone('app.example.co.uk')).toBe('example.co.uk')
+  })
+
+  it('rejects apex domains when the configured provider cannot route them', () => {
+    const client = {
+      capabilities: { apexDomains: false },
+    } as Parameters<typeof requireCustomDomainHostnameSupported>[0]
+
+    expect(() =>
+      requireCustomDomainHostnameSupported(client, 'example.com'),
+    ).toThrow('Use a subdomain')
+    expect(() =>
+      requireCustomDomainHostnameSupported(client, 'www.example.com'),
+    ).not.toThrow()
   })
 
   it('stores the provider-authoritative status and DNS records', () => {

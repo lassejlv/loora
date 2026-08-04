@@ -27,6 +27,7 @@
     "@orpc/server": "^1.14.8",
     "drizzle-orm": "catalog:",
     "playwright-core": "^1.61.1",
+    "tldts": "^7.0.19",
     "zod": "catalog:"
   },
   "devDependencies": {
