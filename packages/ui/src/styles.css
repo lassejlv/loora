@@ -304,23 +304,72 @@ body {
    through is the point of it. Kept here rather than as utilities at the call
    site so the exception stays one rule somebody can find and delete. */
 .cx-agent-box {
-  background: --alpha(var(--surface) / 76%);
+  position: relative;
+  background: --alpha(var(--surface) / 72%);
   border: 1px solid --alpha(var(--line) / 90%);
-  box-shadow: var(--panel-shadow-lg);
-  -webkit-backdrop-filter: blur(24px) saturate(150%);
-  backdrop-filter: blur(24px) saturate(150%);
+  box-shadow:
+    inset 0 1px 0 --alpha(var(--color-white) / 6%),
+    var(--panel-shadow-lg),
+    0 24px 48px -16px --alpha(var(--color-zinc-950) / 35%);
+  -webkit-backdrop-filter: blur(28px) saturate(160%);
+  backdrop-filter: blur(28px) saturate(160%);
 }
 
-.cx-agent-thinking {
-  animation: cx-agent-thinking 1.4s ease-in-out infinite alternate;
+/* A hairline of light along the top edge that only moves while the agent is
+   working — the box's whole pulse, one pixel tall. */
+.cx-agent-box::before {
+  content: '';
+  position: absolute;
+  inset-inline: 0;
+  top: -1px;
+  height: 1px;
+  background: linear-gradient(
+    90deg,
+    transparent 15%,
+    --alpha(var(--foreground) / 60%) 50%,
+    transparent 85%
+  );
+  background-size: 200% 100%;
+  opacity: 0;
+  transition: opacity 0.3s ease;
+  pointer-events: none;
 }
 
-@keyframes cx-agent-thinking {
+.cx-agent-box[data-running='true']::before {
+  opacity: 1;
+  animation: cx-agent-scan 2.2s linear infinite;
+}
+
+@keyframes cx-agent-scan {
   from {
-    opacity: 0.52;
+    background-position: 160% 0;
   }
   to {
-    opacity: 1;
+    background-position: -60% 0;
+  }
+}
+
+/* Thinking text shimmers — a band of light sweeping through the words. */
+.cx-agent-thinking {
+  background: linear-gradient(
+    90deg,
+    --alpha(var(--muted-foreground) / 55%) 35%,
+    var(--foreground) 50%,
+    --alpha(var(--muted-foreground) / 55%) 65%
+  );
+  background-size: 250% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: cx-agent-shimmer 1.8s linear infinite;
+}
+
+@keyframes cx-agent-shimmer {
+  from {
+    background-position: 175% 0;
+  }
+  to {
+    background-position: -75% 0;
   }
 }
 
@@ -335,6 +384,12 @@ body {
 @media (prefers-reduced-motion: reduce) {
   .cx-agent-thinking {
     animation: none;
+    background: none;
+    -webkit-text-fill-color: currentColor;
+  }
+  .cx-agent-box[data-running='true']::before {
+    animation: none;
+    background-position: 50% 0;
   }
 }
 

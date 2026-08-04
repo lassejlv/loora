@@ -457,15 +457,34 @@ describe('AgentChat', () => {
     )
   })
 
-  test('the chat can be moved from its keyboard-accessible handle', async () => {
+  test('the whole card can be dragged without a permanent handle', async () => {
     const view = await open(
       <AgentChat designId="d1" draftId={null} open onOpenChange={() => {}} />,
     )
-    const handle = view.getByRole('button', { name: 'Move agent chat' })
-    const box = handle.parentElement as HTMLElement
+    const field = view.getByLabelText('Ask the agent')
+    const box = field.closest('.cx-agent-box') as HTMLElement
     const before = box.style.transform
 
-    fireEvent.keyDown(handle, { key: 'ArrowUp' })
+    expect(view.queryByRole('button', { name: 'Move agent chat' })).toBeNull()
+
+    Object.assign(box, {
+      setPointerCapture: vi.fn(),
+      hasPointerCapture: vi.fn(() => true),
+      releasePointerCapture: vi.fn(),
+    })
+    fireEvent.pointerDown(box, {
+      pointerId: 1,
+      button: 0,
+      isPrimary: true,
+      clientX: 100,
+      clientY: 100,
+    })
+    fireEvent.pointerMove(box, {
+      pointerId: 1,
+      isPrimary: true,
+      clientX: 84,
+      clientY: 84,
+    })
 
     expect(box.style.transform).not.toBe(before)
   })

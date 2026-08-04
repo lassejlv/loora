@@ -34,7 +34,6 @@ import { apiUrl } from '@loora/platform'
 import { orpc } from '@loora/rpc/client'
 import {
   BotIcon,
-  GripVerticalIcon,
   LogOutIcon,
   PlusIcon,
   SendIcon,
@@ -353,11 +352,14 @@ function AgentChatShell({
   className,
   offset,
   onOffsetChange,
+  running = false,
 }: {
   children: React.ReactNode
   className?: string
   offset: AgentChatOffset
   onOffsetChange: (offset: AgentChatOffset) => void
+  /** Lights the scan line along the top edge while a run is in flight. */
+  running?: boolean
 }) {
   const boxRef = useRef<HTMLDivElement>(null)
   const dragRef = useRef<{
@@ -399,67 +401,49 @@ function AgentChatShell({
     <div className="pointer-events-none absolute inset-x-0 bottom-16 z-30 flex justify-center px-4">
       <div
         ref={boxRef}
+        data-running={running || undefined}
         style={{ transform: `translate3d(${offset.x}px, ${offset.y}px, 0)` }}
         className={cn(
-          'cx-agent-box group/agent pointer-events-auto w-full max-w-xl overflow-hidden rounded-lg will-change-transform',
+          'cx-agent-box group/agent pointer-events-auto w-full max-w-xl cursor-grab overflow-hidden rounded-lg will-change-transform active:cursor-grabbing [&_button]:cursor-pointer [&_textarea]:cursor-text',
           className,
         )}
+        onPointerDown={(event) => {
+          if (!event.isPrimary || event.button !== 0) return
+          const target = event.target as HTMLElement
+          if (target.closest('textarea, button, a, input, select')) return
+          const limits = bounds()
+          if (!limits) return
+          event.currentTarget.setPointerCapture(event.pointerId)
+          dragRef.current = {
+            pointerX: event.clientX,
+            pointerY: event.clientY,
+            offset,
+            ...limits,
+          }
+        }}
+        onPointerMove={(event) => {
+          const drag = dragRef.current
+          if (!drag || !event.currentTarget.hasPointerCapture(event.pointerId)) return
+          onOffsetChange(
+            clampOffset(
+              {
+                x: drag.offset.x + event.clientX - drag.pointerX,
+                y: drag.offset.y + event.clientY - drag.pointerY,
+              },
+              drag,
+            ),
+          )
+        }}
+        onPointerUp={(event) => {
+          if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+            event.currentTarget.releasePointerCapture(event.pointerId)
+          }
+          dragRef.current = null
+        }}
+        onPointerCancel={() => {
+          dragRef.current = null
+        }}
       >
-        <div
-          role="button"
-          tabIndex={0}
-          aria-label="Move agent chat"
-          className="flex h-5 touch-none cursor-grab items-center justify-center border-b border-line/50 text-muted-foreground/60 outline-none hover:text-muted-foreground active:cursor-grabbing focus-visible:bg-foreground/5 focus-visible:text-foreground"
-          onPointerDown={(event) => {
-            if (!event.isPrimary || event.button !== 0) return
-            const limits = bounds()
-            if (!limits) return
-            event.currentTarget.setPointerCapture(event.pointerId)
-            dragRef.current = {
-              pointerX: event.clientX,
-              pointerY: event.clientY,
-              offset,
-              ...limits,
-            }
-          }}
-          onPointerMove={(event) => {
-            const drag = dragRef.current
-            if (!drag || !event.currentTarget.hasPointerCapture(event.pointerId)) return
-            onOffsetChange(
-              clampOffset(
-                {
-                  x: drag.offset.x + event.clientX - drag.pointerX,
-                  y: drag.offset.y + event.clientY - drag.pointerY,
-                },
-                drag,
-              ),
-            )
-          }}
-          onPointerUp={(event) => {
-            if (event.currentTarget.hasPointerCapture(event.pointerId)) {
-              event.currentTarget.releasePointerCapture(event.pointerId)
-            }
-            dragRef.current = null
-          }}
-          onPointerCancel={() => {
-            dragRef.current = null
-          }}
-          onKeyDown={(event) => {
-            const movement = {
-              ArrowLeft: { x: -16, y: 0 },
-              ArrowRight: { x: 16, y: 0 },
-              ArrowUp: { x: 0, y: -16 },
-              ArrowDown: { x: 0, y: 16 },
-            }[event.key]
-            if (!movement) return
-            event.preventDefault()
-            onOffsetChange(
-              clampOffset({ x: offset.x + movement.x, y: offset.y + movement.y }),
-            )
-          }}
-        >
-          <GripVerticalIcon size={12} className="rotate-90" />
-        </div>
         {children}
       </div>
     </div>
@@ -718,7 +702,7 @@ function AgentChatBox({
     : conversation
 
   return (
-    <AgentChatShell offset={offset} onOffsetChange={onOffsetChange}>
+    <AgentChatShell offset={offset} onOffsetChange={onOffsetChange} running={running}>
       {history.length > 0 ? (
         <div className="grid grid-rows-[0fr] opacity-0 transition-[grid-template-rows,opacity] duration-200 ease-out group-hover/agent:grid-rows-[1fr] group-hover/agent:opacity-100">
           <div className="min-h-0 overflow-hidden">
@@ -726,16 +710,24 @@ function AgentChatBox({
               aria-label="Conversation history"
               className="max-h-56 space-y-3 overflow-y-auto border-b border-line/70 px-3 py-3 overscroll-contain"
             >
-              {history.map((message) => (
-                <div key={message.id} className="text-xs">
-                  <p className="mb-0.5 text-2xs font-medium text-muted-foreground">
-                    {message.role === 'user' ? 'You' : 'Agent'}
-                  </p>
-                  <p className="whitespace-pre-wrap text-foreground">
+              {history.map((message) =>
+                message.role === 'user' ? (
+                  // What was asked sits right, in a quiet bubble; what the
+                  // agent said flows left as plain text. No labels needed.
+                  <div key={message.id} className="flex justify-end pl-10">
+                    <p className="whitespace-pre-wrap rounded-lg rounded-br-sm bg-foreground/8 px-2.5 py-1.5 text-xs text-foreground">
+                      {message.text}
+                    </p>
+                  </div>
+                ) : (
+                  <p
+                    key={message.id}
+                    className="whitespace-pre-wrap pr-6 text-xs text-foreground"
+                  >
                     {message.text}
                   </p>
-                </div>
-              ))}
+                ),
+              )}
             </div>
           </div>
         </div>
@@ -904,7 +896,12 @@ function AgentChatBox({
             type="button"
             aria-label="Send"
             disabled={!input.trim()}
-            className="grid size-6 shrink-0 place-items-center rounded-sm text-muted-foreground hover:bg-foreground/5 hover:text-foreground disabled:opacity-40"
+            className={cn(
+              'grid size-6 shrink-0 place-items-center rounded-md transition-colors duration-150',
+              input.trim()
+                ? 'bg-foreground text-background hover:opacity-90'
+                : 'text-muted-foreground disabled:opacity-40',
+            )}
             onClick={() => void submit()}
           >
             <SendIcon size={13} />
