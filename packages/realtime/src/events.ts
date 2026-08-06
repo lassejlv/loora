@@ -110,6 +110,19 @@ function nodeIds(value: unknown) {
   )
 }
 
+function stringArray(value: unknown): string[] | null {
+  if (!nodeIds(value) || !Array.isArray(value)) return null
+  return value.filter((id): id is string => typeof id === 'string')
+}
+
+function finiteNumber(value: unknown): number | null {
+  return typeof value === 'number' && Number.isFinite(value) ? value : null
+}
+
+function stringValue(value: unknown): string | null {
+  return typeof value === 'string' ? value : null
+}
+
 export function isCanvasRealtimeActivity(
   value: unknown,
 ): value is CanvasRealtimeActivity {
@@ -179,19 +192,32 @@ export function parseCanvasRealtimeEvent(
   ) {
     return null
   }
+  const sentAt = finiteNumber(parsed.sentAt)
+  if (sentAt === null) return null
   if (
     parsed.type === 'canvas.changed' &&
     Number.isInteger(parsed.revision) &&
-    Number(parsed.revision) >= 0 &&
-    nodeIds(parsed.nodeIds)
+    Number(parsed.revision) >= 0
   ) {
-    return parsed as unknown as CanvasRealtimeEvent
+    const revision = finiteNumber(parsed.revision)
+    const nodeIdsValue = stringArray(parsed.nodeIds)
+    if (revision === null || nodeIdsValue === null) return null
+    return {
+      type: 'canvas.changed',
+      revision,
+      nodeIds: nodeIdsValue,
+      sentAt,
+    }
   }
   if (
     parsed.type === 'agent.activity' &&
     (parsed.activity === null || isCanvasRealtimeActivity(parsed.activity))
   ) {
-    return parsed as unknown as CanvasRealtimeEvent
+    return {
+      type: 'agent.activity',
+      activity: parsed.activity,
+      sentAt,
+    }
   }
   if (
     parsed.type === 'presence.peer' &&
@@ -200,7 +226,12 @@ export function parseCanvasRealtimeEvent(
     parsed.sessionId.length <= 128 &&
     (parsed.peer === null || isCanvasPresencePeer(parsed.peer))
   ) {
-    return parsed as unknown as CanvasRealtimeEvent
+    return {
+      type: 'presence.peer',
+      sessionId: stringValue(parsed.sessionId) ?? '',
+      peer: parsed.peer,
+      sentAt,
+    }
   }
   if (
     parsed.type === 'presence.state' &&
@@ -208,7 +239,11 @@ export function parseCanvasRealtimeEvent(
     parsed.peers.length <= MAX_PRESENCE_PEERS &&
     parsed.peers.every(isCanvasPresencePeer)
   ) {
-    return parsed as unknown as CanvasRealtimeEvent
+    return {
+      type: 'presence.state',
+      peers: parsed.peers.filter(isCanvasPresencePeer),
+      sentAt,
+    }
   }
   if (
     parsed.type === 'branch.changed' &&
@@ -218,7 +253,12 @@ export function parseCanvasRealtimeEvent(
         parsed.draftId.length <= 128)) &&
     (parsed.status === null || typeof parsed.status === 'string')
   ) {
-    return parsed as unknown as CanvasRealtimeEvent
+    return {
+      type: 'branch.changed',
+      draftId: parsed.draftId === null ? null : stringValue(parsed.draftId),
+      status: parsed.status === null ? null : stringValue(parsed.status),
+      sentAt,
+    }
   }
   return null
 }

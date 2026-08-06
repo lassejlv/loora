@@ -162,9 +162,25 @@ type CanvasRealtimeMessage =
       sentAt: number
     }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return !!value && typeof value === 'object' && !Array.isArray(value)
+}
+
+function finiteNumber(value: unknown): number | null {
+  return typeof value === 'number' && Number.isFinite(value) ? value : null
+}
+
+function stringArray(value: unknown): string[] | null {
+  if (!Array.isArray(value) || !value.every((item) => typeof item === 'string')) {
+    return null
+  }
+  return value
+}
+
 function isPeer(value: unknown): value is CanvasPeer {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return false
-  const peer = value as Record<string, unknown>
+  if (!isRecord(value)) return false
+  const peer = value
+  const cursor = peer.cursor
   return (
     typeof peer.sessionId === 'string' &&
     typeof peer.userId === 'string' &&
@@ -172,11 +188,11 @@ function isPeer(value: unknown): value is CanvasPeer {
     (peer.image === null || typeof peer.image === 'string') &&
     typeof peer.color === 'string' &&
     (peer.role === 'owner' || peer.role === 'edit' || peer.role === 'view') &&
-    (peer.cursor === null ||
-      (!!peer.cursor &&
-        typeof peer.cursor === 'object' &&
-        Number.isFinite((peer.cursor as Record<string, unknown>).x) &&
-        Number.isFinite((peer.cursor as Record<string, unknown>).y))) &&
+    (cursor === null ||
+      (!!cursor &&
+        isRecord(cursor) &&
+        Number.isFinite(cursor.x) &&
+        Number.isFinite(cursor.y))) &&
     Array.isArray(peer.selection) &&
     peer.selection.every((id) => typeof id === 'string') &&
     Number.isFinite(peer.updatedAt)
@@ -184,8 +200,8 @@ function isPeer(value: unknown): value is CanvasPeer {
 }
 
 function isAgentActivity(value: unknown): value is CanvasAgentActivity {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return false
-  const activity = value as Record<string, unknown>
+  if (!isRecord(value)) return false
+  const activity = value
   return (
     typeof activity.id === 'string' &&
     typeof activity.label === 'string' &&
@@ -206,11 +222,12 @@ export function parseCanvasRealtimeMessage(
   } catch {
     return null
   }
-  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+  if (!isRecord(parsed)) {
     return null
   }
-  const event = parsed as Record<string, unknown>
-  if (!Number.isFinite(event.sentAt)) return null
+  const event = parsed
+  const sentAt = finiteNumber(event.sentAt)
+  if (sentAt === null) return null
   if (
     event.type === 'canvas.changed' &&
     Number.isInteger(event.revision) &&
@@ -218,21 +235,30 @@ export function parseCanvasRealtimeMessage(
     Array.isArray(event.nodeIds) &&
     event.nodeIds.every((id) => typeof id === 'string')
   ) {
-    return parsed as CanvasRealtimeMessage
+    const revision = finiteNumber(event.revision)
+    const nodeIds = stringArray(event.nodeIds)
+    return revision === null || nodeIds === null
+      ? null
+      : { type: 'canvas.changed', revision, nodeIds, sentAt }
   }
   if (
     event.type === 'presence.peer' &&
     typeof event.sessionId === 'string' &&
     (event.peer === null || isPeer(event.peer))
   ) {
-    return parsed as CanvasRealtimeMessage
+    return {
+      type: 'presence.peer',
+      sessionId: event.sessionId,
+      peer: event.peer,
+      sentAt,
+    }
   }
   if (
     event.type === 'presence.state' &&
     Array.isArray(event.peers) &&
     event.peers.every(isPeer)
   ) {
-    return parsed as CanvasRealtimeMessage
+    return { type: 'presence.state', peers: event.peers, sentAt }
   }
   if (
     event.type === 'ready' &&
@@ -242,20 +268,32 @@ export function parseCanvasRealtimeMessage(
     event.peers.every(isPeer) &&
     (event.activity === null || isAgentActivity(event.activity))
   ) {
-    return parsed as CanvasRealtimeMessage
+    return {
+      type: 'ready',
+      sessionId: event.sessionId,
+      role: event.role,
+      peers: event.peers,
+      activity: event.activity,
+      sentAt,
+    }
   }
-  if (event.type === 'pong') return parsed as CanvasRealtimeMessage
+  if (event.type === 'pong') return { type: 'pong', sentAt }
   if (
     event.type === 'branch.changed' &&
     (event.draftId === null || typeof event.draftId === 'string') &&
     (event.status === null || typeof event.status === 'string')
   ) {
-    return parsed as CanvasRealtimeMessage
+    return {
+      type: 'branch.changed',
+      draftId: event.draftId,
+      status: event.status,
+      sentAt,
+    }
   }
   if (event.type !== 'agent.activity') return null
-  if (event.activity === null) return parsed as CanvasRealtimeMessage
+  if (event.activity === null) return { type: 'agent.activity', activity: null, sentAt }
   return isAgentActivity(event.activity)
-    ? (parsed as CanvasRealtimeMessage)
+    ? { type: 'agent.activity', activity: event.activity, sentAt }
     : null
 }
 

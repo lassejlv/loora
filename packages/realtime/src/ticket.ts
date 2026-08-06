@@ -99,32 +99,46 @@ export async function signRealtimeTicket(
 function claimsFrom(value: unknown, now: number): RealtimeTicketClaims | null {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null
   const claims = value as Record<string, unknown>
-  const text = (field: unknown, max: number) =>
+  const text = (field: unknown, max: number): string | null =>
     typeof field === 'string' && field.length > 0 && field.length <= max
+      ? field
+      : null
+  const number = (field: unknown): number | null =>
+    typeof field === 'number' && Number.isFinite(field) ? field : null
+  const jti = text(claims.jti, 128)
+  const userId = text(claims.userId, 128)
+  const sessionId = text(claims.sessionId, 128)
+  const ownerUserId = text(claims.ownerUserId, 128)
+  const designId = text(claims.designId, 128)
+  const draftId = claims.draftId === null ? null : text(claims.draftId, 128)
+  const name = text(claims.name, 200)
+  const image = claims.image === null ? null : text(claims.image, 1_000)
+  const issuedAt = number(claims.issuedAt)
+  const expiresAt = number(claims.expiresAt)
   if (
     claims.v !== 1 ||
-    !text(claims.jti, 128) ||
-    !text(claims.userId, 128) ||
-    !text(claims.sessionId, 128) ||
-    !text(claims.ownerUserId, 128) ||
-    !text(claims.designId, 128) ||
-    (claims.draftId !== null && !text(claims.draftId, 128)) ||
+    jti === null || userId === null || sessionId === null ||
+    ownerUserId === null || designId === null ||
+    (claims.draftId !== null && draftId === null) ||
     (claims.role !== 'owner' && claims.role !== 'edit' && claims.role !== 'view') ||
-    typeof claims.name !== 'string' ||
-    claims.name.length > 200 ||
-    (claims.image !== null && typeof claims.image !== 'string') ||
-    typeof claims.color !== 'string' ||
-    !/^#[0-9a-f]{6}$/i.test(claims.color) ||
-    !Number.isFinite(claims.issuedAt) ||
-    !Number.isFinite(claims.expiresAt)
+    name === null || image === null && claims.image !== null ||
+    typeof claims.color !== 'string' || !/^#[0-9a-f]{6}$/i.test(claims.color) ||
+    issuedAt === null || expiresAt === null
   ) {
     return null
   }
   // Expiry is the point of the ticket; a clock that claims the far future is
   // as suspect as one that already lapsed.
-  if (Number(claims.expiresAt) <= now) return null
-  if (Number(claims.expiresAt) - now > 10 * REALTIME_TICKET_TTL_MS) return null
-  return claims as unknown as RealtimeTicketClaims
+  if (expiresAt <= now) return null
+  if (expiresAt - now > 10 * REALTIME_TICKET_TTL_MS) return null
+  return {
+    v: 1,
+    jti, userId, sessionId, ownerUserId, designId, draftId,
+    role: claims.role,
+    name, image,
+    color: claims.color,
+    issuedAt, expiresAt,
+  }
 }
 
 /**
