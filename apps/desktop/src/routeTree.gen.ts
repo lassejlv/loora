@@ -10,6 +10,7 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as AppRouteImport } from './routes/app'
 import { Route as AppIndexRouteImport } from './routes/app.index'
 import { Route as AppAppearanceRouteImport } from './routes/app.appearance'
 import { Route as AppIntegrationsRouteImport } from './routes/app.integrations'
@@ -22,25 +23,30 @@ const IndexRoute = IndexRouteImport.update({
   path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
-const AppIndexRoute = AppIndexRouteImport.update({
-  id: '/app/',
-  path: '/app/',
+const AppRoute = AppRouteImport.update({
+  id: '/app',
+  path: '/app',
   getParentRoute: () => rootRouteImport,
+} as any)
+const AppIndexRoute = AppIndexRouteImport.update({
+  id: '/',
+  path: '/',
+  getParentRoute: () => AppRoute,
 } as any)
 const AppAppearanceRoute = AppAppearanceRouteImport.update({
-  id: '/app/appearance',
-  path: '/app/appearance',
-  getParentRoute: () => rootRouteImport,
+  id: '/appearance',
+  path: '/appearance',
+  getParentRoute: () => AppRoute,
 } as any)
 const AppIntegrationsRoute = AppIntegrationsRouteImport.update({
-  id: '/app/integrations',
-  path: '/app/integrations',
-  getParentRoute: () => rootRouteImport,
+  id: '/integrations',
+  path: '/integrations',
+  getParentRoute: () => AppRoute,
 } as any)
 const AppSecurityRoute = AppSecurityRouteImport.update({
-  id: '/app/security',
-  path: '/app/security',
-  getParentRoute: () => rootRouteImport,
+  id: '/security',
+  path: '/security',
+  getParentRoute: () => AppRoute,
 } as any)
 const DesignIdRoute = DesignIdRouteImport.update({
   id: '/design/$id',
@@ -55,6 +61,7 @@ const DesignIdBBranchIdRoute = DesignIdBBranchIdRouteImport.update({
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/app': typeof AppRouteWithChildren
   '/app/appearance': typeof AppAppearanceRoute
   '/app/integrations': typeof AppIntegrationsRoute
   '/app/security': typeof AppSecurityRoute
@@ -74,6 +81,7 @@ export interface FileRoutesByTo {
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/app': typeof AppRouteWithChildren
   '/app/appearance': typeof AppAppearanceRoute
   '/app/integrations': typeof AppIntegrationsRoute
   '/app/security': typeof AppSecurityRoute
@@ -85,6 +93,7 @@ export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | '/'
+    | '/app'
     | '/app/appearance'
     | '/app/integrations'
     | '/app/security'
@@ -103,6 +112,7 @@ export interface FileRouteTypes {
   id:
     | '__root__'
     | '/'
+    | '/app'
     | '/app/appearance'
     | '/app/integrations'
     | '/app/security'
@@ -113,11 +123,8 @@ export interface FileRouteTypes {
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
-  AppAppearanceRoute: typeof AppAppearanceRoute
-  AppIntegrationsRoute: typeof AppIntegrationsRoute
-  AppSecurityRoute: typeof AppSecurityRoute
+  AppRoute: typeof AppRouteWithChildren
   DesignIdRoute: typeof DesignIdRoute
-  AppIndexRoute: typeof AppIndexRoute
   DesignIdBBranchIdRoute: typeof DesignIdBBranchIdRoute
 }
 
@@ -130,33 +137,40 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/app': {
+      id: '/app'
+      path: '/app'
+      fullPath: '/app'
+      preLoaderRoute: typeof AppRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/app/': {
       id: '/app/'
-      path: '/app'
+      path: '/'
       fullPath: '/app/'
       preLoaderRoute: typeof AppIndexRouteImport
-      parentRoute: typeof rootRouteImport
+      parentRoute: typeof AppRoute
     }
     '/app/appearance': {
       id: '/app/appearance'
-      path: '/app/appearance'
+      path: '/appearance'
       fullPath: '/app/appearance'
       preLoaderRoute: typeof AppAppearanceRouteImport
-      parentRoute: typeof rootRouteImport
+      parentRoute: typeof AppRoute
     }
     '/app/integrations': {
       id: '/app/integrations'
-      path: '/app/integrations'
+      path: '/integrations'
       fullPath: '/app/integrations'
       preLoaderRoute: typeof AppIntegrationsRouteImport
-      parentRoute: typeof rootRouteImport
+      parentRoute: typeof AppRoute
     }
     '/app/security': {
       id: '/app/security'
-      path: '/app/security'
+      path: '/security'
       fullPath: '/app/security'
       preLoaderRoute: typeof AppSecurityRouteImport
-      parentRoute: typeof rootRouteImport
+      parentRoute: typeof AppRoute
     }
     '/design/$id': {
       id: '/design/$id'
@@ -175,13 +189,26 @@ declare module '@tanstack/react-router' {
   }
 }
 
-const rootRouteChildren: RootRouteChildren = {
-  IndexRoute: IndexRoute,
+interface AppRouteChildren {
+  AppAppearanceRoute: typeof AppAppearanceRoute
+  AppIntegrationsRoute: typeof AppIntegrationsRoute
+  AppSecurityRoute: typeof AppSecurityRoute
+  AppIndexRoute: typeof AppIndexRoute
+}
+
+const AppRouteChildren: AppRouteChildren = {
   AppAppearanceRoute: AppAppearanceRoute,
   AppIntegrationsRoute: AppIntegrationsRoute,
   AppSecurityRoute: AppSecurityRoute,
-  DesignIdRoute: DesignIdRoute,
   AppIndexRoute: AppIndexRoute,
+}
+
+const AppRouteWithChildren = AppRoute._addFileChildren(AppRouteChildren)
+
+const rootRouteChildren: RootRouteChildren = {
+  IndexRoute: IndexRoute,
+  AppRoute: AppRouteWithChildren,
+  DesignIdRoute: DesignIdRoute,
   DesignIdBBranchIdRoute: DesignIdBBranchIdRoute,
 }
 export const routeTree = rootRouteImport

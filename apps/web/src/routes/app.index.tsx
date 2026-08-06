@@ -1,5 +1,4 @@
 import { createFileRoute } from '@tanstack/react-router'
-import { AccountGate } from '@loora/shell/account-gate'
 import { DesignsDashboard } from '@loora/shell/designs-dashboard'
 import { seo } from '#/lib/seo'
 
@@ -15,9 +14,5 @@ export const Route = createFileRoute('/app/')({
 })
 
 function FilesPage() {
-  return (
-    <AccountGate>
-      <DesignsDashboard />
-    </AccountGate>
-  )
+  return <DesignsDashboard />
 }

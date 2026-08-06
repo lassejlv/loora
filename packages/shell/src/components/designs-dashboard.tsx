@@ -15,16 +15,7 @@ import {
   SearchIcon,
   XIcon,
 } from '@loora/ui/icons'
-import { authClient } from '@loora/auth/client'
-import {
-  AppAccountMenu,
-  AppNavigation,
-} from './app-navigation'
 import { DesignThumbnail } from './design-thumbnail'
-import { AppSettingsDialog } from './settings-dialog'
-import { StatusBadge } from './status-badge'
-import { UpgradeToProButton } from '@loora/editor/upgrade-to-pro'
-import { clearWelcomeSeen } from './welcome-dialog'
 import { Button } from '@loora/ui/button'
 import {
   Dialog,
@@ -290,14 +281,12 @@ function FilesLoading({ view }: { view: FilesView }) {
  */
 export function DesignsDashboard() {
   const navigate = useNavigate()
-  const { data: session } = authClient.useSession()
   const searchRef = useRef<HTMLInputElement | null>(null)
   const [designs, setDesigns] = useState<DesignSummary[] | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [query, setQuery] = useState('')
   const [view, setView] = useState<FilesView>(initialView)
   const [creating, setCreating] = useState(false)
-  const [settingsOpen, setSettingsOpen] = useState(false)
   const [renameTarget, setRenameTarget] = useState<DesignSummary | null>(null)
   const [renameName, setRenameName] = useState('')
   const [renaming, setRenaming] = useState(false)
@@ -485,51 +474,10 @@ export function DesignsDashboard() {
     }
   }
 
-  const signOut = async () => {
-    clearWelcomeSeen()
-    await authClient.signOut()
-  }
-
-  const accountName = session?.user?.name ?? session?.user?.email ?? 'Account'
-
   return (
-    <div className="flex h-screen min-h-0 bg-cx-canvas text-foreground">
-      <aside className="hidden w-48 shrink-0 flex-col border-e border-line bg-surface md:flex">
-        <Link to="/app" className="flex h-10 shrink-0 items-center gap-2 px-3">
-          <img
-            src="/logo192.png"
-            alt=""
-            width={16}
-            height={16}
-            className="size-4 shrink-0 rounded-sm"
-          />
-          <span className="text-xs font-semibold tracking-tight">loora</span>
-        </Link>
-        <AppNavigation
-          active="recents"
-          onSettings={() => setSettingsOpen(true)}
-        />
-        <div className="mt-auto flex flex-col gap-2 border-t border-line p-2">
-          <StatusBadge className="-mb-1" />
-          <UpgradeToProButton fullWidth size="sm" />
-          <AppAccountMenu
-            name={accountName}
-            onSettings={() => setSettingsOpen(true)}
-            onSignOut={() => void signOut()}
-          />
-        </div>
-      </aside>
-
-      <main className="flex min-w-0 flex-1 flex-col overflow-y-auto">
-        <header className="sticky top-0 z-10 flex h-10 flex-wrap items-center gap-2 border-b border-line bg-surface px-3 md:px-4">
-          <div className="md:hidden">
-            <AppAccountMenu
-              compact
-              name={accountName}
-              onSettings={() => setSettingsOpen(true)}
-              onSignOut={() => void signOut()}
-            />
-          </div>
+    <>
+      <main className="app-page-enter flex min-w-0 flex-1 flex-col overflow-y-auto">
+        <header className="sticky top-0 z-10 flex h-10 flex-wrap items-center gap-2 border-b border-line bg-surface pe-3 ps-12 md:px-4">
           <h1 className="sr-only">Your design files</h1>
           <div className="flex flex-1 items-center gap-0.5">
             <Button
@@ -801,7 +749,6 @@ export function DesignsDashboard() {
         </DialogPopup>
       </Dialog>
 
-      <AppSettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} />
-    </div>
+    </>
   )
 }

@@ -1,5 +1,4 @@
 import { createFileRoute } from '@tanstack/react-router'
-import { AccountGate } from '@loora/shell/account-gate'
 import { AppPageShell } from '@loora/shell/app-page-shell'
 import { BillingSettings } from '@loora/shell/billing-settings'
 import { seo } from '#/lib/seo'
@@ -17,14 +16,11 @@ export const Route = createFileRoute('/app/billing')({
 
 function BillingPage() {
   return (
-    <AccountGate>
-      <AppPageShell
-        active="billing"
-        title="Billing"
-        description="Manage your Loora plan, subscription, and Agent Calls."
-      >
-        <BillingSettings />
-      </AppPageShell>
-    </AccountGate>
+    <AppPageShell
+      title="Billing"
+      description="Manage your Loora plan, subscription, and Agent Calls."
+    >
+      <BillingSettings />
+    </AppPageShell>
   )
 }

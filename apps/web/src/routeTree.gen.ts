@@ -10,6 +10,7 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as AppRouteImport } from './routes/app'
 import { Route as FeaturesRouteImport } from './routes/features'
 import { Route as LaunchWeekRouteImport } from './routes/launch-week'
 import { Route as LlmsDottxtRouteImport } from './routes/llms[.]txt'
@@ -61,6 +62,11 @@ import { Route as ApiHandoffTokenAssetIdRouteImport } from './routes/api.handoff
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AppRoute = AppRouteImport.update({
+  id: '/app',
+  path: '/app',
   getParentRoute: () => rootRouteImport,
 } as any)
 const FeaturesRoute = FeaturesRouteImport.update({
@@ -140,39 +146,39 @@ const ApiRealtimeTicketRoute = ApiRealtimeTicketRouteImport.update({
   getParentRoute: () => rootRouteImport,
 } as any)
 const AppIndexRoute = AppIndexRouteImport.update({
-  id: '/app/',
-  path: '/app/',
-  getParentRoute: () => rootRouteImport,
+  id: '/',
+  path: '/',
+  getParentRoute: () => AppRoute,
 } as any)
 const AppAdminRoute = AppAdminRouteImport.update({
-  id: '/app/admin',
-  path: '/app/admin',
-  getParentRoute: () => rootRouteImport,
+  id: '/admin',
+  path: '/admin',
+  getParentRoute: () => AppRoute,
 } as any)
 const AppAppearanceRoute = AppAppearanceRouteImport.update({
-  id: '/app/appearance',
-  path: '/app/appearance',
-  getParentRoute: () => rootRouteImport,
+  id: '/appearance',
+  path: '/appearance',
+  getParentRoute: () => AppRoute,
 } as any)
 const AppBillingRoute = AppBillingRouteImport.update({
-  id: '/app/billing',
-  path: '/app/billing',
-  getParentRoute: () => rootRouteImport,
+  id: '/billing',
+  path: '/billing',
+  getParentRoute: () => AppRoute,
 } as any)
 const AppDesignRoute = AppDesignRouteImport.update({
-  id: '/app/design',
-  path: '/app/design',
-  getParentRoute: () => rootRouteImport,
+  id: '/design',
+  path: '/design',
+  getParentRoute: () => AppRoute,
 } as any)
 const AppIntegrationsRoute = AppIntegrationsRouteImport.update({
-  id: '/app/integrations',
-  path: '/app/integrations',
-  getParentRoute: () => rootRouteImport,
+  id: '/integrations',
+  path: '/integrations',
+  getParentRoute: () => AppRoute,
 } as any)
 const AppSecurityRoute = AppSecurityRouteImport.update({
-  id: '/app/security',
-  path: '/app/security',
-  getParentRoute: () => rootRouteImport,
+  id: '/security',
+  path: '/security',
+  getParentRoute: () => AppRoute,
 } as any)
 const CompareIndexRoute = CompareIndexRouteImport.update({
   id: '/compare/',
@@ -303,6 +309,7 @@ const ApiHandoffTokenAssetIdRoute = ApiHandoffTokenAssetIdRouteImport.update({
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/app': typeof AppRouteWithChildren
   '/features': typeof FeaturesRoute
   '/launch-week': typeof LaunchWeekRoute
   '/llms.txt': typeof LlmsDottxtRoute
@@ -404,6 +411,7 @@ export interface FileRoutesByTo {
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/app': typeof AppRouteWithChildren
   '/features': typeof FeaturesRoute
   '/launch-week': typeof LaunchWeekRoute
   '/llms.txt': typeof LlmsDottxtRoute
@@ -456,6 +464,7 @@ export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | '/'
+    | '/app'
     | '/features'
     | '/launch-week'
     | '/llms.txt'
@@ -556,6 +565,7 @@ export interface FileRouteTypes {
   id:
     | '__root__'
     | '/'
+    | '/app'
     | '/features'
     | '/launch-week'
     | '/llms.txt'
@@ -607,6 +617,7 @@ export interface FileRouteTypes {
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  AppRoute: typeof AppRouteWithChildren
   FeaturesRoute: typeof FeaturesRoute
   LaunchWeekRoute: typeof LaunchWeekRoute
   LlmsDottxtRoute: typeof LlmsDottxtRoute
@@ -622,18 +633,11 @@ export interface RootRouteChildren {
   ApiCustomDomainSiteRoute: typeof ApiCustomDomainSiteRoute
   ApiReadyRoute: typeof ApiReadyRoute
   ApiRealtimeTicketRoute: typeof ApiRealtimeTicketRoute
-  AppAdminRoute: typeof AppAdminRouteWithChildren
-  AppAppearanceRoute: typeof AppAppearanceRoute
-  AppBillingRoute: typeof AppBillingRoute
-  AppDesignRoute: typeof AppDesignRoute
-  AppIntegrationsRoute: typeof AppIntegrationsRoute
-  AppSecurityRoute: typeof AppSecurityRoute
   CompareSlugRoute: typeof CompareSlugRoute
   DesignIdRoute: typeof DesignIdRoute
   DesktopAuthRoute: typeof DesktopAuthRoute
   LearnSlugRoute: typeof LearnSlugRoute
   McpClientRoute: typeof McpClientRoute
-  AppIndexRoute: typeof AppIndexRoute
   CompareIndexRoute: typeof CompareIndexRoute
   LearnIndexRoute: typeof LearnIndexRoute
   McpIndexRoute: typeof McpIndexRoute
@@ -661,6 +665,13 @@ declare module '@tanstack/react-router' {
       path: '/'
       fullPath: '/'
       preLoaderRoute: typeof IndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/app': {
+      id: '/app'
+      path: '/app'
+      fullPath: '/app'
+      preLoaderRoute: typeof AppRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/features': {
@@ -770,52 +781,52 @@ declare module '@tanstack/react-router' {
     }
     '/app/': {
       id: '/app/'
-      path: '/app'
+      path: '/'
       fullPath: '/app/'
       preLoaderRoute: typeof AppIndexRouteImport
-      parentRoute: typeof rootRouteImport
+      parentRoute: typeof AppRoute
     }
     '/app/admin': {
       id: '/app/admin'
-      path: '/app/admin'
+      path: '/admin'
       fullPath: '/app/admin'
       preLoaderRoute: typeof AppAdminRouteImport
-      parentRoute: typeof rootRouteImport
+      parentRoute: typeof AppRoute
     }
     '/app/appearance': {
       id: '/app/appearance'
-      path: '/app/appearance'
+      path: '/appearance'
       fullPath: '/app/appearance'
       preLoaderRoute: typeof AppAppearanceRouteImport
-      parentRoute: typeof rootRouteImport
+      parentRoute: typeof AppRoute
     }
     '/app/billing': {
       id: '/app/billing'
-      path: '/app/billing'
+      path: '/billing'
       fullPath: '/app/billing'
       preLoaderRoute: typeof AppBillingRouteImport
-      parentRoute: typeof rootRouteImport
+      parentRoute: typeof AppRoute
     }
     '/app/design': {
       id: '/app/design'
-      path: '/app/design'
+      path: '/design'
       fullPath: '/app/design'
       preLoaderRoute: typeof AppDesignRouteImport
-      parentRoute: typeof rootRouteImport
+      parentRoute: typeof AppRoute
     }
     '/app/integrations': {
       id: '/app/integrations'
-      path: '/app/integrations'
+      path: '/integrations'
       fullPath: '/app/integrations'
       preLoaderRoute: typeof AppIntegrationsRouteImport
-      parentRoute: typeof rootRouteImport
+      parentRoute: typeof AppRoute
     }
     '/app/security': {
       id: '/app/security'
-      path: '/app/security'
+      path: '/security'
       fullPath: '/app/security'
       preLoaderRoute: typeof AppSecurityRouteImport
-      parentRoute: typeof rootRouteImport
+      parentRoute: typeof AppRoute
     }
     '/compare/': {
       id: '/compare/'
@@ -1007,6 +1018,28 @@ const AppAdminRouteWithChildren = AppAdminRoute._addFileChildren(
   AppAdminRouteChildren,
 )
 
+interface AppRouteChildren {
+  AppAdminRoute: typeof AppAdminRouteWithChildren
+  AppAppearanceRoute: typeof AppAppearanceRoute
+  AppBillingRoute: typeof AppBillingRoute
+  AppDesignRoute: typeof AppDesignRoute
+  AppIntegrationsRoute: typeof AppIntegrationsRoute
+  AppSecurityRoute: typeof AppSecurityRoute
+  AppIndexRoute: typeof AppIndexRoute
+}
+
+const AppRouteChildren: AppRouteChildren = {
+  AppAdminRoute: AppAdminRouteWithChildren,
+  AppAppearanceRoute: AppAppearanceRoute,
+  AppBillingRoute: AppBillingRoute,
+  AppDesignRoute: AppDesignRoute,
+  AppIntegrationsRoute: AppIntegrationsRoute,
+  AppSecurityRoute: AppSecurityRoute,
+  AppIndexRoute: AppIndexRoute,
+}
+
+const AppRouteWithChildren = AppRoute._addFileChildren(AppRouteChildren)
+
 interface ApiHandoffTokenRouteChildren {
   ApiHandoffTokenAssetIdRoute: typeof ApiHandoffTokenAssetIdRoute
 }
@@ -1021,6 +1054,7 @@ const ApiHandoffTokenRouteWithChildren = ApiHandoffTokenRoute._addFileChildren(
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  AppRoute: AppRouteWithChildren,
   FeaturesRoute: FeaturesRoute,
   LaunchWeekRoute: LaunchWeekRoute,
   LlmsDottxtRoute: LlmsDottxtRoute,
@@ -1037,18 +1071,11 @@ const rootRouteChildren: RootRouteChildren = {
   ApiCustomDomainSiteRoute: ApiCustomDomainSiteRoute,
   ApiReadyRoute: ApiReadyRoute,
   ApiRealtimeTicketRoute: ApiRealtimeTicketRoute,
-  AppAdminRoute: AppAdminRouteWithChildren,
-  AppAppearanceRoute: AppAppearanceRoute,
-  AppBillingRoute: AppBillingRoute,
-  AppDesignRoute: AppDesignRoute,
-  AppIntegrationsRoute: AppIntegrationsRoute,
-  AppSecurityRoute: AppSecurityRoute,
   CompareSlugRoute: CompareSlugRoute,
   DesignIdRoute: DesignIdRoute,
   DesktopAuthRoute: DesktopAuthRoute,
   LearnSlugRoute: LearnSlugRoute,
   McpClientRoute: McpClientRoute,
-  AppIndexRoute: AppIndexRoute,
   CompareIndexRoute: CompareIndexRoute,
   LearnIndexRoute: LearnIndexRoute,
   McpIndexRoute: McpIndexRoute,

@@ -548,6 +548,25 @@ body {
   }
 }
 
+/* `/app` keeps its chrome mounted while route content changes. The small
+   entrance softens that body swap without making navigation feel delayed. */
+.app-page-enter {
+  animation: app-page-enter 160ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+@keyframes app-page-enter {
+  from {
+    opacity: 0;
+    transform: translateY(3px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .app-page-enter {
+    animation: none;
+  }
+}
+
 .dark {
   /* Grok Night, pulled a step darker so the chrome recedes around authored
      documents while keeping its clean neutral base and crisp terminal hues. */

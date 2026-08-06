@@ -1,5 +1,4 @@
 import { createFileRoute } from '@tanstack/react-router'
-import { AccountGate } from '@loora/shell/account-gate'
 import { AppPageShell } from '@loora/shell/app-page-shell'
 import { authClient } from '@loora/auth/client'
 import { AdminUsers } from '@loora/shell/admin/users'
@@ -21,15 +20,12 @@ function AdminUsersPage() {
   const userId = session?.user?.id ?? ''
 
   return (
-    <AccountGate>
-      <AppPageShell
-        active="admin"
-        wide
-        title="Users"
-        description="Every account on the workspace."
-      >
-        <AdminUsers currentUserId={userId} pendingRequests={0} onChanged={() => undefined} />
-      </AppPageShell>
-    </AccountGate>
+    <AppPageShell
+      wide
+      title="Users"
+      description="Every account on the workspace."
+    >
+      <AdminUsers currentUserId={userId} pendingRequests={0} onChanged={() => undefined} />
+    </AppPageShell>
   )
 }

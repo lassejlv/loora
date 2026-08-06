@@ -75,9 +75,10 @@ export function AppNavigation({
           <Link
             key={item.section}
             to={item.to}
+            preload="intent"
             aria-current={selected ? 'page' : undefined}
             className={cn(
-              'flex items-center gap-1.5 rounded-sm px-2 py-1 text-xs transition-colors',
+              'flex items-center gap-1.5 rounded-sm px-2 py-1 text-xs transition-[color,background-color,box-shadow] duration-150',
               // The hover tint is translucent zinc, so a selected item painted
               // in the same tint would be indistinguishable from a hovered one.
               // Selected reads as its own surface: a step up plus a hairline.
@@ -141,7 +142,7 @@ export function AppAccountMenu({
           const Icon = item.icon
           return (
             <DropdownMenuItem key={item.section} asChild>
-              <Link to={item.to}>
+              <Link to={item.to} preload="intent">
                 <Icon data-slot="icon" />
                 {item.label}
               </Link>

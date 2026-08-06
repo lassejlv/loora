@@ -1,5 +1,4 @@
 import { createFileRoute } from '@tanstack/react-router'
-import { AccountGate } from '@loora/shell/account-gate'
 import { AdminPanel } from '@loora/shell/admin/admin-panel'
 import { AppPageShell } from '@loora/shell/app-page-shell'
 import { seo } from '#/lib/seo'
@@ -17,15 +16,12 @@ export const Route = createFileRoute('/app/admin')({
 
 function AdminPage() {
   return (
-    <AccountGate>
-      <AppPageShell
-        active="admin"
-        wide
-        title="Admin"
-        description="Accounts, access, usage, and takedowns across the whole workspace."
-      >
-        <AdminPanel />
-      </AppPageShell>
-    </AccountGate>
+    <AppPageShell
+      wide
+      title="Admin"
+      description="Accounts, access, usage, and takedowns across the whole workspace."
+    >
+      <AdminPanel />
+    </AppPageShell>
   )
 }
