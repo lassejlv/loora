@@ -62,7 +62,6 @@ describe('HTML import sandbox', () => {
   })
 
   it('accepts Paper-sized HTML pastes under the source budget', () => {
-    // A couple of embedded images used to blow past the old 1 MB cap.
     const chunk = 'a'.repeat(1_500_000)
     const html = `<x-paper-html><div data-chunk="${chunk}">Card</div></x-paper-html>`
     expect(html.length).toBeGreaterThan(1_000_000)

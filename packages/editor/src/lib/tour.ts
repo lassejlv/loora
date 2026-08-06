@@ -1,9 +1,5 @@
 import type { TourStep } from '../components/product-tour'
 
-/**
- * Bumping the suffix replays the tour for everyone — worth it when a step
- * describes something that has genuinely changed, not for copy edits.
- */
 export const TOUR_STORAGE_KEY = 'loora:tour-seen:1'
 
 export function hasSeenTour(): boolean {
@@ -34,7 +30,6 @@ export function clearTourSeen() {
   }
 }
 
-/** Where an interrupted run had got to, so a reload does not start over. */
 export const TOUR_PROGRESS_KEY = 'loora:tour-progress'
 
 export function readTourProgress(): number {
@@ -65,14 +60,8 @@ export function clearTourProgress() {
   }
 }
 
-/** Where an agent connects. Same endpoint the integrations page hands out. */
 export const MCP_ENDPOINT = 'https://mcp.loora.design/mcp'
 
-/**
- * What somebody needs to know to use Loora, in the order they meet it. Panel
- * steps open what they point at rather than assuming it is showing; the
- * branch step drops out for anyone who cannot branch.
- */
 export function editorTourSteps({
   isMobile,
   openLayers,
@@ -82,11 +71,8 @@ export function editorTourSteps({
   isMobile: boolean
   openLayers: () => void
   openDesign: () => void
-  /** How many nodes the document holds right now, for the hands-on step. */
   nodeCount: () => number
 }): TourStep[] {
-  // Captured when the hands-on step opens, so "did something appear?" is
-  // measured against the document as it was at that moment.
   let baseline = 0
 
   const steps: TourStep[] = [

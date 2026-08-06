@@ -7,7 +7,6 @@ import {
 
 export { HTML_IMPORT_SANDBOX_BASE_CSS } from '@loora/canvas/import'
 
-/** Paper snapshots often embed images as data URLs; 1 MB was too tight. */
 export const MAX_HTML_IMPORT_SOURCE_BYTES = 8_000_000
 export const MAX_CSS_IMPORT_SOURCE_BYTES = 2_000_000
 export const MAX_HTML_IMPORT_ELEMENTS = 20_000
