@@ -1,6 +1,7 @@
 import {
   type CanvasAction,
   type CanvasDocument,
+  type CanvasLayout,
   type CanvasNode,
   type CanvasStyle,
   type InstanceNode,
@@ -49,6 +50,8 @@ export interface PreparedCanvasExport {
 interface RenderedOccurrence {
   node: CanvasNode
   instance?: InstanceNode
+  /** The node that arranges this one, unresolved — `fill` and `hug` need it. */
+  parent?: CanvasNode
   rendered: CanvasNode
 }
 
@@ -97,10 +100,12 @@ function escapeAttribute(value: string) {
 }
 
 import {
+  type LayoutParent,
   colorValue,
   escapeCssString,
   fontFamilyValue,
-  lengthValue,
+  layoutDeclarations,
+  layoutParent,
   paintValue,
 } from './style-css'
 import {
@@ -118,24 +123,17 @@ function className(id: string) {
     .join('')}`
 }
 
-function styleDeclarations(document: CanvasDocument, node: CanvasNode) {
-  const { layout, style } = node
+function styleDeclarations(
+  document: CanvasDocument,
+  node: CanvasNode,
+  parent?: LayoutParent,
+) {
+  const { style } = node
   const declarations: string[] = [
-    'box-sizing:border-box',
-    `position:${layout.position === 'absolute' ? 'absolute' : 'relative'}`,
-    `width:${lengthValue(layout.width, 'width')}`,
-    `height:${lengthValue(layout.height, 'height')}`,
+    ...layoutDeclarations(node.layout, { parent }),
     `opacity:${style.opacity}`,
     `overflow:${style.overflow}`,
   ]
-  if (layout.position === 'absolute') {
-    declarations.push(`left:${layout.x}px`, `top:${layout.y}px`)
-  }
-  if (layout.minWidth !== undefined) declarations.push(`min-width:${layout.minWidth}px`)
-  if (layout.maxWidth !== undefined) declarations.push(`max-width:${layout.maxWidth}px`)
-  if (layout.minHeight !== undefined) declarations.push(`min-height:${layout.minHeight}px`)
-  if (layout.maxHeight !== undefined) declarations.push(`max-height:${layout.maxHeight}px`)
-  if (layout.aspectRatio !== undefined) declarations.push(`aspect-ratio:${layout.aspectRatio}`)
   if (node.rotation) declarations.push(`transform:rotate(${node.rotation}deg)`)
   if (node.type === 'text' && style.fills[0]?.type === 'solid') {
     declarations.push(`color:${colorValue(document, style.fills[0].color)}`)
@@ -160,29 +158,6 @@ function styleDeclarations(document: CanvasDocument, node: CanvasNode) {
     )
   }
   if (style.blendMode) declarations.push(`mix-blend-mode:${style.blendMode}`)
-  if (layout.mode === 'flex') {
-    declarations.push(
-      'display:flex',
-      `flex-direction:${layout.direction ?? 'row'}`,
-      `flex-wrap:${layout.wrap ? 'wrap' : 'nowrap'}`,
-      `gap:${layout.gap ?? 0}px`,
-      `align-items:${layout.align ?? 'stretch'}`,
-      `justify-content:${layout.justify ?? 'start'}`,
-    )
-  } else if (layout.mode === 'grid') {
-    declarations.push(
-      'display:grid',
-      `grid-template-columns:repeat(${Math.max(1, layout.columns ?? 1)},minmax(0,1fr))`,
-      `gap:${layout.gap ?? 0}px`,
-      `align-items:${layout.align ?? 'stretch'}`,
-      `justify-content:${layout.justify ?? 'start'}`,
-    )
-  }
-  if (layout.padding) {
-    declarations.push(
-      `padding:${layout.padding.top}px ${layout.padding.right}px ${layout.padding.bottom}px ${layout.padding.left}px`,
-    )
-  }
   if (style.typography) {
     const typography = style.typography
     declarations.push(
@@ -616,8 +591,21 @@ function cssForNode(
   instance?: InstanceNode,
   variant?: string,
   selectorPrefix = '',
+  parentNode?: CanvasNode,
 ) {
   const selector = `${selectorPrefix}.${className(instance ? `${instance.id}-${node.id}` : node.id)}`
+  /** The parent as it stands at one width — a row here may be a column there. */
+  const parentAt = (width: number) => {
+    if (!parentNode) return undefined
+    return layoutParent(
+      applyInstancePatches(
+        document,
+        resolveNodeAtWidth(document, parentNode, width),
+        instance,
+        variant,
+      ).layout,
+    )
+  }
   // The base rule carries every override that is not behind a media query —
   // the breakpoints at zero width. Reading the raw node here dropped the
   // default (mobile) breakpoint from exports entirely.
@@ -632,7 +620,10 @@ function cssForNode(
       ? asInstanceComponentRoot(patched)
       : patched
   const motion = nodeMotionDeclarations(document, styled)
-  const base = `${selector}{${[styleDeclarations(document, styled), ...motion]
+  const base = `${selector}{${[
+    styleDeclarations(document, styled, parentAt(0)),
+    ...motion,
+  ]
     .filter(Boolean)
     .join(';')}}`
   const pageBase =
@@ -642,7 +633,15 @@ function cssForNode(
   // Ascending, because these rules share a specificity and later ones win.
   // Document order is not guaranteed to be ascending.
   const responsive = breakpoints
-    .filter((breakpoint) => breakpoint.minWidth > 0 && node.responsive[breakpoint.id])
+    // The parent's breakpoints matter too: a `fill` child is a flex share in a
+    // row and a stretch in a column, so a parent that turns at a width has to
+    // restate its children there even when they carry no override of their own.
+    .filter(
+      (breakpoint) =>
+        breakpoint.minWidth > 0 &&
+        (node.responsive[breakpoint.id] ||
+          parentNode?.responsive[breakpoint.id]),
+    )
     .map((breakpoint) => {
       const resolved = resolveNodeAtWidth(document, node, breakpoint.minWidth)
       const responsive = applyInstancePatches(
@@ -651,7 +650,7 @@ function cssForNode(
         instance,
         variant,
       )
-      return `@media(min-width:${breakpoint.minWidth}px){${selector}{${styleDeclarations(document, instance && responsive.type === 'component' ? asInstanceComponentRoot(responsive) : responsive)}}}`
+      return `@media(min-width:${breakpoint.minWidth}px){${selector}{${styleDeclarations(document, instance && responsive.type === 'component' ? asInstanceComponentRoot(responsive) : responsive, parentAt(breakpoint.minWidth))}}}`
     })
   // Last, so a hidden range outranks every rule that shares its specificity.
   const hidden = hiddenRules(
@@ -694,7 +693,11 @@ function collectRenderedOccurrences(
     if (node.type === 'instance') {
       const component = document.nodes[node.componentId]
       if (component?.type === 'component') {
-        stack.push({ node: component, instance: node })
+        stack.push({
+          node: component,
+          instance: node,
+          parent: occurrence.node,
+        })
       }
       continue
     }
@@ -704,6 +707,7 @@ function collectRenderedOccurrences(
       stack.push({
         node: children[child]!,
         instance: occurrence.instance,
+        parent: occurrence.node,
       })
     }
   }
@@ -719,8 +723,10 @@ function collectCss(
   const motionNodes: CanvasNode[] = []
   const motionSelectors = new WeakMap<CanvasNode, string>()
   for (const occurrence of occurrences) {
-    const { node, instance } = occurrence
-    output.push(cssForNode(document, node, breakpoints, instance))
+    const { node, instance, parent } = occurrence
+    output.push(
+      cssForNode(document, node, breakpoints, instance, undefined, '', parent),
+    )
     if (instance) {
       const component = document.nodes[instance.componentId]
       if (component?.type === 'component') {
@@ -733,6 +739,7 @@ function collectCss(
               instance,
               variant,
               `[data-loora-node="${escapeCssString(instance.id)}"][data-loora-variant="${escapeCssString(variant)}"] `,
+              parent,
             ),
           )
         }
@@ -1356,9 +1363,10 @@ function portableDeclarations(
   document: CanvasDocument,
   node: CanvasNode,
   exportedRoot: boolean,
+  parent?: LayoutParent,
 ) {
   const declarations = new Map<string, string>()
-  for (const item of styleDeclarations(document, node).split(';')) {
+  for (const item of styleDeclarations(document, node, parent).split(';')) {
     const separator = item.indexOf(':')
     if (separator <= 0) continue
     declarations.set(
@@ -1494,6 +1502,7 @@ function renderPortableNode(
   exportedRoot = false,
   themeValuesJson = JSON.stringify(runtimeThemeValues(document)),
   resolvedNodes?: ReadonlyMap<string, CanvasNode>,
+  parentLayout?: CanvasLayout,
 ): string {
   const node =
     resolvedNodes?.get(renderedOccurrenceKey(rawNode, instance)) ??
@@ -1510,6 +1519,7 @@ function renderPortableNode(
     document,
     styled,
     exportedRoot,
+    parentLayout ? layoutParent(parentLayout) : undefined,
   )
   const attributes = portableAttributes(
     document,
@@ -1565,6 +1575,7 @@ ${indent(paths.join('\n'), 2)}
           false,
           themeValuesJson,
           resolvedNodes,
+          styled.layout,
         ),
       )
       .filter(Boolean)
@@ -1586,6 +1597,7 @@ ${indent(children.join('\n'), 2)}
           false,
           themeValuesJson,
           resolvedNodes,
+          styled.layout,
         ),
       )
       .filter(Boolean)
@@ -1611,6 +1623,7 @@ ${indent(children.join('\n'), 2)}
         false,
         themeValuesJson,
         resolvedNodes,
+        styled.layout,
       ),
     )
     .filter(Boolean)

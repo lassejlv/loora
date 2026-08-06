@@ -141,6 +141,28 @@ export const canvasLayoutPatchSchema = z.object({
     .enum(['start', 'center', 'end', 'space-between', 'space-around'])
     .optional(),
   columns: z.number().int().min(1).max(100).optional(),
+  alignSelf: z
+    .enum(['start', 'center', 'end', 'stretch'])
+    .optional()
+    .describe(
+      'Cross-axis alignment for this child alone, overriding the parent\'s align.',
+    ),
+  grow: z
+    .number()
+    .finite()
+    .nonnegative()
+    .optional()
+    .describe(
+      'Share of free main-axis space this child takes against its siblings. Defaults to 1 for a fill width/height, 0 otherwise.',
+    ),
+  shrink: z
+    .number()
+    .finite()
+    .nonnegative()
+    .optional()
+    .describe(
+      'How much this child gives back main-axis space when the line overflows. Defaults to 1 for a fill width/height, 0 otherwise.',
+    ),
 })
 
 export const canvasStylePatchSchema = z.object({

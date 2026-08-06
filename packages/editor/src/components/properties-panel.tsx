@@ -14,6 +14,7 @@ import {
   type CanvasStyle,
   type CanvasTypography,
   type DesignToken,
+  type LayoutAlignment,
   type NodeMutationPatch,
   type NodePatch,
   type NodeRef,
@@ -518,6 +519,16 @@ export function CanvasPropertiesPanel({ onClose }: { onClose?: () => void }) {
   const overriddenHere =
     breakpoint !== 'base' &&
     nodes.some((item) => item.responsive[breakpoint] !== undefined)
+  // Child sizing only means something to a node a flex/grid parent arranges;
+  // absolute children and roots have no parent to answer.
+  const arrangesChildren = nodes.every((item) => {
+    if (item.layout.position !== 'flow') return false
+    const parent = item.parentId ? document.nodes[item.parentId] : undefined
+    return parent?.layout.mode === 'flex' || parent?.layout.mode === 'grid'
+  })
+  const alignSelf = layout((item) => item.layout.alignSelf ?? null)
+  const grow = layout((item) => item.layout.grow ?? null)
+  const shrink = layout((item) => item.layout.shrink ?? null)
 
   const setTypography = (patch: Partial<CanvasTypography>) => {
     const operations = refs.map((target, index) => {
@@ -745,6 +756,44 @@ export function CanvasPropertiesPanel({ onClose }: { onClose?: () => void }) {
               onCommit={(rotation) => commit({ rotation })}
             />
           </Pair>
+          {arrangesChildren ? (
+            <>
+              <Pair>
+                <NumberCell
+                  label="Grow"
+                  min={0}
+                  step={0.1}
+                  value={grow}
+                  onCommit={(value) => commit({ layout: { grow: value } })}
+                />
+                <NumberCell
+                  label="Shrink"
+                  min={0}
+                  step={0.1}
+                  value={shrink}
+                  onCommit={(value) => commit({ layout: { shrink: value } })}
+                />
+              </Pair>
+              <SelectCell
+                label="Align"
+                value={alignSelf}
+                onChange={(value) =>
+                  patchLayout((current) => {
+                    const next = { ...current }
+                    if (value) next.alignSelf = value as LayoutAlignment
+                    else delete next.alignSelf
+                    return next
+                  })
+                }
+              >
+                <option value="">Parent</option>
+                <option value="start">Start</option>
+                <option value="center">Center</option>
+                <option value="end">End</option>
+                <option value="stretch">Stretch</option>
+              </SelectCell>
+            </>
+          ) : null}
         </Section>
 
         <Section title="Stack">

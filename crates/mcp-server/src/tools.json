@@ -461,6 +461,26 @@
               "type": "integer",
               "minimum": 1,
               "maximum": 100
+            },
+            "alignSelf": {
+              "description": "Cross-axis alignment for this child alone, overriding the parent's align.",
+              "type": "string",
+              "enum": [
+                "start",
+                "center",
+                "end",
+                "stretch"
+              ]
+            },
+            "grow": {
+              "description": "Share of free main-axis space this child takes against its siblings. Defaults to 1 for a fill width/height, 0 otherwise.",
+              "type": "number",
+              "minimum": 0
+            },
+            "shrink": {
+              "description": "How much this child gives back main-axis space when the line overflows. Defaults to 1 for a fill width/height, 0 otherwise.",
+              "type": "number",
+              "minimum": 0
             }
           }
         },
@@ -2076,6 +2096,26 @@
               "type": "integer",
               "minimum": 1,
               "maximum": 100
+            },
+            "alignSelf": {
+              "description": "Cross-axis alignment for this child alone, overriding the parent's align.",
+              "type": "string",
+              "enum": [
+                "start",
+                "center",
+                "end",
+                "stretch"
+              ]
+            },
+            "grow": {
+              "description": "Share of free main-axis space this child takes against its siblings. Defaults to 1 for a fill width/height, 0 otherwise.",
+              "type": "number",
+              "minimum": 0
+            },
+            "shrink": {
+              "description": "How much this child gives back main-axis space when the line overflows. Defaults to 1 for a fill width/height, 0 otherwise.",
+              "type": "number",
+              "minimum": 0
             }
           }
         },
@@ -3420,6 +3460,26 @@
               "type": "integer",
               "minimum": 1,
               "maximum": 100
+            },
+            "alignSelf": {
+              "description": "Cross-axis alignment for this child alone, overriding the parent's align.",
+              "type": "string",
+              "enum": [
+                "start",
+                "center",
+                "end",
+                "stretch"
+              ]
+            },
+            "grow": {
+              "description": "Share of free main-axis space this child takes against its siblings. Defaults to 1 for a fill width/height, 0 otherwise.",
+              "type": "number",
+              "minimum": 0
+            },
+            "shrink": {
+              "description": "How much this child gives back main-axis space when the line overflows. Defaults to 1 for a fill width/height, 0 otherwise.",
+              "type": "number",
+              "minimum": 0
             }
           }
         },
@@ -4846,6 +4906,26 @@
               "type": "integer",
               "minimum": 1,
               "maximum": 100
+            },
+            "alignSelf": {
+              "description": "Cross-axis alignment for this child alone, overriding the parent's align.",
+              "type": "string",
+              "enum": [
+                "start",
+                "center",
+                "end",
+                "stretch"
+              ]
+            },
+            "grow": {
+              "description": "Share of free main-axis space this child takes against its siblings. Defaults to 1 for a fill width/height, 0 otherwise.",
+              "type": "number",
+              "minimum": 0
+            },
+            "shrink": {
+              "description": "How much this child gives back main-axis space when the line overflows. Defaults to 1 for a fill width/height, 0 otherwise.",
+              "type": "number",
+              "minimum": 0
             }
           }
         },
@@ -6219,6 +6299,26 @@
               "type": "integer",
               "minimum": 1,
               "maximum": 100
+            },
+            "alignSelf": {
+              "description": "Cross-axis alignment for this child alone, overriding the parent's align.",
+              "type": "string",
+              "enum": [
+                "start",
+                "center",
+                "end",
+                "stretch"
+              ]
+            },
+            "grow": {
+              "description": "Share of free main-axis space this child takes against its siblings. Defaults to 1 for a fill width/height, 0 otherwise.",
+              "type": "number",
+              "minimum": 0
+            },
+            "shrink": {
+              "description": "How much this child gives back main-axis space when the line overflows. Defaults to 1 for a fill width/height, 0 otherwise.",
+              "type": "number",
+              "minimum": 0
             }
           }
         },

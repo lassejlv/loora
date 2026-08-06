@@ -27,8 +27,9 @@ import {
   nodeMotionDeclarations,
 } from './motion-css'
 import {
+  type LayoutParent,
   colorValue,
-  lengthValue,
+  layoutDeclarations,
   paintValue,
 } from './style-css'
 import {
@@ -41,8 +42,10 @@ import {
 } from './engine'
 import {
   type CanvasDocument,
+  type CanvasLayout,
   type CanvasNode,
   type InstanceNode,
+  type LayoutMode,
   type NodeId,
   type NodeMutationPatch,
   type NodePatch,
@@ -477,17 +480,10 @@ function patchNode(node: CanvasNode, patch: NodePatch | undefined): CanvasNode {
   } as CanvasNode
 }
 
-function nodeCss(
-  document: CanvasDocument,
-  node: CanvasNode,
-  isPageRoot = false,
-): CSSProperties {
-  const { layout, style } = node
-  // Transitions and self-starting animations are plain declarations, so they
-  // ride the inline style the renderer already builds. Only pointer states need
-  // a real stylesheet.
-  const motion = Object.fromEntries(
-    nodeMotionDeclarations(document, node).map((declaration) => {
+/** `prop:value` pairs as React's camelCased style object. */
+function declarationsToStyle(declarations: string[]): CSSProperties {
+  return Object.fromEntries(
+    declarations.map((declaration) => {
       const separator = declaration.indexOf(':')
       const property = declaration.slice(0, separator)
       return [
@@ -496,21 +492,25 @@ function nodeCss(
       ]
     }),
   ) as CSSProperties
+}
+
+function nodeCss(
+  document: CanvasDocument,
+  node: CanvasNode,
+  isPageRoot = false,
+  parent?: LayoutParent,
+): CSSProperties {
+  const { style } = node
+  // Transitions and self-starting animations are plain declarations, so they
+  // ride the inline style the renderer already builds. Only pointer states need
+  // a real stylesheet.
+  const motion = declarationsToStyle(nodeMotionDeclarations(document, node))
   const css: CSSProperties = {
-    boxSizing: 'border-box',
-    position: layout.position === 'absolute' || isPageRoot ? 'absolute' : 'relative',
-    left: layout.position === 'absolute' || isPageRoot ? layout.x : undefined,
-    top: layout.position === 'absolute' || isPageRoot ? layout.y : undefined,
-    width: lengthValue(layout.width, 'width'),
-    height: lengthValue(layout.height, 'height'),
-    minWidth: layout.minWidth,
-    maxWidth: layout.maxWidth,
-    minHeight: layout.minHeight,
-    maxHeight: layout.maxHeight,
-    aspectRatio: layout.aspectRatio,
+    ...declarationsToStyle(
+      layoutDeclarations(node.layout, { parent, asRoot: isPageRoot }),
+    ),
     opacity: style.opacity,
     overflow: style.overflow,
-    display: node.hidden ? 'none' : undefined,
     transform: node.rotation ? `rotate(${node.rotation}deg)` : undefined,
     transformOrigin: 'center',
     borderRadius: Array.isArray(style.radius)
@@ -539,33 +539,7 @@ function nodeCss(
     mixBlendMode: style.blendMode as CSSProperties['mixBlendMode'],
     userSelect: 'none',
   }
-  if (layout.mode === 'flex') {
-    css.display = node.hidden ? 'none' : 'flex'
-    css.flexDirection = layout.direction ?? 'row'
-    css.flexWrap = layout.wrap ? 'wrap' : 'nowrap'
-    css.gap = layout.gap
-    css.alignItems = layout.align === 'start' || layout.align === 'end'
-      ? `flex-${layout.align}`
-      : layout.align
-    css.justifyContent =
-      layout.justify === 'start' || layout.justify === 'end'
-        ? `flex-${layout.justify}`
-        : layout.justify
-  } else if (layout.mode === 'grid') {
-    css.display = node.hidden ? 'none' : 'grid'
-    css.gridTemplateColumns = `repeat(${Math.max(1, layout.columns ?? 1)}, minmax(0, 1fr))`
-    css.gap = layout.gap
-    css.alignItems = layout.align === 'start' || layout.align === 'end'
-      ? `flex-${layout.align}`
-      : layout.align
-    css.justifyContent =
-      layout.justify === 'start' || layout.justify === 'end'
-        ? `flex-${layout.justify}`
-        : layout.justify
-  }
-  if (layout.padding) {
-    css.padding = `${layout.padding.top}px ${layout.padding.right}px ${layout.padding.bottom}px ${layout.padding.left}px`
-  }
+  if (node.hidden) css.display = 'none'
   if (style.typography) {
     css.fontFamily = style.typography.family
     css.fontSize = style.typography.size
@@ -598,6 +572,13 @@ interface RenderNodeProps {
   instancePath?: NodeId[]
   width: number
   topLevel?: boolean
+  /**
+   * How the parent arranges this node. Two scalars rather than the parent's
+   * layout, so a parent that re-resolves at a breakpoint does not hand every
+   * child a new object and defeat their memoization.
+   */
+  parentMode?: LayoutMode
+  parentDirection?: 'row' | 'column'
 }
 
 function nodeRefFor(nodeId: NodeId, instancePath: NodeId[] = []): NodeRef {
@@ -738,11 +719,13 @@ function orderAtIndex(siblings: DropSibling[], index: number) {
 
 const RenderChildren = memo(function RenderChildren({
   parentId,
+  parentLayout,
   instance,
   instancePath,
   width,
 }: {
   parentId: NodeId
+  parentLayout: CanvasLayout
   instance?: InstanceNode
   instancePath: NodeId[]
   width: number
@@ -755,6 +738,8 @@ const RenderChildren = memo(function RenderChildren({
       instance={instance}
       instancePath={instancePath}
       width={width}
+      parentMode={parentLayout.mode}
+      parentDirection={parentLayout.direction}
     />
   ))
 })
@@ -784,6 +769,8 @@ function RawCanvasNodeRenderer({
   instancePath = [],
   width,
   topLevel = false,
+  parentMode,
+  parentDirection,
 }: RenderNodeProps) {
   const source = useCanvasNode(id)
   const liveInstance = useOptionalCanvasNode(instance?.id)
@@ -867,7 +854,12 @@ function RawCanvasNodeRenderer({
     'data-loora-node-type': node.type,
     'data-loora-locked': node.locked ? 'true' : undefined,
     style: {
-      ...nodeCss(engine.document, node, topLevel),
+      ...nodeCss(
+        engine.document,
+        node,
+        topLevel,
+        parentMode ? { mode: parentMode, direction: parentDirection } : undefined,
+      ),
       ...(isPage && topLevel
         ? {
             width: `${width}px`,
@@ -955,6 +947,7 @@ function RawCanvasNodeRenderer({
         {visible ? (
           <RenderChildren
             parentId={node.id}
+            parentLayout={node.layout}
             instance={currentInstance}
             instancePath={instancePath}
             width={width}
@@ -1031,6 +1024,8 @@ function RawCanvasNodeRenderer({
             instance={node}
             instancePath={path}
             width={width}
+            parentMode={node.layout.mode}
+            parentDirection={node.layout.direction}
           />
         ) : null}
       </div>
@@ -1051,6 +1046,7 @@ function RawCanvasNodeRenderer({
     visible ? (
       <RenderChildren
         parentId={node.id}
+        parentLayout={node.layout}
         instance={currentInstance}
         instancePath={instancePath}
         width={width}

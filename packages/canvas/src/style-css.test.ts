@@ -1,13 +1,22 @@
 import { describe, expect, it } from 'vitest'
 import {
+  type LayoutParent,
   colorValue,
   escapeCssString,
   fontFamilyValue,
+  layoutDeclarations,
   lengthValue,
   paintValue,
   stylePatchDeclarations,
 } from './style-css'
-import { createCanvasDocument, type CanvasColor, type CanvasPaint, type CanvasStylePatch } from './model'
+import {
+  createCanvasDocument,
+  defaultLayout,
+  type CanvasColor,
+  type CanvasLayout,
+  type CanvasPaint,
+  type CanvasStylePatch,
+} from './model'
 
 const document = createCanvasDocument('Test', 'doc')
 
@@ -169,6 +178,143 @@ describe('lengthValue', () => {
 
   it('converts hug for height', () => {
     expect(lengthValue({ unit: 'hug' }, 'height')).toBe('auto')
+  })
+})
+
+describe('layoutDeclarations', () => {
+  const child = (patch: Partial<CanvasLayout> = {}) =>
+    defaultLayout(200, 100, { position: 'flow', ...patch })
+  const row: LayoutParent = { mode: 'flex', direction: 'row' }
+  const column: LayoutParent = { mode: 'flex', direction: 'column' }
+
+  it('sizes against the containing block when there is no parent', () => {
+    const declarations = layoutDeclarations(child({ width: { unit: 'fill' } }))
+    expect(declarations).toContain('width:100%')
+    expect(declarations.some((item) => item.startsWith('flex-'))).toBe(false)
+  })
+
+  it('makes fill a share of the main axis rather than a full width', () => {
+    const declarations = layoutDeclarations(child({ width: { unit: 'fill' } }), {
+      parent: row,
+    })
+    expect(declarations).toContain('flex-grow:1')
+    expect(declarations).toContain('flex-basis:0%')
+    expect(declarations).toContain('min-width:0px')
+    expect(declarations.some((item) => item.startsWith('width:'))).toBe(false)
+  })
+
+  it('keeps a fixed sibling from shrinking beside a filling one', () => {
+    const declarations = layoutDeclarations(
+      child({ width: { unit: 'px', value: 200 } }),
+      { parent: row },
+    )
+    expect(declarations).toContain('width:200px')
+    expect(declarations).toContain('flex-shrink:0')
+  })
+
+  it('honours an explicit minimum over the fill default', () => {
+    const declarations = layoutDeclarations(
+      child({ width: { unit: 'fill' }, minWidth: 120 }),
+      { parent: row },
+    )
+    expect(declarations).toContain('min-width:120px')
+    expect(declarations).not.toContain('min-width:0px')
+  })
+
+  it('stretches a filling cross axis instead of measuring the parent', () => {
+    const declarations = layoutDeclarations(child({ height: { unit: 'fill' } }), {
+      parent: row,
+    })
+    expect(declarations).toContain('align-self:stretch')
+    expect(declarations.some((item) => item.startsWith('height:'))).toBe(false)
+  })
+
+  it('reads the main axis from the parent direction', () => {
+    const declarations = layoutDeclarations(child({ height: { unit: 'fill' } }), {
+      parent: column,
+    })
+    expect(declarations).toContain('flex-grow:1')
+    expect(declarations).toContain('min-height:0px')
+  })
+
+  it('gives a hug a definite size so stretch cannot claim it', () => {
+    const declarations = layoutDeclarations(child({ height: { unit: 'hug' } }), {
+      parent: row,
+    })
+    expect(declarations).toContain('height:fit-content')
+  })
+
+  it('stretches a filling grid child along both axes', () => {
+    const declarations = layoutDeclarations(
+      child({ width: { unit: 'fill' }, height: { unit: 'fill' } }),
+      { parent: { mode: 'grid' } },
+    )
+    expect(declarations).toContain('justify-self:stretch')
+    expect(declarations).toContain('align-self:stretch')
+  })
+
+  it('sizes an out-of-flow child against its containing block', () => {
+    const declarations = layoutDeclarations(
+      defaultLayout(0, 0, { position: 'absolute', width: { unit: 'fill' } }),
+      { parent: row },
+    )
+    expect(declarations).toContain('width:100%')
+    expect(declarations.some((item) => item.startsWith('flex-'))).toBe(false)
+  })
+
+  it('aligns grid children inside their track, not the tracks in the row', () => {
+    const declarations = layoutDeclarations(
+      defaultLayout(0, 0, { mode: 'grid', columns: 3, justify: 'center' }),
+    )
+    expect(declarations).toContain('justify-items:center')
+    expect(declarations).not.toContain('justify-content:center')
+  })
+
+  it('keeps justify-content for the values that space tracks apart', () => {
+    const declarations = layoutDeclarations(
+      defaultLayout(0, 0, { mode: 'grid', justify: 'space-between' }),
+    )
+    expect(declarations).toContain('justify-content:space-between')
+  })
+
+  it('spells the ends of the flex axes the way flexbox does', () => {
+    const declarations = layoutDeclarations(
+      defaultLayout(0, 0, { mode: 'flex', align: 'start', justify: 'end' }),
+    )
+    expect(declarations).toContain('align-items:flex-start')
+    expect(declarations).toContain('justify-content:flex-end')
+  })
+
+  it('lets a filling child take a weighted share of the row', () => {
+    const declarations = layoutDeclarations(
+      child({ width: { unit: 'fill' }, grow: 2 }),
+      { parent: row },
+    )
+    expect(declarations).toContain('flex-grow:2')
+    expect(declarations).toContain('flex-shrink:1')
+    expect(declarations).toContain('flex-basis:0%')
+  })
+
+  it('lets a fixed child keep shrinking when the row overflows', () => {
+    const declarations = layoutDeclarations(
+      child({ width: { unit: 'px', value: 200 }, shrink: 1 }),
+      { parent: row },
+    )
+    expect(declarations).toContain('width:200px')
+    expect(declarations).toContain('flex-shrink:1')
+  })
+
+  it('lets a child opt out of the alignment its parent hands out', () => {
+    const declarations = layoutDeclarations(
+      child({ alignSelf: 'end' }),
+      { parent: row },
+    )
+    expect(declarations).toContain('align-self:flex-end')
+  })
+
+  it('does not align a child that has no parent to disagree with', () => {
+    const declarations = layoutDeclarations(child({ alignSelf: 'end' }))
+    expect(declarations.some((item) => item.startsWith('align-self:'))).toBe(false)
   })
 })
 

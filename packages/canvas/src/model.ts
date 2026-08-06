@@ -55,6 +55,8 @@ export interface CanvasInsets {
 
 export type LayoutMode = 'absolute' | 'flex' | 'grid'
 export type PositionMode = 'flow' | 'absolute'
+/** Where a container places children on the cross axis, or a child itself. */
+export type LayoutAlignment = 'start' | 'center' | 'end' | 'stretch'
 
 export interface CanvasLayout {
   position: PositionMode
@@ -72,9 +74,24 @@ export interface CanvasLayout {
   wrap?: boolean
   gap?: number
   padding?: CanvasInsets
-  align?: 'start' | 'center' | 'end' | 'stretch'
+  align?: LayoutAlignment
   justify?: 'start' | 'center' | 'end' | 'space-between' | 'space-around'
   columns?: number
+  /**
+   * A child that wants a different cross-axis alignment than its parent's
+   * `align` gives every sibling.
+   */
+  alignSelf?: LayoutAlignment
+  /**
+   * How this child shares free main-axis space against its siblings. Absent
+   * means a `fill` child splits evenly (1) and everything else takes nothing.
+   */
+  grow?: number
+  /**
+   * How this child gives back main-axis space when the line overflows. Absent
+   * means it shrinks with the rest of the line (1).
+   */
+  shrink?: number
 }
 
 export type CanvasColor = string | { token: TokenId }
@@ -957,6 +974,9 @@ const layoutKeys = new Set([
   'align',
   'justify',
   'columns',
+  'alignSelf',
+  'grow',
+  'shrink',
 ])
 
 function validLayoutPatch(value: unknown, partial = true) {
@@ -996,6 +1016,8 @@ function validLayoutPatch(value: unknown, partial = true) {
     'aspectRatio',
     'gap',
     'columns',
+    'grow',
+    'shrink',
   ] as const
   if (
     !partial &&
@@ -1020,6 +1042,12 @@ function validLayoutPatch(value: unknown, partial = true) {
   if (
     value.align !== undefined &&
     !['start', 'center', 'end', 'stretch'].includes(String(value.align))
+  ) {
+    return false
+  }
+  if (
+    value.alignSelf !== undefined &&
+    !['start', 'center', 'end', 'stretch'].includes(String(value.alignSelf))
   ) {
     return false
   }

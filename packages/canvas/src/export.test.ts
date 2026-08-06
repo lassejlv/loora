@@ -243,6 +243,71 @@ describe('Canvas exports', () => {
     )
   })
 
+  it('gives a filling child a share of the row and leaves its fixed sibling alone', () => {
+    const document = fixture()
+    document.nodes.hero.layout = {
+      ...document.nodes.hero.layout,
+      mode: 'flex',
+      direction: 'row',
+    }
+    document.nodes.sidebar = createFrameNode('Sidebar', {
+      id: 'sidebar',
+      parentId: 'hero',
+      order: 512,
+    })
+    document.nodes.sidebar.layout = {
+      ...document.nodes.sidebar.layout,
+      position: 'flow',
+      width: { unit: 'px', value: 240 },
+    }
+    document.nodes.headline.layout = {
+      ...document.nodes.headline.layout,
+      position: 'flow',
+      width: { unit: 'fill' },
+      height: { unit: 'hug' },
+    }
+    const { css } = compileCanvas(document)
+    const rule = (id: string) =>
+      css.split('\n').find((line) => line.startsWith(`.loora-${id}{`))!
+
+    expect(rule('sidebar')).toContain('width:240px')
+    expect(rule('sidebar')).toContain('flex-shrink:0')
+    expect(rule('headline')).toContain('flex-grow:1')
+    expect(rule('headline')).toContain('flex-basis:0%')
+    expect(rule('headline')).not.toContain('width:100%')
+    // Hugging the cross axis has to survive the row's default stretch.
+    expect(rule('headline')).toContain('height:fit-content')
+  })
+
+  it('restates a child when only its parent turns at a breakpoint', () => {
+    const document = fixture()
+    document.breakpoints = [
+      { id: 'mobile', name: 'Mobile', minWidth: 0, previewWidth: 390 },
+      { id: 'desktop', name: 'Desktop', minWidth: 1200, previewWidth: 1440 },
+    ]
+    document.nodes.hero.layout = {
+      ...document.nodes.hero.layout,
+      mode: 'flex',
+      direction: 'column',
+    }
+    document.nodes.hero.responsive = {
+      desktop: { layout: { direction: 'row' } },
+    }
+    document.nodes.headline.layout = {
+      ...document.nodes.headline.layout,
+      position: 'flow',
+      width: { unit: 'fill' },
+    }
+    const { css } = compileCanvas(document)
+    const desktop = css.slice(css.indexOf('@media(min-width:1200px)'))
+
+    // A column stretches a filling child; a row hands it a share instead.
+    expect(css).toContain('align-self:stretch')
+    expect(desktop).toContain('.loora-headline{')
+    expect(desktop).toContain('flex-grow:1')
+    expect(desktop).toContain('flex-basis:0%')
+  })
+
   it('shows a text node again at a breakpoint that unhides it', () => {
     const document = fixture()
     document.breakpoints = [

@@ -142,6 +142,51 @@ function InsertUndoProbe() {
 }
 
 describe('Canvas React surface', () => {
+  it('sizes flow children against the parent that arranges them', () => {
+    const document = createCanvasDocument('Fill fixture', 'fill')
+    document.nodes.page = createPageNode('Home', {
+      id: 'page',
+      layout: { ...defaultLayout(1_000, 600), mode: 'flex', direction: 'row' },
+    })
+    document.nodes.sidebar = createFrameNode('Sidebar', {
+      id: 'sidebar',
+      parentId: 'page',
+      order: 1_024,
+      layout: {
+        ...defaultLayout(),
+        position: 'flow',
+        width: { unit: 'px', value: 240 },
+      },
+    })
+    document.nodes.body = createFrameNode('Body', {
+      id: 'body',
+      parentId: 'page',
+      order: 2_048,
+      layout: {
+        ...defaultLayout(),
+        position: 'flow',
+        width: { unit: 'fill' },
+        height: { unit: 'hug' },
+      },
+    })
+    const engine = new CanvasEngine(document)
+    const view = render(
+      <CanvasProvider engine={engine}>
+        <CanvasSurface pageWidth={1_000} initialCamera={{ x: 0, y: 0, zoom: 1 }} />
+      </CanvasProvider>,
+    )
+    const style = (id: string) =>
+      view.container.querySelector<HTMLElement>(`[data-loora-node="${id}"]`)!
+        .style
+
+    expect(style('sidebar').width).toBe('240px')
+    expect(style('sidebar').flexShrink).toBe('0')
+    expect(style('body').flexGrow).toBe('1')
+    expect(style('body').flexBasis).toBe('0%')
+    expect(style('body').width).toBe('')
+    expect(style('body').height).toBe('fit-content')
+  })
+
   it('routes text-edit signals only to the requested node', () => {
     const session = new CanvasSession()
     let titleEdits = 0
