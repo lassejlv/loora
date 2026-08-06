@@ -15,7 +15,7 @@ import {
 import { useCanvasDocument, useCanvasTransaction } from '@loora/canvas/react'
 import { Trash2Icon } from '@loora/ui/icons'
 import { Button } from '@loora/ui/button'
-import { NumberCell, Pair, Section, SelectCell } from './properties-panel'
+import { NumberCell, Pair, Section, SelectCell } from './inspector-controls'
 
 /**
  * Motion, for the person holding the mouse.
