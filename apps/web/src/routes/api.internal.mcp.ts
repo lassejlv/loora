@@ -1,5 +1,4 @@
 import '@tanstack/react-start'
-import { timingSafeEqual } from 'node:crypto'
 import { createFileRoute } from '@tanstack/react-router'
 import { eq, or } from 'drizzle-orm'
 import { db } from '@loora/db'
@@ -8,21 +7,13 @@ import { user } from '@loora/db/schema'
 import { createLooraToolExecutor } from '@loora/rpc/mcp-server'
 import { AccessDeniedError, requireAppAccess } from '@loora/rpc/mcp-access'
 import { createMcpUsageController } from '@loora/rpc/mcp-usage'
+import { hasValidBearerToken } from '#/lib/internal-auth'
 
 type InternalRequest =
   | { action: 'ready' }
   | { action: 'access'; userId: string }
   | { action: 'execute'; userId: string; tool: string; arguments?: unknown }
   | { action: 'resolveUser'; selector: string }
-
-function authorized(request: Request) {
-  const configured = process.env.MCP_INTERNAL_TOKEN?.trim()
-  const supplied = request.headers.get('authorization')?.replace(/^Bearer /, '') ?? ''
-  if (!configured) return false
-  const expected = Buffer.from(configured)
-  const actual = Buffer.from(supplied)
-  return expected.length === actual.length && timingSafeEqual(expected, actual)
-}
 
 async function resolveUser(selector: string) {
   const [found] = await db
@@ -35,7 +26,9 @@ async function resolveUser(selector: string) {
 }
 
 export async function internalMcpResponse(request: Request) {
-  if (!authorized(request)) return Response.json({ error: 'Unauthorized' }, { status: 401 })
+  if (!hasValidBearerToken(request, process.env.MCP_INTERNAL_TOKEN)) {
+    return Response.json({ error: 'Unauthorized' }, { status: 401 })
+  }
   let input: InternalRequest
   try {
     input = await request.json() as InternalRequest

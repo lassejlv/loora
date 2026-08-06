@@ -5,14 +5,7 @@ import { Button } from '@loora/ui/button'
 import { Input } from '@loora/ui/input'
 import { orpc } from '@loora/rpc/client'
 import type { AdminDesign } from '../admin/types'
-
-function formatDate(value: Date | string) {
-  const date = value instanceof Date ? value : new Date(value)
-  return new Intl.DateTimeFormat(undefined, {
-    dateStyle: 'medium',
-    timeStyle: 'short',
-  }).format(date)
-}
+import { formatDateTime } from '../../lib/format-date'
 
 export function AdminDesigns({ onChanged }: { onChanged: () => void }) {
   const [designs, setDesigns] = useState<AdminDesign[] | null>(null)
@@ -122,7 +115,7 @@ export function AdminDesigns({ onChanged }: { onChanged: () => void }) {
                   {item.shares > 0 ? <Badge variant="outline">{item.shares} shared</Badge> : null}
                 </p>
                 <p className="truncate text-2xs text-muted-foreground">
-                  {item.ownerEmail} · updated {formatDate(item.updatedAt)} · rev{' '}
+                  {item.ownerEmail} · updated {formatDateTime(item.updatedAt)} · rev{' '}
                   {item.revision.toLocaleString()}
                 </p>
               </div>

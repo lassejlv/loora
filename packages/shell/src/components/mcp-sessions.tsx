@@ -4,17 +4,11 @@ import { CheckIcon, CopyIcon, RefreshCwIcon } from '@loora/ui/icons'
 import { Button } from '@loora/ui/button'
 import { IntegrationCard, IntegrationStatus } from './integration-card'
 import { orpc } from '@loora/rpc/client'
+import { formatDateTime } from '../lib/format-date'
 
 type McpSession = Awaited<ReturnType<typeof orpc.mcp.sessions>>[number]
 
 const MCP_SERVER_URL = 'https://mcp.loora.design/mcp'
-
-function formatDate(timestamp: number) {
-  return new Intl.DateTimeFormat(undefined, {
-    dateStyle: 'medium',
-    timeStyle: 'short',
-  }).format(timestamp)
-}
 
 export function McpSessions() {
   const [sessions, setSessions] = useState<McpSession[] | null>(null)
@@ -116,11 +110,11 @@ export function McpSessions() {
                 <div className="min-w-0">
                   <p className="truncate text-xs font-medium">{session.name}</p>
                   <p className="mt-0.5 text-xs leading-relaxed text-muted-foreground">
-                    Connected {formatDate(session.connectedAt)}
+                    Connected {formatDateTime(session.connectedAt)}
                     {session.lastAuthorizedAt > session.connectedAt
-                      ? ` · Last authorized ${formatDate(session.lastAuthorizedAt)}`
+                      ? ` · Last authorized ${formatDateTime(session.lastAuthorizedAt)}`
                       : ''}
-                    {session.expiresAt ? ` · Expires ${formatDate(session.expiresAt)}` : ''}
+                    {session.expiresAt ? ` · Expires ${formatDateTime(session.expiresAt)}` : ''}
                   </p>
                 </div>
                 <Button

@@ -4,6 +4,7 @@ import { MCP_WEEKLY_INCLUDED } from '@loora/billing/mcp-usage'
 import { Button } from '@loora/ui/button'
 import { PanelLoading } from '@loora/ui/panel-shell'
 import { orpc } from '@loora/rpc/client'
+import { formatDateTime } from '../lib/format-date'
 
 type BillingStatus = Awaited<ReturnType<typeof orpc.billing.status>>
 type McpUsageResponse = Awaited<ReturnType<typeof orpc.billing.mcpUsage>>
@@ -11,13 +12,6 @@ type McpUsage = NonNullable<McpUsageResponse['usage']>
 
 function formatCount(value: number) {
   return value.toLocaleString()
-}
-
-function formatResetDate(iso: string) {
-  return new Intl.DateTimeFormat(undefined, {
-    dateStyle: 'medium',
-    timeStyle: 'short',
-  }).format(new Date(iso))
 }
 
 interface UsageCopy {
@@ -84,7 +78,7 @@ function UsageCard({ usage, copy }: { usage: McpUsage; copy: UsageCopy }) {
             ? 'Weekly limit reached'
             : `${formatCount(usage.remaining ?? 0)} remaining`}
         </p>
-        <p>Resets {formatResetDate(usage.resetsAt)}</p>
+        <p>Resets {formatDateTime(usage.resetsAt)}</p>
       </div>
     </div>
   )
