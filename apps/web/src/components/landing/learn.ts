@@ -10,7 +10,7 @@
 
 export const LEARN_UPDATED = '2026-08-02'
 
-export type LearnSection = {
+type LearnSection = {
   heading: string
   /** Paragraphs. Prose carries the argument; bullets only ever support it. */
   body: readonly string[]

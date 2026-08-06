@@ -24,7 +24,7 @@ import { designDraft } from '@loora/db/schema'
 
 export type RealtimeSession = NonNullable<Awaited<ReturnType<typeof requireSession>>>
 
-export interface RealtimeAccess {
+interface RealtimeAccess {
   session: RealtimeSession
   ownerUserId: string
   role: 'owner' | 'edit' | 'view'
@@ -71,15 +71,6 @@ function draftExists(ownerUserId: string, designId: string, draftId: string) {
     )
     .limit(1)
     .then((rows) => !!rows[0])
-}
-
-export async function resolveRealtimeAccess(
-  request: Request,
-  input: { designId: string; draftId: string | null },
-): Promise<RealtimeAccessResult> {
-  const authenticated = await requireRealtimeSession(request)
-  if (!authenticated.ok) return authenticated
-  return resolveRealtimeAccessForSession(authenticated.session, input)
 }
 
 export async function resolveRealtimeAccessForSession(

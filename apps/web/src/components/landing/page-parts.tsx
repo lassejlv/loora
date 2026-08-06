@@ -87,10 +87,6 @@ export function Section({
   )
 }
 
-export function Paragraph({ children }: { children: ReactNode }) {
-  return <p className="mt-4 text-muted-foreground">{render(children)}</p>
-}
-
 export function Bullets({ items }: { items: readonly string[] }) {
   const accent = useAccent()
   return (
