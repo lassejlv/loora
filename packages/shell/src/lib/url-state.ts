@@ -21,10 +21,6 @@ export const editorSearchParams = {
   code: parseAsBoolean.withDefault(false),
 }
 
-export const editorValidateSearch = createStandardSchemaV1(editorSearchParams, {
-  partialOutput: true,
-})
-
 export const integrationsSearchParams = {
   integration: parseAsStringLiteral(INTEGRATION_TABS),
   github: parseAsString,
@@ -61,46 +57,3 @@ export const legacyDesignValidateSearch = createStandardSchemaV1(
     partialOutput: true,
   },
 )
-
-export type EditorSearchParams = {
-  d: string | null
-  draft: string | null
-  settings: SettingsTab | null
-  layers: boolean
-  assets: boolean
-  history: boolean
-  code: boolean
-}
-
-/** One-shot bootstrap from raw URL + localStorage before / alongside nuqs defaults. */
-export function bootstrapEditorSearch(activeId: string): Partial<{
-  d: string
-  settings: SettingsTab
-  layers: boolean
-}> {
-  if (typeof window === 'undefined') return {}
-  const raw = new URLSearchParams(window.location.search)
-  const patch: Partial<{
-    d: string
-    settings: SettingsTab
-    layers: boolean
-  }> = {}
-
-  const settingsRaw = raw.get('settings')
-  if (settingsRaw && (SETTINGS_TABS as readonly string[]).includes(settingsRaw)) {
-    patch.settings = settingsRaw as SettingsTab
-  }
-
-  if (!raw.get('d') && activeId) patch.d = activeId
-
-  if (raw.get('layers') === null && window.localStorage.getItem('loora:layers') === '1') {
-    patch.layers = true
-  }
-
-  return patch
-}
-
-export function readUrlDesignId(): string | null {
-  if (typeof window === 'undefined') return null
-  return new URLSearchParams(window.location.search).get('d')
-}
