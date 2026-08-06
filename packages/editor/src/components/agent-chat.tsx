@@ -300,47 +300,66 @@ function MentionsText({
   )
 }
 
-function AgentMenuFooter({ action }: { action: 'run' | 'insert' }) {
-  return (
-    <div className="flex items-center gap-3 border-t border-line/50 px-2.5 py-1.5 text-2xs text-muted-foreground/80">
-      <span className="flex items-center gap-1">
-        <Kbd className="h-4 min-w-4 bg-transparent text-2xs">↑↓</Kbd>
-        navigate
-      </span>
-      <span className="flex items-center gap-1">
-        <Kbd className="h-4 min-w-4 bg-transparent text-2xs">⇥</Kbd>
-        complete
-      </span>
-      <span className="flex items-center gap-1">
-        <Kbd className="h-4 min-w-4 bg-transparent text-2xs">↵</Kbd>
-        {action}
-      </span>
-      <span className="ms-auto flex items-center gap-1">
-        <Kbd className="h-4 min-w-4 bg-transparent text-2xs">esc</Kbd>
-        close
-      </span>
-    </div>
-  )
-}
-
-function MenuIconTile({
+/**
+ * One compact row shared by the slash-command, mention, and whisper menus.
+ * No icon tile, no two-line label stack, no footer — the row is the unit.
+ */
+function AgentMenuRow({
   selected,
+  icon: Icon,
   children,
+  trailing,
+  current,
+  onActivate,
+  onMouseEnter,
 }: {
   selected: boolean
+  icon?: typeof BotIcon
   children: React.ReactNode
+  /** Muted trailing detail: the raw command name, or a layer's path · type. */
+  trailing?: React.ReactNode
+  /** The choice in effect right now — a check, not a word. */
+  current?: boolean
+  onActivate: () => void
+  onMouseEnter: () => void
 }) {
   return (
-    <span
+    <button
+      type="button"
+      role="option"
+      aria-selected={selected}
+      // The textarea keeps focus so typing never stops; the mouse only moves
+      // the highlight the keyboard is already driving.
+      onMouseDown={(event) => event.preventDefault()}
+      onMouseEnter={onMouseEnter}
+      onClick={onActivate}
       className={cn(
-        'grid size-6 shrink-0 place-items-center rounded-md border transition-colors duration-75',
-        selected
-          ? 'border-line/80 bg-surface text-foreground shadow-sm'
-          : 'border-transparent text-muted-foreground',
+        'flex w-full items-center gap-2 rounded-md px-2 py-1 text-start transition-colors duration-75',
+        selected && 'bg-foreground/6',
       )}
     >
-      {children}
-    </span>
+      {Icon ? <Icon size={13} className="shrink-0 text-muted-foreground" /> : null}
+      <span className="min-w-0 flex-1 truncate text-xs text-foreground">
+        {children}
+      </span>
+      {trailing ? (
+        <span className="min-w-0 shrink-0 truncate text-2xs text-muted-foreground/70">
+          {trailing}
+        </span>
+      ) : null}
+      {current ? (
+        <CheckIcon size={12} className="shrink-0 text-foreground" />
+      ) : (
+        <Kbd
+          className={cn(
+            'h-4 min-w-4 shrink-0 bg-transparent text-2xs transition-opacity duration-75',
+            selected ? 'opacity-100' : 'opacity-0',
+          )}
+        >
+          ↵
+        </Kbd>
+      )}
+    </button>
   )
 }
 
@@ -482,6 +501,7 @@ export function AgentChat({
   onOpenChange,
   selection,
   nodes,
+  containerRef,
 }: {
   designId: string
   draftId: string | null
@@ -491,6 +511,8 @@ export function AgentChat({
   selection?: string[]
   /** Layers @ can offer, read when the menu opens so it never goes stale. */
   nodes?: () => AgentMentionNode[]
+  /** The element the drag bounds clamp to. Falls back to the box's ancestor. */
+  containerRef?: React.RefObject<HTMLElement | null>
 }) {
   const [status, setStatus] = useState<AgentChatStatus | null>(null)
   const [thread, setThread] = useState<{
@@ -564,6 +586,7 @@ export function AgentChat({
       inputRef={inputRef}
       selectionRef={selectionRef}
       nodes={nodes}
+      containerRef={containerRef}
       onClose={() => onOpenChange(false)}
       onNewThread={async () => {
         const next = await orpc.assistant
@@ -594,6 +617,7 @@ function AgentChatShell({
   offset,
   onOffsetChange,
   running = false,
+  containerRef,
 }: {
   children: React.ReactNode
   className?: string
@@ -601,6 +625,8 @@ function AgentChatShell({
   onOffsetChange: (offset: AgentChatOffset) => void
   /** Lights the scan line along the top edge while a run is in flight. */
   running?: boolean
+  /** The element the drag bounds clamp to. Falls back to the box's ancestor. */
+  containerRef?: React.RefObject<HTMLElement | null>
 }) {
   const boxRef = useRef<HTMLDivElement>(null)
   const dragRef = useRef<{
@@ -615,7 +641,7 @@ function AgentChatShell({
 
   const bounds = () => {
     const box = boxRef.current
-    const parent = box?.parentElement?.parentElement
+    const parent = containerRef?.current ?? box?.parentElement?.parentElement
     if (!box || !parent) return null
     const boxRect = box.getBoundingClientRect()
     const parentRect = parent.getBoundingClientRect()
@@ -720,6 +746,7 @@ function AgentChatBox({
   inputRef,
   selectionRef,
   nodes,
+  containerRef,
   onClose,
   onNewThread,
   onStatusChange,
@@ -742,6 +769,7 @@ function AgentChatBox({
   inputRef: React.RefObject<HTMLTextAreaElement | null>
   selectionRef: React.RefObject<string[] | undefined>
   nodes?: () => AgentMentionNode[]
+  containerRef?: React.RefObject<HTMLElement | null>
   onClose: () => void
   onNewThread: () => Promise<void>
   onStatusChange: (status: AgentChatStatus) => void
@@ -937,11 +965,11 @@ function AgentChatBox({
     icon: SettingsIcon,
     current: item.id === reasoningEffort,
   }))
-  const [commandPool, menuLabel] = query.startsWith(`${MODEL_COMMAND} `)
-    ? ([modelCommands, 'Models'] as const)
+  const commandPool = query.startsWith(`${MODEL_COMMAND} `)
+    ? modelCommands
     : query.startsWith(`${EFFORT_COMMAND} `)
-      ? ([effortCommands, 'Reasoning effort'] as const)
-      : ([SLASH_COMMANDS, 'Commands'] as const)
+      ? effortCommands
+      : SLASH_COMMANDS
   const slashOpen = query.startsWith('/') && !menuDismissed
   const matches = slashOpen
     ? commandPool.filter(
@@ -1005,12 +1033,30 @@ function AgentChatBox({
     ? conversation.slice(0, -1)
     : conversation
 
+  // Snap the transcript to the bottom whenever a new exchange arrives, so the
+  // latest reply is visible the moment the hover opens the scroll area.
+  const historyRef = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    const el = historyRef.current
+    if (el) el.scrollTop = el.scrollHeight
+  }, [history.length])
+
+  const menuActive = slashOpen || mentionOpen
+
   return (
-    <AgentChatShell offset={offset} onOffsetChange={onOffsetChange} running={running}>
+    <AgentChatShell offset={offset} onOffsetChange={onOffsetChange} running={running} containerRef={containerRef}>
       {history.length > 0 ? (
-        <div className="grid grid-rows-[0fr] opacity-0 transition-[grid-template-rows,opacity] duration-200 ease-out group-hover/agent:grid-rows-[1fr] group-hover/agent:opacity-100">
+        <div
+          className={cn(
+            'grid transition-[grid-template-rows,opacity] duration-200 ease-out',
+            slashOpen
+              ? 'grid-rows-[0fr] opacity-0'
+              : 'grid-rows-[0fr] opacity-0 group-hover/agent:grid-rows-[1fr] group-hover/agent:opacity-100',
+          )}
+        >
           <div className="min-h-0 overflow-hidden">
             <div
+              ref={historyRef}
               aria-label="Conversation history"
               className="max-h-56 space-y-3 overflow-y-auto border-b border-line/70 px-3 py-3 overscroll-contain"
             >
@@ -1044,341 +1090,256 @@ function AgentChatBox({
         </div>
       ) : null}
 
-      {approval ? (
-        <div className="border-b border-line/70 px-3 py-2">
-          <div className="min-w-0">
-            <p className="text-xs text-foreground">
-              Delete{' '}
-              {approvalCount(approval.part)} on the canvas?
-            </p>
-            <div className="mt-1.5 flex items-center gap-1.5">
-              <button
-                type="button"
-                className="rounded-sm bg-foreground px-2 py-0.5 text-2xs font-medium text-background hover:opacity-90"
-                onClick={() =>
-                  void chat.addToolApprovalResponse({
-                    id: approval.approvalId,
-                    approved: true,
-                  })
-                }
-              >
-                Delete
-              </button>
-              <button
-                type="button"
-                className="rounded-sm px-2 py-0.5 text-2xs text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
-                onClick={() =>
-                  void chat.addToolApprovalResponse({
-                    id: approval.approvalId,
-                    approved: false,
-                    reason: 'The person declined the deletion.',
-                  })
-                }
-              >
-                Keep them
-              </button>
+      <div>
+        <div className="min-h-0 overflow-hidden">
+          {approval ? (
+            <div className="border-b border-line/70 px-3 py-2">
+              <div className="min-w-0">
+                <p className="text-xs text-foreground">
+                  Delete{' '}
+                  {approvalCount(approval.part)} on the canvas?
+                </p>
+                <div className="mt-1.5 flex items-center gap-1.5">
+                  <button
+                    type="button"
+                    className="rounded-sm bg-foreground px-2 py-0.5 text-2xs font-medium text-background hover:opacity-90"
+                    onClick={() =>
+                      void chat.addToolApprovalResponse({
+                        id: approval.approvalId,
+                        approved: true,
+                      })
+                    }
+                  >
+                    Delete
+                  </button>
+                  <button
+                    type="button"
+                    className="rounded-sm px-2 py-0.5 text-2xs text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
+                    onClick={() =>
+                      void chat.addToolApprovalResponse({
+                        id: approval.approvalId,
+                        approved: false,
+                        reason: 'The person declined the deletion.',
+                      })
+                    }
+                  >
+                    Keep them
+                  </button>
+                </div>
+              </div>
             </div>
-          </div>
-        </div>
-      ) : line ? (
-        <div className="border-b border-line/70 px-3 py-2">
-          <p
-            className={cn(
-              'max-h-32 min-w-0 overflow-y-auto whitespace-pre-wrap text-xs',
-              running
-                ? 'cx-shimmer text-muted-foreground'
-                : error
-                  ? 'text-destructive-foreground'
-                  : 'text-foreground',
-            )}
-          >
-            {line}
-          </p>
-        </div>
-      ) : null}
-
-      {slashOpen ? (
-        <div className="border-b border-line/70">
-          <p className="px-3 pt-2 text-2xs font-medium uppercase tracking-wider text-muted-foreground/70">
-            {menuLabel}
-          </p>
-          {matches.length > 0 ? (
-            <ul
-              role="listbox"
-              aria-label="Commands"
-              className="max-h-56 overflow-y-auto p-1"
-            >
-              {matches.map((command, index) => {
-                const Icon = command.icon
-                const selected = command.name === active?.name
-                return (
-                  <li key={command.name}>
-                    <button
-                      type="button"
-                      role="option"
-                      aria-selected={selected}
-                      // The textarea keeps focus so typing never stops; the mouse
-                      // only moves the highlight the keyboard is already driving.
-                      onMouseDown={(event) => event.preventDefault()}
-                      onMouseEnter={() => setHighlighted(index)}
-                      onClick={() => void choose(command.name)}
-                      className={cn(
-                        'flex w-full items-center gap-2.5 rounded-md px-1.5 py-1.5 text-start transition-colors duration-75',
-                        selected && 'bg-foreground/8',
-                      )}
-                    >
-                      <MenuIconTile selected={selected}>
-                        <Icon size={13} />
-                      </MenuIconTile>
-                      <span className="min-w-0 flex-1">
-                        <span className="block truncate text-xs text-foreground">
-                          {command.description}
-                        </span>
-                        {/* What is typed stays bright; the rest of the command
-                            is a ghost. A bare slash dims nothing. */}
-                        <span className="block truncate font-mono text-2xs text-muted-foreground">
-                          {command.name.startsWith(query) && query.length > 1 ? (
-                            <>
-                              <span className="text-foreground/80">
-                                {command.name.slice(0, query.length)}
-                              </span>
-                              {command.name.slice(query.length)}
-                            </>
-                          ) : (
-                            command.name
-                          )}
-                        </span>
-                      </span>
-                      {command.current ? (
-                        <CheckIcon size={12} className="shrink-0 text-foreground" />
-                      ) : (
-                        <Kbd
-                          className={cn(
-                            'h-4 min-w-4 bg-transparent text-2xs transition-opacity duration-75',
-                            selected ? 'opacity-100' : 'opacity-0',
-                          )}
-                        >
-                          ↵
-                        </Kbd>
-                      )}
-                    </button>
-                  </li>
-                )
-              })}
-            </ul>
-          ) : (
-            <p className="px-3 py-2.5 text-xs text-muted-foreground">
-              No matching command.
-            </p>
-          )}
-          <AgentMenuFooter action="run" />
-        </div>
-      ) : null}
-
-      {mentionOpen ? (
-        <div className="border-b border-line/70">
-          <p className="px-3 pt-2 text-2xs font-medium uppercase tracking-wider text-muted-foreground/70">
-            Layers
-          </p>
-          {mentionMatches.length > 0 ? (
-            <ul
-              role="listbox"
-              aria-label="Layers"
-              className="max-h-56 overflow-y-auto p-1"
-            >
-              {mentionMatches.map((node, index) => {
-                const Icon = mentionIcon(node.type)
-                const selected = node.id === activeMention?.id
-                return (
-                  <li key={node.id}>
-                    <button
-                      type="button"
-                      role="option"
-                      aria-selected={selected}
-                      onMouseDown={(event) => event.preventDefault()}
-                      onMouseEnter={() => setHighlighted(index)}
-                      onClick={() => chooseMention(node)}
-                      className={cn(
-                        'flex w-full items-center gap-2.5 rounded-md px-1.5 py-1.5 text-start transition-colors duration-75',
-                        selected && 'bg-foreground/8',
-                      )}
-                    >
-                      <MenuIconTile selected={selected}>
-                        <Icon size={13} />
-                      </MenuIconTile>
-                      <span className="min-w-0 flex-1">
-                        <span className="block truncate text-xs text-foreground">
-                          {highlightMatch(node.name, mentionQuery)}
-                        </span>
-                        <span className="block truncate text-2xs text-muted-foreground">
-                          {node.path ? `${node.path} · ${node.type}` : node.type}
-                        </span>
-                      </span>
-                      <Kbd
-                        className={cn(
-                          'h-4 min-w-4 bg-transparent text-2xs transition-opacity duration-75',
-                          selected ? 'opacity-100' : 'opacity-0',
-                        )}
-                      >
-                        ↵
-                      </Kbd>
-                    </button>
-                  </li>
-                )
-              })}
-            </ul>
-          ) : (
-            <p className="px-3 py-2.5 text-xs text-muted-foreground">
-              No layers match.
-            </p>
-          )}
-          <AgentMenuFooter action="insert" />
-        </div>
-      ) : null}
-
-      {draftMentions.length > 0 ? (
-        <div className="flex flex-wrap gap-1 border-b border-line/50 px-2.5 pb-1.5 pt-2">
-          {draftMentions.map((mention) => {
-            const Icon = mentionIcon(mention.type)
-            return (
-              <span
-                key={mention.id}
-                className="inline-flex max-w-full items-center gap-1 rounded-md bg-foreground/8 py-0.5 pl-1.5 pr-0.5 text-2xs text-foreground"
+          ) : line ? (
+            <div className="border-b border-line/70 px-3 py-2">
+              <p
+                className={cn(
+                  'max-h-32 min-w-0 overflow-y-auto whitespace-pre-wrap text-xs',
+                  running
+                    ? 'cx-shimmer text-muted-foreground'
+                    : error
+                      ? 'text-destructive-foreground'
+                      : 'text-foreground',
+                )}
               >
-                <Icon size={11} className="shrink-0 text-muted-foreground" />
-                <span className="min-w-0 truncate">{mention.name}</span>
-                <button
-                  type="button"
-                  aria-label={`Remove ${mention.name}`}
-                  className="grid size-4 shrink-0 place-items-center rounded-sm text-muted-foreground hover:bg-foreground/10 hover:text-foreground"
-                  onMouseDown={(event) => event.preventDefault()}
-                  onClick={() => removeMention(mention.id)}
-                >
-                  <XIcon size={10} />
-                </button>
-              </span>
-            )
-          })}
-        </div>
-      ) : null}
-
-      <div className="flex items-end gap-1.5 px-2.5 py-2">
-        <div className="relative min-w-0 flex-1">
-          {/* Mirror of the draft: plain text plus chips for resolved @names.
-              The textarea sits on top, transparent when non-empty so chips show.
-              Removable chips live in the strip above — the overlay is visual only. */}
-          {input ? (
-            <div
-              aria-hidden
-              className="pointer-events-none absolute inset-0 max-h-40 overflow-hidden whitespace-pre-wrap break-words px-1 py-1.5 text-xs text-foreground"
-            >
-              <MentionsText text={input} mentions={draftMentions} />
+                {line}
+              </p>
             </div>
           ) : null}
-          <textarea
-            ref={inputRef}
-            rows={1}
-            value={input}
-            spellCheck={false}
-            aria-label="Ask the agent"
-            placeholder={
-              connected
-                ? 'Ask the agent…  / commands  @ layers'
-                : `Type ${CHATGPT_LOGIN_COMMAND} to connect ChatGPT`
-            }
-            className={cn(
-              'max-h-40 w-full resize-none bg-transparent px-1 py-1.5 text-xs outline-none placeholder:text-muted-foreground',
-              input
-                ? 'relative caret-foreground text-transparent'
-                : 'text-foreground',
-            )}
-            onChange={(event) => {
-              onInputChange(event.target.value)
-              setMenuDismissed(false)
-              setHighlighted(0)
-            }}
-            onScroll={(event) => {
-              const mirror = event.currentTarget.previousElementSibling
-              if (mirror instanceof HTMLElement) {
-                mirror.scrollTop = event.currentTarget.scrollTop
-              }
-            }}
-            onKeyDown={(event) => {
-              const count =
-                matches.length > 0
-                  ? matches.length
-                  : mentionMatches.length > 0
-                    ? mentionMatches.length
-                    : 0
-              const menuActive = slashOpen || mentionOpen
-              if (event.key === 'Escape') {
-                event.preventDefault()
-                // The menu first, the box second.
-                if (menuActive) setMenuDismissed(true)
-                else onClose()
-                return
-              }
-              if (
-                count > 0 &&
-                (event.key === 'ArrowDown' || event.key === 'ArrowUp')
-              ) {
-                event.preventDefault()
-                const step = event.key === 'ArrowDown' ? 1 : count - 1
-                setHighlighted((current) =>
-                  (Math.min(current, count - 1) + step) % count,
+
+          {slashOpen ? (
+            <div className="border-b border-line/70">
+              {matches.length > 0 ? (
+                <ul role="listbox" aria-label="Commands" className="max-h-56 overflow-y-auto p-1">
+                  {matches.map((command, index) => {
+                    const selected = command.name === active?.name
+                    return (
+                      <li key={command.name}>
+                        <AgentMenuRow
+                          selected={selected}
+                          trailing={
+                            // The typed prefix stays bright; the rest dims.
+                            command.name.startsWith(query) && query.length > 1 ? (
+                              <>
+                                <span className="text-foreground/80">
+                                  {command.name.slice(0, query.length)}
+                                </span>
+                                {command.name.slice(query.length)}
+                              </>
+                            ) : (
+                              command.name
+                            )
+                          }
+                          current={command.current}
+                          onActivate={() => void choose(command.name)}
+                          onMouseEnter={() => setHighlighted(index)}
+                        >
+                          {command.description}
+                        </AgentMenuRow>
+                      </li>
+                    )
+                  })}
+                </ul>
+              ) : (
+                <p className="px-2 py-2 text-xs text-muted-foreground">
+                  No matching command.
+                </p>
+              )}
+            </div>
+          ) : null}
+
+          {mentionOpen ? (
+            <div className="border-b border-line/70">
+              {mentionMatches.length > 0 ? (
+                <ul role="listbox" aria-label="Layers" className="max-h-56 overflow-y-auto p-1">
+                  {mentionMatches.map((node, index) => {
+                    const Icon = mentionIcon(node.type)
+                    const selected = node.id === activeMention?.id
+                    return (
+                      <li key={node.id}>
+                        <AgentMenuRow
+                          selected={selected}
+                          icon={Icon}
+                          trailing={node.path ? `${node.path} · ${node.type}` : node.type}
+                          onActivate={() => chooseMention(node)}
+                          onMouseEnter={() => setHighlighted(index)}
+                        >
+                          {highlightMatch(node.name, mentionQuery)}
+                        </AgentMenuRow>
+                      </li>
+                    )
+                  })}
+                </ul>
+              ) : (
+                <p className="px-2 py-2 text-xs text-muted-foreground">
+                  No layers match.
+                </p>
+              )}
+            </div>
+          ) : null}
+
+          {draftMentions.length > 0 ? (
+            <div className="flex flex-wrap gap-1 border-b border-line/50 px-2.5 pb-1.5 pt-2">
+              {draftMentions.map((mention) => {
+                const Icon = mentionIcon(mention.type)
+                return (
+                  <span
+                    key={mention.id}
+                    className="inline-flex max-w-full items-center gap-1 rounded-md bg-foreground/8 py-0.5 pl-1.5 pr-0.5 text-2xs text-foreground"
+                  >
+                    <Icon size={11} className="shrink-0 text-muted-foreground" />
+                    <span className="min-w-0 truncate">{mention.name}</span>
+                    <button
+                      type="button"
+                      aria-label={`Remove ${mention.name}`}
+                      className="grid size-4 shrink-0 place-items-center rounded-sm text-muted-foreground hover:bg-foreground/10 hover:text-foreground"
+                      onMouseDown={(event) => event.preventDefault()}
+                      onClick={() => removeMention(mention.id)}
+                    >
+                      <XIcon size={10} />
+                    </button>
+                  </span>
                 )
-                return
-              }
-              if (count > 0 && event.key === 'Tab') {
-                // Completes without running, for anybody who wants to look first.
-                event.preventDefault()
-                if (matches.length > 0 && active) onInputChange(active.name)
-                else if (activeMention) chooseMention(activeMention)
-                return
-              }
-              if (event.key === 'Enter' && !event.shiftKey) {
-                event.preventDefault()
-                if (matches.length > 0 && active) void choose(active.name)
-                else if (mentionMatches.length > 0 && activeMention)
-                  chooseMention(activeMention)
-                else void submit()
-              }
-            }}
-          />
-        </div>
-        {running ? (
-          <button
-            type="button"
-            aria-label="Stop the agent"
-            className="grid size-6 shrink-0 place-items-center rounded-sm text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
-            onClick={() => chat.stop()}
-          >
-            <SquareIcon size={12} />
-          </button>
-        ) : (
-          <button
-            type="button"
-            aria-label="Send"
-            disabled={!input.trim()}
-            className={cn(
-              'grid size-6 shrink-0 place-items-center rounded-md transition-colors duration-150',
-              input.trim()
-                ? 'bg-foreground text-background hover:opacity-90'
-                : 'text-muted-foreground disabled:opacity-40',
+              })}
+            </div>
+          ) : null}
+
+          <div className="flex items-center gap-1.5 px-2.5 py-2">
+            <div className="relative min-w-0 flex-1">
+              <textarea
+                ref={inputRef}
+                rows={1}
+                value={input}
+                spellCheck={false}
+                aria-label="Ask the agent"
+                placeholder={
+                  connected
+                    ? 'Ask the agent…  / commands  @ layers'
+                    : `Type ${CHATGPT_LOGIN_COMMAND} to connect ChatGPT`
+                }
+                className={cn(
+                  'block max-h-40 w-full resize-none bg-transparent px-1 py-1.5 text-xs text-foreground outline-none placeholder:text-muted-foreground',
+                )}
+                onChange={(event) => {
+                  onInputChange(event.target.value)
+                  setMenuDismissed(false)
+                  setHighlighted(0)
+                }}
+                onKeyDown={(event) => {
+                  const count =
+                    matches.length > 0
+                      ? matches.length
+                      : mentionMatches.length > 0
+                        ? mentionMatches.length
+                        : 0
+                  if (event.key === 'Escape') {
+                    event.preventDefault()
+                    // The menu first, the box second.
+                    if (menuActive) setMenuDismissed(true)
+                    else onClose()
+                    return
+                  }
+                  if (
+                    count > 0 &&
+                    (event.key === 'ArrowDown' || event.key === 'ArrowUp')
+                  ) {
+                    event.preventDefault()
+                    const step = event.key === 'ArrowDown' ? 1 : count - 1
+                    setHighlighted((current) =>
+                      (Math.min(current, count - 1) + step) % count,
+                    )
+                    return
+                  }
+                  if (count > 0 && event.key === 'Tab') {
+                    // Completes without running, for anybody who wants to look first.
+                    event.preventDefault()
+                    if (matches.length > 0 && active) onInputChange(active.name)
+                    else if (activeMention) chooseMention(activeMention)
+                    return
+                  }
+                  if (event.key === 'Enter' && !event.shiftKey) {
+                    event.preventDefault()
+                    if (matches.length > 0 && active) void choose(active.name)
+                    else if (mentionMatches.length > 0 && activeMention)
+                      chooseMention(activeMention)
+                    else void submit()
+                  }
+                }}
+              />
+            </div>
+            {running ? (
+              <button
+                type="button"
+                aria-label="Stop the agent"
+                className="grid size-6 shrink-0 place-items-center rounded-sm text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
+                onClick={() => chat.stop()}
+              >
+                <SquareIcon size={12} />
+              </button>
+            ) : (
+              <button
+                type="button"
+                aria-label="Send"
+                disabled={!input.trim()}
+                className={cn(
+                  'grid size-6 shrink-0 place-items-center rounded-md transition-colors duration-150',
+                  input.trim()
+                    ? 'bg-foreground text-background hover:opacity-90'
+                    : 'text-muted-foreground disabled:opacity-40',
+                )}
+                onClick={() => void submit()}
+              >
+                <SendIcon size={13} />
+              </button>
             )}
-            onClick={() => void submit()}
-          >
-            <SendIcon size={13} />
-          </button>
-        )}
-        <button
-          type="button"
-          aria-label="Close the agent"
-          className="grid size-6 shrink-0 place-items-center rounded-sm text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
-          onClick={onClose}
-        >
-          <XIcon size={13} />
-        </button>
+            <button
+              type="button"
+              aria-label="Close the agent"
+              className="grid size-6 shrink-0 place-items-center rounded-sm text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
+              onClick={onClose}
+            >
+              <XIcon size={13} />
+            </button>
+          </div>
+        </div>
       </div>
 
       {needsConnection(chat.error) ? (

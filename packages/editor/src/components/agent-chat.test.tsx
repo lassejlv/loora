@@ -221,8 +221,9 @@ describe('AgentChat', () => {
     expect(history.textContent).not.toContain('The billing section is ready.')
     expect(history.className).toContain('max-h-56')
     expect(history.className).toContain('overflow-y-auto')
+    // The transcript is inside the collapsible wrapper that reveals it on hover.
     expect(history.parentElement?.parentElement?.className).toContain(
-      'group-hover/agent:opacity-100',
+      'transition-[grid-template-rows,opacity]',
     )
   })
 
@@ -354,7 +355,7 @@ describe('AgentChat', () => {
     fireEvent.change(field, { target: { value: '/' } })
 
     const options = view.getAllByRole('option')
-    // Soft label first, command name underneath.
+    // Single-line: human label, then the raw command name trailing.
     expect(options.map((option) => option.textContent)).toEqual([
       expect.stringMatching(/Connect ChatGPT.*\/login-with-chatgpt/s),
       expect.stringMatching(/Disconnect ChatGPT.*\/logout-chatgpt/s),
@@ -363,8 +364,6 @@ describe('AgentChat', () => {
       expect.stringMatching(/New thread.*\/new/s),
     ])
     expect(options[0].getAttribute('aria-selected')).toBe('true')
-    expect(view.getByText('navigate')).toBeTruthy()
-    expect(view.getByText('close')).toBeTruthy()
   })
 
   test('an unmatched slash shows an empty state instead of vanishing', async () => {
@@ -610,20 +609,18 @@ describe('AgentChat', () => {
 
     fireEvent.change(field, { target: { value: 'make @he' } })
     const options = view.getAllByRole('option')
-    // Prefix rank: Hero section before Heading; ancestry path disambiguates.
+    // Single-line: name, then trailing `path · type`.
     expect(options.map((option) => option.textContent)).toEqual([
       expect.stringMatching(/Hero section.*Home · frame/s),
       expect.stringMatching(/Heading.*Home \/ Hero section · text/s),
     ])
-    expect(view.getByText('insert')).toBeTruthy()
 
     await act(async () => {
       fireEvent.click(options[0])
     })
     expect(field.value).toBe('make @Hero section ')
-    // Removable chip strip + mirror highlight over the transparent field.
+    // Removable chip strip above the input.
     expect(view.getByRole('button', { name: 'Remove Hero section' })).toBeTruthy()
-    expect(view.getByText('@Hero section')).toBeTruthy()
 
     fireEvent.change(field, { target: { value: 'make @Hero section blue' } })
     await act(async () => {
@@ -713,6 +710,85 @@ describe('AgentChat', () => {
 
     fireEvent.change(field, { target: { value: 'make it blue' } })
     expect(view.queryAllByRole('option')).toHaveLength(0)
+  })
+
+  test('keeps the input visible when no menu is open', async () => {
+    const view = await open(
+      <AgentChat designId="d1" draftId={null} open onOpenChange={() => {}} />,
+    )
+    const input = view.getByLabelText('Ask the agent')
+    expect(input).toBeTruthy()
+    expect(input.closest('.cx-agent-box')).toBeTruthy()
+    expect(input.className).toContain('block')
+    expect(input.parentElement?.parentElement?.className).toContain('items-center')
+  })
+
+  test('shows slash commands above the input and hides history', async () => {
+    chatState.messages = [
+      {
+        id: 'm1',
+        role: 'user',
+        parts: [{ type: 'text', text: 'Build a settings screen' }],
+      },
+      {
+        id: 'm2',
+        role: 'assistant',
+        parts: [{ type: 'text', text: 'The settings screen is ready.' }],
+      },
+    ]
+    const view = await open(
+      <AgentChat designId="d1" draftId={null} open onOpenChange={() => {}} />,
+    )
+    const input = view.getByLabelText('Ask the agent')
+    fireEvent.change(input, { target: { value: '/' } })
+
+    const menu = view.getByRole('listbox', { name: 'Commands' })
+    const history = view.getByLabelText('Conversation history')
+    const historyWrapper = history.parentElement?.parentElement as HTMLElement
+
+    expect(menu.compareDocumentPosition(input) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(input).toBeTruthy()
+    expect(historyWrapper.className).toContain('grid-rows-[0fr]')
+    expect(historyWrapper.className).toContain('opacity-0')
+    expect(historyWrapper.className).not.toContain('group-hover/agent:grid-rows-[1fr]')
+  })
+
+  test('auto-scrolls the transcript to the bottom', async () => {
+    const long = Array.from({ length: 30 }, (_, index) => ({
+      id: `u${index}`,
+      role: index % 2 === 0 ? 'user' : 'assistant',
+      parts: [{ type: 'text', text: `Message ${index}` }],
+    }))
+    chatState.messages = long
+    const view = await open(
+      <AgentChat designId="d1" draftId={null} open onOpenChange={() => {}} />,
+    )
+    const history = view.getByLabelText('Conversation history') as HTMLDivElement
+    expect(history.scrollTop).toBeGreaterThanOrEqual(history.scrollHeight - 50)
+  })
+
+  test('textarea shows plain text without a mirror overlay', async () => {
+    const view = await open(
+      <AgentChat
+        designId="d1"
+        draftId={null}
+        open
+        onOpenChange={() => {}}
+        nodes={() => [{ id: 'n1', name: 'Hero', type: 'frame', path: 'Home' }]}
+      />,
+    )
+    const field = view.getByLabelText('Ask the agent') as HTMLTextAreaElement
+
+    fireEvent.change(field, { target: { value: '@' } })
+    await act(async () => {
+      fireEvent.click(view.getAllByRole('option')[0])
+    })
+    fireEvent.change(field, { target: { value: 'restyle @Hero blue' } })
+    // The textarea carries the plain text, visibly.
+    expect(field.value).toBe('restyle @Hero blue')
+    // No aria-hidden mirror div sits over the input.
+    const inputRow = field.parentElement
+    expect(inputRow?.querySelector('[aria-hidden]')).toBeNull()
   })
 })
 

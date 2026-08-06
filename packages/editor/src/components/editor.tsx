@@ -359,6 +359,7 @@ function CanvasShell({
   const isMobile = useIsMobile()
   const canvasSession = useCanvasSession()
   const controlsRef = useRef<CanvasSurfaceControls>(null)
+  const agentContainerRef = useRef<HTMLDivElement>(null)
   const [mobileInspector, setMobileInspector] = useState<
     'layers' | 'design' | null
   >(null)
@@ -1174,7 +1175,7 @@ function CanvasShell({
           ) : null}
           {/* The free canvas area. The tool clusters float inside it so they
               stay centred on what is visible, not on the whole viewport. */}
-          <div className="relative min-h-0 min-w-0 flex-1">
+          <div ref={agentContainerRef} className="relative min-h-0 min-w-0 flex-1">
             <TooltipProvider delay={400} closeDelay={0}>
               <CanvasToolStrip
                 actions={actions}
@@ -1209,6 +1210,7 @@ function CanvasShell({
                 open={agentOpen}
                 onOpenChange={setAgentOpen}
                 selection={actions.selection.map((ref) => ref.nodeId)}
+                containerRef={agentContainerRef}
                 nodes={() => {
                   const { nodes } = controller.engine.document
                   return Object.values(nodes).map((node) => {
