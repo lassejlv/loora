@@ -11,6 +11,7 @@ import {
 } from '@loora/canvas/model'
 import { orpc } from '@loora/rpc/client'
 import { apiUrl } from '@loora/platform'
+import type { CanvasPresencePeer } from '@loora/realtime/events'
 
 export interface CanvasSyncTarget {
   designId: string
@@ -25,6 +26,7 @@ export interface CanvasAgentActivity {
   updatedAt: number
   expiresAt?: number
 }
+export type CanvasPeer = CanvasPresencePeer
 
 export interface CanvasRemoteChange {
   sequence: number
@@ -115,18 +117,6 @@ export function applyAcknowledgedTransactions(
     document = applyTransaction(document, transaction).document
   }
   return document
-}
-
-export interface CanvasPeer {
-  sessionId: string
-  userId: string
-  name: string
-  image: string | null
-  color: string
-  role: 'owner' | 'edit' | 'view'
-  cursor: { x: number; y: number } | null
-  selection: string[]
-  updatedAt: number
 }
 
 type CanvasRealtimeMessage =
