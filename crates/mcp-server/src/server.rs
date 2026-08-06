@@ -250,8 +250,9 @@ fn normalize_advertised_schemas(value: &mut Value) {
 
 pub fn router(state: Arc<AppState>) -> Router {
     let public_host = Url::parse(&state.config.public_url)
-        .ok()
-        .and_then(|url| url.host_str().map(str::to_owned));
+        .expect("MCP_PUBLIC_URL is validated during startup")
+        .host_str()
+        .map(str::to_owned);
     let mut allowed_hosts = vec![
         "localhost".to_owned(),
         "127.0.0.1".to_owned(),
