@@ -47,9 +47,9 @@ const SYSTEM_OPTION: ThemeOption = {
   value: 'system',
   label: 'System',
   swatch: {
-    canvas: 'linear-gradient(90deg,#f4f4f5 0 50%,#191918 50%)',
-    surface: 'linear-gradient(90deg,#ffffff 0 50%,#2a2926 50%)',
-    accent: 'linear-gradient(90deg,#3f3f46 0 50%,#8fa8f8 50%)',
+    canvas: 'linear-gradient(90deg,#f4f4f5 0 50%,#0f0f10 50%)',
+    surface: 'linear-gradient(90deg,#ffffff 0 50%,#1e1e21 50%)',
+    accent: 'linear-gradient(90deg,#3f3f46 0 50%,#7aa2f7 50%)',
   },
 }
 

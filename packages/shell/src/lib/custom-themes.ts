@@ -105,11 +105,11 @@ function normalizeColors(input: unknown, fallback: CustomThemeColors): CustomThe
 }
 
 export const DARK_PRESET: CustomThemeColors = {
-  canvas: '#191918',
-  surface: '#242321',
-  line: '#393834',
-  ink: '#efede8',
-  accent: '#8fa8f8',
+  canvas: '#0f0f10',
+  surface: '#18181a',
+  line: '#2c2c30',
+  ink: '#e1e1e1',
+  accent: '#7aa2f7',
 }
 
 export const LIGHT_PRESET: CustomThemeColors = {

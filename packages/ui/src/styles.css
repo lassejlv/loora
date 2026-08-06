@@ -549,53 +549,53 @@ body {
 }
 
 .dark {
-  /* Charcoal mineral: the chrome recedes around the authored document instead
-     of turning the editor into a blue-black developer tool. */
-  --cx-canvas: #191918;
-  --cx-dot: #363633;
-  --cx-ink: #efede8;
-  --cx-accent: #8fa8f8;
+  /* Grok Night, pulled a step darker so the chrome recedes around authored
+     documents while keeping its clean neutral base and crisp terminal hues. */
+  --cx-canvas: #0f0f10;
+  --cx-dot: #2d2d30;
+  --cx-ink: #e1e1e1;
+  --cx-accent: #7aa2f7;
 
-  --background: #1d1c1b;
+  --background: #121213;
   --foreground: var(--cx-ink);
-  --card: #242321;
+  --card: #18181a;
   --card-foreground: var(--cx-ink);
-  --popover: #2a2926;
+  --popover: #1e1e21;
   --popover-foreground: var(--cx-ink);
-  --primary: #e7e4de;
-  --primary-foreground: #1d1c1b;
+  --primary: #7aa2f7;
+  --primary-foreground: #0a0a0a;
   --secondary: --alpha(var(--color-white) / 7%);
   --secondary-foreground: var(--cx-ink);
   --muted: --alpha(var(--color-white) / 5%);
-  --muted-foreground: #aaa69e;
-  --accent: --alpha(var(--color-white) / 8%);
+  --muted-foreground: #8f8f94;
+  --accent: --alpha(#7aa2f7 / 15%);
   --accent-foreground: var(--cx-ink);
-  --destructive: var(--color-red-500);
-  --destructive-foreground: var(--color-red-300);
-  --border: #393834;
-  --input: #484641;
+  --destructive: #f7768e;
+  --destructive-foreground: #ff8fa3;
+  --border: #2c2c30;
+  --input: #3a3a40;
   --ring: var(--cx-accent);
   --sidebar: var(--background);
   --sidebar-foreground: var(--foreground);
   --sidebar-primary: var(--cx-accent);
-  --sidebar-primary-foreground: #171716;
+  --sidebar-primary-foreground: #0a0a0a;
   --sidebar-accent: var(--secondary);
   --sidebar-accent-foreground: var(--foreground);
   --sidebar-border: var(--border);
   --sidebar-ring: var(--ring);
-  --info: var(--color-blue-400);
-  --info-foreground: var(--color-blue-300);
-  --success: var(--color-emerald-400);
-  --success-foreground: var(--color-emerald-300);
-  --diff-added: var(--color-emerald-400);
-  --diff-removed: var(--color-red-400);
-  --skill: var(--color-violet-400);
-  --warning: var(--color-amber-400);
-  --warning-foreground: var(--color-amber-300);
+  --info: #7dcfff;
+  --info-foreground: #89ddff;
+  --success: #9ece6a;
+  --success-foreground: #b9f27c;
+  --diff-added: #9ece6a;
+  --diff-removed: #f7768e;
+  --skill: #bb9af7;
+  --warning: #e0af68;
+  --warning-foreground: #ffc777;
 
-  --surface: #242321;
-  --surface-2: #2a2926;
-  --line: #393834;
+  --surface: #18181a;
+  --surface-2: #1e1e21;
+  --line: #2c2c30;
   --panel-shadow: 0 1px 2px --alpha(var(--color-black) / 24%);
   --panel-shadow-lg:
     0 18px 42px -18px --alpha(var(--color-black) / 70%),

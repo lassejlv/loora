@@ -47,8 +47,8 @@ export const BUILT_IN_THEMES: ThemeMeta[] = [
     id: 'dark',
     label: 'Dark',
     dark: true,
-    themeColor: '#1d1c1b',
-    swatch: { canvas: '#191918', surface: '#242321', accent: '#8fa8f8' },
+    themeColor: '#121213',
+    swatch: { canvas: '#0f0f10', surface: '#18181a', accent: '#7aa2f7' },
   },
   {
     id: 'tokyo-night',
