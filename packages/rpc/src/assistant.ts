@@ -210,6 +210,9 @@ export async function saveAssistantMessages(
     .onConflictDoUpdate({
       target: assistantMessage.id,
       set: { parts: sql`excluded.parts` },
+      // A client may retry its own streamed message, but it may never use a
+      // message id to update a row in another person's thread.
+      setWhere: eq(assistantMessage.threadId, id),
     })
   const title = threadTitle(window)
   await db

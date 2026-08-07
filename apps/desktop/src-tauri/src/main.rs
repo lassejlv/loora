@@ -13,11 +13,12 @@ use axum::{
     },
     http::{
         header::{
-            ACCEPT, CACHE_CONTROL, CONTENT_ENCODING, CONTENT_LENGTH, CONTENT_TYPE, COOKIE,
-            LOCATION, ORIGIN, REFERER, SET_COOKIE,
+            ACCEPT, CACHE_CONTROL, CONTENT_ENCODING, CONTENT_LENGTH, CONTENT_TYPE, COOKIE, HOST,
+            LOCATION, ORIGIN, REFERER, REFERRER_POLICY, SET_COOKIE,
         },
         HeaderMap, HeaderName, Method, StatusCode,
     },
+    middleware::{self, Next},
     response::{Html, IntoResponse, Response},
     routing::{any, get, post},
     Json, Router,
@@ -30,6 +31,7 @@ use rand::RngCore;
 use reqwest::redirect::Policy;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
+use subtle::ConstantTimeEq;
 use tauri::{Manager, WebviewUrl, WebviewWindowBuilder};
 use tokio::{fs, net::TcpListener, sync::RwLock};
 use tokio_tungstenite::{
@@ -46,6 +48,8 @@ use url::Url;
 const REALTIME_PROTOCOL: &str = "loora.realtime.v1";
 const KEYRING_SERVICE: &str = "design.loora.desktop";
 const KEYRING_ACCOUNT: &str = "session";
+const BRIDGE_COOKIE_PREFIX: &str = "loora_bridge";
+const BRIDGE_QUERY: &str = "bridge";
 
 #[derive(Clone)]
 struct Config {
@@ -62,6 +66,7 @@ struct AppState {
     port: u16,
     pending_state: Arc<RwLock<Option<String>>>,
     realtime_upstream: Arc<RwLock<Option<String>>>,
+    bridge_token: String,
     session: SessionStore,
 }
 
@@ -213,6 +218,104 @@ fn random_state() -> String {
     let mut bytes = [0_u8; 24];
     rand::rng().fill_bytes(&mut bytes);
     URL_SAFE_NO_PAD.encode(bytes)
+}
+
+fn random_bridge_token() -> String {
+    let mut bytes = [0_u8; 32];
+    rand::rng().fill_bytes(&mut bytes);
+    URL_SAFE_NO_PAD.encode(bytes)
+}
+
+fn bridge_origin(port: u16) -> String {
+    format!("http://127.0.0.1:{port}")
+}
+
+fn secret_matches(value: &str, expected: &str) -> bool {
+    value.len() == expected.len() && bool::from(value.as_bytes().ct_eq(expected.as_bytes()))
+}
+
+fn bridge_cookie_name(port: u16) -> String {
+    format!("{BRIDGE_COOKIE_PREFIX}_{port}")
+}
+
+fn has_bridge_cookie(headers: &HeaderMap, port: u16, expected: &str) -> bool {
+    let expected_name = bridge_cookie_name(port);
+    headers
+        .get_all(COOKIE)
+        .iter()
+        .filter_map(|value| value.to_str().ok())
+        .flat_map(|value| value.split(';'))
+        .filter_map(|part| part.trim().split_once('='))
+        .any(|(name, value)| name == expected_name && secret_matches(value, expected))
+}
+
+fn has_expected_host(headers: &HeaderMap, port: u16) -> bool {
+    headers
+        .get(HOST)
+        .and_then(|value| value.to_str().ok())
+        .is_some_and(|value| value == format!("127.0.0.1:{port}"))
+}
+
+fn has_trusted_origin(headers: &HeaderMap, port: u16) -> bool {
+    headers
+        .get(ORIGIN)
+        .map(|value| {
+            value
+                .to_str()
+                .is_ok_and(|value| value == bridge_origin(port))
+        })
+        .unwrap_or(true)
+}
+
+fn bridge_query_token(request: &Request) -> Option<String> {
+    url::form_urlencoded::parse(request.uri().query()?.as_bytes())
+        .find(|(name, _)| name == BRIDGE_QUERY)
+        .map(|(_, value)| value.into_owned())
+}
+
+fn bridge_bootstrap_response(port: u16, token: &str) -> Response {
+    Response::builder()
+        .status(StatusCode::SEE_OTHER)
+        .header(LOCATION, "/")
+        .header(CACHE_CONTROL, "no-store")
+        .header(REFERRER_POLICY, "no-referrer")
+        .header(
+            SET_COOKIE,
+            format!(
+                "{}={token}; Path=/; HttpOnly; SameSite=Strict",
+                bridge_cookie_name(port),
+            ),
+        )
+        .body(Body::empty())
+        .unwrap_or_else(|_| StatusCode::INTERNAL_SERVER_ERROR.into_response())
+}
+
+async fn require_bridge(State(state): State<AppState>, request: Request, next: Next) -> Response {
+    if !has_expected_host(request.headers(), state.port) {
+        return (StatusCode::FORBIDDEN, "Untrusted desktop host").into_response();
+    }
+
+    if request.method() == Method::GET
+        && request.uri().path() == "/"
+        && bridge_query_token(&request)
+            .is_some_and(|value| secret_matches(&value, &state.bridge_token))
+    {
+        return bridge_bootstrap_response(state.port, &state.bridge_token);
+    }
+
+    // The browser hand-off cannot carry the webview cookie. Its random, pending
+    // state plus the server's single-use token authenticate this one route.
+    if request.uri().path() == "/callback" {
+        return next.run(request).await;
+    }
+
+    if !has_trusted_origin(request.headers(), state.port) {
+        return (StatusCode::FORBIDDEN, "Untrusted desktop origin").into_response();
+    }
+    if !has_bridge_cookie(request.headers(), state.port, &state.bridge_token) {
+        return (StatusCode::UNAUTHORIZED, "Unauthorized desktop request").into_response();
+    }
+    next.run(request).await
 }
 
 fn page(title: &str, message: &str) -> Response {
@@ -761,6 +864,10 @@ fn router(state: AppState) -> Router {
         .route("/realtime", get(realtime))
         .route("/api/{*path}", any(proxy_api))
         .fallback(serve_app)
+        .layer(middleware::from_fn_with_state(
+            state.clone(),
+            require_bridge,
+        ))
         .with_state(state)
 }
 
@@ -781,6 +888,7 @@ fn main() {
                     .port();
                 let config = Config::read(&handle);
                 let session = SessionStore::load().await;
+                let bridge_token = random_bridge_token();
                 let state = AppState {
                     config,
                     client: reqwest::Client::builder()
@@ -794,6 +902,7 @@ fn main() {
                     port,
                     pending_state: Arc::new(RwLock::new(None)),
                     realtime_upstream: Arc::new(RwLock::new(None)),
+                    bridge_token: bridge_token.clone(),
                     session,
                 };
                 tauri::async_runtime::spawn(async move {
@@ -802,8 +911,10 @@ fn main() {
                     }
                 });
 
-                let url = Url::parse(&format!("http://127.0.0.1:{port}/"))
-                    .map_err(|error| format!("could not build desktop URL: {error}"))?;
+                let url = Url::parse(&format!(
+                    "http://127.0.0.1:{port}/?{BRIDGE_QUERY}={bridge_token}"
+                ))
+                .map_err(|error| format!("could not build desktop URL: {error}"))?;
                 WebviewWindowBuilder::new(&handle, "main", WebviewUrl::External(url))
                     .title("Loora")
                     .inner_size(1440.0, 900.0)
@@ -823,6 +934,137 @@ fn main() {
 mod tests {
     use super::*;
     use axum::http::header::{AUTHORIZATION, CONNECTION, HOST};
+    use tower::ServiceExt;
+
+    fn test_state() -> AppState {
+        AppState {
+            config: Config {
+                api_origin: Url::parse("https://loora.test").unwrap(),
+                app_origin: Url::parse("https://loora.test").unwrap(),
+                dev_server: None,
+                app_root: PathBuf::from("/unused"),
+            },
+            client: reqwest::Client::new(),
+            port: 4300,
+            pending_state: Arc::new(RwLock::new(None)),
+            realtime_upstream: Arc::new(RwLock::new(None)),
+            bridge_token: "test-bridge-token".to_owned(),
+            session: SessionStore {
+                token: Arc::new(RwLock::new(None)),
+                legacy_path: PathBuf::from("/unused"),
+            },
+        }
+    }
+
+    #[tokio::test]
+    async fn rejects_an_unauthenticated_loopback_request() {
+        let response = router(test_state())
+            .oneshot(
+                Request::builder()
+                    .uri("/desktop/session")
+                    .header(HOST, "127.0.0.1:4300")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    #[tokio::test]
+    async fn rejects_a_dns_rebinding_host_with_a_valid_cookie() {
+        let response = router(test_state())
+            .oneshot(
+                Request::builder()
+                    .uri("/desktop/session")
+                    .header(HOST, "attacker.example:4300")
+                    .header(COOKIE, "loora_bridge_4300=test-bridge-token")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::FORBIDDEN);
+    }
+
+    #[tokio::test]
+    async fn rejects_an_untrusted_browser_origin_with_a_valid_cookie() {
+        let response = router(test_state())
+            .oneshot(
+                Request::builder()
+                    .uri("/desktop/session")
+                    .header(HOST, "127.0.0.1:4300")
+                    .header(ORIGIN, "https://attacker.example")
+                    .header(COOKIE, "loora_bridge_4300=test-bridge-token")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::FORBIDDEN);
+    }
+
+    #[tokio::test]
+    async fn bootstraps_the_webview_cookie_once() {
+        let response = router(test_state())
+            .oneshot(
+                Request::builder()
+                    .uri("/?bridge=test-bridge-token")
+                    .header(HOST, "127.0.0.1:4300")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::SEE_OTHER);
+        assert_eq!(response.headers().get(LOCATION).unwrap(), "/");
+        let cookie = response
+            .headers()
+            .get(SET_COOKIE)
+            .unwrap()
+            .to_str()
+            .unwrap();
+        assert!(cookie.starts_with("loora_bridge_4300=test-bridge-token;"));
+        assert!(cookie.contains("HttpOnly"));
+        assert!(cookie.contains("SameSite=Strict"));
+    }
+
+    #[tokio::test]
+    async fn accepts_the_bootstrapped_webview() {
+        let response = router(test_state())
+            .oneshot(
+                Request::builder()
+                    .uri("/desktop/session")
+                    .header(HOST, "127.0.0.1:4300")
+                    .header(COOKIE, "loora_bridge_4300=test-bridge-token")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn keeps_the_state_protected_browser_callback_reachable() {
+        let response = router(test_state())
+            .oneshot(
+                Request::builder()
+                    .uri("/callback?state=wrong&token=wrong")
+                    .header(HOST, "127.0.0.1:4300")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+    }
 
     #[test]
     fn random_state_matches_web_handoff_contract() {
