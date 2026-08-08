@@ -17,7 +17,11 @@ actions!(loora, [Quit]);
 
 fn main() {
     #[cfg(target_os = "linux")]
-    loora_ui::init_linux_canvas();
+    {
+        // Prefer X11/XWayland before GPUI's compositor guess and GTK init.
+        loora_ui::prefer_x11_for_canvas();
+        loora_ui::init_linux_canvas();
+    }
 
     application()
         .with_assets(Assets)
