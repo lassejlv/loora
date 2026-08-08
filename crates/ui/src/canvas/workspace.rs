@@ -36,9 +36,7 @@ use crate::context_menu::{
     ContextMenuEntry,
 };
 use crate::icon::IconName;
-use crate::settings::{
-    resolve_keystrokes, shortcut_catalog, SettingsDialog, SettingsSection,
-};
+use crate::settings::{resolve_keystrokes, shortcut_catalog, SettingsSection};
 use crate::theme::{Theme, ThemeKind};
 
 actions!(
@@ -184,7 +182,7 @@ pub struct CanvasWorkspace {
     command_query: String,
     command_index: usize,
     command_edit: Option<TextCursor>,
-    settings_open: bool,
+    settings_route_active: bool,
     settings_section: SettingsSection,
     shortcut_overrides: HashMap<String, String>,
     shortcut_recording: Option<String>,
@@ -351,7 +349,7 @@ impl CanvasWorkspace {
             command_query: String::new(),
             command_index: 0,
             command_edit: None,
-            settings_open: false,
+            settings_route_active: false,
             settings_section: SettingsSection::General,
             shortcut_overrides,
             shortcut_recording: None,
@@ -1420,40 +1418,60 @@ impl CanvasWorkspace {
         cx.notify();
     }
 
-    pub fn open_settings(&mut self, cx: &mut Context<Self>) {
-        self.close_command_dialog(cx);
-        self.settings_open = true;
-        self.settings_section = SettingsSection::General;
-        self.shortcut_recording = None;
-        self.shortcut_search.clear();
-        self.shortcut_search_focused = false;
-        cx.notify();
+    pub fn open_settings(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.navigate_to(SettingsSection::General.path(), window, cx);
     }
 
-    pub fn close_settings(&mut self, cx: &mut Context<Self>) {
-        if !self.settings_open {
-            return;
-        }
-        self.settings_open = false;
-        self.shortcut_recording = None;
-        self.shortcut_search_focused = false;
-        cx.notify();
-    }
-
-    pub fn toggle_settings_panel(&mut self, cx: &mut Context<Self>) {
-        if self.settings_open {
-            self.close_settings(cx);
-        } else {
-            self.open_settings(cx);
-        }
-    }
-
-    pub fn select_settings_section(&mut self, section: SettingsSection, cx: &mut Context<Self>) {
+    pub fn set_settings_route_active(
+        &mut self,
+        active: bool,
+        section: SettingsSection,
+        cx: &mut Context<Self>,
+    ) {
+        let changed = self.settings_route_active != active || self.settings_section != section;
+        self.settings_route_active = active;
         self.settings_section = section;
-        self.shortcut_recording = None;
-        if section != SettingsSection::Shortcuts {
+        if !active {
+            self.shortcut_recording = None;
             self.shortcut_search_focused = false;
         }
+        // Hide the native webview child when leaving the canvas route.
+        self.webview.update(cx, |view, _| {
+            view.set_visible(!active);
+        });
+        if changed {
+            cx.notify();
+        }
+    }
+
+    pub fn set_canvas_route_active(&mut self, active: bool, cx: &mut Context<Self>) {
+        if active {
+            self.set_settings_route_active(false, SettingsSection::General, cx);
+            self.webview.update(cx, |view, _| {
+                view.set_visible(true);
+            });
+        }
+    }
+
+    pub fn theme(&self) -> Theme {
+        self.theme
+    }
+
+    pub fn shortcut_overrides(&self) -> &HashMap<String, String> {
+        &self.shortcut_overrides
+    }
+
+    pub fn shortcut_recording(&self) -> Option<&str> {
+        self.shortcut_recording.as_deref()
+    }
+
+    pub fn shortcut_search(&self) -> &str {
+        &self.shortcut_search
+    }
+
+    fn navigate_to(&mut self, path: &str, window: &mut Window, cx: &mut Context<Self>) {
+        gpui_router::RouterState::global_mut(cx).with_path(SharedString::from(path));
+        window.refresh();
         cx.notify();
     }
 
@@ -5270,8 +5288,8 @@ impl CanvasWorkspace {
         self.toggle_files_panel(cx);
     }
 
-    fn toggle_settings(&mut self, _: &ToggleSettings, _: &mut Window, cx: &mut Context<Self>) {
-        self.toggle_settings_panel(cx);
+    fn toggle_settings(&mut self, _: &ToggleSettings, window: &mut Window, cx: &mut Context<Self>) {
+        self.open_settings(window, cx);
     }
 
     fn workspace_quit(&mut self, _: &WorkspaceQuit, _: &mut Window, cx: &mut Context<Self>) {
@@ -5279,8 +5297,8 @@ impl CanvasWorkspace {
     }
 
     fn on_key_down(&mut self, event: &KeyDownEvent, _window: &mut Window, cx: &mut Context<Self>) {
-        if self.settings_open {
-            self.on_settings_key_down(event, cx);
+        if self.settings_route_active {
+            self.on_settings_key_down(event, _window, cx);
             return;
         }
 
@@ -5644,7 +5662,16 @@ impl CanvasWorkspace {
         }
     }
 
-    fn on_settings_key_down(&mut self, event: &KeyDownEvent, cx: &mut Context<Self>) {
+    pub fn handle_settings_key_down(
+        &mut self,
+        event: &KeyDownEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.on_settings_key_down(event, window, cx);
+    }
+
+    fn on_settings_key_down(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
         let key = event.keystroke.key.as_str();
 
         if self.shortcut_recording.is_some() {
@@ -5668,7 +5695,7 @@ impl CanvasWorkspace {
         }
 
         if key == "escape" {
-            self.close_settings(cx);
+            self.navigate_to("/", window, cx);
             cx.stop_propagation();
             return;
         }
@@ -6142,7 +6169,7 @@ fn workspace_key_bindings(overrides: &HashMap<String, String>) -> Vec<KeyBinding
 fn binding_for_action(action_id: &str, keystroke: &str) -> Option<KeyBinding> {
     let context = Some("CanvasWorkspace");
     let binding = match action_id {
-        "toggle_settings" => KeyBinding::new(keystroke, ToggleSettings, context),
+        "toggle_settings" => KeyBinding::new(keystroke, ToggleSettings, None),
         "new_design" => KeyBinding::new(keystroke, NewDesign, context),
         "open_designs" => KeyBinding::new(keystroke, ToggleFiles, context),
         "save_design" => KeyBinding::new(keystroke, SaveDesign, context),
@@ -6216,11 +6243,6 @@ impl Render for CanvasWorkspace {
             .command_edit
             .as_ref()
             .map(|cursor| (cursor.anchor, cursor.caret));
-        let settings_open = self.settings_open;
-        let settings_section = self.settings_section;
-        let shortcut_overrides = self.shortcut_overrides.clone();
-        let shortcut_recording = self.shortcut_recording.clone();
-        let shortcut_search = self.shortcut_search.clone();
         let files = self.files.clone();
         let active_id = self.document_id();
         let dirty = self.dirty;
@@ -6421,10 +6443,10 @@ impl Render for CanvasWorkspace {
                                             })
                                             .on_click({
                                                 let entity = entity.clone();
-                                                move |_, _, cx| {
+                                                move |_, window, cx| {
                                                     cx.stop_propagation();
                                                     entity.update(cx, |this, cx| {
-                                                        this.open_settings(cx);
+                                                        this.open_settings(window, cx);
                                                     });
                                                 }
                                             })
@@ -6489,16 +6511,6 @@ impl Render for CanvasWorkspace {
                     command_index,
                     command_selection,
                     dirty,
-                ))
-            })
-            .when(settings_open, |this| {
-                this.child(SettingsDialog::new(
-                    entity.clone(),
-                    theme,
-                    settings_section,
-                    shortcut_overrides,
-                    shortcut_recording,
-                    shortcut_search,
                 ))
             })
             .when_some(image_picker, |this, picker| {

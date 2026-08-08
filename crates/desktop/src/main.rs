@@ -1,12 +1,15 @@
+mod app_root;
+
+use app_root::AppRoot;
 use gpui::{
     actions, point, prelude::*, px, size, App, Bounds, KeyBinding, Menu, MenuItem, QuitMode,
     TitlebarOptions, WindowBackgroundAppearance, WindowBounds, WindowOptions,
 };
 use gpui_platform::application;
 use loora_ui::{
-    Assets, CanvasWorkspace, FitAll, FitSelection, GroupSelection, NewDesign, Redo, SaveDesign,
-    ToggleFiles, ToggleSettings, ToolFrame, ToolHand, ToolImage, ToolRectangle, ToolSelect,
-    ToolText, Undo, UngroupSelection, ZoomIn, ZoomOut, ZoomReset,
+    Assets, FitAll, FitSelection, GroupSelection, NewDesign, Redo, SaveDesign, ToggleFiles,
+    ToggleSettings, ToolFrame, ToolHand, ToolImage, ToolRectangle, ToolSelect, ToolText, Undo,
+    UngroupSelection, ZoomIn, ZoomOut, ZoomReset,
 };
 use std::sync::Arc;
 
@@ -17,6 +20,9 @@ fn main() {
         .with_assets(Assets)
         .with_quit_mode(QuitMode::LastWindowClosed)
         .run(|cx: &mut App| {
+            gpui_router::init(cx);
+            loora_ui::init_motion(cx);
+
             cx.set_app_identity("com.loora.app", "Loora");
             set_app_icon();
             cx.on_action(|_: &Quit, cx| cx.quit());
@@ -87,7 +93,7 @@ fn open_main_window(cx: &mut App) {
         },
         |window, cx| {
             window.set_background_appearance(WindowBackgroundAppearance::Blurred);
-            cx.new(|cx| CanvasWorkspace::new(window, cx))
+            cx.new(|cx| AppRoot::new(window, cx))
         },
     )
     .expect("failed to open Loora window");

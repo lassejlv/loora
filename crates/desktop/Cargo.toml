@@ -10,6 +10,7 @@ path = "src/main.rs"
 [dependencies]
 gpui.workspace = true
 gpui_platform.workspace = true
+gpui-router.workspace = true
 image = { version = "0.25", default-features = false, features = ["png"] }
 loora-ui.workspace = true
 

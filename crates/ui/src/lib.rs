@@ -40,7 +40,7 @@ pub use motion::{
 };
 pub use settings::{
     display_keystroke, format_keystroke_label, resolve_keystrokes, shortcut_catalog,
-    SettingsDialog, SettingsSection, ShortcutCategory, ShortcutDef,
+    SettingsSection, SettingsSectionPage, SettingsShell, ShortcutCategory, ShortcutDef,
 };
 pub use sidebar::{Sidebar, SidebarEntry, SidebarItem};
 pub use text_field::{blinking_caret, field_content};

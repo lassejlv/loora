@@ -3547,6 +3547,7 @@ version = "0.1.0"
 dependencies = [
  "embed-resource",
  "gpui",
+ "gpui-router",
  "gpui_platform",
  "image",
  "loora-ui",
@@ -3572,6 +3573,7 @@ dependencies = [
  "async-channel",
  "base64",
  "gpui",
+ "gpui-router",
  "image",
  "loora-engine",
  "serde_json",

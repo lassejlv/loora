@@ -1,25 +1,93 @@
-//! Cursor-inspired settings overlay: sidebar nav + section content.
+//! Full-page settings route (Cursor-inspired sidebar + content).
 
 use std::collections::HashMap;
 
 use gpui::{
-    div, prelude::FluentBuilder, px, Entity, FontWeight, InteractiveElement, IntoElement,
-    MouseButton, ParentElement, RenderOnce, SharedString, StatefulInteractiveElement, Styled,
+    div, prelude::FluentBuilder, px, AnyElement, App, Entity, FontWeight, InteractiveElement,
+    IntoElement, MouseButton, ParentElement, SharedString, StatefulInteractiveElement, Styled,
+    Window,
 };
+use gpui_router::{use_location, Layout, Outlet};
 
-use crate::CanvasWorkspace;
 use crate::icon::{Icon, IconName};
-use crate::motion::{Ease, Motion, MotionStyle, Transition};
 use crate::settings::shortcuts::{
     display_keystroke, resolve_keystrokes, shortcut_catalog, ShortcutCategory, ShortcutDef,
 };
 use crate::settings::SettingsSection;
 use crate::sidebar::{Sidebar, SidebarEntry};
 use crate::theme::{Theme, ThemeKind};
-use std::time::Duration;
+use crate::CanvasWorkspace;
 
+/// Layout shell for `/settings` and nested section routes.
+pub struct SettingsShell {
+    workspace: Entity<CanvasWorkspace>,
+    theme: Theme,
+    section: SettingsSection,
+    outlet: AnyElement,
+}
+
+impl SettingsShell {
+    pub fn new(
+        workspace: Entity<CanvasWorkspace>,
+        theme: Theme,
+        section: SettingsSection,
+    ) -> Self {
+        Self {
+            workspace,
+            theme,
+            section,
+            outlet: div().into_any_element(),
+        }
+    }
+}
+
+impl Layout for SettingsShell {
+    fn outlet(&mut self, element: AnyElement) {
+        self.outlet = element;
+    }
+
+    fn render_layout(self: Box<Self>, window: &mut Window, cx: &mut App) -> AnyElement {
+        let theme = self.theme;
+        let workspace = self.workspace;
+        let section = self.section;
+
+        // Keep shortcut keyboard handling active while this page is shown.
+        workspace.update(cx, |this, cx| {
+            this.set_settings_route_active(true, section, cx);
+        });
+
+        div()
+            .size_full()
+            .flex()
+            .flex_row()
+            .bg(theme.main_bg)
+            .child(settings_sidebar(theme, section, window, cx))
+            .child(
+                div()
+                    .flex_1()
+                    .h_full()
+                    .min_w_0()
+                    .flex()
+                    .flex_col()
+                    .bg(theme.main_bg)
+                    .child(settings_header(theme, section))
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_h_0()
+                            .overflow_hidden()
+                            .px(px(28.))
+                            .pb(px(28.))
+                            .child(Outlet::from(self.outlet)),
+                    ),
+            )
+            .into_any_element()
+    }
+}
+
+/// Section body for a settings route.
 #[derive(IntoElement)]
-pub struct SettingsDialog {
+pub struct SettingsSectionPage {
     workspace: Entity<CanvasWorkspace>,
     theme: Theme,
     section: SettingsSection,
@@ -28,7 +96,7 @@ pub struct SettingsDialog {
     query: String,
 }
 
-impl SettingsDialog {
+impl SettingsSectionPage {
     pub fn new(
         workspace: Entity<CanvasWorkspace>,
         theme: Theme,
@@ -48,117 +116,89 @@ impl SettingsDialog {
     }
 }
 
-impl RenderOnce for SettingsDialog {
-    fn render(self, _window: &mut gpui::Window, _cx: &mut gpui::App) -> impl IntoElement {
+impl gpui::RenderOnce for SettingsSectionPage {
+    fn render(self, _window: &mut Window, _cx: &mut App) -> impl IntoElement {
         let theme = self.theme;
         let workspace = self.workspace;
-        let section = self.section;
-        let overrides = self.shortcut_overrides;
-        let recording = self.recording;
-        let query = self.query;
-
-        div()
-            .absolute()
-            .inset_0()
-            .occlude()
-            .flex()
-            .items_center()
-            .justify_center()
-            .bg(theme.overlay_scrim())
-            .on_mouse_down(MouseButton::Left, {
-                let workspace = workspace.clone();
-                move |_, _, cx| {
-                    workspace.update(cx, |this, cx| this.close_settings(cx));
-                }
-            })
-            .child(
-                Motion::new()
-                    .id("settings-dialog")
-                    .initial(MotionStyle::new().opacity(0.).y(px(14.)).scale(0.98))
-                    .animate(MotionStyle::new().opacity(1.).y(px(0.)).scale(1.))
-                    .transition(Transition::tween(Duration::from_millis(240)).ease(Ease::EaseOut))
-                    .child(
-                        div()
-                            .w(px(920.))
-                            .h(px(620.))
-                            .flex()
-                            .flex_row()
-                            .rounded(px(16.))
-                            .border_1()
-                            .border_color(theme.hairline())
-                            .bg(theme.main_bg)
-                            .shadow_lg()
-                            .overflow_hidden()
-                            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-                            .child(settings_sidebar(theme, section, workspace.clone()))
-                            .child(
-                                div()
-                                    .flex_1()
-                                    .h_full()
-                                    .min_w_0()
-                                    .flex()
-                                    .flex_col()
-                                    .bg(theme.main_bg)
-                                    .child(settings_header(theme, section, workspace.clone()))
-                                    .child(
-                                        div()
-                                            .flex_1()
-                                            .min_h_0()
-                                            .overflow_hidden()
-                                            .px(px(28.))
-                                            .pb(px(28.))
-                                            .child(match section {
-                                                SettingsSection::General => {
-                                                    general_page(theme, workspace.clone()).into_any_element()
-                                                }
-                                                SettingsSection::Appearance => {
-                                                    appearance_page(theme, workspace.clone())
-                                                        .into_any_element()
-                                                }
-                                                SettingsSection::Shortcuts => shortcuts_page(
-                                                    theme,
-                                                    workspace,
-                                                    overrides,
-                                                    recording,
-                                                    query,
-                                                )
-                                                .into_any_element(),
-                                            }),
-                                    ),
-                            ),
-                    ),
+        match self.section {
+            SettingsSection::General => general_page(theme, workspace).into_any_element(),
+            SettingsSection::Appearance => appearance_page(theme, workspace).into_any_element(),
+            SettingsSection::Shortcuts => shortcuts_page(
+                theme,
+                workspace,
+                self.shortcut_overrides,
+                self.recording,
+                self.query,
             )
+            .into_any_element(),
+        }
     }
+}
+
+fn navigate_to(path: &str, window: &mut Window, cx: &mut App) {
+    gpui_router::RouterState::global_mut(cx).with_path(path.into());
+    window.refresh();
 }
 
 fn settings_sidebar(
     theme: Theme,
     section: SettingsSection,
-    workspace: Entity<CanvasWorkspace>,
+    _window: &mut Window,
+    _cx: &mut App,
 ) -> impl IntoElement {
-    Sidebar::new(theme)
-        .title("Settings")
-        .subtitle("Preferences")
-        .width(220.0_f32)
-        .selected(section.id())
-        .items([
-            SidebarEntry::new("general", "General", IconName::Settings),
-            SidebarEntry::new("appearance", "Appearance", IconName::View),
-            SidebarEntry::new("shortcuts", "Shortcuts", IconName::Keyboard),
-        ])
-        .pt(px(20.))
-        .on_select(move |id, _, cx| {
-            if let Some(next) = SettingsSection::parse(id) {
-                workspace.update(cx, |this, cx| this.select_settings_section(next, cx));
-            }
-        })
+    let pathname = if _cx.has_global::<gpui_router::RouterState>() {
+        use_location(_cx).pathname.to_string()
+    } else {
+        section.path().to_string()
+    };
+    let selected = SettingsSection::from_pathname(&pathname);
+
+    div()
+        .flex()
+        .flex_col()
+        .h_full()
+        .child(
+            div()
+                .id("settings-back")
+                .flex()
+                .items_center()
+                .gap_2()
+                .h(px(44.))
+                .px(px(16.))
+                .pt(px(10.))
+                .cursor_pointer()
+                .text_color(theme.muted)
+                .hover(|s| s.text_color(theme.foreground))
+                .on_mouse_down(MouseButton::Left, move |_, window, cx| {
+                    navigate_to("/", window, cx);
+                })
+                .child(
+                    div()
+                        .text_size(px(13.))
+                        .child("← Back"),
+                ),
+        )
+        .child(
+            Sidebar::new(theme)
+                .title("Settings")
+                .subtitle("Preferences")
+                .width(220.0_f32)
+                .selected(selected.id())
+                .items([
+                    SidebarEntry::new("general", "General", IconName::Settings),
+                    SidebarEntry::new("appearance", "Appearance", IconName::View),
+                    SidebarEntry::new("shortcuts", "Shortcuts", IconName::Keyboard),
+                ])
+                .pt(px(8.))
+                .on_select(move |id, window, cx| {
+                    if let Some(next) = SettingsSection::parse(id) {
+                        navigate_to(next.path(), window, cx);
+                    }
+                }),
+        )
 }
 
-fn settings_header(
-    theme: Theme,
-    section: SettingsSection,
-    workspace: Entity<CanvasWorkspace>,
-) -> impl IntoElement {
+fn settings_header(theme: Theme, section: SettingsSection) -> impl IntoElement {
     div()
         .flex()
         .items_center()
@@ -173,22 +213,6 @@ fn settings_header(
                 .font_weight(FontWeight::SEMIBOLD)
                 .text_color(theme.foreground)
                 .child(section.label()),
-        )
-        .child(
-            div()
-                .id("settings-close")
-                .flex()
-                .items_center()
-                .justify_center()
-                .size(px(32.))
-                .rounded(px(8.))
-                .cursor_pointer()
-                .text_color(theme.muted)
-                .hover(|s| s.bg(theme.hover).text_color(theme.foreground))
-                .on_mouse_down(MouseButton::Left, move |_, _, cx| {
-                    workspace.update(cx, |this, cx| this.close_settings(cx));
-                })
-                .child(Icon::hugeicon(IconName::CancelSquare).size(px(16.))),
         )
 }
 
@@ -219,13 +243,8 @@ fn general_page(theme: Theme, workspace: Entity<CanvasWorkspace>) -> impl IntoEl
                     "Open Shortcuts",
                     "Remap keyboard shortcuts used across the canvas",
                     "Open",
-                    {
-                        let workspace = workspace.clone();
-                        move |_, _, cx| {
-                            workspace.update(cx, |this, cx| {
-                                this.select_settings_section(SettingsSection::Shortcuts, cx);
-                            });
-                        }
+                    move |_, window, cx| {
+                        navigate_to(SettingsSection::Shortcuts.path(), window, cx);
                     },
                 ))
                 .child(divider(theme))
@@ -234,12 +253,17 @@ fn general_page(theme: Theme, workspace: Entity<CanvasWorkspace>) -> impl IntoEl
                     "Appearance",
                     "Switch between dark and light chrome",
                     "Open",
-                    move |_, _, cx| {
-                        workspace.update(cx, |this, cx| {
-                            this.select_settings_section(SettingsSection::Appearance, cx);
-                        });
+                    move |_, window, cx| {
+                        navigate_to(SettingsSection::Appearance.path(), window, cx);
                     },
                 )),
+        )
+        .child(
+            // Touch workspace so the page stays subscribed to preference updates.
+            div().id("settings-general-workspace-ref").child({
+                let _ = workspace;
+                ""
+            }),
         )
 }
 
@@ -641,7 +665,7 @@ fn action_row(
     title: &'static str,
     description: &'static str,
     action_label: &'static str,
-    on_click: impl Fn(&gpui::MouseDownEvent, &mut gpui::Window, &mut gpui::App) + 'static,
+    on_click: impl Fn(&gpui::MouseDownEvent, &mut Window, &mut App) + 'static,
 ) -> impl IntoElement {
     div()
         .flex()
