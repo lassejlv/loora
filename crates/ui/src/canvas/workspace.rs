@@ -430,12 +430,14 @@ impl CanvasWorkspace {
         self.webview.update(cx, |view, _| {
             view.reclaim_host_keyboard();
         });
-        if !window.is_window_active() {
-            window.activate_window();
-        }
-        if !self.focus_handle.is_focused(window) {
-            self.focus_handle.focus(window, cx);
-        }
+        // Always re-activate: after a wry child click the window may still report
+        // active while X keyboard focus is stuck on the embed container.
+        window.activate_window();
+        self.focus_handle.focus(window, cx);
+        eprintln!(
+            "loora: host keyboard reclaim (focused={})",
+            self.focus_handle.is_focused(window)
+        );
     }
 
     fn shell_chrome_token(&self) -> ShellChromeToken {

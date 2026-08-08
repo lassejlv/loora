@@ -155,8 +155,12 @@ impl CanvasWebView {
                     position: Position::Logical(LogicalPosition::new(0.0, 0.0)),
                     size: WrySize::Logical(LogicalSize::new(1.0, 1.0)),
                 })?;
-                // Prefer host keyboard; pointer still targets the child.
-                let _ = webview.focus_parent();
+                // Prefer host keyboard on platforms where focus_parent is the real host.
+                // On Linux this would focus the child GTK container and steal X keys.
+                #[cfg(not(target_os = "linux"))]
+                {
+                    let _ = webview.focus_parent();
+                }
                 Ok(Rc::new(webview))
             })
             .map_err(|error| {
@@ -315,7 +319,17 @@ impl CanvasWebView {
         let Some(webview) = self.webview.as_ref() else {
             return;
         };
-        let _ = webview.focus_parent();
+        // On Linux X11 embed, wry's parent_window is the child container GTK
+        // window — focusing it steals X keyboard away from GPUI and keys vanish.
+        // Only call focus_parent on platforms where the parent is the real host.
+        #[cfg(not(target_os = "linux"))]
+        {
+            let _ = webview.focus_parent();
+        }
+        #[cfg(target_os = "linux")]
+        {
+            let _ = webview;
+        }
     }
 
     /// Give the child webview keyboard focus (platforms where grab_focus delivers keys).
@@ -340,7 +354,10 @@ pub fn pump_linux_canvas() {
 }
 
 fn collapse_webview(webview: &wry::WebView) {
-    let _ = webview.focus_parent();
+    #[cfg(not(target_os = "linux"))]
+    {
+        let _ = webview.focus_parent();
+    }
     let _ = webview.set_visible(false);
     let _ = webview.set_bounds(Rect {
         position: Position::Logical(LogicalPosition::new(-10_000.0, -10_000.0)),
@@ -553,8 +570,8 @@ impl Element for CanvasWebViewElement {
             .as_ref()
             .map(|hitbox| hitbox.bounds)
             .unwrap_or(bounds);
-        // Do not steal keyboard every frame — canvas shortcuts run in JS while the
-        // child owns focus. Only reclaim when the pointer hits GPUI chrome.
+        // Do not steal keyboard every frame — canvas shortcuts run on the host
+        // after canvas-pointer reclaim. Only clear the owns flag on chrome clicks.
         window.with_content_mask(Some(ContentMask { bounds }), |window| {
             let webview = self.view.clone();
             let parent = self.parent.clone();
@@ -563,7 +580,16 @@ impl Element for CanvasWebViewElement {
                     return;
                 }
                 if !bounds.contains(&event.position) {
-                    let _ = webview.focus_parent();
+                    // Linux: do not focus_parent (child GTK window). GPUI already
+                    // has this click; just clear the owns flag.
+                    #[cfg(not(target_os = "linux"))]
+                    {
+                        let _ = webview.focus_parent();
+                    }
+                    #[cfg(target_os = "linux")]
+                    {
+                        let _ = &webview;
+                    }
                     parent.update(cx, |view, _| {
                         view.set_webview_owns_keyboard(false);
                     });
