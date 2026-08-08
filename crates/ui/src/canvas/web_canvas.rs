@@ -447,6 +447,15 @@ html,body,#loora-app{width:100%;height:100%;margin:0;overflow:hidden;background:
 #loora-toolbar [data-tip]:hover::after{content:attr(data-tip);position:absolute;left:50%;bottom:calc(100% + 8px);transform:translateX(-50%);white-space:nowrap;padding:0 8px;height:24px;line-height:24px;border-radius:7px;border:1px solid var(--loora-toolbar-border);background:var(--loora-toolbar-tip-bg);color:var(--loora-toolbar-tip-fg);font:500 11px/24px -apple-system,BlinkMacSystemFont,sans-serif;pointer-events:none;z-index:2;box-shadow:var(--loora-toolbar-shadow)}
 #loora-zoom{position:absolute;right:16px;bottom:16px;height:28px;padding:0 10px;border-radius:7px;border:1px solid var(--loora-toolbar-border);background:var(--loora-toolbar-bg);color:var(--loora-toolbar-fg);font:500 11px/26px -apple-system,BlinkMacSystemFont,sans-serif;cursor:pointer;z-index:50;pointer-events:auto;box-shadow:var(--loora-toolbar-shadow)}
 #loora-zoom:hover{color:var(--loora-toolbar-active-fg)}
+#loora-context-menu[hidden]{display:none}
+#loora-context-menu{position:fixed;z-index:100;min-width:220px;max-height:calc(100vh - 16px);padding:6px;border:1px solid var(--loora-toolbar-border);border-radius:10px;background:var(--loora-toolbar-bg);box-shadow:var(--loora-toolbar-shadow);backdrop-filter:blur(16px);overflow:auto;box-sizing:border-box;font:500 12px/1 -apple-system,BlinkMacSystemFont,sans-serif}
+.loora-context-item{display:flex;align-items:center;justify-content:space-between;width:100%;height:32px;padding:0 10px;border:0;border-radius:7px;background:transparent;color:var(--loora-toolbar-fg);font:inherit;text-align:left;cursor:default}
+.loora-context-item:hover,.loora-context-item.is-highlighted{background:var(--loora-toolbar-hover);color:var(--loora-toolbar-active-fg)}
+.loora-context-item:disabled{opacity:.38}
+.loora-context-item:disabled:hover{background:transparent;color:var(--loora-toolbar-fg)}
+.loora-context-item.is-destructive{color:#ff6b72}
+.loora-context-shortcut{margin-left:24px;color:color-mix(in srgb,var(--loora-toolbar-fg) 62%,transparent);font-size:11px}
+.loora-context-separator{height:1px;margin:4px 8px;background:var(--loora-toolbar-border)}
 </style>
 <style id="loora-document-css"></style>
 </head>
@@ -471,6 +480,7 @@ html,body,#loora-app{width:100%;height:100%;margin:0;overflow:hidden;background:
       <button type="button" class="loora-action" data-cmd="redo" data-tip="Redo  ⌘⇧Z" id="loora-redo"><svg viewBox="0 0 24 24" fill="none"><path d="M20 10H10a5 5 0 1 0 0 10h5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><path d="m16 6 4 4-4 4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
   </div>
   <button type="button" id="loora-zoom" data-cmd="fit-selection">100%</button>
+  <div id="loora-context-menu" role="menu" hidden></div>
 </div>
 <script>
 (() => {
@@ -481,6 +491,7 @@ html,body,#loora-app{width:100%;height:100%;margin:0;overflow:hidden;background:
   const zoomChip = document.getElementById('loora-zoom');
   const undoBtn = document.getElementById('loora-undo');
   const redoBtn = document.getElementById('loora-redo');
+  const contextMenu = document.getElementById('loora-context-menu');
   const state = {
     camera: { x: 40, y: 40, zoom: 1 },
     selection: [],
@@ -491,12 +502,15 @@ html,body,#loora-app{width:100%;height:100%;margin:0;overflow:hidden;background:
     drag: null,
     dragFrame: 0,
     dragPointer: null,
+    pendingDragCommit: null,
+    pendingDragCommitTimer: 0,
     cameraPost: 0,
     spacePan: false,
     nodes: new Map(),
     handles: new Map(),
     groupBox: null,
     guideEls: [],
+    contextMenuIndex: 0,
   };
   const SNAP_PX = 5;
   const GUIDE_LABEL_MIN = 1;
@@ -519,6 +533,70 @@ html,body,#loora-app{width:100%;height:100%;margin:0;overflow:hidden;background:
     if (undoBtn) undoBtn.disabled = !state.canUndo;
     if (redoBtn) redoBtn.disabled = !state.canRedo;
   };
+  const contextMenuItems = () => [...contextMenu.querySelectorAll('.loora-context-item:not(:disabled)')];
+  const highlightContextMenuItem = index => {
+    const items = contextMenuItems();
+    if (!items.length) return;
+    state.contextMenuIndex = (index + items.length) % items.length;
+    items.forEach((item, itemIndex) => item.classList.toggle('is-highlighted', itemIndex === state.contextMenuIndex));
+  };
+  const hideContextMenu = () => {
+    contextMenu.hidden = true;
+    contextMenu.replaceChildren();
+    state.contextMenuIndex = 0;
+  };
+  const showContextMenu = command => {
+    contextMenu.replaceChildren();
+    for (const entry of command.entries || []) {
+      if (entry.separator) {
+        const separator = document.createElement('div');
+        separator.className = 'loora-context-separator';
+        separator.setAttribute('role', 'separator');
+        contextMenu.appendChild(separator);
+        continue;
+      }
+      const item = document.createElement('button');
+      item.type = 'button';
+      item.className = `loora-context-item${entry.destructive ? ' is-destructive' : ''}`;
+      item.dataset.contextAction = entry.id || '';
+      item.disabled = entry.enabled === false;
+      item.setAttribute('role', 'menuitem');
+      const label = document.createElement('span');
+      label.textContent = entry.label || '';
+      item.appendChild(label);
+      if (entry.shortcut) {
+        const shortcut = document.createElement('span');
+        shortcut.className = 'loora-context-shortcut';
+        shortcut.textContent = entry.shortcut;
+        item.appendChild(shortcut);
+      }
+      item.addEventListener('pointerenter', () => {
+        const items = contextMenuItems();
+        const index = items.indexOf(item);
+        if (index >= 0) highlightContextMenuItem(index);
+      });
+      contextMenu.appendChild(item);
+    }
+    contextMenu.hidden = false;
+    const margin = 8;
+    const x = Math.max(margin, Math.min(Number(command.x) || 0, innerWidth - contextMenu.offsetWidth - margin));
+    const y = Math.max(margin, Math.min(Number(command.y) || 0, innerHeight - contextMenu.offsetHeight - margin));
+    contextMenu.style.left = `${x}px`;
+    contextMenu.style.top = `${y}px`;
+    highlightContextMenuItem(0);
+  };
+  contextMenu.addEventListener('pointerdown', event => event.stopPropagation());
+  contextMenu.addEventListener('click', event => {
+    const item = event.target.closest('[data-context-action]');
+    if (!item || item.disabled) return;
+    const action = item.dataset.contextAction;
+    hideContextMenu();
+    post('context-action', { action });
+  });
+  document.addEventListener('pointerdown', event => {
+    if (!contextMenu.hidden && !contextMenu.contains(event.target)) hideContextMenu();
+  }, true);
+  window.addEventListener('blur', hideContextMenu);
   document.getElementById('loora-toolbar')?.addEventListener('pointerdown', event => {
     event.stopPropagation();
   });
@@ -544,7 +622,8 @@ html,body,#loora-app{width:100%;height:100%;margin:0;overflow:hidden;background:
     const label = target instanceof Element ? target.closest('[data-loora-page-label]') : null;
     return label ? nodeForId(label.dataset.looraPageLabel) : null;
   };
-  const visualNode = node => node?.dataset.looraKind === 'page'
+  const isRootFrame = node => node?.dataset.looraRoot === 'true';
+  const visualNode = node => isRootFrame(node)
     ? node.closest('.loora-page-host') || node
     : node;
   const cameraTransform = () => {
@@ -851,7 +930,7 @@ html,body,#loora-app{width:100%;height:100%;margin:0;overflow:hidden;background:
     visuals.forEach(visual => { visual.style.pointerEvents = 'none'; });
     const stack = document.elementsFromPoint(event.clientX, event.clientY);
     visuals.forEach((visual, index) => { visual.style.pointerEvents = previousPointerEvents[index]; });
-    const containers = new Set(['page', 'frame', 'component', 'instance']);
+    const containers = new Set(['frame', 'component', 'instance']);
     const visited = new Set();
     for (const element of stack) {
       let candidate = element.closest?.('[data-loora-node]') || null;
@@ -883,7 +962,7 @@ html,body,#loora-app{width:100%;height:100%;margin:0;overflow:hidden;background:
   const selectionUnionRect = () => {
     const nodes = state.selection
       .map(id => nodeForId(id))
-      .filter(node => node && node.dataset.looraKind !== 'page' && node.dataset.looraLocked !== 'true');
+      .filter(node => node && node.dataset.looraLocked !== 'true');
     if (!nodes.length) return null;
     let x1 = Infinity, y1 = Infinity, x2 = -Infinity, y2 = -Infinity;
     for (const node of nodes) {
@@ -1010,9 +1089,9 @@ html,body,#loora-app{width:100%;height:100%;margin:0;overflow:hidden;background:
       if (moved) moved.style.translate = offset;
     }
     if (drag.type === 'resize') {
-      if (drag.node.dataset.looraKind === 'page') {
-        // The visible artboard is a host around the page node. Resizing only
-        // the inner node is ignored by its width:100% page rule and leaves the
+      if (isRootFrame(drag.node)) {
+        // The visible artboard is a host around the root frame. Resizing only
+        // the inner node is ignored by its width:100% root rule and leaves the
         // handles detached from the actual edge.
         element.style.width = `${bounds.width}px`;
         element.style.height = `${bounds.height}px`;
@@ -1051,9 +1130,9 @@ html,body,#loora-app{width:100%;height:100%;margin:0;overflow:hidden;background:
   const marqueeSelection = bounds => {
     const ids = [];
     for (const node of state.nodes.values()) {
-      // Page hosts span the whole artboard, so any marquee inside one would
-      // select the page itself instead of the content the user swept over.
-      if (node.dataset.looraKind === 'page') continue;
+      // Root hosts span the whole artboard, so any marquee inside one would
+      // select the frame itself instead of the content the user swept over.
+      if (isRootFrame(node)) continue;
       if (getComputedStyle(node).display === 'none') continue;
       if (rectsIntersect(bounds, worldRect(node))) ids.push(node.dataset.looraNode);
     }
@@ -1061,13 +1140,12 @@ html,body,#loora-app{width:100%;height:100%;margin:0;overflow:hidden;background:
   };
   // Dragging a frame already moves its children; keeping a selected descendant in
   // the set would translate it twice on screen and again in the engine.
-  const movableDragSet = (ids, allowPages) => {
+  const movableDragSet = ids => {
     const items = [];
     for (const id of ids) {
       const node = nodeForId(id);
       if (!node) continue;
       if (node.dataset.looraLocked === 'true') continue;
-      if (!allowPages && node.dataset.looraKind === 'page') continue;
       items.push({ node, origin:worldRect(node) });
     }
     return items.filter(item => !items.some(other => other !== item && other.node.contains(item.node)));
@@ -1146,7 +1224,7 @@ html,body,#loora-app{width:100%;height:100%;margin:0;overflow:hidden;background:
     const id = node.dataset.looraNode;
     const multi = !event.shiftKey && state.selection.length > 1 && state.selection.includes(id);
     if (!multi) choose(id, event.shiftKey);
-    const origins = multi ? movableDragSet(state.selection, false) : movableDragSet([id], true);
+    const origins = multi ? movableDragSet(state.selection) : movableDragSet([id]);
     const primary = origins.find(item => item.node === node) || origins[0];
     if (primary) {
       const ordered = [primary, ...origins.filter(item => item !== primary)];
@@ -1243,7 +1321,7 @@ html,body,#loora-app{width:100%;height:100%;margin:0;overflow:hidden;background:
       moved.style.removeProperty('translate');
       moved.style.removeProperty('will-change');
       if (drag.type === 'resize') {
-        if (item.node.dataset.looraKind === 'page') {
+        if (isRootFrame(item.node)) {
           moved.style.width = `${item.origin.width}px`;
           moved.style.removeProperty('height');
           moved.style.minHeight = `${item.origin.height}px`;
@@ -1256,6 +1334,22 @@ html,body,#loora-app{width:100%;height:100%;margin:0;overflow:hidden;background:
         }
       }
     }
+  };
+  const finishDragCommit = () => {
+    if (!state.pendingDragCommit) return;
+    const drag = state.pendingDragCommit;
+    state.pendingDragCommit = null;
+    clearTimeout(state.pendingDragCommitTimer);
+    state.pendingDragCommitTimer = 0;
+    clearDragPreview(drag);
+    syncHandles();
+  };
+  const awaitDragCommit = drag => {
+    finishDragCommit();
+    state.pendingDragCommit = drag;
+    // A rejected or interrupted native update must not leave an inline preview
+    // transform stuck forever. Normal commits finish on the next CSS refresh.
+    state.pendingDragCommitTimer = setTimeout(finishDragCommit, 1000);
   };
   const cancelDrag = event => {
     cancelQueuedDragPointer();
@@ -1287,8 +1381,7 @@ html,body,#loora-app{width:100%;height:100%;margin:0;overflow:hidden;background:
       const bounds = drag.bounds || drag.origin;
       const move = drag.type === 'move';
       const drop = move ? renderedDropTarget(event, drag) : null;
-      clearDragPreview(drag);
-      syncHandles();
+      awaitDragCommit(drag);
       const payload = {
         id:drag.node.dataset.looraNode,
         mode:drag.type,
@@ -1450,6 +1543,16 @@ html,body,#loora-app{width:100%;height:100%;margin:0;overflow:hidden;background:
     post('context-menu', { id:node?.dataset.looraNode || null, x:event.clientX, y:event.clientY, world });
   });
   surface.addEventListener('keydown', event => {
+    if (!contextMenu.hidden) {
+      if (event.key === 'Escape') hideContextMenu();
+      else if (event.key === 'ArrowDown') highlightContextMenuItem(state.contextMenuIndex + 1);
+      else if (event.key === 'ArrowUp') highlightContextMenuItem(state.contextMenuIndex - 1);
+      else if (event.key === 'Enter' || event.key === ' ') contextMenuItems()[state.contextMenuIndex]?.click();
+      else return;
+      event.preventDefault();
+      event.stopPropagation();
+      return;
+    }
     const editing = event.target instanceof Element && !!event.target.closest('[data-loora-editing="true"]');
     if (editing) {
       if (event.key === 'Escape' || ((event.metaKey || event.ctrlKey) && event.key === 'Enter')) event.target.blur();
@@ -1521,6 +1624,7 @@ html,body,#loora-app{width:100%;height:100%;margin:0;overflow:hidden;background:
   };
 
   window.__looraApply = payload => {
+    finishDragCommit();
     // A full DOM replace invalidates any in-flight drag node references.
     if (state.drag) {
       cancelQueuedDragPointer();
@@ -1587,7 +1691,9 @@ html,body,#loora-app{width:100%;height:100%;margin:0;overflow:hidden;background:
   };
   window.__looraCommand = command => {
     if (!command) return;
-    if (command.type === 'fit-all') fitAll();
+    if (command.type === 'context-menu') showContextMenu(command);
+    else if (command.type === 'dismiss-context-menu') hideContextMenu();
+    else if (command.type === 'fit-all') fitAll();
     else if (command.type === 'focus-page') focusPage(command.id);
     else if (command.type === 'camera') { state.camera={...state.camera,...command.camera}; cameraTransform(); }
     else if (command.type === 'export-png') exportPng();
@@ -1611,6 +1717,9 @@ html,body,#loora-app{width:100%;height:100%;margin:0;overflow:hidden;background:
     else if (command.type === 'patch-css') {
       // Style-only refresh keeps DOM identity (and in-flight drag) intact.
       if (typeof command.css === 'string') css.textContent = command.css;
+      // Clear the inline preview only after the committed CSS is installed so
+      // there is never a painted frame at the old document position.
+      finishDragCommit();
       state.camera = { ...state.camera, ...(command.camera || {}) };
       state.tool = command.tool || state.tool;
       state.preview = !!command.preview;
@@ -1659,7 +1768,7 @@ mod tests {
 
     #[test]
     fn page_resize_updates_the_artboard_host() {
-        assert!(CANVAS_SHELL.contains("drag.node.dataset.looraKind === 'page'"));
+        assert!(CANVAS_SHELL.contains("if (isRootFrame(drag.node))"));
         assert!(CANVAS_SHELL.contains("element.style.width = `${bounds.width}px`"));
         assert!(CANVAS_SHELL.contains("element.style.height = `${bounds.height}px`"));
         assert!(CANVAS_SHELL.contains("positionHandles(renderedBounds)"));
@@ -1670,6 +1779,20 @@ mod tests {
         assert!(CANVAS_SHELL.contains("const queueDragPointer"));
         assert!(CANVAS_SHELL.contains("requestAnimationFrame(flushDragPointer)"));
         assert!(CANVAS_SHELL.contains("cancelAnimationFrame(state.dragFrame)"));
+    }
+
+    #[test]
+    fn drag_preview_survives_until_committed_css_applies() {
+        assert!(CANVAS_SHELL.contains("pendingDragCommit: null"));
+        assert!(CANVAS_SHELL.contains("state.pendingDragCommit = drag"));
+        assert!(CANVAS_SHELL.contains("const finishDragCommit = () =>"));
+
+        let pointer_up = CANVAS_SHELL
+            .split("surface.addEventListener('pointerup', event => {")
+            .nth(1)
+            .and_then(|tail| tail.split("surface.addEventListener('wheel'").next())
+            .expect("pointerup handler");
+        assert!(!pointer_up.contains("clearDragPreview(drag);\n      syncHandles();\n      const payload"));
     }
 
     #[test]
@@ -1693,6 +1816,14 @@ mod tests {
     }
 
     #[test]
+    fn context_menu_lives_inside_webview_chrome() {
+        assert!(CANVAS_SHELL.contains("id=\"loora-context-menu\""));
+        assert!(CANVAS_SHELL.contains("command.type === 'context-menu'"));
+        assert!(CANVAS_SHELL.contains("post('context-action', { action })"));
+        assert!(CANVAS_SHELL.contains("window.addEventListener('blur', hideContextMenu)"));
+    }
+
+    #[test]
     fn webview_drag_snaps_with_smart_guides() {
         assert!(CANVAS_SHELL.contains("const SNAP_PX = 5"));
         assert!(CANVAS_SHELL.contains("const snapMove"));
@@ -1710,8 +1841,8 @@ mod tests {
         assert!(CANVAS_SHELL.contains("border:1.5px dashed #6f8cff"));
         assert!(CANVAS_SHELL.contains("const rectsIntersect"));
         assert!(CANVAS_SHELL.contains("const marqueeSelection"));
-        // Page hosts would swallow every sweep started inside an artboard.
-        assert!(CANVAS_SHELL.contains("if (node.dataset.looraKind === 'page') continue;"));
+        // Root hosts would swallow every sweep started inside an artboard.
+        assert!(CANVAS_SHELL.contains("if (isRootFrame(node)) continue;"));
         assert!(CANVAS_SHELL.contains("post('select', { id:ids.length ? ids[ids.length-1] : null, ids, additive:drag.additive })"));
     }
 

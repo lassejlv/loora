@@ -1,7 +1,7 @@
 use std::{fs, time::Instant};
 
 use loora_engine::{
-    canvas_import::parse_design_bytes, compile_canvas, HtmlCanvasOptions, NodeKind,
+    canvas_import::parse_design_bytes, compile_canvas, HtmlCanvasOptions,
 };
 
 fn hug_page_fixture() -> String {
@@ -87,7 +87,7 @@ fn real_loora_export_preserves_page_flow() {
     let mut pages: Vec<_> = document
         .nodes
         .values()
-        .filter(|node| node.kind == NodeKind::Page)
+        .filter(|node| node.is_root_frame())
         .collect();
     pages.sort_by(|a, b| a.order.total_cmp(&b.order));
     assert_eq!(pages.len(), 2);

@@ -122,7 +122,7 @@ impl CanvasEngine {
         let mut page_ids: Vec<NodeId> = document
             .nodes
             .values()
-            .filter(|node| node.kind == NodeKind::Page)
+            .filter(|node| node.is_root_frame())
             .map(|node| node.id.clone())
             .collect();
         page_ids.sort_by(|left, right| {
@@ -271,8 +271,8 @@ impl CanvasEngine {
         let Some(node) = self.node(page_id) else {
             return Err(EngineError::NodeMissing(page_id.to_string()));
         };
-        if node.kind != NodeKind::Page {
-            return Err(EngineError::InvalidParent("not a page".into()));
+        if !node.is_root_frame() {
+            return Err(EngineError::InvalidParent("not a root frame".into()));
         }
         if &self.document.root_page_id == page_id {
             return Ok(());
@@ -288,7 +288,7 @@ impl CanvasEngine {
             .document
             .nodes
             .values()
-            .filter(|n| n.kind == NodeKind::Page)
+            .filter(|n| n.is_root_frame())
             .map(|n| n.id.clone())
             .collect();
         pages.sort_by(|a, b| {
@@ -335,7 +335,7 @@ impl CanvasEngine {
             .document
             .nodes
             .values()
-            .filter(|n| n.kind == NodeKind::Page)
+            .filter(|n| n.is_root_frame())
             .map(|n| n.id.clone())
             .collect();
         pages.sort_by(|a, b| {
@@ -522,7 +522,7 @@ impl CanvasEngine {
             let Some(node) = self.node(id) else {
                 continue;
             };
-            if node.locked || node.kind == NodeKind::Page {
+            if node.locked {
                 continue;
             }
             let mut layout = node.layout.clone();
@@ -605,12 +605,12 @@ impl CanvasEngine {
             return Ok(());
         }
 
-        // Page artboards are the editor viewport itself. Imported viewport
+        // Root frame artboards are the editor viewport itself. Imported viewport
         // `minHeight` values describe the initial responsive canvas, not a
         // permanent resize constraint. Treat a direct page resize as explicit
         // geometry so an old viewport minimum cannot make the artboard snap
         // back under the pointer.
-        let (width, height) = if node.kind == NodeKind::Page {
+        let (width, height) = if node.is_root_frame() {
             (world.width.max(1.0), world.height.max(1.0))
         } else {
             node.layout.clamp_size(world.width, world.height)
@@ -627,10 +627,10 @@ impl CanvasEngine {
         layout.height_mode = SizeMode::Fixed;
         layout.width_percent = None;
         layout.height_percent = None;
-        if extract_from_flow && node.kind != NodeKind::Page {
+        if extract_from_flow && !node.is_root_frame() {
             layout.position = LayoutPosition::Absolute;
         }
-        if node.kind == NodeKind::Page {
+        if node.is_root_frame() {
             layout.min_width = None;
             layout.max_width = None;
             layout.min_height = None;
@@ -700,7 +700,7 @@ impl CanvasEngine {
         let mut layout = node.layout.clone();
         layout.x = world.x - parent_origin.x;
         layout.y = world.y - parent_origin.y;
-        if node.kind != NodeKind::Page && layout.position == LayoutPosition::Flow {
+        if !node.is_root_frame() && layout.position == LayoutPosition::Flow {
             layout.position = LayoutPosition::Absolute;
             layout.width_mode = SizeMode::Fixed;
             layout.height_mode = SizeMode::Fixed;
@@ -737,8 +737,10 @@ impl CanvasEngine {
         let Some(node) = self.node(id).cloned() else {
             return Err(EngineError::NodeMissing(id.to_string()));
         };
-        if node.kind == NodeKind::Page {
-            return Err(EngineError::InvalidParent("cannot reparent page".into()));
+        if &node.id == self.root_page_id() {
+            return Err(EngineError::InvalidParent(
+                "cannot reparent the active root frame".into(),
+            ));
         }
         if node.parent_id.as_ref() == Some(new_parent) {
             return Ok(());
@@ -773,8 +775,10 @@ impl CanvasEngine {
         let Some(node) = self.node(id).cloned() else {
             return Err(EngineError::NodeMissing(id.to_string()));
         };
-        if node.kind == NodeKind::Page {
-            return Err(EngineError::InvalidParent("cannot reparent page".into()));
+        if &node.id == self.root_page_id() {
+            return Err(EngineError::InvalidParent(
+                "cannot reparent the active root frame".into(),
+            ));
         }
         if self.node(new_parent).is_none() {
             return Err(EngineError::NodeMissing(new_parent.to_string()));
@@ -908,13 +912,15 @@ impl CanvasEngine {
         max + DEFAULT_ORDER_STEP
     }
 
-    /// Delete `id` and its descendants. Pages cannot be deleted.
+    /// Delete `id` and its descendants. The active root frame cannot be deleted.
     pub fn delete_node(&mut self, id: &NodeId) -> Result<(), EngineError> {
         let Some(node) = self.node(id) else {
             return Err(EngineError::NodeMissing(id.to_string()));
         };
-        if node.kind == NodeKind::Page {
-            return Err(EngineError::InvalidParent("cannot delete page".into()));
+        if &node.id == self.root_page_id() {
+            return Err(EngineError::InvalidParent(
+                "cannot delete the active root frame".into(),
+            ));
         }
         if node.locked {
             return Err(EngineError::InvalidParent("node is locked".into()));
@@ -938,9 +944,6 @@ impl CanvasEngine {
         let Some(node) = self.node(id).cloned() else {
             return Err(EngineError::NodeMissing(id.to_string()));
         };
-        if node.kind == NodeKind::Page {
-            return Ok(());
-        }
         let parent = node.parent_id.clone();
         let siblings = self.children(parent.as_ref());
         if siblings.last().map(|n| &n.id) == Some(id) {
@@ -971,9 +974,6 @@ impl CanvasEngine {
         let Some(node) = self.node(id).cloned() else {
             return Err(EngineError::NodeMissing(id.to_string()));
         };
-        if node.kind == NodeKind::Page {
-            return Ok(());
-        }
         let parent = node.parent_id.clone();
         let siblings = self.children(parent.as_ref());
         if siblings.first().map(|n| &n.id) == Some(id) {
@@ -1016,9 +1016,6 @@ impl CanvasEngine {
         let Some(node) = self.node(id).cloned() else {
             return Err(EngineError::NodeMissing(id.to_string()));
         };
-        if node.kind == NodeKind::Page {
-            return Ok(());
-        }
         let parent = node.parent_id.clone();
         let siblings: Vec<NodeId> = self
             .children(parent.as_ref())
@@ -1078,7 +1075,7 @@ impl CanvasEngine {
             let Some(root_node) = self.node(root) else {
                 continue;
             };
-            if root_node.kind == NodeKind::Page || root_node.locked {
+            if root_node.locked {
                 continue;
             }
             let subtree = self.collect_subtree(root);
@@ -1270,7 +1267,7 @@ impl CanvasEngine {
         let mut nodes: Vec<Node> = ids
             .iter()
             .filter_map(|id| self.node(id).cloned())
-            .filter(|n| n.kind != NodeKind::Page && !n.locked)
+            .filter(|n| n.parent_id.is_some() && !n.locked)
             .collect();
         if nodes.len() < 2 {
             return Err(EngineError::InvalidParent(
@@ -1306,7 +1303,7 @@ impl CanvasEngine {
 
         let parent_origin = if self
             .node(&parent)
-            .map(|n| n.kind == NodeKind::Page)
+            .map(|n| n.is_root_frame())
             .unwrap_or(true)
         {
             Vec2::new(0.0, 0.0)
@@ -1380,7 +1377,7 @@ impl CanvasEngine {
             .unwrap_or_else(|| self.root_page_id().clone());
         let parent_origin = if self
             .node(&parent)
-            .map(|n| n.kind == NodeKind::Page)
+            .map(|n| n.is_root_frame())
             .unwrap_or(true)
         {
             Vec2::new(0.0, 0.0)
@@ -2906,8 +2903,10 @@ impl CanvasEngine {
         let Some(target) = self.node(target_id).cloned() else {
             return Err(EngineError::NodeMissing(target_id.to_string()));
         };
-        if dragged.kind == NodeKind::Page {
-            return Err(EngineError::InvalidParent("cannot move page".into()));
+        if &dragged.id == self.root_page_id() {
+            return Err(EngineError::InvalidParent(
+                "cannot move the active root frame into another layer".into(),
+            ));
         }
         if would_cycle(self.document(), dragged_id, Some(target_id)) {
             return Err(EngineError::Cycle);
@@ -2940,7 +2939,7 @@ impl CanvasEngine {
         };
         let parent_origin = if self
             .node(&new_parent)
-            .map(|n| n.kind == NodeKind::Page)
+            .map(|n| n.is_root_frame())
             .unwrap_or(true)
         {
             Vec2::new(0.0, 0.0)
@@ -3071,19 +3070,17 @@ fn apply_transaction(
                 let mut next = current;
                 next.parent_id = parent_id.clone();
                 next.order = *order;
-                if next.kind != NodeKind::Page {
-                    validate_parent(
-                        &Document {
-                            nodes: {
-                                let mut n = document.nodes.clone();
-                                n.insert(id.clone(), next.clone());
-                                n
-                            },
-                            ..document.clone()
+                validate_parent(
+                    &Document {
+                        nodes: {
+                            let mut n = document.nodes.clone();
+                            n.insert(id.clone(), next.clone());
+                            n
                         },
-                        &next,
-                    )?;
-                }
+                        ..document.clone()
+                    },
+                    &next,
+                )?;
                 document.nodes.insert(id.clone(), next);
             }
             Operation::Delete { id } => {
@@ -3264,11 +3261,7 @@ fn apply_patch(mut node: Node, patch: &NodePatch) -> Node {
 
 fn validate_parent(document: &Document, node: &Node) -> Result<(), EngineError> {
     match node.kind {
-        NodeKind::Page => {
-            if node.parent_id.is_some() {
-                return Err(EngineError::InvalidParent("page must be a root".into()));
-            }
-        }
+        NodeKind::Frame if node.parent_id.is_none() => {}
         NodeKind::Frame
         | NodeKind::Rectangle
         | NodeKind::Text

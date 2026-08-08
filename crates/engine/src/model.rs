@@ -690,7 +690,7 @@ pub enum ImageFit {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum NodeKind {
-    Page,
+    #[serde(alias = "page")]
     Frame,
     Rectangle,
     Text,
@@ -819,15 +819,16 @@ impl Node {
         }
     }
 
-    pub fn page(name: impl Into<String>) -> Self {
+    pub fn root_frame(name: impl Into<String>) -> Self {
         Self::base(
-            "page",
-            NodeKind::Page,
+            "frame",
+            NodeKind::Frame,
             name,
             None,
             Layout::new(0.0, 0.0, 1440.0, 900.0),
             Style {
                 fills: vec![Paint::solid(Color::rgb(0x1a, 0x1a, 0x1a))],
+                overflow: Overflow::Hidden,
                 ..Style::default()
             },
         )
@@ -1176,8 +1177,12 @@ impl Node {
     pub fn is_container(&self) -> bool {
         matches!(
             self.kind,
-            NodeKind::Page | NodeKind::Frame | NodeKind::Component | NodeKind::Instance
+            NodeKind::Frame | NodeKind::Component | NodeKind::Instance
         )
+    }
+
+    pub fn is_root_frame(&self) -> bool {
+        self.kind == NodeKind::Frame && self.parent_id.is_none()
     }
 
     pub fn text_content(&self) -> &str {
@@ -1281,10 +1286,10 @@ fn default_theme_id() -> String {
 
 impl Document {
     pub fn empty(name: impl Into<String>) -> Self {
-        let page = Node::page("Page 1");
-        let root_page_id = page.id.clone();
+        let frame = Node::root_frame("Frame 1");
+        let root_page_id = frame.id.clone();
         let mut nodes = std::collections::HashMap::new();
-        nodes.insert(page.id.clone(), page);
+        nodes.insert(frame.id.clone(), frame);
         Self {
             schema_version: 2,
             id: NodeId::new("doc").to_string(),
@@ -1334,7 +1339,7 @@ impl Document {
     }
 }
 
-/// Seed document with a page and a few shapes.
+/// Seed document with a root frame and a few shapes.
 pub fn demo_document() -> Document {
     let mut doc = Document::empty("Demo");
     let page_id = doc.root_page_id.clone();
@@ -1401,5 +1406,22 @@ mod tests {
         assert_eq!(style.fills.len(), 1);
         assert_eq!(style.corners.tl, 8.0);
         assert!((style.opacity - 0.5).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn root_artboard_is_a_clipped_frame() {
+        let document = Document::empty("Frame document");
+        let root = document.nodes.get(&document.root_page_id).unwrap();
+        assert_eq!(root.kind, NodeKind::Frame);
+        assert!(root.is_root_frame());
+        assert_eq!(root.style.overflow, Overflow::Hidden);
+        assert_eq!(serde_json::to_value(root.kind).unwrap(), "frame");
+    }
+
+    #[test]
+    fn legacy_page_kind_deserializes_as_a_frame() {
+        let kind: NodeKind = serde_json::from_str("\"page\"").unwrap();
+        assert_eq!(kind, NodeKind::Frame);
+        assert_eq!(serde_json::to_string(&kind).unwrap(), "\"frame\"");
     }
 }

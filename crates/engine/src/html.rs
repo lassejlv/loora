@@ -44,7 +44,7 @@ pub fn compile_canvas(document: &Document, options: &HtmlCanvasOptions) -> Compi
     let mut pages: Vec<&Node> = document
         .nodes
         .values()
-        .filter(|node| node.kind == NodeKind::Page)
+        .filter(|node| node.is_root_frame())
         .collect();
     pages.sort_by(|left, right| {
         left.order
@@ -273,7 +273,7 @@ fn render_node(
     let content_editable =
         resolved.kind == NodeKind::Text && !resolved.locked && !context.options.preview;
     output.markup.push_str(&format!(
-        "<{tag} class=\"loora-node {class}\" data-loora-node=\"{}\" data-loora-kind=\"{}\" data-loora-parent=\"{}\" data-loora-position=\"{}\" data-loora-locked=\"{}\" data-loora-interactions=\"{}\" data-loora-states=\"{}\"{}>",
+        "<{tag} class=\"loora-node {class}\" data-loora-node=\"{}\" data-loora-kind=\"{}\" data-loora-parent=\"{}\" data-loora-position=\"{}\" data-loora-locked=\"{}\" data-loora-interactions=\"{}\" data-loora-states=\"{}\"{}{}>",
         html_attr(resolved.id.as_str()),
         kind_name(resolved.kind),
         html_attr(parent_id),
@@ -281,6 +281,7 @@ fn render_node(
         resolved.locked,
         html_attr(&interactions),
         html_attr(&states),
+        if page_root { " data-loora-root=\"true\"" } else { "" },
         if content_editable { " data-loora-editable=\"true\"" } else { "" },
     ));
 
@@ -1233,7 +1234,7 @@ fn justify_css(value: LayoutJustify, flex: bool) -> &'static str {
 }
 
 fn semantic_tag(node: &Node) -> &'static str {
-    if node.kind == NodeKind::Page {
+    if node.is_root_frame() {
         return "main";
     }
     if node.kind != NodeKind::Frame {
@@ -1256,7 +1257,6 @@ fn semantic_tag(node: &Node) -> &'static str {
 
 fn kind_name(kind: NodeKind) -> &'static str {
     match kind {
-        NodeKind::Page => "page",
         NodeKind::Frame => "frame",
         NodeKind::Rectangle => "shape",
         NodeKind::Text => "text",
@@ -1401,6 +1401,8 @@ mod tests {
         assert!(node_rule.contains("color:rgba(255,255,255,1)"));
         assert!(!node_rule.contains("background:rgba(255,255,255,1)"));
         assert!(compiled.markup.contains("Hello"));
+        assert!(compiled.markup.contains("data-loora-kind=\"frame\""));
+        assert!(compiled.markup.contains("data-loora-root=\"true\""));
     }
 
     #[test]

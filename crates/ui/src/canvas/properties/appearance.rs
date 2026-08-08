@@ -201,7 +201,7 @@ pub fn appearance_section(
         .child(choice_field(
             theme,
             "props-overflow-hidden".into(),
-            "Clip",
+            "Clip content",
             Some(style.overflow == Overflow::Hidden),
             disabled,
             {

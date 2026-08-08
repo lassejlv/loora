@@ -135,7 +135,7 @@ fn convert_canvas_export(root: &Value) -> Result<Document, String> {
             .unwrap_or(key)
             .to_string();
         let (mut node, layout, is_ellipse) = convert_node(raw, &token_colors)?;
-        if node.kind == NodeKind::Page {
+        if node.is_root_frame() {
             page_ids.push((node.order, node_id.clone()));
         }
         if is_ellipse {
@@ -164,10 +164,10 @@ fn convert_canvas_export(root: &Value) -> Result<Document, String> {
         .or_else(|| {
             nodes
                 .values()
-                .find(|n| n.kind == NodeKind::Page)
+                .find(|n| n.is_root_frame())
                 .map(|n| n.id.clone())
         })
-        .ok_or_else(|| "canvas export has no page".to_string())?;
+        .ok_or_else(|| "canvas export has no root frame".to_string())?;
 
     resolve_sizes(&mut nodes, &pending, &root_page_id);
     for id in &ellipse_ids {
@@ -391,7 +391,7 @@ fn finalize_layout(document: &mut Document) {
     let page_ids: Vec<NodeId> = document
         .nodes
         .values()
-        .filter(|n| n.kind == NodeKind::Page)
+        .filter(|n| n.is_root_frame())
         .map(|n| n.id.clone())
         .collect();
     for page_id in page_ids {
@@ -631,8 +631,7 @@ fn convert_node(
     };
     let is_ellipse = shape_kind == ShapeKind::Ellipse;
     let kind = match type_name {
-        "page" => NodeKind::Page,
-        "frame" | "group" => NodeKind::Frame,
+        "page" | "frame" | "group" => NodeKind::Frame,
         "text" => NodeKind::Text,
         "shape" => NodeKind::Rectangle,
         "component" => NodeKind::Component,
@@ -642,7 +641,16 @@ fn convert_node(
         other => return Err(format!("unsupported node type: {other}")),
     };
 
-    let pending = convert_pending_layout(raw.get("layout"), kind, raw.get("viewport"));
+    let is_root_frame = kind == NodeKind::Frame
+        && raw
+            .get("parentId")
+            .and_then(Value::as_str)
+            .is_none();
+    let pending = convert_pending_layout(
+        raw.get("layout"),
+        is_root_frame,
+        raw.get("viewport"),
+    );
     let style = convert_style(raw.get("style"), tokens);
     let text = raw
         .get("text")
@@ -1368,21 +1376,21 @@ fn apply_pending_meta(layout: &mut Layout, pending: &PendingLayout) {
 
 fn convert_pending_layout(
     layout: Option<&Value>,
-    kind: NodeKind,
+    is_root_frame: bool,
     viewport: Option<&Value>,
 ) -> PendingLayout {
     let layout = layout.unwrap_or(&Value::Null);
     let width = parse_dim(layout.get("width"));
     let height = parse_dim(layout.get("height"));
 
-    let viewport_width = if kind == NodeKind::Page {
+    let viewport_width = if is_root_frame {
         viewport
             .and_then(|value| value.get("width"))
             .and_then(Value::as_f64)
     } else {
         None
     };
-    let viewport_min_height = if kind == NodeKind::Page {
+    let viewport_min_height = if is_root_frame {
         viewport
             .and_then(|value| value.get("minHeight").or_else(|| value.get("height")))
             .and_then(Value::as_f64)
@@ -1895,7 +1903,7 @@ fn resolve_sizes(
     // Resolve each page tree; also resolve orphan components with a synthetic parent size.
     let page_ids: Vec<NodeId> = nodes
         .values()
-        .filter(|n| n.kind == NodeKind::Page)
+        .filter(|n| n.is_root_frame())
         .map(|n| n.id.clone())
         .collect();
 
@@ -1951,7 +1959,7 @@ fn resolve_sizes(
     // Orphan components / roots not under a page.
     let orphans: Vec<NodeId> = nodes
         .values()
-        .filter(|n| n.parent_id.is_none() && n.kind != NodeKind::Page)
+        .filter(|n| n.parent_id.is_none() && !n.is_root_frame())
         .map(|n| n.id.clone())
         .collect();
     for id in orphans {
@@ -2206,6 +2214,8 @@ mod tests {
         assert_eq!(doc.root_page_id.as_str(), "page_1");
         assert_eq!(doc.tokens.len(), 1);
         let page = doc.nodes.get(&NodeId::from_static("page_1")).unwrap();
+        assert_eq!(page.kind, NodeKind::Frame);
+        assert!(page.is_root_frame());
         assert!((page.layout.width - 1440.0).abs() < f64::EPSILON);
         let frame = doc.nodes.get(&NodeId::from_static("frame_1")).unwrap();
         assert!(frame.layout.width > 100.0);

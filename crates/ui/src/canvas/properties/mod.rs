@@ -189,62 +189,7 @@ impl RenderOnce for PropertiesPanel {
                     ),
             )
             .child(match (self.selection.first(), self.world_bounds) {
-                (Some(node), Some(bounds)) if node.kind == NodeKind::Page => {
-                    let page = node.clone();
-                    let ws = workspace.clone();
-                    let page_id = page.id.clone();
-                    div()
-                        .flex()
-                        .flex_col()
-                        .flex_1()
-                        .min_h_0()
-                        .px_3()
-                        .py_3()
-                        .gap_2()
-                        .child(
-                            div()
-                                .text_size(px(13.))
-                                .font_weight(FontWeight::SEMIBOLD)
-                                .text_color(theme.bright_white)
-                                .child(page.name.clone()),
-                        )
-                        .child(
-                            div()
-                                .text_size(px(11.))
-                                .text_color(theme.muted)
-                                .child(format!(
-                                    "Page · {:.0} × {:.0}",
-                                    bounds.width, bounds.height
-                                )),
-                        )
-                        .child(
-                            div()
-                                .id("fit-selected-page")
-                                .flex()
-                                .items_center()
-                                .justify_center()
-                                .h(px(32.))
-                                .rounded(px(8.))
-                                .bg(theme.field_bg())
-                                .border_1()
-                                .border_color(theme.hairline())
-                                .cursor_pointer()
-                                .hover(|s| s.bg(theme.highlight_fill()))
-                                .on_click(move |_, _, cx| {
-                                    ws.update(cx, |this, cx| {
-                                        this.fit_page(&page_id, cx);
-                                    });
-                                })
-                                .child(
-                                    div()
-                                        .text_size(px(12.))
-                                        .text_color(theme.foreground)
-                                        .child("Fit page in view"),
-                                ),
-                        )
-                        .into_any_element()
-                }
-                (Some(node), Some(bounds)) if node.kind != NodeKind::Page => {
+                (Some(node), Some(bounds)) => {
                     let node = node.clone();
                     let selection = self.selection.clone();
                     let selection_count = selection.len();
@@ -658,7 +603,6 @@ fn empty_state(theme: Theme) -> impl IntoElement {
 
 fn kind_label(kind: NodeKind) -> &'static str {
     match kind {
-        NodeKind::Page => "Page",
         NodeKind::Frame => "Frame",
         NodeKind::Rectangle => "Rectangle",
         NodeKind::Text => "Text",

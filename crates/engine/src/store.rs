@@ -389,7 +389,7 @@ fn is_design_filename(name: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::model::{Color, Layout, Node};
+    use crate::model::{Color, Layout, Node, NodeKind};
     use std::time::SystemTime;
 
     fn temp_store(label: &str) -> (DesignStore, PathBuf) {
@@ -452,6 +452,9 @@ mod tests {
         let doc = store.import_file(&legacy).unwrap();
         assert_eq!(doc.name, "Legacy Card");
         assert_eq!(doc.nodes.len(), 2);
+        let root_frame = doc.nodes.get(&doc.root_page_id).unwrap();
+        assert_eq!(root_frame.kind, NodeKind::Frame);
+        assert!(root_frame.is_root_frame());
         let frame = doc.nodes.values().find(|n| n.name == "Card").unwrap();
         assert_eq!(frame.style.fills.len(), 1);
         assert!((frame.style.corners.tl - 8.0).abs() < f32::EPSILON);

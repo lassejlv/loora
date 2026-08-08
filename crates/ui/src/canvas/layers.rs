@@ -52,7 +52,7 @@ pub fn build_layer_rows(
         rows.push(LayerRow {
             id: page_id.clone(),
             name: page.name.clone().into(),
-            kind: NodeKind::Page,
+            kind: page.kind,
             depth: 0,
             hidden: page.hidden,
             locked: page.locked,
@@ -506,7 +506,7 @@ fn layer_row(
     let drag_id = row.id.clone();
     let drag_name = row.name.clone();
     let type_icon = match row.kind {
-        NodeKind::Page | NodeKind::Frame | NodeKind::Component => IconName::Grid,
+        NodeKind::Frame | NodeKind::Component => IconName::Grid,
         NodeKind::Text => IconName::Text,
         NodeKind::Image => IconName::Image,
         NodeKind::Instance => IconName::Square,
@@ -906,7 +906,7 @@ mod tests {
         let engine = fat_doc(800);
         let mut collapsed = HashSet::new();
         for node in engine.document().nodes.values() {
-            if node.kind != NodeKind::Page && node.is_container() {
+            if !node.is_root_frame() && node.is_container() {
                 collapsed.insert(node.id.clone());
             }
         }

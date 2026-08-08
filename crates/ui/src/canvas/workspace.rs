@@ -237,8 +237,7 @@ struct ColorPickerState {
 struct ContextMenuState {
     position: Point<Pixels>,
     highlight: usize,
-    /// When set, overrides the canvas right-click entries (inspector enum menus).
-    entries: Option<Vec<ContextMenuEntry>>,
+    entries: Vec<ContextMenuEntry>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -1004,6 +1003,7 @@ impl CanvasWorkspace {
             }
             "context-menu" if !self.preview_mode => {
                 self.blur_props_if_needed(cx);
+                self.context_menu = None;
                 if let Some(id) = message
                     .get("id")
                     .and_then(|value| value.as_str())
@@ -1023,18 +1023,23 @@ impl CanvasWorkspace {
                         self.context_world = Some(Vec2::new(x, y));
                     }
                 }
-                let viewport = self.viewport_bounds.get();
                 let x = message.get("x").and_then(|value| value.as_f64()).unwrap_or(0.0);
                 let y = message.get("y").and_then(|value| value.as_f64()).unwrap_or(0.0);
                 let entries = self.context_menu_entries(cx);
-                self.context_menu = Some(ContextMenuState {
-                    position: gpui::point(
-                        viewport.origin.x + px(x as f32),
-                        viewport.origin.y + px(y as f32),
-                    ),
-                    highlight: first_action_index(&entries),
-                    entries: None,
+                let entries = web_context_menu_entries(&entries);
+                self.webview.update(cx, |view, _| {
+                    let _ = view.command(serde_json::json!({
+                        "type": "context-menu",
+                        "x": x,
+                        "y": y,
+                        "entries": entries,
+                    }));
                 });
+            }
+            "context-action" if !self.preview_mode => {
+                if let Some(action) = message.get("action").and_then(|value| value.as_str()) {
+                    self.run_context_action(action, cx);
+                }
             }
             "command" => {
                 if let Some(command) = message.get("command").and_then(|value| value.as_str()) {
@@ -1076,7 +1081,6 @@ impl CanvasWorkspace {
                     .selection
                     .iter()
                     .filter_map(|id| self.engine.node(id))
-                    .filter(|node| node.kind != NodeKind::Page)
                     .any(|node| !node.locked);
                 let mut changed = false;
                 for id in self.selection.clone() {
@@ -1203,12 +1207,14 @@ impl CanvasWorkspace {
     fn sync_web_canvas(&mut self, cx: &mut Context<Self>) {
         // Hide the native webview only for overlays that cover most of the canvas.
         // Color picker uses a right-edge webview inset instead (see viewport-host).
-        let overlay_covers_canvas = self.command_open
-            || self.image_picker.is_some()
-            || self.context_menu.is_some();
+        let hide_webview = canvas_webview_hidden_for_overlays(
+            self.command_open,
+            self.image_picker.is_some(),
+            self.context_menu.is_some(),
+        );
         self.webview
-            .update(cx, |view, _| view.set_visible(!overlay_covers_canvas));
-        if !self.web_ready || overlay_covers_canvas {
+            .update(cx, |view, _| view.set_visible(!hide_webview));
+        if !self.web_ready || hide_webview {
             return;
         }
 
@@ -2603,19 +2609,13 @@ impl CanvasWorkspace {
         self.context_menu = Some(ContextMenuState {
             position,
             highlight,
-            entries: Some(entries),
+            entries,
+        });
+        self.webview.update(cx, |view, _| {
+            let _ = view.command(serde_json::json!({ "type": "dismiss-context-menu" }));
         });
         self.focus_handle.focus(window, cx);
         cx.notify();
-    }
-
-    fn active_context_entries(&self, cx: &Context<Self>) -> Vec<ContextMenuEntry> {
-        if let Some(menu) = &self.context_menu {
-            if let Some(entries) = &menu.entries {
-                return entries.clone();
-            }
-        }
-        self.context_menu_entries(cx)
     }
 
     fn context_menu_entries(&self, cx: &Context<Self>) -> Vec<ContextMenuEntry> {
@@ -2624,7 +2624,6 @@ impl CanvasWorkspace {
             .selection
             .iter()
             .filter_map(|id| self.engine.node(id))
-            .filter(|n| n.kind != NodeKind::Page)
             .collect();
         let has_selection = !editable.is_empty();
         let can_edit = editable.iter().any(|n| !n.locked);
@@ -2656,7 +2655,7 @@ impl CanvasWorkspace {
                         .icon(IconName::BoundingBox),
                 ),
                 ContextMenuEntry::Action(
-                    ContextMenuAction::new("fit-all", "Fit all pages")
+                    ContextMenuAction::new("fit-all", "Fit all frames")
                         .shortcut("⌘2")
                         .icon(IconName::View),
                 ),
@@ -3022,12 +3021,7 @@ impl CanvasWorkspace {
         let mut nodes = Vec::new();
         let mut seen = HashSet::new();
         for id in &self.selection {
-            if self
-                .engine
-                .node(id)
-                .map(|n| n.kind == NodeKind::Page)
-                .unwrap_or(true)
-            {
+            if self.engine.node(id).is_none() {
                 continue;
             }
             let mut stack = vec![id.clone()];
@@ -3236,7 +3230,7 @@ impl CanvasWorkspace {
                     .map(|p| {
                         self.engine
                             .node(p)
-                            .map(|n| n.kind == NodeKind::Page)
+                            .map(|n| n.is_root_frame())
                             .unwrap_or(true)
                     })
                     .unwrap_or(true)
@@ -3272,7 +3266,7 @@ impl CanvasWorkspace {
         let parent_origin = if self
             .engine
             .node(&parent)
-            .map(|n| n.kind == NodeKind::Page)
+            .map(|n| n.is_root_frame())
             .unwrap_or(true)
         {
             Vec2::new(0.0, 0.0)
@@ -3363,7 +3357,7 @@ impl CanvasWorkspace {
         let parent_origin = if self
             .engine
             .node(&parent)
-            .map(|n| n.kind == NodeKind::Page)
+            .map(|n| n.is_root_frame())
             .unwrap_or(true)
         {
             Vec2::new(0.0, 0.0)
@@ -3445,7 +3439,7 @@ impl CanvasWorkspace {
             .document()
             .nodes
             .values()
-            .filter(|n| n.kind != NodeKind::Page)
+            .filter(|n| !n.is_root_frame())
             .filter(|n| {
                 // On current page tree (any descendant of page).
                 let mut cur = n.parent_id.clone();
@@ -5407,7 +5401,6 @@ impl CanvasWorkspace {
                         .selection
                         .iter()
                         .filter_map(|id| self.engine.node(id))
-                        .filter(|n| n.kind != NodeKind::Page)
                         .any(|n| !n.locked);
                     for id in self.selection.clone() {
                         let _ = self.engine.set_locked(&id, lock);
@@ -5436,7 +5429,11 @@ impl CanvasWorkspace {
 
     fn on_context_menu_key_down(&mut self, event: &KeyDownEvent, cx: &mut Context<Self>) {
         let key = event.keystroke.key.as_str();
-        let entries = self.active_context_entries(cx);
+        let entries = self
+            .context_menu
+            .as_ref()
+            .map(|menu| menu.entries.clone())
+            .unwrap_or_default();
         let Some(state) = self.context_menu.as_mut() else {
             return;
         };
@@ -5479,7 +5476,7 @@ impl CanvasWorkspace {
             if self
                 .engine
                 .node(&id)
-                .map(|node| node.kind != NodeKind::Page && !node.locked)
+                .map(|node| !node.locked)
                 .unwrap_or(false)
                 && self.engine.delete_node(&id).is_ok()
             {
@@ -5723,7 +5720,7 @@ impl CanvasWorkspace {
         let parent_origin = if self
             .engine
             .node(&parent)
-            .map(|n| n.kind == NodeKind::Page)
+            .map(|n| n.is_root_frame())
             .unwrap_or(true)
         {
             Vec2::new(0.0, 0.0)
@@ -5785,12 +5782,70 @@ impl CanvasWorkspace {
     }
 }
 
+fn canvas_webview_hidden_for_overlays(
+    command_open: bool,
+    image_picker_open: bool,
+    _context_menu_open: bool,
+) -> bool {
+    // Canvas menus render inside the WebView, while inspector menus stay in
+    // the sidebar. Neither needs the native canvas view to disappear.
+    command_open || image_picker_open
+}
+
+fn web_context_menu_entries(entries: &[ContextMenuEntry]) -> Vec<serde_json::Value> {
+    entries
+        .iter()
+        .map(|entry| match entry {
+            ContextMenuEntry::Separator => serde_json::json!({ "separator": true }),
+            ContextMenuEntry::Action(action) => serde_json::json!({
+                "id": action.id.as_ref(),
+                "label": action.label.as_ref(),
+                "shortcut": action.shortcut.as_ref().map(|shortcut| shortcut.as_ref()),
+                "enabled": action.enabled,
+                "destructive": action.destructive,
+            }),
+        })
+        .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{canvas_webview_hidden_for_overlays, web_context_menu_entries};
+    use crate::context_menu::{ContextMenuAction, ContextMenuEntry};
+
+    #[test]
+    fn context_menu_does_not_hide_the_canvas_webview() {
+        assert!(!canvas_webview_hidden_for_overlays(false, false, true));
+        assert!(canvas_webview_hidden_for_overlays(true, false, false));
+        assert!(canvas_webview_hidden_for_overlays(false, true, false));
+    }
+
+    #[test]
+    fn web_context_menu_payload_preserves_action_state() {
+        let entries = vec![
+            ContextMenuEntry::Action(
+                ContextMenuAction::new("copy", "Copy")
+                    .shortcut("⌘C")
+                    .enabled(false),
+            ),
+            ContextMenuEntry::Separator,
+            ContextMenuEntry::Action(ContextMenuAction::new("delete", "Delete").destructive()),
+        ];
+        let payload = web_context_menu_entries(&entries);
+        assert_eq!(payload[0]["id"], "copy");
+        assert_eq!(payload[0]["shortcut"], "⌘C");
+        assert_eq!(payload[0]["enabled"], false);
+        assert_eq!(payload[1]["separator"], true);
+        assert_eq!(payload[2]["destructive"], true);
+    }
+}
+
 fn default_collapsed_layers(engine: &CanvasEngine) -> HashSet<NodeId> {
     engine
         .document()
         .nodes
         .values()
-        .filter(|node| node.kind != NodeKind::Page && node.is_container())
+        .filter(|node| !node.is_root_frame() && node.is_container())
         .map(|node| node.id.clone())
         .collect()
 }
@@ -5987,11 +6042,10 @@ impl Render for CanvasWorkspace {
             .map(|cursor| (cursor.anchor, cursor.caret));
         let color_picker = self.color_picker.clone();
         let context_menu = self.context_menu.clone();
-        let context_entries = if context_menu.is_some() {
-            self.active_context_entries(cx)
-        } else {
-            Vec::new()
-        };
+        let context_entries = context_menu
+            .as_ref()
+            .map(|menu| menu.entries.clone())
+            .unwrap_or_default();
         let props_nodes: Vec<Node> = self
             .selection
             .iter()
