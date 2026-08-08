@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Loora
+Comment=Design interfaces on an infinite canvas
+Exec=Loora
+Icon=loora
+Terminal=false
+Categories=Graphics;Development;
+StartupWMClass=com.loora.app

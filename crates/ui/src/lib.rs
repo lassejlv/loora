@@ -17,7 +17,11 @@ mod tooltip;
 
 pub use assets::Assets;
 pub use button::{Button, ButtonVariant, BUTTON_VARIANTS};
-pub use canvas::{CanvasTool, CanvasWorkspace};
+pub use canvas::{
+    CanvasTool, CanvasWorkspace, FitAll, FitSelection, GroupSelection, NewDesign, Redo,
+    SaveDesign, ToggleFiles, ToolFrame, ToolHand, ToolImage, ToolRectangle, ToolSelect, ToolText,
+    Undo, UngroupSelection, ZoomIn, ZoomOut, ZoomReset,
+};
 pub use color_picker::{
     color_to_rgba, format_hex as format_color_hex, parse_hex as parse_color_hex, preset_colors,
     ColorPickerField, ColorPickerPopover, Hsv,

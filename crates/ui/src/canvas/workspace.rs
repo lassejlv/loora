@@ -28,7 +28,7 @@ use crate::canvas::layers::{
 use crate::canvas::properties::{
     format_hex, format_number, parse_hex, PropertiesPanel, PropsField, PropsView,
 };
-use crate::canvas::text_edit::{self, TextEditSession};
+use crate::canvas::text_edit::{self, TextCursor, TextEditSession};
 use crate::canvas::web_canvas::CanvasWebView;
 use crate::color_picker::ColorPickerPopover;
 use crate::context_menu::{
@@ -152,9 +152,11 @@ pub struct CanvasWorkspace {
     layer_scroll: UniformListScrollHandle,
     pub(crate) layer_query: String,
     layer_search_focused: bool,
+    layer_search_edit: Option<TextCursor>,
     /// In-place layer rename (double-click a row).
     layer_rename: Option<NodeId>,
     layer_rename_draft: String,
+    layer_rename_edit: Option<TextCursor>,
     /// Flattened layer rows; invalidated when revision / collapse / query change.
     layer_rows_cache: Option<(LayerListKey, Rc<Vec<LayerRow>>)>,
     pub(crate) preview_mode: bool,
@@ -176,6 +178,7 @@ pub struct CanvasWorkspace {
     pub(crate) command_open: bool,
     command_query: String,
     command_index: usize,
+    command_edit: Option<TextCursor>,
     store: DesignStore,
     files: Vec<DesignFileInfo>,
     saved_revision: u64,
@@ -186,6 +189,7 @@ pub struct CanvasWorkspace {
     text_edit: Option<TextEditSession>,
     /// Image source picker for a target image node.
     image_picker: Option<ImagePickerState>,
+    image_url_edit: Option<TextCursor>,
     /// Interactive color picker popover (swatch click).
     color_picker: Option<ColorPickerState>,
     /// Canvas context menu (right-click).
@@ -201,6 +205,7 @@ pub struct CanvasWorkspace {
     /// Properties inspector focus / draft / scrub state.
     props_focus: Option<PropsField>,
     props_draft: String,
+    props_text_edit: Option<TextCursor>,
     props_scrub: Option<PropsScrub>,
     props_collapsed: HashSet<&'static str>,
     /// Inspector breakpoint (None = base). Canvas still paints base layout.
@@ -349,8 +354,10 @@ impl CanvasWorkspace {
             layer_scroll: UniformListScrollHandle::new(),
             layer_query: String::new(),
             layer_search_focused: false,
+            layer_search_edit: None,
             layer_rename: None,
             layer_rename_draft: String::new(),
+            layer_rename_edit: None,
             layer_rows_cache: None,
             preview_mode: false,
             preview_hidden: HashSet::new(),
@@ -371,6 +378,7 @@ impl CanvasWorkspace {
             command_open: false,
             command_query: String::new(),
             command_index: 0,
+            command_edit: None,
             store,
             files,
             saved_revision,
@@ -380,6 +388,7 @@ impl CanvasWorkspace {
             _caret_task: None,
             text_edit: None,
             image_picker: None,
+            image_url_edit: None,
             color_picker: None,
             context_menu: None,
             clipboard: Vec::new(),
@@ -388,6 +397,7 @@ impl CanvasWorkspace {
             last_pointer_world: None,
             props_focus: None,
             props_draft: String::new(),
+            props_text_edit: None,
             props_scrub: None,
             props_collapsed: HashSet::new(),
             active_breakpoint_id: None,
@@ -1308,10 +1318,13 @@ impl CanvasWorkspace {
         self.command_open = true;
         self.command_query.clear();
         self.command_index = 0;
+        self.command_edit = Some(TextCursor::at_end(0));
         self.text_edit = None;
         self.layer_search_focused = false;
+        self.layer_search_edit = None;
         self.clear_props_focus();
         self.image_picker = None;
+        self.image_url_edit = None;
         cx.notify();
     }
 
@@ -1320,6 +1333,34 @@ impl CanvasWorkspace {
             self.command_open = false;
             self.command_query.clear();
             self.command_index = 0;
+            self.command_edit = None;
+            cx.notify();
+        }
+    }
+
+    pub fn focus_command_input(
+        &mut self,
+        click_count: usize,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if !self.command_open {
+            return;
+        }
+        let cursor = self
+            .command_edit
+            .get_or_insert_with(|| TextCursor::at_end(self.command_query.len()));
+        if click_count >= 2 {
+            cursor.select_all(self.command_query.len());
+        } else {
+            cursor.set_caret(self.command_query.len(), false);
+        }
+        self.focus_handle.focus(window, cx);
+        cx.notify();
+    }
+
+    pub fn blur_command_input(&mut self, cx: &mut Context<Self>) {
+        if self.command_edit.take().is_some() {
             cx.notify();
         }
     }
@@ -1744,15 +1785,19 @@ impl CanvasWorkspace {
             mode: ImagePickerMode::Choose,
             url: String::new(),
         });
+        self.image_url_edit = None;
         self.command_open = false;
+        self.command_edit = None;
         self.text_edit = None;
         self.layer_search_focused = false;
+        self.layer_search_edit = None;
         self.clear_props_focus();
         cx.notify();
     }
 
     pub fn close_image_picker(&mut self, cx: &mut Context<Self>) {
         if self.image_picker.take().is_some() {
+            self.image_url_edit = None;
             cx.notify();
         }
     }
@@ -1763,6 +1808,7 @@ impl CanvasWorkspace {
         };
         let id = state.node_id;
         self.image_picker = None;
+        self.image_url_edit = None;
         self.prompt_image_for_node(id, cx);
         cx.notify();
     }
@@ -1771,6 +1817,38 @@ impl CanvasWorkspace {
         if let Some(state) = self.image_picker.as_mut() {
             state.mode = ImagePickerMode::Url;
             state.url.clear();
+            self.image_url_edit = Some(TextCursor::at_end(0));
+            cx.notify();
+        }
+    }
+
+    pub fn focus_image_url_input(
+        &mut self,
+        click_count: usize,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(state) = self.image_picker.as_ref() else {
+            return;
+        };
+        if state.mode != ImagePickerMode::Url {
+            return;
+        }
+        let text_len = state.url.len();
+        let cursor = self
+            .image_url_edit
+            .get_or_insert_with(|| TextCursor::at_end(text_len));
+        if click_count >= 2 {
+            cursor.select_all(text_len);
+        } else {
+            cursor.set_caret(text_len, false);
+        }
+        self.focus_handle.focus(window, cx);
+        cx.notify();
+    }
+
+    pub fn blur_image_url_input(&mut self, cx: &mut Context<Self>) {
+        if self.image_url_edit.take().is_some() {
             cx.notify();
         }
     }
@@ -1779,6 +1857,7 @@ impl CanvasWorkspace {
         if let Some(state) = self.image_picker.as_mut() {
             state.mode = ImagePickerMode::Choose;
             state.url.clear();
+            self.image_url_edit = None;
             cx.notify();
         }
     }
@@ -1793,6 +1872,7 @@ impl CanvasWorkspace {
         }
         let id = state.node_id;
         self.image_picker = None;
+        self.image_url_edit = None;
         self.fetch_and_set_image_url(id, url, cx);
         cx.notify();
     }
@@ -2089,12 +2169,12 @@ impl CanvasWorkspace {
     /// True when a faux text field is capturing keystrokes (props, search, etc.).
     fn typing_capture_active(&self) -> bool {
         self.props_focus.is_some()
-            || self.layer_search_focused
-            || self.layer_rename.is_some()
+            || self.layer_search_edit.is_some()
+            || self.layer_rename_edit.is_some()
             || self.text_edit.is_some()
             || self.command_open
             || matches!(
-                self.image_picker.as_ref().map(|p| &p.mode),
+                self.image_picker.as_ref().map(|picker| &picker.mode),
                 Some(ImagePickerMode::Url)
             )
     }
@@ -2106,33 +2186,49 @@ impl CanvasWorkspace {
         if !self.typing_capture_active() {
             return false;
         }
-        if self.layer_rename.is_some() {
-            self.layer_rename_draft.push_str(ch);
+        if let Some(mut cursor) = self.layer_rename_edit.take() {
+            text_edit::insert(&mut self.layer_rename_draft, &mut cursor, ch);
+            self.layer_rename_edit = Some(cursor);
             cx.notify();
             return true;
         }
         if self.props_focus.is_some() {
-            self.props_draft.push_str(ch);
+            if let Some(mut session) = self.props_text_edit.take() {
+                text_edit::insert(&mut self.props_draft, &mut session, ch);
+                self.props_text_edit = Some(session);
+            } else {
+                self.props_draft.push_str(ch);
+            }
             cx.notify();
             return true;
         }
-        if self.layer_search_focused {
-            self.layer_query.push_str(ch);
+        if let Some(mut cursor) = self.layer_search_edit.take() {
+            text_edit::insert(&mut self.layer_query, &mut cursor, ch);
+            self.layer_search_edit = Some(cursor);
             cx.notify();
             return true;
         }
         if self.command_open {
-            self.command_query.push_str(ch);
-            self.command_index = 0;
-            cx.notify();
+            if let Some(mut cursor) = self.command_edit.take() {
+                text_edit::insert(&mut self.command_query, &mut cursor, ch);
+                self.command_edit = Some(cursor);
+                self.command_index = 0;
+                cx.notify();
+            }
             return true;
         }
-        if let Some(state) = self.image_picker.as_mut() {
-            if matches!(state.mode, ImagePickerMode::Url) {
-                state.url.push_str(ch);
-                cx.notify();
-                return true;
+        if matches!(
+            self.image_picker.as_ref().map(|picker| &picker.mode),
+            Some(ImagePickerMode::Url)
+        ) {
+            if let Some(mut cursor) = self.image_url_edit.take() {
+                if let Some(state) = self.image_picker.as_mut() {
+                    text_edit::insert(&mut state.url, &mut cursor, ch);
+                    self.image_url_edit = Some(cursor);
+                    cx.notify();
+                }
             }
+            return true;
         }
         if let Some(session) = self.text_edit.clone() {
             if let Some(node) = self.engine.node(&session.id).cloned() {
@@ -2218,6 +2314,7 @@ impl CanvasWorkspace {
         };
         self.layer_rename_draft = node.name.clone();
         self.layer_rename = Some(id.clone());
+        self.layer_rename_edit = Some(TextCursor::selecting_all(self.layer_rename_draft.len()));
         self.select_only(id);
         self.clear_props_focus();
         cx.notify();
@@ -2227,6 +2324,7 @@ impl CanvasWorkspace {
         let Some(id) = self.layer_rename.take() else {
             return;
         };
+        self.layer_rename_edit = None;
         let name = self.layer_rename_draft.trim().to_string();
         self.layer_rename_draft.clear();
         if name.is_empty() {
@@ -2243,8 +2341,30 @@ impl CanvasWorkspace {
     pub fn cancel_layer_rename(&mut self, cx: &mut Context<Self>) {
         if self.layer_rename.take().is_some() {
             self.layer_rename_draft.clear();
+            self.layer_rename_edit = None;
             cx.notify();
         }
+    }
+
+    pub fn focus_layer_rename(
+        &mut self,
+        click_count: usize,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.layer_rename.is_none() {
+            return;
+        }
+        let cursor = self
+            .layer_rename_edit
+            .get_or_insert_with(|| TextCursor::at_end(self.layer_rename_draft.len()));
+        if click_count >= 2 {
+            cursor.select_all(self.layer_rename_draft.len());
+        } else {
+            cursor.set_caret(self.layer_rename_draft.len(), false);
+        }
+        self.focus_handle.focus(window, cx);
+        cx.notify();
     }
 
     fn commit_layer_rename_if_needed(&mut self, cx: &mut Context<Self>) {
@@ -2273,18 +2393,33 @@ impl CanvasWorkspace {
         cx.notify();
     }
 
-    pub fn focus_layer_search(&mut self, cx: &mut Context<Self>) {
+    pub fn focus_layer_search(
+        &mut self,
+        click_count: usize,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         self.commit_layer_rename_if_needed(cx);
         self.blur_props_if_needed(cx);
         self.layer_search_focused = true;
+        let cursor = self
+            .layer_search_edit
+            .get_or_insert_with(|| TextCursor::at_end(self.layer_query.len()));
+        if click_count >= 2 {
+            cursor.select_all(self.layer_query.len());
+        } else {
+            cursor.set_caret(self.layer_query.len(), false);
+        }
         self.text_edit = None;
         self.clear_props_focus();
+        self.focus_handle.focus(window, cx);
         cx.notify();
     }
 
     pub fn blur_layer_search(&mut self, cx: &mut Context<Self>) {
         if self.layer_search_focused {
             self.layer_search_focused = false;
+            self.layer_search_edit = None;
             cx.notify();
         }
     }
@@ -2292,6 +2427,7 @@ impl CanvasWorkspace {
     fn clear_props_focus(&mut self) {
         self.props_focus = None;
         self.props_draft.clear();
+        self.props_text_edit = None;
         self.props_scrub = None;
     }
 
@@ -2317,6 +2453,10 @@ impl CanvasWorkspace {
         PropsView {
             focus: self.props_focus,
             draft: self.props_draft.clone(),
+            selection: self
+                .props_text_edit
+                .as_ref()
+                .map(|session| (session.anchor, session.caret)),
             readonly,
             collapsed: self.props_collapsed.clone(),
         }
@@ -2333,10 +2473,23 @@ impl CanvasWorkspace {
     pub fn focus_props_field(
         &mut self,
         field: PropsField,
+        click_count: usize,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         if self.preview_mode {
+            return;
+        }
+        if self.props_focus == Some(field) {
+            if let Some(session) = self.props_text_edit.as_mut() {
+                if click_count >= 2 {
+                    session.select_all(self.props_draft.len());
+                } else {
+                    session.set_caret(self.props_draft.len(), false);
+                }
+            }
+            self.focus_handle.focus(window, cx);
+            cx.notify();
             return;
         }
         self.commit_layer_rename_if_needed(cx);
@@ -2350,16 +2503,23 @@ impl CanvasWorkspace {
             return;
         }
         // Switching fields: commit the previous draft first.
-        if self.props_focus.is_some() && self.props_focus != Some(field) {
+        if self.props_focus.is_some() {
             self.commit_props_draft(cx);
         }
         self.layer_search_focused = false;
+        self.layer_search_edit = None;
         self.text_edit = None;
         self.command_open = false;
+        self.command_edit = None;
         self.props_scrub = None;
         self.color_picker = None;
         self.props_focus = Some(field);
         self.props_draft = self.props_field_value(&node, field);
+        let mut session = TextCursor::at_end(self.props_draft.len());
+        if click_count >= 2 {
+            session.select_all(self.props_draft.len());
+        }
+        self.props_text_edit = Some(session);
         // Keep workspace key focus so typed hex / numbers reach on_key_down.
         self.focus_handle.focus(window, cx);
         cx.notify();
@@ -4697,6 +4857,10 @@ impl CanvasWorkspace {
 
     fn on_props_key_down(&mut self, event: &KeyDownEvent, cx: &mut Context<Self>) {
         let key = event.keystroke.key.as_str();
+        let modifiers = &event.keystroke.modifiers;
+        let Some(mut session) = self.props_text_edit.take() else {
+            return;
+        };
         if key == "escape" {
             self.clear_props_focus();
             cx.stop_propagation();
@@ -4704,23 +4868,110 @@ impl CanvasWorkspace {
             return;
         }
         if key == "enter" {
+            self.props_text_edit = Some(session);
             self.commit_props_draft(cx);
             cx.stop_propagation();
             return;
         }
-        if key == "backspace" {
-            self.props_draft.pop();
+        if modifiers.platform {
+            match key {
+                "a" => session.select_all(self.props_draft.len()),
+                "c" => {
+                    let (start, end) = session.sorted();
+                    if start < end {
+                        cx.write_to_clipboard(ClipboardItem::new_string(
+                            self.props_draft[start..end].to_string(),
+                        ));
+                    }
+                }
+                "x" => {
+                    let (start, end) = session.sorted();
+                    if start < end {
+                        cx.write_to_clipboard(ClipboardItem::new_string(
+                            self.props_draft[start..end].to_string(),
+                        ));
+                        text_edit::delete_selection(&mut self.props_draft, &mut session);
+                    }
+                }
+                "v" => {
+                    if let Some(item) = cx.read_from_clipboard() {
+                        for entry in item.entries() {
+                            if let ClipboardEntry::String(value) = entry {
+                                text_edit::insert(
+                                    &mut self.props_draft,
+                                    &mut session,
+                                    &value.text,
+                                );
+                                break;
+                            }
+                        }
+                    }
+                }
+                "left" => text_edit::move_home(
+                    &mut session,
+                    &self.props_draft,
+                    modifiers.shift,
+                ),
+                "right" => text_edit::move_end(
+                    &mut session,
+                    &self.props_draft,
+                    modifiers.shift,
+                ),
+                _ => {
+                    self.props_text_edit = Some(session);
+                    return;
+                }
+            }
+            self.props_text_edit = Some(session);
             cx.stop_propagation();
             cx.notify();
             return;
         }
-        if let Some(ch) = event.keystroke.key_char.as_deref() {
-            if !event.keystroke.modifiers.modified() {
-                self.props_draft.push_str(ch);
-                cx.stop_propagation();
-                cx.notify();
+
+        match key {
+            "backspace" => {
+                text_edit::backspace(&mut self.props_draft, &mut session);
+            }
+            "delete" => {
+                text_edit::delete_forward(&mut self.props_draft, &mut session);
+            }
+            "left" => text_edit::move_left(
+                &mut session,
+                &self.props_draft,
+                modifiers.shift,
+            ),
+            "right" => text_edit::move_right(
+                &mut session,
+                &self.props_draft,
+                modifiers.shift,
+            ),
+            "up" | "home" => text_edit::move_home(
+                &mut session,
+                &self.props_draft,
+                modifiers.shift,
+            ),
+            "down" | "end" => text_edit::move_end(
+                &mut session,
+                &self.props_draft,
+                modifiers.shift,
+            ),
+            _ => {
+                if let Some(ch) = event.keystroke.key_char.as_deref() {
+                    if !modifiers.modified() {
+                        text_edit::insert(&mut self.props_draft, &mut session, ch);
+                    } else {
+                        self.props_text_edit = Some(session);
+                        return;
+                    }
+                } else {
+                    self.props_text_edit = Some(session);
+                    return;
+                }
             }
         }
+        self.props_text_edit = Some(session);
+        cx.stop_propagation();
+        cx.notify();
     }
 
     pub fn toggle_hidden(&mut self, id: &NodeId, cx: &mut Context<Self>) {
@@ -5262,10 +5513,7 @@ impl CanvasWorkspace {
             return;
         }
 
-        let Some(state) = self.image_picker.as_mut() else {
-            return;
-        };
-        if state.mode != ImagePickerMode::Url {
+        if self.image_picker.as_ref().map(|state| &state.mode) != Some(&ImagePickerMode::Url) {
             return;
         }
 
@@ -5274,18 +5522,18 @@ impl CanvasWorkspace {
             cx.stop_propagation();
             return;
         }
-        if key == "backspace" {
-            state.url.pop();
+        let Some(mut cursor) = self.image_url_edit.take() else {
+            return;
+        };
+        let handled = self
+            .image_picker
+            .as_mut()
+            .map(|state| edit_text_input_key(event, &mut state.url, &mut cursor, cx))
+            .unwrap_or(false);
+        self.image_url_edit = Some(cursor);
+        if handled {
             cx.stop_propagation();
             cx.notify();
-            return;
-        }
-        if let Some(ch) = event.keystroke.key_char.as_deref() {
-            if !event.keystroke.modifiers.modified() {
-                state.url.push_str(ch);
-                cx.stop_propagation();
-                cx.notify();
-            }
         }
     }
 
@@ -5319,21 +5567,17 @@ impl CanvasWorkspace {
             cx.notify();
             return;
         }
-        if key == "backspace" {
-            self.command_query.pop();
+        let Some(mut cursor) = self.command_edit.take() else {
+            return;
+        };
+        if edit_text_input_key(event, &mut self.command_query, &mut cursor, cx) {
+            self.command_edit = Some(cursor);
             self.command_index = 0;
             cx.stop_propagation();
             cx.notify();
             return;
         }
-        if let Some(ch) = event.keystroke.key_char.as_deref() {
-            if !event.keystroke.modifiers.modified() {
-                self.command_query.push_str(ch);
-                self.command_index = 0;
-                cx.stop_propagation();
-                cx.notify();
-            }
-        }
+        self.command_edit = Some(cursor);
     }
 
     fn on_layer_rename_key_down(&mut self, event: &KeyDownEvent, cx: &mut Context<Self>) {
@@ -5348,19 +5592,16 @@ impl CanvasWorkspace {
             cx.stop_propagation();
             return;
         }
-        if key == "backspace" {
-            self.layer_rename_draft.pop();
+        let Some(mut cursor) = self.layer_rename_edit.take() else {
+            return;
+        };
+        if edit_text_input_key(event, &mut self.layer_rename_draft, &mut cursor, cx) {
+            self.layer_rename_edit = Some(cursor);
             cx.stop_propagation();
             cx.notify();
             return;
         }
-        if let Some(ch) = event.keystroke.key_char.as_deref() {
-            if !event.keystroke.modifiers.modified() {
-                self.layer_rename_draft.push_str(ch);
-                cx.stop_propagation();
-                cx.notify();
-            }
-        }
+        self.layer_rename_edit = Some(cursor);
     }
 
     fn on_layer_search_key_down(&mut self, event: &KeyDownEvent, cx: &mut Context<Self>) {
@@ -5370,19 +5611,16 @@ impl CanvasWorkspace {
             cx.stop_propagation();
             return;
         }
-        if key == "backspace" {
-            self.layer_query.pop();
+        let Some(mut cursor) = self.layer_search_edit.take() else {
+            return;
+        };
+        if edit_text_input_key(event, &mut self.layer_query, &mut cursor, cx) {
+            self.layer_search_edit = Some(cursor);
             cx.stop_propagation();
             cx.notify();
             return;
         }
-        if let Some(ch) = event.keystroke.key_char.as_deref() {
-            if !event.keystroke.modifiers.modified() {
-                self.layer_query.push_str(ch);
-                cx.stop_propagation();
-                cx.notify();
-            }
-        }
+        self.layer_search_edit = Some(cursor);
     }
 
     fn tool_select(&mut self, _: &ToolSelect, _: &mut Window, cx: &mut Context<Self>) {
@@ -5576,6 +5814,72 @@ fn next_untitled_name(files: &[DesignFileInfo]) -> String {
     }
 }
 
+fn edit_text_input_key(
+    event: &KeyDownEvent,
+    text: &mut String,
+    cursor: &mut TextCursor,
+    cx: &mut Context<CanvasWorkspace>,
+) -> bool {
+    let key = event.keystroke.key.as_str();
+    let modifiers = &event.keystroke.modifiers;
+
+    if modifiers.platform {
+        match key {
+            "a" => cursor.select_all(text.len()),
+            "c" => {
+                let (start, end) = cursor.sorted();
+                if start < end {
+                    cx.write_to_clipboard(ClipboardItem::new_string(text[start..end].to_string()));
+                }
+            }
+            "x" => {
+                let (start, end) = cursor.sorted();
+                if start < end {
+                    cx.write_to_clipboard(ClipboardItem::new_string(text[start..end].to_string()));
+                    text_edit::delete_selection(text, cursor);
+                }
+            }
+            "v" => {
+                if let Some(item) = cx.read_from_clipboard() {
+                    for entry in item.entries() {
+                        if let ClipboardEntry::String(value) = entry {
+                            text_edit::insert(text, cursor, &value.text);
+                            break;
+                        }
+                    }
+                }
+            }
+            "left" => text_edit::move_home(cursor, text, modifiers.shift),
+            "right" => text_edit::move_end(cursor, text, modifiers.shift),
+            _ => return false,
+        }
+        return true;
+    }
+
+    match key {
+        "backspace" => {
+            text_edit::backspace(text, cursor);
+        }
+        "delete" => {
+            text_edit::delete_forward(text, cursor);
+        }
+        "left" => text_edit::move_left(cursor, text, modifiers.shift),
+        "right" => text_edit::move_right(cursor, text, modifiers.shift),
+        "up" | "home" => text_edit::move_home(cursor, text, modifiers.shift),
+        "down" | "end" => text_edit::move_end(cursor, text, modifiers.shift),
+        _ => {
+            let Some(ch) = event.keystroke.key_char.as_deref() else {
+                return false;
+            };
+            if modifiers.modified() || ch.is_empty() {
+                return false;
+            }
+            text_edit::insert(text, cursor, ch);
+        }
+    }
+    true
+}
+
 fn is_http_url(value: &str) -> bool {
     let lower = value.to_ascii_lowercase();
     lower.starts_with("http://") || lower.starts_with("https://")
@@ -5649,17 +5953,38 @@ impl Render for CanvasWorkspace {
         let selection_set: HashSet<NodeId> = self.selection.iter().cloned().collect();
         let query = self.layer_query.clone();
         let layer_search_focused = self.layer_search_focused;
+        let layer_search_selection = self
+            .layer_search_edit
+            .as_ref()
+            .map(|cursor| (cursor.anchor, cursor.caret));
         let layer_rename = self.layer_rename.clone();
         let layer_rename_draft = self.layer_rename_draft.clone();
+        let layer_rename_selection = self
+            .layer_rename_edit
+            .as_ref()
+            .map(|cursor| (cursor.anchor, cursor.caret));
         let layer_scroll = self.layer_scroll.clone();
         let command_open = self.command_open;
         let command_query = self.command_query.clone();
         let command_index = self.command_index;
+        let command_selection = self
+            .command_edit
+            .as_ref()
+            .map(|cursor| (cursor.anchor, cursor.caret));
         let files = self.files.clone();
         let active_id = self.document_id();
         let dirty = self.dirty;
         let doc_name = self.document_name();
         let image_picker = self.image_picker.clone();
+        let library_assets = image_picker
+            .as_ref()
+            .filter(|picker| picker.mode == ImagePickerMode::Choose)
+            .map(|_| self.library_assets())
+            .unwrap_or_default();
+        let image_url_selection = self
+            .image_url_edit
+            .as_ref()
+            .map(|cursor| (cursor.anchor, cursor.caret));
         let color_picker = self.color_picker.clone();
         let context_menu = self.context_menu.clone();
         let context_entries = if context_menu.is_some() {
@@ -5712,8 +6037,10 @@ impl Render for CanvasWorkspace {
                     rows,
                     query,
                     layer_search_focused,
+                    layer_search_selection,
                     layer_rename,
                     layer_rename_draft,
+                    layer_rename_selection,
                     components,
                     layer_scroll,
                 ))
@@ -5728,6 +6055,7 @@ impl Render for CanvasWorkspace {
                     .bg(theme.main_bg)
                     .child(
                         div()
+                            .id("canvas-titlebar")
                             .flex()
                             .items_center()
                             .justify_between()
@@ -5737,6 +6065,11 @@ impl Render for CanvasWorkspace {
                             .border_b_1()
                             .border_color(theme.border)
                             .bg(theme.header_bg())
+                            .on_click(|event, window, _| {
+                                if event.click_count() == 2 {
+                                    window.titlebar_double_click();
+                                }
+                            })
                             .child(
                                 div()
                                     .flex()
@@ -5752,6 +6085,7 @@ impl Render for CanvasWorkspace {
                                             .on_click({
                                                 let entity = entity.clone();
                                                 move |_, _, cx| {
+                                                    cx.stop_propagation();
                                                     entity.update(cx, |this, cx| {
                                                         this.open_command_dialog(cx);
                                                     });
@@ -5797,6 +6131,7 @@ impl Render for CanvasWorkspace {
                                                         })
                                                         .hover(|s| s.bg(theme.wash()))
                                                         .on_click(move |_, _, cx| {
+                                                            cx.stop_propagation();
                                                             entity.update(cx, |this, cx| {
                                                                 this.focus_page(&id_for_click, cx);
                                                             });
@@ -5830,6 +6165,7 @@ impl Render for CanvasWorkspace {
                                             .on_click({
                                                 let entity = entity.clone();
                                                 move |_, _, cx| {
+                                                    cx.stop_propagation();
                                                     entity.update(cx, |this, cx| {
                                                         this.fit_all_pages(cx);
                                                     });
@@ -5873,6 +6209,7 @@ impl Render for CanvasWorkspace {
                     files,
                     command_query,
                     command_index,
+                    command_selection,
                     dirty,
                 ))
             })
@@ -5882,7 +6219,8 @@ impl Render for CanvasWorkspace {
                     theme,
                     picker.mode,
                     picker.url,
-                    entity.read(cx).library_assets(),
+                    image_url_selection,
+                    library_assets,
                 ))
             })
             .when_some(color_picker, |this, picker| {

@@ -6,7 +6,7 @@ use gpui::{
 use crate::canvas::workspace::CanvasWorkspace;
 use crate::icon::{Icon, IconName};
 use crate::motion::{Ease, Motion, MotionStyle, Transition};
-use crate::text_field::field_content;
+use crate::text_field::editable_field_content;
 use crate::theme::Theme;
 use std::path::PathBuf;
 use std::time::Duration;
@@ -23,6 +23,7 @@ pub struct ImagePickerDialog {
     theme: Theme,
     mode: ImagePickerMode,
     url: String,
+    selection: Option<(usize, usize)>,
     library: Vec<PathBuf>,
 }
 
@@ -32,6 +33,7 @@ impl ImagePickerDialog {
         theme: Theme,
         mode: ImagePickerMode,
         url: String,
+        selection: Option<(usize, usize)>,
         library: Vec<PathBuf>,
     ) -> Self {
         Self {
@@ -39,6 +41,7 @@ impl ImagePickerDialog {
             theme,
             mode,
             url,
+            selection,
             library,
         }
     }
@@ -50,6 +53,7 @@ impl RenderOnce for ImagePickerDialog {
         let workspace = self.workspace;
         let mode = self.mode;
         let url = self.url;
+        let selection = self.selection;
         let library = self.library;
 
         div()
@@ -186,6 +190,7 @@ impl RenderOnce for ImagePickerDialog {
                                         .gap_3()
                                         .child(
                                             div()
+                                                .id("image-url-input")
                                                 .flex()
                                                 .items_center()
                                                 .gap_2()
@@ -196,13 +201,35 @@ impl RenderOnce for ImagePickerDialog {
                                                 .border_1()
                                                 .border_color(rgba(0x7aa2f788))
                                                 .cursor(CursorStyle::IBeam)
-                                                .child(field_content(
+                                                .on_mouse_down(gpui::MouseButton::Left, {
+                                                    let workspace = workspace.clone();
+                                                    move |event, window, cx| {
+                                                        cx.stop_propagation();
+                                                        workspace.update(cx, |this, cx| {
+                                                            this.focus_image_url_input(
+                                                                event.click_count,
+                                                                window,
+                                                                cx,
+                                                            );
+                                                        });
+                                                    }
+                                                })
+                                                .when(selection.is_some(), |this| {
+                                                    let workspace = workspace.clone();
+                                                    this.on_mouse_down_out(move |_, _, cx| {
+                                                        workspace.update(cx, |this, cx| {
+                                                            this.blur_image_url_input(cx)
+                                                        });
+                                                    })
+                                                })
+                                                .child(editable_field_content(
                                                     url,
                                                     "https://…",
-                                                    true,
+                                                    selection,
                                                     theme.bright_white,
                                                     theme.muted,
                                                     theme.bright_white,
+                                                    theme.highlight_fill(),
                                                     px(14.),
                                                     px(16.),
                                                 )),

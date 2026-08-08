@@ -93,6 +93,7 @@ pub enum PropsField {
 pub struct PropsView {
     pub focus: Option<PropsField>,
     pub draft: String,
+    pub selection: Option<(usize, usize)>,
     pub readonly: bool,
     pub collapsed: HashSet<&'static str>,
 }
@@ -102,9 +103,16 @@ impl Default for PropsView {
         Self {
             focus: None,
             draft: String::new(),
+            selection: None,
             readonly: false,
             collapsed: HashSet::new(),
         }
+    }
+}
+
+impl PropsView {
+    pub fn selection_for(&self, field: PropsField) -> Option<(usize, usize)> {
+        (self.focus == Some(field)).then_some(self.selection).flatten()
     }
 }
 
@@ -159,6 +167,7 @@ impl RenderOnce for PropertiesPanel {
             .bg(theme.panel_chrome_bg())
             .child(
                 div()
+                    .id("properties-titlebar")
                     .flex()
                     .items_center()
                     .h(px(52.))
@@ -166,6 +175,11 @@ impl RenderOnce for PropertiesPanel {
                     .px_3()
                     .border_b_1()
                     .border_color(theme.border)
+                    .on_click(|event, window, _| {
+                        if event.click_count() == 2 {
+                            window.titlebar_double_click();
+                        }
+                    })
                     .child(
                         div()
                             .text_size(px(13.))
@@ -579,7 +593,8 @@ fn header_section(
     let kind = shared(selection.iter().map(|n| n.kind))
         .map(kind_label)
         .unwrap_or("Mixed");
-    let ws = workspace;
+    let ws = workspace.clone();
+    let ws_blur = workspace;
 
     div()
         .flex()
@@ -595,10 +610,14 @@ fn header_section(
             name_display,
             "Name".into(),
             view.focus == Some(PropsField::Name),
+            view.selection_for(PropsField::Name),
             view.readonly,
-            move |_, window, cx| {
-                ws.update(cx, |this, cx| this.focus_props_field(PropsField::Name, window, cx));
+            move |event, window, cx| {
+                ws.update(cx, |this, cx| {
+                    this.focus_props_field(PropsField::Name, event.click_count, window, cx)
+                });
             },
+            move |_, _, cx| ws_blur.update(cx, |this, cx| this.blur_props_if_needed(cx)),
         ))
         .child(
             div().flex().items_center().h(px(20.)).px_1().child(

@@ -10,7 +10,7 @@ use loora_engine::{CanvasEngine, NodeId, NodeKind};
 
 use crate::canvas::workspace::CanvasWorkspace;
 use crate::icon::{Icon, IconName};
-use crate::text_field::field_content;
+use crate::text_field::editable_field_content;
 use crate::theme::Theme;
 
 const LAYER_ROW_HEIGHT: f32 = 36.;
@@ -144,8 +144,10 @@ pub struct LayerSidebar {
     rows: Rc<Vec<LayerRow>>,
     query: String,
     search_focused: bool,
+    search_selection: Option<(usize, usize)>,
     rename_id: Option<NodeId>,
     rename_draft: String,
+    rename_selection: Option<(usize, usize)>,
     components: Vec<(NodeId, SharedString)>,
     scroll_handle: UniformListScrollHandle,
 }
@@ -158,8 +160,10 @@ impl LayerSidebar {
         rows: Rc<Vec<LayerRow>>,
         query: String,
         search_focused: bool,
+        search_selection: Option<(usize, usize)>,
         rename_id: Option<NodeId>,
         rename_draft: String,
+        rename_selection: Option<(usize, usize)>,
         components: Vec<(NodeId, SharedString)>,
         scroll_handle: UniformListScrollHandle,
     ) -> Self {
@@ -170,8 +174,10 @@ impl LayerSidebar {
             rows,
             query,
             search_focused,
+            search_selection,
             rename_id,
             rename_draft,
+            rename_selection,
             components,
             scroll_handle,
         }
@@ -185,8 +191,10 @@ impl RenderOnce for LayerSidebar {
         let workspace = self.workspace;
         let query = self.query.clone();
         let search_focused = self.search_focused;
+        let search_selection = self.search_selection;
         let rename_id = self.rename_id.clone();
         let rename_draft = self.rename_draft.clone();
+        let rename_selection = self.rename_selection;
         let rows = self.rows;
         let scroll_handle = self.scroll_handle;
         let row_count = rows.len();
@@ -211,6 +219,7 @@ impl RenderOnce for LayerSidebar {
             let row_rows = rows.clone();
             let row_rename_id = rename_id.clone();
             let row_rename_draft = rename_draft.clone();
+            let row_rename_selection = rename_selection;
             uniform_list("layers-scroll", row_count, move |range, _, _| {
                 range
                     .map(|index| {
@@ -230,6 +239,7 @@ impl RenderOnce for LayerSidebar {
                                 } else {
                                     String::new()
                                 },
+                                renaming.then_some(row_rename_selection).flatten(),
                             ))
                     })
                     .collect::<Vec<_>>()
@@ -252,6 +262,7 @@ impl RenderOnce for LayerSidebar {
             .bg(theme.panel_chrome_bg())
             .child(
                 div()
+                    .id("layers-titlebar")
                     .flex()
                     .items_center()
                     .justify_between()
@@ -259,6 +270,11 @@ impl RenderOnce for LayerSidebar {
                     .h(px(52.))
                     .pl(px(76.))
                     .pr_3()
+                    .on_click(|event, window, _| {
+                        if event.click_count() == 2 {
+                            window.titlebar_double_click();
+                        }
+                    })
                     .child(
                         div()
                             .text_size(px(13.))
@@ -320,7 +336,7 @@ impl RenderOnce for LayerSidebar {
                         .rounded(px(8.))
                         .bg(theme.field_bg())
                         .border_1()
-                          .border_color(if search_focused {
+                        .border_color(if search_focused {
                             rgba(0x7aa2f788).into()
                         } else {
                             theme.hairline()
@@ -328,25 +344,32 @@ impl RenderOnce for LayerSidebar {
                         .cursor(CursorStyle::IBeam)
                         .on_mouse_down(gpui::MouseButton::Left, {
                             let workspace = workspace.clone();
-                            move |_, _, cx| {
+                            move |event, window, cx| {
                                 cx.stop_propagation();
                                 workspace.update(cx, |this, cx| {
-                                    this.focus_layer_search(cx);
+                                    this.focus_layer_search(event.click_count, window, cx);
                                 });
                             }
+                        })
+                        .when(search_focused, |this| {
+                            let workspace = workspace.clone();
+                            this.on_mouse_down_out(move |_, _, cx| {
+                                workspace.update(cx, |this, cx| this.blur_layer_search(cx));
+                            })
                         })
                         .child(
                             Icon::hugeicon(IconName::Search)
                                 .size(px(14.))
                                 .text_color(theme.muted),
                         )
-                        .child(field_content(
+                        .child(editable_field_content(
                             query.clone(),
                             "Search layers",
-                            search_focused,
+                            search_selection.filter(|_| search_focused),
                             theme.foreground,
                             theme.muted,
                             theme.bright_white,
+                            theme.highlight_fill(),
                             px(12.),
                             px(14.),
                         )),
@@ -473,6 +496,7 @@ fn layer_row(
     selected: bool,
     renaming: bool,
     rename_draft: String,
+    rename_selection: Option<(usize, usize)>,
 ) -> impl IntoElement {
     let id = row.id.clone();
     let id_toggle = row.id.clone();
@@ -596,6 +620,8 @@ fn layer_row(
                 .text_color(theme.muted_strong),
         )
         .child(if renaming {
+            let focus_workspace = workspace.clone();
+            let blur_workspace = workspace.clone();
             div()
                 .flex_1()
                 .min_w_0()
@@ -607,13 +633,23 @@ fn layer_row(
                 .border_color(theme.accent)
                 .flex()
                 .items_center()
-                .child(field_content(
+                .on_mouse_down(gpui::MouseButton::Left, move |event, window, cx| {
+                    cx.stop_propagation();
+                    focus_workspace.update(cx, |this, cx| {
+                        this.focus_layer_rename(event.click_count, window, cx);
+                    });
+                })
+                .on_mouse_down_out(move |_, _, cx| {
+                    blur_workspace.update(cx, |this, cx| this.commit_layer_rename(cx));
+                })
+                .child(editable_field_content(
                     rename_draft,
                     "Name",
-                    true,
+                    rename_selection,
                     theme.foreground,
                     theme.muted,
                     theme.accent,
+                    theme.highlight_fill(),
                     px(12.),
                     px(14.),
                 ))

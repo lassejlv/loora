@@ -23,6 +23,7 @@ pub fn stack_section(
         let ws2 = workspace.clone();
         let ws3 = workspace.clone();
         let ws4 = workspace.clone();
+        let ws5 = workspace.clone();
         number_field(
             theme,
             format!("props-stack-{label}").into(),
@@ -36,9 +37,15 @@ pub fn stack_section(
                 }
             },
             view.focus == Some(field),
+            view.selection_for(field),
             disabled,
             None,
-            move |_, window, cx| ws.update(cx, |this, cx| this.focus_props_field(field, window, cx)),
+            move |event, window, cx| {
+                ws.update(cx, |this, cx| {
+                    this.focus_props_field(field, event.click_count, window, cx)
+                })
+            },
+            move |_, _, cx| ws5.update(cx, |this, cx| this.blur_props_if_needed(cx)),
             move |event, _, cx| {
                 ws2.update(cx, |this, cx| {
                     this.begin_props_scrub(field, start, f32::from(event.position.x), cx)

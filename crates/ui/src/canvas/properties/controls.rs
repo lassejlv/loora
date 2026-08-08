@@ -4,7 +4,7 @@ use gpui::{
 };
 use loora_engine::Color;
 
-use crate::text_field::field_content;
+use crate::text_field::editable_field_content;
 use crate::theme::Theme;
 
 /// Compact inspector select. `None` is rendered as the multi-selection "Mixed" value.
@@ -122,9 +122,11 @@ pub fn number_field(
     label: &'static str,
     display: SharedString,
     focused: bool,
+    selection: Option<(usize, usize)>,
     disabled: bool,
     suffix: Option<&'static str>,
     on_focus: impl Fn(&MouseDownEvent, &mut gpui::Window, &mut gpui::App) + 'static,
+    on_blur: impl Fn(&MouseDownEvent, &mut gpui::Window, &mut gpui::App) + 'static,
     on_scrub_down: impl Fn(&MouseDownEvent, &mut gpui::Window, &mut gpui::App) + 'static,
     on_scrub_move: impl Fn(&MouseMoveEvent, &mut gpui::Window, &mut gpui::App) + 'static,
     on_scrub_up: impl Fn(&MouseUpEvent, &mut gpui::Window, &mut gpui::App) + 'static,
@@ -153,6 +155,7 @@ pub fn number_field(
         .when(!disabled, |this| {
             this.on_mouse_down(MouseButton::Left, on_focus)
         })
+        .when(focused && !disabled, |this| this.on_mouse_down_out(on_blur))
         .child(
             div()
                 .id(SharedString::from(format!("{label}-scrub")))
@@ -171,13 +174,14 @@ pub fn number_field(
                 })
                 .child(label),
         )
-        .child(field_content(
+        .child(editable_field_content(
             display,
             "—",
-            focused && !disabled,
+            selection.filter(|_| focused && !disabled),
             theme.foreground,
             theme.muted,
             theme.bright_white,
+            theme.highlight_fill(),
             px(11.),
             px(12.),
         ))
@@ -198,8 +202,10 @@ pub fn text_field(
     display: SharedString,
     placeholder: SharedString,
     focused: bool,
+    selection: Option<(usize, usize)>,
     disabled: bool,
     on_focus: impl Fn(&MouseDownEvent, &mut gpui::Window, &mut gpui::App) + 'static,
+    on_blur: impl Fn(&MouseDownEvent, &mut gpui::Window, &mut gpui::App) + 'static,
 ) -> impl IntoElement {
     div()
         .id(id)
@@ -224,13 +230,15 @@ pub fn text_field(
         .when(!disabled, |this| {
             this.on_mouse_down(MouseButton::Left, on_focus)
         })
-        .child(field_content(
+        .when(focused && !disabled, |this| this.on_mouse_down_out(on_blur))
+        .child(editable_field_content(
             display,
             placeholder,
-            focused && !disabled,
+            selection.filter(|_| focused && !disabled),
             theme.foreground,
             theme.muted,
             theme.bright_white,
+            theme.highlight_fill(),
             px(11.),
             px(12.),
         ))
@@ -242,9 +250,11 @@ pub fn hex_color_field(
     color: Option<Color>,
     display: SharedString,
     focused: bool,
+    selection: Option<(usize, usize)>,
     disabled: bool,
     on_swatch: impl Fn(&MouseDownEvent, &mut gpui::Window, &mut gpui::App) + 'static,
     on_hex_focus: impl Fn(&MouseDownEvent, &mut gpui::Window, &mut gpui::App) + 'static,
+    on_blur: impl Fn(&MouseDownEvent, &mut gpui::Window, &mut gpui::App) + 'static,
 ) -> impl IntoElement {
     crate::color_picker::ColorPickerField::new(
         theme,
@@ -252,9 +262,11 @@ pub fn hex_color_field(
         color,
         display,
         focused,
+        selection,
         disabled,
         on_swatch,
         on_hex_focus,
+        on_blur,
     )
 }
 
@@ -308,5 +320,75 @@ pub fn parse_hex(input: &str) -> Option<Color> {
             Some(Color::rgb(r * 17, g * 17, b * 17))
         }
         _ => None,
+    }
+}
+
+#[cfg(test)]
+mod interaction_tests {
+    use gpui::{
+        point, Context, Entity, Modifiers, Render, TestAppContext, VisualTestContext,
+    };
+
+    use super::*;
+
+    struct TextFieldTestView {
+        focused: bool,
+    }
+
+    impl Render for TextFieldTestView {
+        fn render(
+            &mut self,
+            _window: &mut gpui::Window,
+            cx: &mut Context<Self>,
+        ) -> impl IntoElement {
+            let view: Entity<Self> = cx.entity();
+            let blur_view = view.clone();
+            div()
+                .size_full()
+                .child(
+                    div()
+                        .debug_selector(|| "test-text-field".into())
+                        .w(px(200.))
+                        .child(text_field(
+                            Theme::default(),
+                            "test-field".into(),
+                            "hello".into(),
+                            "Placeholder".into(),
+                            self.focused,
+                            self.focused.then_some((5, 5)),
+                            false,
+                            move |_, _, cx| {
+                                view.update(cx, |this, cx| {
+                                    this.focused = true;
+                                    cx.notify();
+                                });
+                            },
+                            move |_, _, cx| {
+                                blur_view.update(cx, |this, cx| {
+                                    this.focused = false;
+                                    cx.notify();
+                                });
+                            },
+                        )),
+                )
+        }
+    }
+
+    #[gpui::test]
+    fn clicking_outside_blurs_a_focused_text_field(cx: &mut TestAppContext) {
+        let (view, cx): (Entity<TextFieldTestView>, &mut VisualTestContext) =
+            cx.add_window_view(|_, _| TextFieldTestView { focused: false });
+        let field = cx
+            .debug_bounds("test-text-field")
+            .expect("the text field should be rendered");
+
+        cx.simulate_click(field.center(), Modifiers::default());
+        assert!(view.read_with(cx, |this, _| this.focused));
+
+        cx.simulate_click(point(px(500.), px(500.)), Modifiers::default());
+        assert!(
+            !view.read_with(cx, |this, _| this.focused),
+            "the text field stayed focused after an outside click"
+        );
     }
 }

@@ -9,7 +9,7 @@ use gpui::{
 };
 use loora_engine::Color;
 
-use crate::text_field::field_content;
+use crate::text_field::editable_field_content;
 use crate::theme::Theme;
 
 type ColorChangeFn = Rc<dyn Fn(Color, &mut Window, &mut gpui::App)>;
@@ -145,9 +145,11 @@ pub struct ColorPickerField {
     color: Option<Color>,
     display: SharedString,
     focused: bool,
+    selection: Option<(usize, usize)>,
     disabled: bool,
     on_swatch: Box<dyn Fn(&MouseDownEvent, &mut Window, &mut gpui::App) + 'static>,
     on_hex_focus: Box<dyn Fn(&MouseDownEvent, &mut Window, &mut gpui::App) + 'static>,
+    on_blur: Box<dyn Fn(&MouseDownEvent, &mut Window, &mut gpui::App) + 'static>,
 }
 
 impl ColorPickerField {
@@ -157,9 +159,11 @@ impl ColorPickerField {
         color: Option<Color>,
         display: impl Into<SharedString>,
         focused: bool,
+        selection: Option<(usize, usize)>,
         disabled: bool,
         on_swatch: impl Fn(&MouseDownEvent, &mut Window, &mut gpui::App) + 'static,
         on_hex_focus: impl Fn(&MouseDownEvent, &mut Window, &mut gpui::App) + 'static,
+        on_blur: impl Fn(&MouseDownEvent, &mut Window, &mut gpui::App) + 'static,
     ) -> Self {
         Self {
             id: id.into(),
@@ -167,9 +171,11 @@ impl ColorPickerField {
             color,
             display: display.into(),
             focused,
+            selection,
             disabled,
             on_swatch: Box::new(on_swatch),
             on_hex_focus: Box::new(on_hex_focus),
+            on_blur: Box::new(on_blur),
         }
     }
 }
@@ -180,6 +186,7 @@ impl RenderOnce for ColorPickerField {
         let swatch = self.color.unwrap_or(Color::rgba(0.0, 0.0, 0.0, 0.0));
         let on_swatch = self.on_swatch;
         let on_hex = self.on_hex_focus;
+        let on_blur = self.on_blur;
 
         div()
             .id(self.id)
@@ -197,6 +204,9 @@ impl RenderOnce for ColorPickerField {
             })
             .bg(theme.surface_raised)
             .opacity(if self.disabled { 0.5 } else { 1.0 })
+            .when(self.focused && !self.disabled, |this| {
+                this.on_mouse_down_out(on_blur)
+            })
             .child(
                 div()
                     .id("color-swatch")
@@ -229,13 +239,14 @@ impl RenderOnce for ColorPickerField {
                     .when(!self.disabled, |this| {
                         this.on_mouse_down(MouseButton::Left, move |e, w, cx| on_hex(e, w, cx))
                     })
-                    .child(field_content(
+                    .child(editable_field_content(
                         self.display,
                         "#000000",
-                        self.focused && !self.disabled,
+                        self.selection.filter(|_| self.focused && !self.disabled),
                         theme.foreground,
                         theme.muted,
                         theme.bright_white,
+                        theme.highlight_fill(),
                         px(11.),
                         px(12.),
                     )),

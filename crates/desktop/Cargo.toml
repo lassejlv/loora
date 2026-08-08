@@ -4,10 +4,23 @@ version.workspace = true
 edition.workspace = true
 
 [[bin]]
-name = "loora"
+name = "Loora"
 path = "src/main.rs"
 
 [dependencies]
 gpui.workspace = true
 gpui_platform.workspace = true
+image = { version = "0.25", default-features = false, features = ["png"] }
 loora-ui.workspace = true
+
+[build-dependencies]
+embed-resource = "3.0"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6"
+objc2-app-kit = { version = "0.3.2", default-features = false, features = [
+    "NSApplication",
+    "NSImage",
+    "NSResponder",
+] }
+objc2-foundation = { version = "=0.3.2", default-features = false, features = ["NSData"] }

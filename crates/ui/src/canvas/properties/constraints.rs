@@ -19,6 +19,7 @@ pub fn constraints_section(
         let b = workspace.clone();
         let c = workspace.clone();
         let d = workspace.clone();
+        let e = workspace.clone();
         number_field(
             theme,
             format!("props-constraint-{label}").into(),
@@ -29,9 +30,15 @@ pub fn constraints_section(
                 format_number(value, 2).into()
             },
             view.focus == Some(field),
+            view.selection_for(field),
             disabled,
             None,
-            move |_, window, cx| a.update(cx, |this, cx| this.focus_props_field(field, window, cx)),
+            move |event, window, cx| {
+                a.update(cx, |this, cx| {
+                    this.focus_props_field(field, event.click_count, window, cx)
+                })
+            },
+            move |_, _, cx| e.update(cx, |this, cx| this.blur_props_if_needed(cx)),
             move |event, _, cx| {
                 b.update(cx, |this, cx| {
                     this.begin_props_scrub(field, value, f32::from(event.position.x), cx)

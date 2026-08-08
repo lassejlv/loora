@@ -7,7 +7,7 @@ use loora_engine::DesignFileInfo;
 use crate::canvas::workspace::CanvasWorkspace;
 use crate::icon::{Icon, IconName};
 use crate::motion::{Ease, Motion, MotionStyle, Transition};
-use crate::text_field::field_content;
+use crate::text_field::editable_field_content;
 use crate::theme::Theme;
 use std::time::Duration;
 
@@ -19,6 +19,7 @@ pub struct FilesCommandDialog {
     files: Vec<DesignFileInfo>,
     query: String,
     selected_index: usize,
+    selection: Option<(usize, usize)>,
     dirty: bool,
 }
 
@@ -30,6 +31,7 @@ impl FilesCommandDialog {
         files: Vec<DesignFileInfo>,
         query: String,
         selected_index: usize,
+        selection: Option<(usize, usize)>,
         dirty: bool,
     ) -> Self {
         Self {
@@ -39,6 +41,7 @@ impl FilesCommandDialog {
             files,
             query,
             selected_index,
+            selection,
             dirty,
         }
     }
@@ -51,6 +54,7 @@ impl RenderOnce for FilesCommandDialog {
         let active_id = self.active_id;
         let query = self.query;
         let selected_index = self.selected_index;
+        let selection = self.selection;
         let dirty = self.dirty;
 
         let filtered: Vec<DesignFileInfo> = self
@@ -99,6 +103,7 @@ impl RenderOnce for FilesCommandDialog {
                             })
                             .child(
                                 div()
+                                    .id("files-search")
                                     .flex()
                                     .items_center()
                                     .gap_3()
@@ -106,18 +111,40 @@ impl RenderOnce for FilesCommandDialog {
                                     .px_4()
                                     .border_b_1()
                                     .border_color(theme.hairline_soft())
+                                    .on_mouse_down(gpui::MouseButton::Left, {
+                                        let workspace = workspace.clone();
+                                        move |event, window, cx| {
+                                            cx.stop_propagation();
+                                            workspace.update(cx, |this, cx| {
+                                                this.focus_command_input(
+                                                    event.click_count,
+                                                    window,
+                                                    cx,
+                                                );
+                                            });
+                                        }
+                                    })
+                                    .when(selection.is_some(), |this| {
+                                        let workspace = workspace.clone();
+                                        this.on_mouse_down_out(move |_, _, cx| {
+                                            workspace.update(cx, |this, cx| {
+                                                this.blur_command_input(cx)
+                                            });
+                                        })
+                                    })
                                     .child(
                                         Icon::hugeicon(IconName::Search)
                                             .size(px(16.))
                                             .text_color(theme.muted),
                                     )
-                                    .child(field_content(
+                                    .child(editable_field_content(
                                         query.clone(),
                                         "Search designs…",
-                                        true,
+                                        selection,
                                         theme.bright_white,
                                         theme.muted,
                                         theme.bright_white,
+                                        theme.highlight_fill(),
                                         px(15.),
                                         px(18.),
                                     ))

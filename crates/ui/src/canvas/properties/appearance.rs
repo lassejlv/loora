@@ -45,10 +45,12 @@ pub fn appearance_section(
     let ws_op2 = workspace.clone();
     let ws_op3 = workspace.clone();
     let ws_op4 = workspace.clone();
+    let ws_op5 = workspace.clone();
     let ws_rad = workspace.clone();
     let ws_rad2 = workspace.clone();
     let ws_rad3 = workspace.clone();
     let ws_rad4 = workspace.clone();
+    let ws_rad5 = workspace.clone();
 
     div()
         .flex()
@@ -60,6 +62,7 @@ pub fn appearance_section(
             fill,
             fill_display,
             view.focus == Some(PropsField::Fill),
+            view.selection_for(PropsField::Fill),
             disabled,
             {
                 let ws = workspace.clone();
@@ -69,8 +72,14 @@ pub fn appearance_section(
                     })
                 }
             },
-            move |_, window, cx| {
-                ws_fill.update(cx, |this, cx| this.focus_props_field(PropsField::Fill, window, cx));
+            move |event, window, cx| {
+                ws_fill.update(cx, |this, cx| {
+                    this.focus_props_field(PropsField::Fill, event.click_count, window, cx)
+                });
+            },
+            {
+                let ws = workspace.clone();
+                move |_, _, cx| ws.update(cx, |this, cx| this.blur_props_if_needed(cx))
             },
         ))
         .child(pair(
@@ -80,13 +89,20 @@ pub fn appearance_section(
                 "Op",
                 opacity_display,
                 view.focus == Some(PropsField::Opacity),
+                view.selection_for(PropsField::Opacity),
                 disabled,
                 Some("%"),
-                move |_, window, cx| {
+                move |event, window, cx| {
                     ws_op.update(cx, |this, cx| {
-                        this.focus_props_field(PropsField::Opacity, window, cx)
+                        this.focus_props_field(
+                            PropsField::Opacity,
+                            event.click_count,
+                            window,
+                            cx,
+                        )
                     });
                 },
+                move |_, _, cx| ws_op5.update(cx, |this, cx| this.blur_props_if_needed(cx)),
                 move |event, _, cx| {
                     ws_op2.update(cx, |this, cx| {
                         this.begin_props_scrub(
@@ -112,13 +128,20 @@ pub fn appearance_section(
                 "R",
                 radius_display,
                 view.focus == Some(PropsField::Radius),
+                view.selection_for(PropsField::Radius),
                 disabled,
                 None,
-                move |_, window, cx| {
+                move |event, window, cx| {
                     ws_rad.update(cx, |this, cx| {
-                        this.focus_props_field(PropsField::Radius, window, cx)
+                        this.focus_props_field(
+                            PropsField::Radius,
+                            event.click_count,
+                            window,
+                            cx,
+                        )
                     });
                 },
+                move |_, _, cx| ws_rad5.update(cx, |this, cx| this.blur_props_if_needed(cx)),
                 move |event, _, cx| {
                     ws_rad2.update(cx, |this, cx| {
                         this.begin_props_scrub(
@@ -208,8 +231,10 @@ pub fn appearance_section(
             disabled,
             {
                 let workspace = workspace.clone();
-                move |_, window, cx| {
-                    workspace.update(cx, |this, cx| this.focus_props_field(PropsField::Fill, window, cx));
+                move |event, window, cx| {
+                    workspace.update(cx, |this, cx| {
+                        this.focus_props_field(PropsField::Fill, event.click_count, window, cx)
+                    });
                 }
             },
         ))
@@ -237,7 +262,8 @@ fn corner_field(
     let a = workspace.clone();
     let b = workspace.clone();
     let c = workspace.clone();
-    let d = workspace;
+    let d = workspace.clone();
+    let e = workspace;
     number_field(
         theme,
         format!("props-{label}").into(),
@@ -248,9 +274,15 @@ fn corner_field(
             format_number(value, 1).into()
         },
         view.focus == Some(field),
+        view.selection_for(field),
         view.readonly,
         None,
-        move |_, window, cx| a.update(cx, |this, cx| this.focus_props_field(field, window, cx)),
+        move |event, window, cx| {
+            a.update(cx, |this, cx| {
+                this.focus_props_field(field, event.click_count, window, cx)
+            })
+        },
+        move |_, _, cx| e.update(cx, |this, cx| this.blur_props_if_needed(cx)),
         move |event, _, cx| {
             b.update(cx, |this, cx| {
                 this.begin_props_scrub(field, value, f32::from(event.position.x), cx)
@@ -297,6 +329,7 @@ pub fn stroke_section(
     let ws_w2 = workspace.clone();
     let ws_w3 = workspace.clone();
     let ws_w4 = workspace.clone();
+    let ws_w5 = workspace.clone();
 
     div()
         .flex()
@@ -342,6 +375,7 @@ pub fn stroke_section(
                 color,
                 color_display,
                 view.focus == Some(PropsField::StrokeColor),
+                view.selection_for(PropsField::StrokeColor),
                 disabled,
                 {
                     let ws = workspace.clone();
@@ -351,10 +385,19 @@ pub fn stroke_section(
                         })
                     }
                 },
-                move |_, window, cx| {
+                move |event, window, cx| {
                     ws_color.update(cx, |this, cx| {
-                        this.focus_props_field(PropsField::StrokeColor, window, cx)
+                        this.focus_props_field(
+                            PropsField::StrokeColor,
+                            event.click_count,
+                            window,
+                            cx,
+                        )
                     });
+                },
+                {
+                    let ws = workspace.clone();
+                    move |_, _, cx| ws.update(cx, |this, cx| this.blur_props_if_needed(cx))
                 },
             ))
             .child(number_field(
@@ -363,13 +406,20 @@ pub fn stroke_section(
                 "W",
                 width_display,
                 view.focus == Some(PropsField::StrokeWidth),
+                view.selection_for(PropsField::StrokeWidth),
                 disabled,
                 None,
-                move |_, window, cx| {
+                move |event, window, cx| {
                     ws_w.update(cx, |this, cx| {
-                        this.focus_props_field(PropsField::StrokeWidth, window, cx)
+                        this.focus_props_field(
+                            PropsField::StrokeWidth,
+                            event.click_count,
+                            window,
+                            cx,
+                        )
                     });
                 },
+                move |_, _, cx| ws_w5.update(cx, |this, cx| this.blur_props_if_needed(cx)),
                 move |event, _, cx| {
                     ws_w2.update(cx, |this, cx| {
                         this.begin_props_scrub(
@@ -460,7 +510,9 @@ pub fn type_section(
     let ws_fs2 = workspace.clone();
     let ws_fs3 = workspace.clone();
     let ws_fs4 = workspace.clone();
+    let ws_fs5 = workspace.clone();
     let ws_text = workspace.clone();
+    let ws_text_blur = workspace.clone();
     let family_display = if view.focus == Some(PropsField::FontFamily) {
         view.draft.clone().into()
     } else {
@@ -482,13 +534,20 @@ pub fn type_section(
             "Size",
             size_display,
             view.focus == Some(PropsField::FontSize),
+            view.selection_for(PropsField::FontSize),
             disabled,
             None,
-            move |_, window, cx| {
+            move |event, window, cx| {
                 ws_fs.update(cx, |this, cx| {
-                    this.focus_props_field(PropsField::FontSize, window, cx)
+                    this.focus_props_field(
+                        PropsField::FontSize,
+                        event.click_count,
+                        window,
+                        cx,
+                    )
                 });
             },
+            move |_, _, cx| ws_fs5.update(cx, |this, cx| this.blur_props_if_needed(cx)),
             move |event, _, cx| {
                 ws_fs2.update(cx, |this, cx| {
                     this.begin_props_scrub(
@@ -514,10 +573,14 @@ pub fn type_section(
             text_display,
             "Text content".into(),
             view.focus == Some(PropsField::Text),
+            view.selection_for(PropsField::Text),
             disabled,
-            move |_, window, cx| {
-                ws_text.update(cx, |this, cx| this.focus_props_field(PropsField::Text, window, cx));
+            move |event, window, cx| {
+                ws_text.update(cx, |this, cx| {
+                    this.focus_props_field(PropsField::Text, event.click_count, window, cx)
+                });
             },
+            move |_, _, cx| ws_text_blur.update(cx, |this, cx| this.blur_props_if_needed(cx)),
         ))
         .child(text_field(
             theme,
@@ -525,14 +588,24 @@ pub fn type_section(
             family_display,
             "Font family".into(),
             view.focus == Some(PropsField::FontFamily),
+            view.selection_for(PropsField::FontFamily),
             disabled,
             {
                 let ws = workspace.clone();
-                move |_, window, cx| {
+                move |event, window, cx| {
                     ws.update(cx, |this, cx| {
-                        this.focus_props_field(PropsField::FontFamily, window, cx)
+                        this.focus_props_field(
+                            PropsField::FontFamily,
+                            event.click_count,
+                            window,
+                            cx,
+                        )
                     })
                 }
+            },
+            {
+                let ws = workspace.clone();
+                move |_, _, cx| ws.update(cx, |this, cx| this.blur_props_if_needed(cx))
             },
         ))
         .child(hex_color_field(
@@ -541,6 +614,7 @@ pub fn type_section(
             Some(typography.color),
             color_display,
             view.focus == Some(PropsField::TextColor),
+            view.selection_for(PropsField::TextColor),
             disabled,
             {
                 let ws = workspace.clone();
@@ -552,11 +626,20 @@ pub fn type_section(
             },
             {
                 let ws = workspace.clone();
-                move |_, window, cx| {
+                move |event, window, cx| {
                     ws.update(cx, |this, cx| {
-                        this.focus_props_field(PropsField::TextColor, window, cx)
+                        this.focus_props_field(
+                            PropsField::TextColor,
+                            event.click_count,
+                            window,
+                            cx,
+                        )
                     })
                 }
+            },
+            {
+                let ws = workspace.clone();
+                move |_, _, cx| ws.update(cx, |this, cx| this.blur_props_if_needed(cx))
             },
         ))
         .child(pair(
@@ -598,6 +681,8 @@ fn type_value_field(
     placeholder: &'static str,
     value: String,
 ) -> impl IntoElement {
+    let ws_focus = workspace.clone();
+    let ws_blur = workspace;
     text_field(
         theme,
         format!("props-type-{placeholder}").into(),
@@ -608,8 +693,14 @@ fn type_value_field(
         },
         placeholder.into(),
         view.focus == Some(field),
+        view.selection_for(field),
         view.readonly,
-        move |_, window, cx| workspace.update(cx, |this, cx| this.focus_props_field(field, window, cx)),
+        move |event, window, cx| {
+            ws_focus.update(cx, |this, cx| {
+                this.focus_props_field(field, event.click_count, window, cx)
+            })
+        },
+        move |_, _, cx| ws_blur.update(cx, |this, cx| this.blur_props_if_needed(cx)),
     )
 }
 

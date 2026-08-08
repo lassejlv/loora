@@ -123,19 +123,27 @@ pub fn motion_section(
                 let b = workspace.clone();
                 let c = workspace.clone();
                 let d = workspace.clone();
+                let e = workspace.clone();
                 number_field(
                     theme,
                     "props-motion-duration".into(),
                     "Ms",
                     duration_display,
                     view.focus == Some(PropsField::MotionDuration),
+                    view.selection_for(PropsField::MotionDuration),
                     disabled,
                     None,
-                    move |_, window, cx| {
+                    move |event, window, cx| {
                         a.update(cx, |this, cx| {
-                            this.focus_props_field(PropsField::MotionDuration, window, cx)
+                            this.focus_props_field(
+                                PropsField::MotionDuration,
+                                event.click_count,
+                                window,
+                                cx,
+                            )
                         })
                     },
+                    move |_, _, cx| e.update(cx, |this, cx| this.blur_props_if_needed(cx)),
                     move |event, _, cx| {
                         b.update(cx, |this, cx| {
                             this.begin_props_scrub(
@@ -325,7 +333,8 @@ pub fn actions_section(
     } else {
         SharedString::from(url.unwrap_or_default())
     };
-    let ws = workspace;
+    let ws = workspace.clone();
+    let ws_blur = workspace;
     div()
         .flex()
         .flex_col()
@@ -336,10 +345,14 @@ pub fn actions_section(
             display,
             "https://… or page:page_id".into(),
             view.focus == Some(PropsField::ActionUrl),
+            view.selection_for(PropsField::ActionUrl),
             disabled,
-            move |_, window, cx| {
-                ws.update(cx, |this, cx| this.focus_props_field(PropsField::ActionUrl, window, cx));
+            move |event, window, cx| {
+                ws.update(cx, |this, cx| {
+                    this.focus_props_field(PropsField::ActionUrl, event.click_count, window, cx)
+                });
             },
+            move |_, _, cx| ws_blur.update(cx, |this, cx| this.blur_props_if_needed(cx)),
         ))
         .child(
             div()
@@ -374,6 +387,7 @@ pub fn vector_section(
     let b = workspace.clone();
     let c = workspace.clone();
     let d = workspace.clone();
+    let e = workspace.clone();
 
     div()
         .flex()
@@ -385,6 +399,7 @@ pub fn vector_section(
             fill,
             fill_display,
             view.focus == Some(PropsField::VectorFill),
+            view.selection_for(PropsField::VectorFill),
             disabled,
             {
                 let ws = workspace.clone();
@@ -394,10 +409,19 @@ pub fn vector_section(
                     })
                 }
             },
-            move |_, window, cx| {
+            move |event, window, cx| {
                 ws_fill.update(cx, |this, cx| {
-                    this.focus_props_field(PropsField::VectorFill, window, cx)
+                    this.focus_props_field(
+                        PropsField::VectorFill,
+                        event.click_count,
+                        window,
+                        cx,
+                    )
                 })
+            },
+            {
+                let ws = workspace.clone();
+                move |_, _, cx| ws.update(cx, |this, cx| this.blur_props_if_needed(cx))
             },
         ))
         .child(number_field(
@@ -406,13 +430,20 @@ pub fn vector_section(
             "Weight",
             weight_display,
             view.focus == Some(PropsField::VectorWeight),
+            view.selection_for(PropsField::VectorWeight),
             disabled,
             None,
-            move |_, window, cx| {
+            move |event, window, cx| {
                 a.update(cx, |this, cx| {
-                    this.focus_props_field(PropsField::VectorWeight, window, cx)
+                    this.focus_props_field(
+                        PropsField::VectorWeight,
+                        event.click_count,
+                        window,
+                        cx,
+                    )
                 })
             },
+            move |_, _, cx| e.update(cx, |this, cx| this.blur_props_if_needed(cx)),
             move |event, _, cx| {
                 b.update(cx, |this, cx| {
                     this.begin_props_scrub(

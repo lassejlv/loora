@@ -6,4 +6,8 @@ mod text_edit;
 mod web_canvas;
 mod workspace;
 
-pub use workspace::{CanvasTool, CanvasWorkspace};
+pub use workspace::{
+    CanvasTool, CanvasWorkspace, FitAll, FitSelection, GroupSelection, NewDesign, Redo,
+    SaveDesign, ToggleFiles, ToolFrame, ToolHand, ToolImage, ToolRectangle, ToolSelect, ToolText,
+    Undo, UngroupSelection, ZoomIn, ZoomOut, ZoomReset,
+};

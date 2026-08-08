@@ -1,22 +1,28 @@
 //! In-canvas text editing helpers (caret / selection / mutations).
 
+use std::ops::{Deref, DerefMut};
+
 use loora_engine::NodeId;
 
-/// Active text edit session for a single text node.
+/// Caret and selection state shared by every editable text field.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct TextEditSession {
-    pub id: NodeId,
+pub struct TextCursor {
     /// UTF-8 byte caret index.
     pub caret: usize,
     /// Selection anchor (UTF-8 bytes). Equal to `caret` means no selection.
     pub anchor: usize,
 }
 
-impl TextEditSession {
-    pub fn new(id: NodeId, text_len: usize) -> Self {
-        // Select-all on enter so replace/type is one keystroke away.
+impl TextCursor {
+    pub fn at_end(text_len: usize) -> Self {
         Self {
-            id,
+            caret: text_len,
+            anchor: text_len,
+        }
+    }
+
+    pub fn selecting_all(text_len: usize) -> Self {
+        Self {
             caret: text_len,
             anchor: 0,
         }
@@ -53,6 +59,37 @@ impl TextEditSession {
         if !extend {
             self.anchor = caret;
         }
+    }
+}
+
+/// Active text edit session for a single text node.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TextEditSession {
+    pub id: NodeId,
+    pub cursor: TextCursor,
+}
+
+impl TextEditSession {
+    pub fn new(id: NodeId, text_len: usize) -> Self {
+        // Select-all on enter so replace/type is one keystroke away.
+        Self {
+            id,
+            cursor: TextCursor::selecting_all(text_len),
+        }
+    }
+}
+
+impl Deref for TextEditSession {
+    type Target = TextCursor;
+
+    fn deref(&self) -> &Self::Target {
+        &self.cursor
+    }
+}
+
+impl DerefMut for TextEditSession {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.cursor
     }
 }
 
@@ -95,7 +132,7 @@ pub fn next_boundary(text: &str, i: usize) -> usize {
 }
 
 /// Move caret one grapheme-ish (char) left. Extends selection when `extend`.
-pub fn move_left(session: &mut TextEditSession, text: &str, extend: bool) {
+pub fn move_left(session: &mut TextCursor, text: &str, extend: bool) {
     session.clamp_in_text(text);
     if !extend && session.has_selection() {
         let (a, _) = session.sorted();
@@ -105,7 +142,7 @@ pub fn move_left(session: &mut TextEditSession, text: &str, extend: bool) {
     session.set_caret(prev_boundary(text, session.caret), extend);
 }
 
-pub fn move_right(session: &mut TextEditSession, text: &str, extend: bool) {
+pub fn move_right(session: &mut TextCursor, text: &str, extend: bool) {
     session.clamp_in_text(text);
     if !extend && session.has_selection() {
         let (_, b) = session.sorted();
@@ -115,13 +152,13 @@ pub fn move_right(session: &mut TextEditSession, text: &str, extend: bool) {
     session.set_caret(next_boundary(text, session.caret), extend);
 }
 
-pub fn move_home(session: &mut TextEditSession, text: &str, extend: bool) {
+pub fn move_home(session: &mut TextCursor, text: &str, extend: bool) {
     session.clamp_in_text(text);
     let line_start = text[..session.caret].rfind('\n').map(|i| i + 1).unwrap_or(0);
     session.set_caret(line_start, extend);
 }
 
-pub fn move_end(session: &mut TextEditSession, text: &str, extend: bool) {
+pub fn move_end(session: &mut TextCursor, text: &str, extend: bool) {
     session.clamp_in_text(text);
     let line_end = text[session.caret..]
         .find('\n')
@@ -131,7 +168,7 @@ pub fn move_end(session: &mut TextEditSession, text: &str, extend: bool) {
 }
 
 /// Logical-line up (by `\n`), keeping preferred column in chars.
-pub fn move_up(session: &mut TextEditSession, text: &str, extend: bool) {
+pub fn move_up(session: &mut TextCursor, text: &str, extend: bool) {
     session.clamp_in_text(text);
     let caret = session.caret;
     let line_start = text[..caret].rfind('\n').map(|i| i + 1).unwrap_or(0);
@@ -149,7 +186,7 @@ pub fn move_up(session: &mut TextEditSession, text: &str, extend: bool) {
     session.set_caret(idx, extend);
 }
 
-pub fn move_down(session: &mut TextEditSession, text: &str, extend: bool) {
+pub fn move_down(session: &mut TextCursor, text: &str, extend: bool) {
     session.clamp_in_text(text);
     let caret = session.caret;
     let line_start = text[..caret].rfind('\n').map(|i| i + 1).unwrap_or(0);
@@ -171,7 +208,7 @@ pub fn move_down(session: &mut TextEditSession, text: &str, extend: bool) {
 }
 
 /// Delete selection, or one char before caret (backspace).
-pub fn backspace(text: &mut String, session: &mut TextEditSession) -> bool {
+pub fn backspace(text: &mut String, session: &mut TextCursor) -> bool {
     session.clamp_in_text(text);
     if session.has_selection() {
         return delete_selection(text, session);
@@ -186,7 +223,7 @@ pub fn backspace(text: &mut String, session: &mut TextEditSession) -> bool {
 }
 
 /// Delete selection, or one char after caret (forward delete).
-pub fn delete_forward(text: &mut String, session: &mut TextEditSession) -> bool {
+pub fn delete_forward(text: &mut String, session: &mut TextCursor) -> bool {
     session.clamp_in_text(text);
     if session.has_selection() {
         return delete_selection(text, session);
@@ -200,7 +237,7 @@ pub fn delete_forward(text: &mut String, session: &mut TextEditSession) -> bool 
     true
 }
 
-pub fn delete_selection(text: &mut String, session: &mut TextEditSession) -> bool {
+pub fn delete_selection(text: &mut String, session: &mut TextCursor) -> bool {
     session.clamp_in_text(text);
     let (a, b) = session.sorted();
     if a == b {
@@ -212,7 +249,7 @@ pub fn delete_selection(text: &mut String, session: &mut TextEditSession) -> boo
 }
 
 /// Insert `insert` at caret (replacing selection).
-pub fn insert(text: &mut String, session: &mut TextEditSession, insert: &str) {
+pub fn insert(text: &mut String, session: &mut TextCursor, insert: &str) {
     session.clamp_in_text(text);
     if session.has_selection() {
         let _ = delete_selection(text, session);
@@ -229,8 +266,7 @@ mod tests {
     #[test]
     fn insert_and_backspace_at_caret() {
         let mut text = String::from("abc");
-        let mut s = TextEditSession {
-            id: NodeId::from("t"),
+        let mut s = TextCursor {
             caret: 1,
             anchor: 1,
         };
@@ -245,8 +281,7 @@ mod tests {
     #[test]
     fn replace_selection() {
         let mut text = String::from("hello");
-        let mut s = TextEditSession {
-            id: NodeId::from("t"),
+        let mut s = TextCursor {
             caret: 4,
             anchor: 1,
         };
@@ -258,8 +293,7 @@ mod tests {
     #[test]
     fn newline_insert() {
         let mut text = String::from("ab");
-        let mut s = TextEditSession {
-            id: NodeId::from("t"),
+        let mut s = TextCursor {
             caret: 1,
             anchor: 1,
         };
@@ -271,13 +305,41 @@ mod tests {
     #[test]
     fn move_across_selection_collapses() {
         let text = String::from("abcd");
-        let mut s = TextEditSession {
-            id: NodeId::from("t"),
+        let mut s = TextCursor {
             caret: 3,
             anchor: 1,
         };
         move_left(&mut s, &text, false);
         assert_eq!(s.caret, 1);
         assert!(!s.has_selection());
+    }
+
+    #[test]
+    fn select_all_then_insert_replaces_the_value() {
+        let mut text = String::from("hello");
+        let mut session = TextCursor {
+            caret: text.len(),
+            anchor: text.len(),
+        };
+        session.select_all(text.len());
+
+        insert(&mut text, &mut session, "x");
+
+        assert_eq!(text, "x");
+        assert_eq!(session.sorted(), (1, 1));
+    }
+
+    #[test]
+    fn shift_arrow_extends_the_selection() {
+        let text = String::from("abc");
+        let mut session = TextCursor {
+            caret: text.len(),
+            anchor: text.len(),
+        };
+
+        move_left(&mut session, &text, true);
+        move_left(&mut session, &text, true);
+
+        assert_eq!(session.sorted(), (1, 3));
     }
 }

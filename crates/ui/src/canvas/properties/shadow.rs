@@ -60,6 +60,7 @@ pub fn shadow_section(
                 let b = workspace.clone();
                 let c = workspace.clone();
                 let d = workspace.clone();
+                let e = workspace.clone();
                 number_field(
                     theme,
                     format!("props-shadow-{label}").into(),
@@ -70,9 +71,15 @@ pub fn shadow_section(
                         format_number(value, 1).into()
                     },
                     view.focus == Some(field),
+                    view.selection_for(field),
                     disabled,
                     None,
-                    move |_, window, cx| a.update(cx, |this, cx| this.focus_props_field(field, window, cx)),
+                    move |event, window, cx| {
+                        a.update(cx, |this, cx| {
+                            this.focus_props_field(field, event.click_count, window, cx)
+                        })
+                    },
+                    move |_, _, cx| e.update(cx, |this, cx| this.blur_props_if_needed(cx)),
                     move |event, _, cx| {
                         b.update(cx, |this, cx| {
                             this.begin_props_scrub(field, value, f32::from(event.position.x), cx)
@@ -96,6 +103,7 @@ pub fn shadow_section(
                     format_hex(shadow.color).into()
                 },
                 view.focus == Some(PropsField::ShadowColor),
+                view.selection_for(PropsField::ShadowColor),
                 disabled,
                 {
                     let ws = workspace.clone();
@@ -107,10 +115,21 @@ pub fn shadow_section(
                 },
                 {
                     let ws = workspace.clone();
-                    move |_, window, cx| {
+                    move |event, window, cx| {
                         ws.update(cx, |this, cx| {
-                            this.focus_props_field(PropsField::ShadowColor, window, cx)
+                            this.focus_props_field(
+                                PropsField::ShadowColor,
+                                event.click_count,
+                                window,
+                                cx,
+                            )
                         })
+                    }
+                },
+                {
+                    let ws = workspace.clone();
+                    move |_, _, cx| {
+                        ws.update(cx, |this, cx| this.blur_props_if_needed(cx));
                     }
                 },
             ))
