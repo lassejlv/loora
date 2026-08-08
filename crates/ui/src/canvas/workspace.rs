@@ -147,6 +147,8 @@ pub struct CanvasWorkspace {
     web_document_key: Option<WebDocumentKey>,
     web_state_key: Option<WebStateKey>,
     web_ready: bool,
+    /// Fit-all deferred until the webview viewport has a real size.
+    pending_fit_all: bool,
     /// Path waiting for a webview PNG rasterization result.
     pending_png_export: Option<PathBuf>,
     pub(crate) collapsed: HashSet<NodeId>,
@@ -318,6 +320,7 @@ impl CanvasWorkspace {
             web_document_key: None,
             web_state_key: None,
             web_ready: false,
+            pending_fit_all: true,
             pending_png_export: None,
             collapsed,
             collapsed_generation: 0,
@@ -403,6 +406,9 @@ impl CanvasWorkspace {
                 }
             }
         }));
+        // Cold start never went through load_document — fit once the viewport exists.
+        workspace.pending_fit_all = true;
+        workspace.fit_all_pages(cx);
         workspace
     }
 
@@ -488,6 +494,7 @@ impl CanvasWorkspace {
                 self.web_ready = true;
                 self.web_document_key = None;
                 self.web_state_key = None;
+                self.flush_pending_fit_all(cx);
             }
             "export-png" => {
                 let Some(path) = self.pending_png_export.take() else {
@@ -1187,6 +1194,9 @@ impl CanvasWorkspace {
         let hide_webview = self.webview_should_be_hidden();
         self.webview
             .update(cx, |view, _| view.set_visible(!hide_webview));
+        if !hide_webview {
+            self.flush_pending_fit_all(cx);
+        }
         if !self.web_ready || hide_webview {
             return;
         }
@@ -1725,6 +1735,7 @@ impl CanvasWorkspace {
         self.note_collapsed_changed();
         self.camera = Camera::new(Vec2::new(40.0, 40.0), 1.0);
         self.refresh_files();
+        self.pending_fit_all = true;
         self.fit_all_pages(cx);
     }
 
@@ -5217,6 +5228,7 @@ impl CanvasWorkspace {
             });
         }
         let Some(bounds) = union else {
+            self.pending_fit_all = false;
             cx.notify();
             return;
         };
@@ -5225,8 +5237,23 @@ impl CanvasWorkspace {
         let h = f32::from(vb.size.height) as f64;
         if w > 1.0 && h > 1.0 {
             self.camera.fit_bounds(w, h, bounds, 72.0);
+            self.pending_fit_all = false;
+        } else {
+            self.pending_fit_all = true;
         }
         cx.notify();
+    }
+
+    fn flush_pending_fit_all(&mut self, cx: &mut Context<Self>) {
+        if !self.pending_fit_all {
+            return;
+        }
+        let vb = self.viewport_bounds.get();
+        let w = f32::from(vb.size.width) as f64;
+        let h = f32::from(vb.size.height) as f64;
+        if w > 1.0 && h > 1.0 {
+            self.fit_all_pages(cx);
+        }
     }
 
     pub fn group_selection(&mut self, cx: &mut Context<Self>) {

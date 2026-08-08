@@ -641,6 +641,12 @@ html,body,#loora-app{width:100%;height:100%;margin:0;overflow:hidden;background:
 .loora-context-item.is-destructive{color:#ff6b72}
 .loora-context-shortcut{margin-left:24px;color:color-mix(in srgb,var(--loora-toolbar-fg) 62%,transparent);font-size:11px}
 .loora-context-separator{height:1px;margin:4px 8px;background:var(--loora-toolbar-border)}
+#loora-empty{position:absolute;left:50%;top:46%;transform:translate(-50%,-50%);display:flex;flex-direction:column;align-items:center;gap:10px;z-index:50;pointer-events:auto;user-select:none}
+#loora-empty[hidden]{display:none}
+#loora-empty .loora-empty-copy{font:500 13px/1.2 -apple-system,BlinkMacSystemFont,sans-serif;color:color-mix(in srgb,var(--loora-surface-fg) 45%,transparent);letter-spacing:.01em;pointer-events:none}
+#loora-empty .loora-empty-cta{pointer-events:auto;height:28px;padding:0 12px;border-radius:8px;border:1px solid var(--loora-toolbar-border);background:var(--loora-toolbar-bg);color:var(--loora-toolbar-fg);font:500 12px/26px -apple-system,BlinkMacSystemFont,sans-serif;cursor:pointer;box-shadow:var(--loora-toolbar-shadow)}
+#loora-empty .loora-empty-cta:hover{background:var(--loora-toolbar-hover);color:var(--loora-toolbar-active-fg)}
+.loora-preview #loora-empty{display:none}
 </style>
 <style id="loora-document-css"></style>
 </head>
@@ -665,6 +671,10 @@ html,body,#loora-app{width:100%;height:100%;margin:0;overflow:hidden;background:
       <button type="button" class="loora-action" data-cmd="redo" data-tip="Redo  ⌘⇧Z" id="loora-redo"><svg viewBox="0 0 24 24" fill="none"><path d="M20 10H10a5 5 0 1 0 0 10h5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><path d="m16 6 4 4-4 4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
   </div>
   <button type="button" id="loora-zoom" data-cmd="fit-selection">100%</button>
+  <div id="loora-empty" hidden>
+    <div class="loora-empty-copy">Empty frame</div>
+    <button type="button" class="loora-empty-cta" data-tool="rectangle">Draw a rectangle · R</button>
+  </div>
   <div id="loora-context-menu" role="menu" hidden></div>
 </div>
 <script>
@@ -792,6 +802,17 @@ html,body,#loora-app{width:100%;height:100%;margin:0;overflow:hidden;background:
     event.stopPropagation();
     if (btn.dataset.tool) post('command', { command: `tool:${btn.dataset.tool}` });
     else if (btn.dataset.cmd) post('command', { command: btn.dataset.cmd });
+  });
+  const emptyHost = document.getElementById('loora-empty');
+  emptyHost?.addEventListener('pointerdown', event => {
+    event.stopPropagation();
+  });
+  emptyHost?.addEventListener('click', event => {
+    const btn = event.target.closest('[data-tool]');
+    if (!btn) return;
+    event.preventDefault();
+    event.stopPropagation();
+    post('command', { command: `tool:${btn.dataset.tool}` });
   });
   zoomChip?.addEventListener('pointerdown', event => event.stopPropagation());
   zoomChip?.addEventListener('click', event => {
@@ -1799,6 +1820,16 @@ html,body,#loora-app{width:100%;height:100%;margin:0;overflow:hidden;background:
     state.camera.y = height/2-(top+bottom)/2*state.camera.zoom;
     cameraTransform(); queueCamera();
   };
+  const syncEmptyHints = () => {
+    if (!emptyHost) return;
+    if (state.preview) {
+      emptyHost.hidden = true;
+      return;
+    }
+    const hosts = [...scene.querySelectorAll('.loora-page-host:not([data-loora-overlay-page])')];
+    const empty = hosts.some(host => !host.querySelector('[data-loora-node]:not([data-loora-root])'));
+    emptyHost.hidden = !empty;
+  };
   const focusPage = id => {
     const node = nodeForId(id); if (!node) return;
     const rect = worldRect(node), width=surface.clientWidth, height=surface.clientHeight, padding=72;
@@ -1835,6 +1866,7 @@ html,body,#loora-app{width:100%;height:100%;margin:0;overflow:hidden;background:
     surface.dataset.tool = state.tool;
     cameraTransform();
     setSelection(payload.selection || []);
+    syncEmptyHints();
     requestAnimationFrame(() => { syncHandles(); syncOverlay(); });
   };
   const exportPng = () => {
@@ -2007,6 +2039,17 @@ mod tests {
         assert!(CANVAS_SHELL.contains("command.type === 'context-menu'"));
         assert!(CANVAS_SHELL.contains("post('context-action', { action })"));
         assert!(CANVAS_SHELL.contains("window.addEventListener('blur', hideContextMenu)"));
+    }
+
+    #[test]
+    fn webview_empty_frame_shows_cta() {
+        assert!(CANVAS_SHELL.contains("id=\"loora-empty\""));
+        assert!(CANVAS_SHELL.contains("const syncEmptyHints"));
+        assert!(CANVAS_SHELL.contains("Empty frame"));
+        assert!(CANVAS_SHELL.contains("[data-loora-node]:not([data-loora-root])"));
+        assert!(CANVAS_SHELL.contains("Draw a rectangle · R"));
+        assert!(CANVAS_SHELL.contains("syncEmptyHints()"));
+        assert!(CANVAS_SHELL.contains(".loora-preview #loora-empty{display:none}"));
     }
 
     #[test]
