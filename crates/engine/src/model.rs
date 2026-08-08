@@ -820,18 +820,26 @@ impl Node {
     }
 
     pub fn root_frame(name: impl Into<String>) -> Self {
-        Self::base(
+        let mut node = Self::base(
             "frame",
             NodeKind::Frame,
             name,
             None,
             Layout::new(0.0, 0.0, 1440.0, 900.0),
             Style {
-                fills: vec![Paint::solid(Color::rgb(0x1a, 0x1a, 0x1a))],
+                // Slightly lighter than the canvas chrome (`#0f0f10`) so the
+                // artboard reads as a page, with a soft edge against the void.
+                fills: vec![Paint::solid(Color::rgb(0x18, 0x18, 0x1a))],
+                stroke: Some(Stroke::solid(Color::rgba(1.0, 1.0, 1.0, 0.06), 1.0)),
                 overflow: Overflow::Hidden,
                 ..Style::default()
             },
-        )
+        );
+        node.viewport = Some(crate::extras::PageViewport {
+            width: 1440.0,
+            min_height: 900.0,
+        });
+        node
     }
 
     pub fn frame(name: impl Into<String>, parent_id: NodeId, layout: Layout) -> Self {
@@ -1286,7 +1294,7 @@ fn default_theme_id() -> String {
 
 impl Document {
     pub fn empty(name: impl Into<String>) -> Self {
-        let frame = Node::root_frame("Frame 1");
+        let frame = Node::root_frame("Desktop");
         let root_page_id = frame.id.clone();
         let mut nodes = std::collections::HashMap::new();
         nodes.insert(frame.id.clone(), frame);
@@ -1413,8 +1421,13 @@ mod tests {
         let document = Document::empty("Frame document");
         let root = document.nodes.get(&document.root_page_id).unwrap();
         assert_eq!(root.kind, NodeKind::Frame);
+        assert_eq!(root.name, "Desktop");
         assert!(root.is_root_frame());
         assert_eq!(root.style.overflow, Overflow::Hidden);
+        assert!(root.style.stroke.is_some());
+        let viewport = root.viewport.expect("root page viewport");
+        assert!((viewport.width - 1440.0).abs() < f64::EPSILON);
+        assert!((viewport.min_height - 900.0).abs() < f64::EPSILON);
         assert_eq!(serde_json::to_value(root.kind).unwrap(), "frame");
     }
 
