@@ -194,6 +194,8 @@ pub struct CanvasWorkspace {
     files: Vec<DesignFileInfo>,
     saved_revision: u64,
     dirty: bool,
+    /// Last `save_now` failed; titlebar shows "Save failed" until a save succeeds.
+    save_failed: bool,
     _autosave_task: Option<Task<()>>,
     _image_tasks: Vec<Task<()>>,
     _caret_task: Option<Task<()>>,
@@ -362,6 +364,7 @@ impl CanvasWorkspace {
             files,
             saved_revision,
             dirty: false,
+            save_failed: false,
             _autosave_task: None,
             _image_tasks: Vec::new(),
             _caret_task: None,
@@ -427,7 +430,7 @@ impl CanvasWorkspace {
             command_open: self.command_open,
             command_query: self.command_query.clone(),
             command_index: self.command_index,
-            dirty: self.dirty,
+            dirty: self.dirty || self.save_failed,
             doc_name: self.document_name(),
             doc_id: self.document_id(),
             files_len: self.files.len(),
@@ -1724,9 +1727,11 @@ impl CanvasWorkspace {
     }
 
     fn load_document(&mut self, doc: loora_engine::Document, cx: &mut Context<Self>) {
+        self._autosave_task = None;
         self.engine.replace_document(doc);
         self.saved_revision = self.engine.revision();
         self.dirty = false;
+        self.save_failed = false;
         self.clear_selection();
         self.text_edit = None;
         self._caret_task = None;
@@ -1740,7 +1745,7 @@ impl CanvasWorkspace {
     }
 
     pub fn save_now(&mut self, cx: &mut Context<Self>) {
-        if self.engine.revision() == self.saved_revision && !self.dirty {
+        if self.engine.revision() == self.saved_revision && !self.dirty && !self.save_failed {
             return;
         }
         let document = self.engine.document().clone();
@@ -1749,18 +1754,27 @@ impl CanvasWorkspace {
                 let _ = self.store.set_active(&document.id);
                 self.saved_revision = self.engine.revision();
                 self.dirty = false;
+                self.save_failed = false;
                 self.refresh_files();
                 cx.notify();
             }
-            Err(err) => eprintln!("loora: save failed: {err}"),
+            Err(err) => {
+                eprintln!("loora: save failed: {err}");
+                self.save_failed = true;
+                self.dirty = true;
+                cx.notify();
+            }
         }
     }
 
     fn schedule_autosave(&mut self, cx: &mut Context<Self>) {
         if self.engine.revision() == self.saved_revision {
+            // Nothing to write; don't leave a stale dirty flag without a task.
+            self.dirty = false;
             return;
         }
         self.dirty = true;
+        self.save_failed = false;
         self._autosave_task = Some(cx.spawn(async move |this, cx| {
             cx.background_executor()
                 .timer(Duration::from_millis(450))
@@ -6229,10 +6243,11 @@ fn workspace_key_bindings(overrides: &HashMap<String, String>) -> Vec<KeyBinding
 fn binding_for_action(action_id: &str, keystroke: &str) -> Option<KeyBinding> {
     let context = Some("CanvasWorkspace");
     let binding = match action_id {
+        // App-level file/settings actions: work even when AppRoot (not canvas) is focused.
         "toggle_settings" => KeyBinding::new(keystroke, ToggleSettings, None),
-        "new_design" => KeyBinding::new(keystroke, NewDesign, context),
-        "open_designs" => KeyBinding::new(keystroke, ToggleFiles, context),
-        "save_design" => KeyBinding::new(keystroke, SaveDesign, context),
+        "new_design" => KeyBinding::new(keystroke, NewDesign, None),
+        "open_designs" => KeyBinding::new(keystroke, ToggleFiles, None),
+        "save_design" => KeyBinding::new(keystroke, SaveDesign, None),
         "undo" => KeyBinding::new(keystroke, Undo, context),
         "redo" => KeyBinding::new(keystroke, Redo, context),
         "zoom_in" => KeyBinding::new(keystroke, ZoomIn, context),
@@ -6306,6 +6321,7 @@ impl Render for CanvasWorkspace {
         let files = self.files.clone();
         let active_id = self.document_id();
         let dirty = self.dirty;
+        let save_failed = self.save_failed;
         let doc_name = self.document_name();
         let image_picker = self.image_picker.clone();
         let library_assets = image_picker
@@ -6536,8 +6552,18 @@ impl Render for CanvasWorkspace {
                                     .child(
                                         div()
                                             .text_size(px(11.))
-                                            .text_color(theme.muted)
-                                            .child(if dirty { "Autosaving…" } else { "Saved" }),
+                                            .text_color(if save_failed {
+                                                theme.red
+                                            } else {
+                                                theme.muted
+                                            })
+                                            .child(if save_failed {
+                                                "Save failed"
+                                            } else if dirty {
+                                                "Unsaved"
+                                            } else {
+                                                "Saved"
+                                            }),
                                     ),
                             ),
                     )
