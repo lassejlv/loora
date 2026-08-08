@@ -130,6 +130,8 @@ impl CanvasWebView {
         let allowed_assets = Rc::new(RefCell::new(HashSet::new()));
         let protocol_assets = allowed_assets.clone();
         let page_load_sender = ipc_sender.clone();
+        #[cfg(target_os = "linux")]
+        let key_grab_sender = ipc_sender.clone();
         let builder = WebViewBuilder::new()
             .with_html(CANVAS_SHELL)
             .with_devtools(cfg!(debug_assertions))
@@ -183,6 +185,9 @@ impl CanvasWebView {
                 error
             })
             .ok();
+
+        #[cfg(target_os = "linux")]
+        crate::canvas::linux_key_grab::start(window, key_grab_sender);
 
         Self {
             focus_handle: cx.focus_handle(),
