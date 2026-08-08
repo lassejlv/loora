@@ -1,0 +1,16 @@
+[package]
+name = "loora-ui"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+async-channel = "2"
+base64 = "0.22"
+gpui.workspace = true
+loora-engine.workspace = true
+serde_json = "1"
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "webp", "bmp"] }
+wry = { version = "0.53.3", default-features = true }
+
+[dev-dependencies]
+gpui = { workspace = true, features = ["test-support"] }

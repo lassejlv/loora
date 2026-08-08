@@ -1,0 +1,13 @@
+[package]
+name = "loora-desktop"
+version.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "loora"
+path = "src/main.rs"
+
+[dependencies]
+gpui.workspace = true
+gpui_platform.workspace = true
+loora-ui.workspace = true

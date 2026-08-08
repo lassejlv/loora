@@ -1,0 +1,10 @@
+[package]
+name = "gpui-router"
+version.workspace = true
+edition.workspace = true
+description = "React-Router inspired routing for GPUI apps."
+license = "MIT"
+
+[dependencies]
+gpui.workspace = true
+matchit = "0.8"

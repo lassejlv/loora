@@ -1,0 +1,22 @@
+{
+  "$schema": "https://raw.githubusercontent.com/lassejlv/termy/refs/heads/main/theme.schema.json",
+  "foreground": "#1a1a1a",
+  "background": "#f5f5f5",
+  "cursor": "#1a1a1a",
+  "black": "#0a0a0a",
+  "red": "#d14d60",
+  "green": "#4c9a4e",
+  "yellow": "#b8860b",
+  "blue": "#3d6fd9",
+  "magenta": "#8b5cf6",
+  "cyan": "#0891b2",
+  "white": "#6b6b6b",
+  "bright_black": "#8a8a8a",
+  "bright_red": "#e11d48",
+  "bright_green": "#16a34a",
+  "bright_yellow": "#ca8a04",
+  "bright_blue": "#2563eb",
+  "bright_magenta": "#7c3aed",
+  "bright_cyan": "#0e7490",
+  "bright_white": "#111111"
+}
