@@ -287,8 +287,9 @@ impl RenderOnce for ColorPickerPopover {
         let on_change = self.on_change;
         let on_dismiss = self.on_dismiss;
 
-        // Keep the popover inside the properties column so we never have to
-        // resize/inset the webview (that was thrashing move/resize hit-testing).
+        // Keep the popover in the properties column. While open, the workspace
+        // also hides the wry child so the full-window dismiss catcher works and
+        // the native canvas cannot paint over the panel.
         div()
             .id("color-picker-root")
             .absolute()
