@@ -522,15 +522,17 @@ impl CanvasWorkspace {
                 self.web_state_key = None;
                 self.flush_pending_fit_all(cx);
             }
-            // Canvas pointer hits the wry X11 child — give the webview keyboard so
-            // capture-phase JS shortcuts (Ctrl+N/R/…) receive keys. GPUI chrome
-            // clicks reclaim via the outside-bounds mouse handler + pending flag.
+            // Canvas pointer hits the wry X11 child. On Linux the child receives
+            // pointer events but X keyboard focus stays on the GPUI toplevel;
+            // wry's grab_focus() does not deliver keys to WebKit in this embed.
+            // Keep (or restore) host keyboard so AppRoot/Workspace shortcuts work.
             "canvas-pointer" => {
                 if !self.webview_text_editing {
-                    self.pending_keyboard_reclaim = false;
+                    eprintln!("loora: canvas-pointer → reclaim host keyboard");
                     self.webview.update(cx, |view, _| {
-                        view.focus_webview();
+                        view.reclaim_host_keyboard();
                     });
+                    self.pending_keyboard_reclaim = true;
                 }
             }
             "webview-editing" => {
@@ -539,18 +541,12 @@ impl CanvasWorkspace {
                     .and_then(|value| value.as_bool())
                     .unwrap_or(false);
                 self.webview_text_editing = active;
-                if active {
-                    self.pending_keyboard_reclaim = false;
-                    self.webview.update(cx, |view, _| {
-                        view.focus_webview();
-                    });
-                } else {
-                    // Still on the canvas after blur — keep webview keys for tools.
-                    self.pending_keyboard_reclaim = false;
-                    self.webview.update(cx, |view, _| {
-                        view.focus_webview();
-                    });
-                }
+                // Never grab_focus the child for editing — keys would vanish.
+                // Host keeps X focus; we forward keystrokes into contenteditable.
+                self.webview.update(cx, |view, _| {
+                    view.reclaim_host_keyboard();
+                });
+                self.pending_keyboard_reclaim = true;
             }
             "export-png" => {
                 let Some(path) = self.pending_png_export.take() else {
@@ -1627,10 +1623,46 @@ impl CanvasWorkspace {
         self.save_now(cx);
         match self.store.create(next_untitled_name(&self.files)) {
             Ok(doc) => {
+                eprintln!("loora: create_design → {}", doc.id);
                 self.load_document(doc, cx);
             }
             Err(err) => eprintln!("loora: create design failed: {err}"),
         }
+    }
+
+    /// Forward host keystrokes into the webview contenteditable. Needed on Linux
+    /// where the wry child never reliably receives X11 keyboard focus.
+    fn forward_key_to_webview_editor(&self, event: &KeyDownEvent, cx: &mut Context<Self>) {
+        let mods = &event.keystroke.modifiers;
+        let key = event.keystroke.key.as_str();
+        let action = match key {
+            "backspace" => Some("backspace"),
+            "delete" => Some("delete"),
+            "enter" => Some("enter"),
+            "escape" => Some("escape"),
+            "left" => Some("left"),
+            "right" => Some("right"),
+            "up" => Some("up"),
+            "down" => Some("down"),
+            "home" => Some("home"),
+            "end" => Some("end"),
+            _ => None,
+        };
+        let payload = if let Some(action) = action {
+            serde_json::json!({
+                "type": "inject-key",
+                "action": action,
+                "shift": mods.shift,
+            })
+        } else if let Some(ch) = event.keystroke.key_char.as_deref() {
+            if mods.control || mods.platform || mods.alt || ch.is_empty() {
+                return;
+            }
+            serde_json::json!({ "type": "inject-key", "text": ch })
+        } else {
+            return;
+        };
+        let _ = self.webview.update(cx, |view, _| view.command(payload));
     }
 
     pub fn open_design(&mut self, id: &str, cx: &mut Context<Self>) {
@@ -5404,6 +5436,12 @@ impl CanvasWorkspace {
             return;
         }
 
+        if self.webview_text_editing {
+            self.forward_key_to_webview_editor(event, cx);
+            cx.stop_propagation();
+            return;
+        }
+
         if self.context_menu.is_some() {
             self.on_context_menu_key_down(event, cx);
             return;
@@ -6411,7 +6449,11 @@ impl Render for CanvasWorkspace {
             .size_full()
             .bg(theme.window_fill())
             .text_color(theme.foreground)
-            .key_context("CanvasWorkspace")
+            .key_context(if self.webview_text_editing {
+                "WebviewTextEditing"
+            } else {
+                "CanvasWorkspace"
+            })
             .track_focus(&self.focus_handle)
             .on_action(cx.listener(Self::undo))
             .on_action(cx.listener(Self::redo))

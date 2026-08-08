@@ -107,7 +107,7 @@ pub struct CanvasWebView {
     focus_handle: FocusHandle,
     webview: Option<Rc<wry::WebView>>,
     visible: bool,
-    /// When true, skip per-frame `focus_parent` so contenteditable can receive keys.
+    /// When true, skip reclaim while contenteditable is active on the host-forward path.
     webview_owns_keyboard: Cell<bool>,
     bounds: Bounds<Pixels>,
     applied_bounds: Rc<Cell<Bounds<Pixels>>>,
@@ -318,7 +318,9 @@ impl CanvasWebView {
         let _ = webview.focus_parent();
     }
 
-    /// Give the child webview keyboard focus (e.g. while editing text).
+    /// Give the child webview keyboard focus (platforms where grab_focus delivers keys).
+    /// On Linux X11 embed this is a no-op path — host reclaim + inject-key is used instead.
+    #[allow(dead_code)]
     pub fn focus_webview(&self) {
         self.webview_owns_keyboard.set(true);
         let Some(webview) = self.webview.as_ref() else {
@@ -1419,7 +1421,8 @@ html,body,#loora-app{width:100%;height:100%;margin:0;overflow:hidden;background:
   surface.addEventListener('pointerdown', event => {
     if (event.button !== 0 && event.button !== 1) return;
     surface.focus({ preventScroll:true });
-    // GPUI never receives this click (X11 child). Ask the host to reclaim keys.
+    // GPUI never receives this click (X11 child). Ask the host to keep/reclaim
+    // keyboard focus — wry grab_focus does not receive X keys on Linux embed.
     if (!(event.target instanceof Element && event.target.closest('[data-loora-editing="true"]'))) {
       post('canvas-pointer');
     }
@@ -2040,6 +2043,45 @@ html,body,#loora-app{width:100%;height:100%;margin:0;overflow:hidden;background:
       if (command.selection) setSelection(command.selection);
       else syncHandles();
     }
+    else if (command.type === 'inject-key') {
+      const node = document.activeElement instanceof Element
+        ? document.activeElement.closest('[data-loora-editing="true"]')
+        : null;
+      const target = node || scene.querySelector('[data-loora-editing="true"]');
+      if (!target) return;
+      target.focus({ preventScroll:true });
+      if (typeof command.text === 'string' && command.text.length) {
+        try { document.execCommand('insertText', false, command.text); } catch (_) {
+          target.append(document.createTextNode(command.text));
+        }
+        return;
+      }
+      const action = command.action;
+      if (action === 'escape') { target.blur(); return; }
+      if (action === 'enter') {
+        try { document.execCommand('insertText', false, '\n'); } catch (_) {}
+        return;
+      }
+      if (action === 'backspace') {
+        try { document.execCommand('delete'); } catch (_) {}
+        return;
+      }
+      if (action === 'delete') {
+        try { document.execCommand('forwardDelete'); } catch (_) {}
+        return;
+      }
+      // Arrow / home / end: synthesize a key event for the contenteditable.
+      const keyMap = {
+        left: 'ArrowLeft', right: 'ArrowRight', up: 'ArrowUp', down: 'ArrowDown',
+        home: 'Home', end: 'End',
+      };
+      const keyName = keyMap[action];
+      if (!keyName) return;
+      target.dispatchEvent(new KeyboardEvent('keydown', {
+        key: keyName, code: keyName, bubbles: true, cancelable: true,
+        shiftKey: !!command.shift,
+      }));
+    }
     else if (command.type === 'state') {
       state.camera = { ...state.camera, ...(command.camera || {}) };
       state.tool = command.tool || 'select';
@@ -2163,6 +2205,8 @@ mod tests {
         assert!(CANVAS_SHELL.contains("post('canvas-pointer')"));
         assert!(CANVAS_SHELL.contains("post('webview-editing', { active: true })"));
         assert!(CANVAS_SHELL.contains("post('webview-editing', { active: false })"));
+        assert!(CANVAS_SHELL.contains("command.type === 'inject-key'"));
+        assert!(CANVAS_SHELL.contains("document.execCommand('insertText'"));
     }
 
     #[test]
