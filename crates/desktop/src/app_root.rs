@@ -5,7 +5,8 @@ use gpui::{
 };
 use gpui_router::{use_location, Route, Routes};
 use loora_ui::{
-    CanvasWorkspace, SettingsSection, SettingsSectionPage, SettingsShell, ToggleSettings,
+    CanvasWorkspace, NewDesign, SaveDesign, SettingsSection, SettingsSectionPage, SettingsShell,
+    ToggleFiles, ToggleSettings,
 };
 
 pub struct AppRoot {
@@ -26,6 +27,15 @@ impl AppRoot {
         cx.bind_keys([
             KeyBinding::new("cmd-,", ToggleSettings, None),
             KeyBinding::new("ctrl-,", ToggleSettings, None),
+            KeyBinding::new("cmd-n", NewDesign, None),
+            KeyBinding::new("ctrl-n", NewDesign, None),
+            KeyBinding::new("secondary-n", NewDesign, None),
+            KeyBinding::new("cmd-o", ToggleFiles, None),
+            KeyBinding::new("ctrl-o", ToggleFiles, None),
+            KeyBinding::new("secondary-o", ToggleFiles, None),
+            KeyBinding::new("cmd-s", SaveDesign, None),
+            KeyBinding::new("ctrl-s", SaveDesign, None),
+            KeyBinding::new("secondary-s", SaveDesign, None),
         ]);
 
         Self {
@@ -49,6 +59,39 @@ impl AppRoot {
         gpui_router::RouterState::global_mut(cx).with_path(next.into());
         window.refresh();
         cx.notify();
+    }
+
+    fn new_design(&mut self, _: &NewDesign, _: &mut Window, cx: &mut Context<Self>) {
+        // Ensure we're on the canvas route, then create.
+        if cx.has_global::<gpui_router::RouterState>() {
+            let path = use_location(cx).pathname.to_string();
+            if path.starts_with("/settings") {
+                gpui_router::RouterState::global_mut(cx).with_path("/".into());
+            }
+        }
+        self.canvas.update(cx, |workspace, cx| {
+            workspace.create_design(cx);
+        });
+        cx.notify();
+    }
+
+    fn toggle_files(&mut self, _: &ToggleFiles, window: &mut Window, cx: &mut Context<Self>) {
+        if cx.has_global::<gpui_router::RouterState>() {
+            let path = use_location(cx).pathname.to_string();
+            if path.starts_with("/settings") {
+                gpui_router::RouterState::global_mut(cx).with_path("/".into());
+                window.refresh();
+            }
+        }
+        self.canvas.update(cx, |workspace, cx| {
+            workspace.toggle_files_panel(cx);
+        });
+    }
+
+    fn save_design(&mut self, _: &SaveDesign, _: &mut Window, cx: &mut Context<Self>) {
+        self.canvas.update(cx, |workspace, cx| {
+            workspace.save_now(cx);
+        });
     }
 
     fn on_key_down(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
@@ -110,6 +153,9 @@ impl Render for AppRoot {
             .track_focus(&self.focus_handle)
             .key_context("AppRoot")
             .on_action(cx.listener(Self::toggle_settings))
+            .on_action(cx.listener(Self::new_design))
+            .on_action(cx.listener(Self::toggle_files))
+            .on_action(cx.listener(Self::save_design))
             .on_key_down(cx.listener(Self::on_key_down))
             .child(
                 Routes::new().children([

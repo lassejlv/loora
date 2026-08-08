@@ -617,7 +617,7 @@ html[data-chrome="light"]{
   --loora-toolbar-shadow:0 8px 28px rgba(0,0,0,.12);
 }
 html,body,#loora-app{width:100%;height:100%;margin:0;overflow:hidden;background:var(--loora-surface-bg);color:var(--loora-surface-fg)}
-#loora-surface{position:absolute;inset:0;overflow:hidden;touch-action:none;outline:none;background:var(--loora-surface-bg)}
+#loora-surface{position:absolute;inset:0;z-index:0;overflow:hidden;touch-action:none;outline:none;background:var(--loora-surface-bg)}
 /* Toolbar/zoom are peers of the surface — never a full-screen overlay above it.
    A full-bleed chrome layer (even with pointer-events:none) broke hit-testing for
    move/resize in the WKWebView. */
@@ -632,6 +632,12 @@ html,body,#loora-app{width:100%;height:100%;margin:0;overflow:hidden;background:
 #loora-toolbar [data-tip]:hover::after{content:attr(data-tip);position:absolute;left:50%;bottom:calc(100% + 8px);transform:translateX(-50%);white-space:nowrap;padding:0 8px;height:24px;line-height:24px;border-radius:7px;border:1px solid var(--loora-toolbar-border);background:var(--loora-toolbar-tip-bg);color:var(--loora-toolbar-tip-fg);font:500 11px/24px -apple-system,BlinkMacSystemFont,sans-serif;pointer-events:none;z-index:2;box-shadow:var(--loora-toolbar-shadow)}
 #loora-zoom{position:absolute;right:16px;bottom:16px;height:28px;padding:0 10px;border-radius:7px;border:1px solid var(--loora-toolbar-border);background:var(--loora-toolbar-bg);color:var(--loora-toolbar-fg);font:500 11px/26px -apple-system,BlinkMacSystemFont,sans-serif;cursor:pointer;z-index:50;pointer-events:auto;box-shadow:var(--loora-toolbar-shadow)}
 #loora-zoom:hover{color:var(--loora-toolbar-active-fg)}
+#loora-empty-label{position:absolute;left:50%;bottom:62px;transform:translateX(-50%);z-index:50;pointer-events:none;font:500 12px/1 -apple-system,BlinkMacSystemFont,sans-serif;color:color-mix(in srgb,var(--loora-surface-fg) 48%,transparent);letter-spacing:.01em;user-select:none}
+#loora-empty-label[hidden]{display:none}
+#loora-toolbar .loora-empty-cta{height:28px;padding:0 10px;width:auto;min-width:0;border:1px solid var(--loora-toolbar-border);border-radius:8px;background:var(--loora-toolbar-hover);color:var(--loora-toolbar-fg);font:500 11px/26px -apple-system,BlinkMacSystemFont,sans-serif;cursor:pointer}
+#loora-toolbar .loora-empty-cta:hover{color:var(--loora-toolbar-active-fg)}
+#loora-toolbar .loora-empty-cta[hidden],#loora-empty-divider[hidden]{display:none}
+.loora-preview #loora-empty-label,.loora-preview #loora-empty-cta,.loora-preview #loora-empty-divider{display:none}
 #loora-context-menu[hidden]{display:none}
 #loora-context-menu{position:fixed;z-index:100;min-width:220px;max-height:calc(100vh - 16px);padding:6px;border:1px solid var(--loora-toolbar-border);border-radius:10px;background:var(--loora-toolbar-bg);box-shadow:var(--loora-toolbar-shadow);backdrop-filter:blur(16px);overflow:auto;box-sizing:border-box;font:500 12px/1 -apple-system,BlinkMacSystemFont,sans-serif}
 .loora-context-item{display:flex;align-items:center;justify-content:space-between;width:100%;height:32px;padding:0 10px;border:0;border-radius:7px;background:transparent;color:var(--loora-toolbar-fg);font:inherit;text-align:left;cursor:default}
@@ -641,12 +647,6 @@ html,body,#loora-app{width:100%;height:100%;margin:0;overflow:hidden;background:
 .loora-context-item.is-destructive{color:#ff6b72}
 .loora-context-shortcut{margin-left:24px;color:color-mix(in srgb,var(--loora-toolbar-fg) 62%,transparent);font-size:11px}
 .loora-context-separator{height:1px;margin:4px 8px;background:var(--loora-toolbar-border)}
-#loora-empty{position:absolute;left:50%;top:46%;transform:translate(-50%,-50%);display:flex;flex-direction:column;align-items:center;gap:10px;z-index:50;pointer-events:auto;user-select:none}
-#loora-empty[hidden]{display:none}
-#loora-empty .loora-empty-copy{font:500 13px/1.2 -apple-system,BlinkMacSystemFont,sans-serif;color:color-mix(in srgb,var(--loora-surface-fg) 45%,transparent);letter-spacing:.01em;pointer-events:none}
-#loora-empty .loora-empty-cta{pointer-events:auto;height:28px;padding:0 12px;border-radius:8px;border:1px solid var(--loora-toolbar-border);background:var(--loora-toolbar-bg);color:var(--loora-toolbar-fg);font:500 12px/26px -apple-system,BlinkMacSystemFont,sans-serif;cursor:pointer;box-shadow:var(--loora-toolbar-shadow)}
-#loora-empty .loora-empty-cta:hover{background:var(--loora-toolbar-hover);color:var(--loora-toolbar-active-fg)}
-.loora-preview #loora-empty{display:none}
 </style>
 <style id="loora-document-css"></style>
 </head>
@@ -669,12 +669,11 @@ html,body,#loora-app{width:100%;height:100%;margin:0;overflow:hidden;background:
       <div class="loora-divider"></div>
       <button type="button" class="loora-action" data-cmd="undo" data-tip="Undo  ⌘Z" id="loora-undo"><svg viewBox="0 0 24 24" fill="none"><path d="M4 10h10a5 5 0 1 1 0 10H9" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><path d="M8 6 4 10l4 4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
       <button type="button" class="loora-action" data-cmd="redo" data-tip="Redo  ⌘⇧Z" id="loora-redo"><svg viewBox="0 0 24 24" fill="none"><path d="M20 10H10a5 5 0 1 0 0 10h5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><path d="m16 6 4 4-4 4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+      <div class="loora-divider" id="loora-empty-divider" hidden></div>
+      <button type="button" class="loora-empty-cta" id="loora-empty-cta" data-tool="rectangle" hidden>Draw · R</button>
   </div>
   <button type="button" id="loora-zoom" data-cmd="fit-selection">100%</button>
-  <div id="loora-empty" hidden>
-    <div class="loora-empty-copy">Empty frame</div>
-    <button type="button" class="loora-empty-cta" data-tool="rectangle">Draw a rectangle · R</button>
-  </div>
+  <div id="loora-empty-label" hidden>Empty frame</div>
   <div id="loora-context-menu" role="menu" hidden></div>
 </div>
 <script>
@@ -803,17 +802,9 @@ html,body,#loora-app{width:100%;height:100%;margin:0;overflow:hidden;background:
     if (btn.dataset.tool) post('command', { command: `tool:${btn.dataset.tool}` });
     else if (btn.dataset.cmd) post('command', { command: btn.dataset.cmd });
   });
-  const emptyHost = document.getElementById('loora-empty');
-  emptyHost?.addEventListener('pointerdown', event => {
-    event.stopPropagation();
-  });
-  emptyHost?.addEventListener('click', event => {
-    const btn = event.target.closest('[data-tool]');
-    if (!btn) return;
-    event.preventDefault();
-    event.stopPropagation();
-    post('command', { command: `tool:${btn.dataset.tool}` });
-  });
+  const emptyCta = document.getElementById('loora-empty-cta');
+  const emptyDivider = document.getElementById('loora-empty-divider');
+  const emptyLabel = document.getElementById('loora-empty-label');
   zoomChip?.addEventListener('pointerdown', event => event.stopPropagation());
   zoomChip?.addEventListener('click', event => {
     event.preventDefault();
@@ -1799,6 +1790,24 @@ html,body,#loora-app{width:100%;height:100%;margin:0;overflow:hidden;background:
     else if (!mod && !event.altKey && ['v','h','f','t','r','i'].includes(key)) command = `tool:${key}`;
     if (command) { event.preventDefault(); post('command', { command }); }
   });
+  // File shortcuts must work even when `#loora-surface` is not the active DOM
+  // focus target (common after chrome clicks). GPUI still handles these when the
+  // wry child does not own keyboard focus.
+  window.addEventListener('keydown', event => {
+    if (event.defaultPrevented) return;
+    const editing = event.target instanceof Element && !!event.target.closest('[data-loora-editing="true"]');
+    if (editing) return;
+    const mod = event.metaKey || event.ctrlKey;
+    if (!mod) return;
+    const key = event.key.toLowerCase();
+    let command = null;
+    if (key === 'n') command = 'new';
+    else if (key === 'o' || key === 'k') command = 'files';
+    else if (key === 's') command = 'save';
+    if (!command) return;
+    event.preventDefault();
+    post('command', { command });
+  });
   surface.addEventListener('keyup', event => {
     if (event.code === 'Space') setSpacePan(false);
   });
@@ -1821,14 +1830,11 @@ html,body,#loora-app{width:100%;height:100%;margin:0;overflow:hidden;background:
     cameraTransform(); queueCamera();
   };
   const syncEmptyHints = () => {
-    if (!emptyHost) return;
-    if (state.preview) {
-      emptyHost.hidden = true;
-      return;
-    }
     const hosts = [...scene.querySelectorAll('.loora-page-host:not([data-loora-overlay-page])')];
-    const empty = hosts.some(host => !host.querySelector('[data-loora-node]:not([data-loora-root])'));
-    emptyHost.hidden = !empty;
+    const empty = !state.preview && hosts.some(host => !host.querySelector('[data-loora-node]:not([data-loora-root])'));
+    if (emptyCta) emptyCta.hidden = !empty;
+    if (emptyDivider) emptyDivider.hidden = !empty;
+    if (emptyLabel) emptyLabel.hidden = !empty;
   };
   const focusPage = id => {
     const node = nodeForId(id); if (!node) return;
@@ -2043,13 +2049,16 @@ mod tests {
 
     #[test]
     fn webview_empty_frame_shows_cta() {
-        assert!(CANVAS_SHELL.contains("id=\"loora-empty\""));
+        assert!(CANVAS_SHELL.contains("id=\"loora-empty-cta\""));
+        assert!(CANVAS_SHELL.contains("id=\"loora-empty-label\""));
         assert!(CANVAS_SHELL.contains("const syncEmptyHints"));
         assert!(CANVAS_SHELL.contains("Empty frame"));
         assert!(CANVAS_SHELL.contains("[data-loora-node]:not([data-loora-root])"));
-        assert!(CANVAS_SHELL.contains("Draw a rectangle · R"));
+        assert!(CANVAS_SHELL.contains(">Draw · R</button>"));
         assert!(CANVAS_SHELL.contains("syncEmptyHints()"));
-        assert!(CANVAS_SHELL.contains(".loora-preview #loora-empty{display:none}"));
+        assert!(CANVAS_SHELL.contains("#loora-surface{position:absolute;inset:0;z-index:0"));
+        assert!(CANVAS_SHELL.contains("else if (mod && key === 'n') command = 'new';"));
+        assert!(CANVAS_SHELL.contains("if (key === 'n') command = 'new';"));
     }
 
     #[test]
