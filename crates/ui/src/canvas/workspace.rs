@@ -36,6 +36,9 @@ use crate::context_menu::{
     ContextMenuEntry,
 };
 use crate::icon::IconName;
+use crate::settings::{
+    resolve_keystrokes, shortcut_catalog, SettingsDialog, SettingsSection,
+};
 use crate::theme::{Theme, ThemeKind};
 
 actions!(
@@ -52,13 +55,15 @@ actions!(
         SaveDesign,
         NewDesign,
         ToggleFiles,
+        ToggleSettings,
         ZoomIn,
         ZoomOut,
         ZoomReset,
         FitSelection,
         FitAll,
         GroupSelection,
-        UngroupSelection
+        UngroupSelection,
+        WorkspaceQuit
     ]
 );
 
@@ -179,6 +184,12 @@ pub struct CanvasWorkspace {
     command_query: String,
     command_index: usize,
     command_edit: Option<TextCursor>,
+    settings_open: bool,
+    settings_section: SettingsSection,
+    shortcut_overrides: HashMap<String, String>,
+    shortcut_recording: Option<String>,
+    shortcut_search: String,
+    shortcut_search_focused: bool,
     store: DesignStore,
     files: Vec<DesignFileInfo>,
     saved_revision: u64,
@@ -264,43 +275,6 @@ struct WebStateKey {
 
 impl CanvasWorkspace {
     pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
-        cx.bind_keys([
-            KeyBinding::new("cmd-z", Undo, Some("CanvasWorkspace")),
-            KeyBinding::new("ctrl-z", Undo, Some("CanvasWorkspace")),
-            KeyBinding::new("cmd-shift-z", Redo, Some("CanvasWorkspace")),
-            KeyBinding::new("ctrl-shift-z", Redo, Some("CanvasWorkspace")),
-            KeyBinding::new("cmd-s", SaveDesign, Some("CanvasWorkspace")),
-            KeyBinding::new("ctrl-s", SaveDesign, Some("CanvasWorkspace")),
-            KeyBinding::new("cmd-n", NewDesign, Some("CanvasWorkspace")),
-            KeyBinding::new("ctrl-n", NewDesign, Some("CanvasWorkspace")),
-            KeyBinding::new("cmd-o", ToggleFiles, Some("CanvasWorkspace")),
-            KeyBinding::new("ctrl-o", ToggleFiles, Some("CanvasWorkspace")),
-            KeyBinding::new("cmd-k", ToggleFiles, Some("CanvasWorkspace")),
-            KeyBinding::new("ctrl-k", ToggleFiles, Some("CanvasWorkspace")),
-            KeyBinding::new("v", ToolSelect, Some("CanvasWorkspace")),
-            KeyBinding::new("h", ToolHand, Some("CanvasWorkspace")),
-            KeyBinding::new("r", ToolRectangle, Some("CanvasWorkspace")),
-            KeyBinding::new("f", ToolFrame, Some("CanvasWorkspace")),
-            KeyBinding::new("t", ToolText, Some("CanvasWorkspace")),
-            KeyBinding::new("i", ToolImage, Some("CanvasWorkspace")),
-            KeyBinding::new("cmd-=", ZoomIn, Some("CanvasWorkspace")),
-            KeyBinding::new("cmd-+", ZoomIn, Some("CanvasWorkspace")),
-            KeyBinding::new("ctrl-=", ZoomIn, Some("CanvasWorkspace")),
-            KeyBinding::new("ctrl-+", ZoomIn, Some("CanvasWorkspace")),
-            KeyBinding::new("cmd--", ZoomOut, Some("CanvasWorkspace")),
-            KeyBinding::new("ctrl--", ZoomOut, Some("CanvasWorkspace")),
-            KeyBinding::new("cmd-0", ZoomReset, Some("CanvasWorkspace")),
-            KeyBinding::new("ctrl-0", ZoomReset, Some("CanvasWorkspace")),
-            KeyBinding::new("cmd-1", FitSelection, Some("CanvasWorkspace")),
-            KeyBinding::new("ctrl-1", FitSelection, Some("CanvasWorkspace")),
-            KeyBinding::new("cmd-2", FitAll, Some("CanvasWorkspace")),
-            KeyBinding::new("ctrl-2", FitAll, Some("CanvasWorkspace")),
-            KeyBinding::new("cmd-g", GroupSelection, Some("CanvasWorkspace")),
-            KeyBinding::new("ctrl-g", GroupSelection, Some("CanvasWorkspace")),
-            KeyBinding::new("cmd-shift-g", UngroupSelection, Some("CanvasWorkspace")),
-            KeyBinding::new("ctrl-shift-g", UngroupSelection, Some("CanvasWorkspace")),
-        ]);
-
         let focus_handle = cx.focus_handle();
         focus_handle.focus(window, cx);
 
@@ -323,16 +297,15 @@ impl CanvasWorkspace {
             .and_then(|id| ThemeKind::parse(&id))
             .map(Theme::from_kind)
             .unwrap_or_default();
+        let shortcut_overrides = store.shortcuts().unwrap_or_default();
+        Self::bind_workspace_keys(cx, &shortcut_overrides);
 
         let viewport_bounds = Rc::new(Cell::new(Bounds::default()));
         let (web_ipc_sender, web_ipc_receiver) = async_channel::unbounded();
         let webview = cx.new({
             let viewport_bounds = viewport_bounds.clone();
             let web_ipc_sender = web_ipc_sender.clone();
-            move |cx| {
-                CanvasWebView::new(window, cx, web_ipc_sender, viewport_bounds)
-                    .expect("create embedded HTML canvas")
-            }
+            move |cx| CanvasWebView::new(window, cx, web_ipc_sender, viewport_bounds)
         });
 
         let mut workspace = Self {
@@ -378,6 +351,12 @@ impl CanvasWorkspace {
             command_query: String::new(),
             command_index: 0,
             command_edit: None,
+            settings_open: false,
+            settings_section: SettingsSection::General,
+            shortcut_overrides,
+            shortcut_recording: None,
+            shortcut_search: String::new(),
+            shortcut_search_focused: false,
             store,
             files,
             saved_revision,
@@ -1427,11 +1406,129 @@ impl CanvasWorkspace {
 
     pub fn toggle_ui_theme(&mut self, cx: &mut Context<Self>) {
         let next = self.theme.kind.toggle();
-        self.theme = Theme::from_kind(next);
-        if let Err(err) = self.store.set_ui_theme(next.as_str()) {
+        self.set_ui_theme_kind(next, cx);
+    }
+
+    pub fn set_ui_theme_kind(&mut self, kind: ThemeKind, cx: &mut Context<Self>) {
+        if self.theme.kind == kind {
+            return;
+        }
+        self.theme = Theme::from_kind(kind);
+        if let Err(err) = self.store.set_ui_theme(kind.as_str()) {
             eprintln!("loora: failed to persist UI theme: {err}");
         }
         cx.notify();
+    }
+
+    pub fn open_settings(&mut self, cx: &mut Context<Self>) {
+        self.close_command_dialog(cx);
+        self.settings_open = true;
+        self.settings_section = SettingsSection::General;
+        self.shortcut_recording = None;
+        self.shortcut_search.clear();
+        self.shortcut_search_focused = false;
+        cx.notify();
+    }
+
+    pub fn close_settings(&mut self, cx: &mut Context<Self>) {
+        if !self.settings_open {
+            return;
+        }
+        self.settings_open = false;
+        self.shortcut_recording = None;
+        self.shortcut_search_focused = false;
+        cx.notify();
+    }
+
+    pub fn toggle_settings_panel(&mut self, cx: &mut Context<Self>) {
+        if self.settings_open {
+            self.close_settings(cx);
+        } else {
+            self.open_settings(cx);
+        }
+    }
+
+    pub fn select_settings_section(&mut self, section: SettingsSection, cx: &mut Context<Self>) {
+        self.settings_section = section;
+        self.shortcut_recording = None;
+        if section != SettingsSection::Shortcuts {
+            self.shortcut_search_focused = false;
+        }
+        cx.notify();
+    }
+
+    pub fn begin_shortcut_recording(&mut self, action_id: &str, cx: &mut Context<Self>) {
+        self.shortcut_recording = Some(action_id.to_string());
+        self.shortcut_search_focused = false;
+        cx.notify();
+    }
+
+    pub fn cancel_shortcut_recording(&mut self, cx: &mut Context<Self>) {
+        if self.shortcut_recording.take().is_some() {
+            cx.notify();
+        }
+    }
+
+    pub fn reset_shortcut(&mut self, action_id: &str, cx: &mut Context<Self>) {
+        self.shortcut_overrides.remove(action_id);
+        if let Err(err) = self.store.clear_shortcut(action_id) {
+            eprintln!("loora: failed to clear shortcut: {err}");
+        }
+        self.shortcut_recording = None;
+        Self::rebind_workspace_keys(cx, &self.shortcut_overrides);
+        cx.notify();
+    }
+
+    pub fn reset_all_shortcuts(&mut self, cx: &mut Context<Self>) {
+        self.shortcut_overrides.clear();
+        if let Err(err) = self.store.clear_shortcuts() {
+            eprintln!("loora: failed to clear shortcuts: {err}");
+        }
+        self.shortcut_recording = None;
+        Self::rebind_workspace_keys(cx, &self.shortcut_overrides);
+        cx.notify();
+    }
+
+    pub fn focus_shortcut_search(&mut self, cx: &mut Context<Self>) {
+        self.shortcut_search_focused = true;
+        self.shortcut_recording = None;
+        cx.notify();
+    }
+
+    fn apply_recorded_shortcut(&mut self, keystroke: &str, cx: &mut Context<Self>) {
+        let Some(action_id) = self.shortcut_recording.clone() else {
+            return;
+        };
+        if keystroke.is_empty() || keystroke == "escape" {
+            self.cancel_shortcut_recording(cx);
+            return;
+        }
+        if matches!(keystroke, "backspace" | "delete") {
+            self.reset_shortcut(&action_id, cx);
+            return;
+        }
+        self.shortcut_overrides
+            .insert(action_id.clone(), keystroke.to_string());
+        if let Err(err) = self.store.set_shortcut(&action_id, keystroke) {
+            eprintln!("loora: failed to persist shortcut: {err}");
+        }
+        self.shortcut_recording = None;
+        Self::rebind_workspace_keys(cx, &self.shortcut_overrides);
+        cx.notify();
+    }
+
+    fn bind_workspace_keys(cx: &mut Context<Self>, overrides: &HashMap<String, String>) {
+        let mut bindings = workspace_key_bindings(overrides);
+        bindings.extend([
+            KeyBinding::new("cmd-q", WorkspaceQuit, None),
+            KeyBinding::new("ctrl-q", WorkspaceQuit, None),
+        ]);
+        cx.bind_keys(bindings);
+    }
+
+    fn rebind_workspace_keys(cx: &mut Context<Self>, overrides: &HashMap<String, String>) {
+        cx.clear_key_bindings();
+        Self::bind_workspace_keys(cx, overrides);
     }
 
     pub fn create_design(&mut self, cx: &mut Context<Self>) {
@@ -5173,7 +5270,20 @@ impl CanvasWorkspace {
         self.toggle_files_panel(cx);
     }
 
+    fn toggle_settings(&mut self, _: &ToggleSettings, _: &mut Window, cx: &mut Context<Self>) {
+        self.toggle_settings_panel(cx);
+    }
+
+    fn workspace_quit(&mut self, _: &WorkspaceQuit, _: &mut Window, cx: &mut Context<Self>) {
+        cx.quit();
+    }
+
     fn on_key_down(&mut self, event: &KeyDownEvent, _window: &mut Window, cx: &mut Context<Self>) {
+        if self.settings_open {
+            self.on_settings_key_down(event, cx);
+            return;
+        }
+
         if self.context_menu.is_some() {
             self.on_context_menu_key_down(event, cx);
             return;
@@ -5531,6 +5641,47 @@ impl CanvasWorkspace {
         if handled {
             cx.stop_propagation();
             cx.notify();
+        }
+    }
+
+    fn on_settings_key_down(&mut self, event: &KeyDownEvent, cx: &mut Context<Self>) {
+        let key = event.keystroke.key.as_str();
+
+        if self.shortcut_recording.is_some() {
+            if key == "escape" {
+                self.cancel_shortcut_recording(cx);
+                cx.stop_propagation();
+                return;
+            }
+            // Ignore pure modifier presses while recording.
+            if matches!(
+                key,
+                "control" | "ctrl" | "shift" | "alt" | "meta" | "cmd" | "super" | "win" | "fn"
+            ) {
+                cx.stop_propagation();
+                return;
+            }
+            let binding = event.keystroke.unparse();
+            self.apply_recorded_shortcut(&binding, cx);
+            cx.stop_propagation();
+            return;
+        }
+
+        if key == "escape" {
+            self.close_settings(cx);
+            cx.stop_propagation();
+            return;
+        }
+
+        if self.shortcut_search_focused && self.settings_section == SettingsSection::Shortcuts {
+            let mut cursor = TextCursor {
+                caret: self.shortcut_search.len(),
+                anchor: self.shortcut_search.len(),
+            };
+            if edit_text_input_key(event, &mut self.shortcut_search, &mut cursor, cx) {
+                cx.stop_propagation();
+                cx.notify();
+            }
         }
     }
 
@@ -5976,6 +6127,45 @@ fn chrono_like_id() -> String {
     format!("{ms:x}")
 }
 
+fn workspace_key_bindings(overrides: &HashMap<String, String>) -> Vec<KeyBinding> {
+    let mut bindings = Vec::new();
+    for def in shortcut_catalog() {
+        for keystroke in resolve_keystrokes(def, overrides) {
+            if let Some(binding) = binding_for_action(def.id, &keystroke) {
+                bindings.push(binding);
+            }
+        }
+    }
+    bindings
+}
+
+fn binding_for_action(action_id: &str, keystroke: &str) -> Option<KeyBinding> {
+    let context = Some("CanvasWorkspace");
+    let binding = match action_id {
+        "toggle_settings" => KeyBinding::new(keystroke, ToggleSettings, context),
+        "new_design" => KeyBinding::new(keystroke, NewDesign, context),
+        "open_designs" => KeyBinding::new(keystroke, ToggleFiles, context),
+        "save_design" => KeyBinding::new(keystroke, SaveDesign, context),
+        "undo" => KeyBinding::new(keystroke, Undo, context),
+        "redo" => KeyBinding::new(keystroke, Redo, context),
+        "zoom_in" => KeyBinding::new(keystroke, ZoomIn, context),
+        "zoom_out" => KeyBinding::new(keystroke, ZoomOut, context),
+        "zoom_reset" => KeyBinding::new(keystroke, ZoomReset, context),
+        "fit_selection" => KeyBinding::new(keystroke, FitSelection, context),
+        "fit_all" => KeyBinding::new(keystroke, FitAll, context),
+        "group" => KeyBinding::new(keystroke, GroupSelection, context),
+        "ungroup" => KeyBinding::new(keystroke, UngroupSelection, context),
+        "tool_select" => KeyBinding::new(keystroke, ToolSelect, context),
+        "tool_hand" => KeyBinding::new(keystroke, ToolHand, context),
+        "tool_rectangle" => KeyBinding::new(keystroke, ToolRectangle, context),
+        "tool_frame" => KeyBinding::new(keystroke, ToolFrame, context),
+        "tool_text" => KeyBinding::new(keystroke, ToolText, context),
+        "tool_image" => KeyBinding::new(keystroke, ToolImage, context),
+        _ => return None,
+    };
+    Some(binding)
+}
+
 impl Render for CanvasWorkspace {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         self.sync_web_canvas(cx);
@@ -6026,6 +6216,11 @@ impl Render for CanvasWorkspace {
             .command_edit
             .as_ref()
             .map(|cursor| (cursor.anchor, cursor.caret));
+        let settings_open = self.settings_open;
+        let settings_section = self.settings_section;
+        let shortcut_overrides = self.shortcut_overrides.clone();
+        let shortcut_recording = self.shortcut_recording.clone();
+        let shortcut_search = self.shortcut_search.clone();
         let files = self.files.clone();
         let active_id = self.document_id();
         let dirty = self.dirty;
@@ -6069,6 +6264,8 @@ impl Render for CanvasWorkspace {
             .on_action(cx.listener(Self::save_design))
             .on_action(cx.listener(Self::new_design))
             .on_action(cx.listener(Self::toggle_files))
+            .on_action(cx.listener(Self::toggle_settings))
+            .on_action(cx.listener(Self::workspace_quit))
             .on_action(cx.listener(Self::tool_select))
             .on_action(cx.listener(Self::tool_hand))
             .on_action(cx.listener(Self::tool_rectangle))
@@ -6211,6 +6408,33 @@ impl Render for CanvasWorkspace {
                                     .gap_3()
                                     .child(
                                         div()
+                                            .id("open-settings")
+                                            .flex()
+                                            .items_center()
+                                            .justify_center()
+                                            .size(px(28.))
+                                            .rounded(px(8.))
+                                            .cursor_pointer()
+                                            .text_color(theme.muted)
+                                            .hover(|s| {
+                                                s.bg(theme.hover).text_color(theme.foreground)
+                                            })
+                                            .on_click({
+                                                let entity = entity.clone();
+                                                move |_, _, cx| {
+                                                    cx.stop_propagation();
+                                                    entity.update(cx, |this, cx| {
+                                                        this.open_settings(cx);
+                                                    });
+                                                }
+                                            })
+                                            .child(
+                                                crate::icon::Icon::hugeicon(IconName::Settings)
+                                                    .size(px(15.)),
+                                            ),
+                                    )
+                                    .child(
+                                        div()
                                             .id("fit-all")
                                             .text_size(px(11.))
                                             .text_color(theme.muted)
@@ -6265,6 +6489,16 @@ impl Render for CanvasWorkspace {
                     command_index,
                     command_selection,
                     dirty,
+                ))
+            })
+            .when(settings_open, |this| {
+                this.child(SettingsDialog::new(
+                    entity.clone(),
+                    theme,
+                    settings_section,
+                    shortcut_overrides,
+                    shortcut_recording,
+                    shortcut_search,
                 ))
             })
             .when_some(image_picker, |this, picker| {

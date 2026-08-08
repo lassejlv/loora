@@ -9,15 +9,14 @@ use std::{
     cell::{Cell, RefCell},
     collections::HashSet,
     fs,
-    ops::Deref,
     path::{Path, PathBuf},
     rc::Rc,
 };
 
 use gpui::{
-    canvas, div, App, Bounds, ContentMask, Element, ElementId, Entity, FocusHandle, Focusable,
-    GlobalElementId, Hitbox, InteractiveElement, IntoElement, LayoutId, MouseDownEvent,
-    ParentElement, Pixels, Render, Size, Style, Styled, Window,
+    canvas, div, prelude::FluentBuilder, px, rgba, App, Bounds, ContentMask, Element, ElementId,
+    Entity, FocusHandle, Focusable, GlobalElementId, Hitbox, InteractiveElement, IntoElement,
+    LayoutId, MouseDownEvent, ParentElement, Pixels, Render, Size, Style, Styled, Window,
 };
 use loora_engine::CompiledCanvas;
 use wry::{
@@ -30,7 +29,7 @@ pub type CanvasIpcSender = async_channel::Sender<String>;
 
 pub struct CanvasWebView {
     focus_handle: FocusHandle,
-    webview: Rc<wry::WebView>,
+    webview: Option<Rc<wry::WebView>>,
     visible: bool,
     bounds: Bounds<Pixels>,
     applied_bounds: Rc<Cell<Bounds<Pixels>>>,
@@ -46,7 +45,7 @@ impl CanvasWebView {
         cx: &mut App,
         ipc_sender: CanvasIpcSender,
         viewport_bounds: Rc<Cell<Bounds<Pixels>>>,
-    ) -> Result<Self, String> {
+    ) -> Self {
         let allowed_assets = Rc::new(RefCell::new(HashSet::new()));
         let protocol_assets = allowed_assets.clone();
         let webview = WebViewBuilder::new()
@@ -59,24 +58,29 @@ impl CanvasWebView {
                 asset_response(request.uri().path(), &protocol_assets.borrow())
             })
             .build_as_child(window)
-            .map_err(|error| format!("create canvas webview: {error}"))?;
-        webview
-            .set_bounds(Rect {
-                position: Position::Logical(LogicalPosition::new(0.0, 0.0)),
-                size: WrySize::Logical(LogicalSize::new(1.0, 1.0)),
+            .and_then(|webview| {
+                webview.set_bounds(Rect {
+                    position: Position::Logical(LogicalPosition::new(0.0, 0.0)),
+                    size: WrySize::Logical(LogicalSize::new(1.0, 1.0)),
+                })?;
+                Ok(Rc::new(webview))
             })
-            .map_err(|error| format!("initialize canvas webview bounds: {error}"))?;
+            .map_err(|error| {
+                eprintln!("loora: embedded HTML canvas unavailable: {error}");
+                error
+            })
+            .ok();
 
-        Ok(Self {
+        Self {
             focus_handle: cx.focus_handle(),
-            webview: Rc::new(webview),
+            webview,
             visible: true,
             bounds: Bounds::default(),
             applied_bounds: Rc::new(Cell::new(Bounds::default())),
             viewport_bounds,
             allowed_assets,
             last_markup: RefCell::new(String::new()),
-        })
+        }
     }
 
     pub fn apply_canvas(
@@ -90,6 +94,9 @@ impl CanvasWebView {
         can_redo: bool,
         chrome: &str,
     ) -> Result<(), String> {
+        let Some(webview) = self.webview.as_ref() else {
+            return Ok(());
+        };
         let selection_ids = selection
             .iter()
             .map(|id| id.as_str())
@@ -128,7 +135,7 @@ impl CanvasWebView {
             "chrome": chrome,
         });
         let script = format!("window.__looraApply({payload});");
-        self.webview
+        webview
             .evaluate_script(&script)
             .map_err(|error| format!("update canvas webview: {error}"))
     }
@@ -146,7 +153,10 @@ impl CanvasWebView {
     }
 
     pub fn command(&self, command: serde_json::Value) -> Result<(), String> {
-        self.webview
+        let Some(webview) = self.webview.as_ref() else {
+            return Ok(());
+        };
+        webview
             .evaluate_script(&format!("window.__looraCommand({command});"))
             .map_err(|error| format!("canvas command: {error}"))
     }
@@ -166,11 +176,13 @@ impl CanvasWebView {
         if self.visible == visible {
             return;
         }
-        if visible {
-            let _ = self.webview.set_visible(true);
-        } else {
-            let _ = self.webview.focus_parent();
-            let _ = self.webview.set_visible(false);
+        if let Some(webview) = self.webview.as_ref() {
+            if visible {
+                let _ = webview.set_visible(true);
+            } else {
+                let _ = webview.focus_parent();
+                let _ = webview.set_visible(false);
+            }
         }
         self.visible = visible;
     }
@@ -178,20 +190,13 @@ impl CanvasWebView {
     pub fn visible(&self) -> bool {
         self.visible
     }
-
 }
 
 impl Drop for CanvasWebView {
     fn drop(&mut self) {
-        let _ = self.webview.set_visible(false);
-    }
-}
-
-impl Deref for CanvasWebView {
-    type Target = wry::WebView;
-
-    fn deref(&self) -> &Self::Target {
-        &self.webview
+        if let Some(webview) = self.webview.as_ref() {
+            let _ = webview.set_visible(false);
+        }
     }
 }
 
@@ -204,6 +209,7 @@ impl Focusable for CanvasWebView {
 impl Render for CanvasWebView {
     fn render(&mut self, window: &mut Window, cx: &mut gpui::Context<Self>) -> impl IntoElement {
         let entity = cx.entity();
+        let available = self.webview.is_some();
         div()
             .track_focus(&self.focus_handle)
             .size_full()
@@ -221,12 +227,27 @@ impl Render for CanvasWebView {
                 .absolute()
                 .size_full()
             })
-            .child(CanvasWebViewElement::new(
-                self.webview.clone(),
-                entity,
-                window,
-                cx,
-            ))
+            .when(available, |this| {
+                this.child(CanvasWebViewElement::new(
+                    self.webview.clone().expect("checked available"),
+                    entity,
+                    window,
+                    cx,
+                ))
+            })
+            .when(!available, |this| {
+                this.child(
+                    div()
+                        .absolute()
+                        .inset_0()
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .text_size(px(13.))
+                        .text_color(rgba(0xffffff66))
+                        .child("Canvas webview unavailable on this platform"),
+                )
+            })
     }
 }
 

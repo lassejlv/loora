@@ -5,8 +5,8 @@ use gpui::{
 use gpui_platform::application;
 use loora_ui::{
     Assets, CanvasWorkspace, FitAll, FitSelection, GroupSelection, NewDesign, Redo, SaveDesign,
-    ToggleFiles, ToolFrame, ToolHand, ToolImage, ToolRectangle, ToolSelect, ToolText, Undo,
-    UngroupSelection, ZoomIn, ZoomOut, ZoomReset,
+    ToggleFiles, ToggleSettings, ToolFrame, ToolHand, ToolImage, ToolRectangle, ToolSelect,
+    ToolText, Undo, UngroupSelection, ZoomIn, ZoomOut, ZoomReset,
 };
 use std::sync::Arc;
 
@@ -25,7 +25,11 @@ fn main() {
                 KeyBinding::new("ctrl-q", Quit, None),
             ]);
             cx.set_menus([
-                Menu::new("Loora").items([MenuItem::action("Quit Loora", Quit)]),
+                Menu::new("Loora").items([
+                    MenuItem::action("Settings…", ToggleSettings),
+                    MenuItem::separator(),
+                    MenuItem::action("Quit Loora", Quit),
+                ]),
                 Menu::new("File").items([
                     MenuItem::action("New Design", NewDesign),
                     MenuItem::action("Open Designs…", ToggleFiles),

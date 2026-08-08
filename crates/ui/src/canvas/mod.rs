@@ -8,6 +8,6 @@ mod workspace;
 
 pub use workspace::{
     CanvasTool, CanvasWorkspace, FitAll, FitSelection, GroupSelection, NewDesign, Redo,
-    SaveDesign, ToggleFiles, ToolFrame, ToolHand, ToolImage, ToolRectangle, ToolSelect, ToolText,
-    Undo, UngroupSelection, ZoomIn, ZoomOut, ZoomReset,
+    SaveDesign, ToggleFiles, ToggleSettings, ToolFrame, ToolHand, ToolImage, ToolRectangle,
+    ToolSelect, ToolText, Undo, UngroupSelection, ZoomIn, ZoomOut, ZoomReset,
 };

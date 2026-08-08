@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
@@ -28,6 +29,9 @@ struct Session {
     /// App chrome theme: `"dark"` or `"light"`.
     #[serde(default)]
     ui_theme: Option<String>,
+    /// Custom keyboard shortcuts: action id → GPUI keystroke string (e.g. `"secondary-s"`).
+    #[serde(default)]
+    shortcuts: HashMap<String, String>,
 }
 
 /// Result of importing one or more design files.
@@ -364,6 +368,31 @@ impl DesignStore {
     pub fn set_ui_theme(&self, theme: &str) -> io::Result<()> {
         let mut session = self.session()?;
         session.ui_theme = Some(theme.to_string());
+        self.write_session(&session)
+    }
+
+    /// Persisted custom keyboard shortcut overrides (action id → keystroke).
+    pub fn shortcuts(&self) -> io::Result<HashMap<String, String>> {
+        Ok(self.session()?.shortcuts)
+    }
+
+    pub fn set_shortcut(&self, action_id: &str, keystroke: &str) -> io::Result<()> {
+        let mut session = self.session()?;
+        session
+            .shortcuts
+            .insert(action_id.to_string(), keystroke.to_string());
+        self.write_session(&session)
+    }
+
+    pub fn clear_shortcut(&self, action_id: &str) -> io::Result<()> {
+        let mut session = self.session()?;
+        session.shortcuts.remove(action_id);
+        self.write_session(&session)
+    }
+
+    pub fn clear_shortcuts(&self) -> io::Result<()> {
+        let mut session = self.session()?;
+        session.shortcuts.clear();
         self.write_session(&session)
     }
 

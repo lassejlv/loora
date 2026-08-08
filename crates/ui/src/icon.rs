@@ -54,6 +54,7 @@ pub enum IconName {
     SendToBack,
     CancelSquare,
     Delete,
+    Keyboard,
 }
 
 impl IconName {
@@ -105,6 +106,7 @@ impl IconName {
             Self::SendToBack => "icons/layer-send-to-back.svg",
             Self::CancelSquare => "icons/cancel-square.svg",
             Self::Delete => "icons/delete-02.svg",
+            Self::Keyboard => "icons/keyboard.svg",
         })
     }
 }
