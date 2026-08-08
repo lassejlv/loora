@@ -161,6 +161,20 @@ impl CanvasWebView {
                 {
                     let _ = webview.focus_parent();
                 }
+                // Keep WebKit from taking GTK/X keyboard focus after artboard clicks.
+                #[cfg(target_os = "linux")]
+                {
+                    use gtk::prelude::WidgetExt;
+                    use wry::WebViewExtUnix;
+                    let gtk_wv = webview.webview();
+                    gtk_wv.set_can_focus(false);
+                    if let Some(top) = gtk_wv.toplevel() {
+                        top.set_can_focus(false);
+                    }
+                    // Mark the embed container as non-focusable at the X level so
+                    // clicks do not move X input focus off the GPUI toplevel.
+                    disable_x11_input_focus_for_gtk_widget(&gtk_wv);
+                }
                 Ok(Rc::new(webview))
             })
             .map_err(|error| {
@@ -350,6 +364,38 @@ impl CanvasWebView {
 pub fn pump_linux_canvas() {
     while gtk::events_pending() {
         gtk::main_iteration_do(false);
+    }
+}
+
+/// Clear the X11 InputHint on the WebKit embed window so button presses do not
+/// move keyboard focus away from the GPUI host toplevel.
+#[cfg(target_os = "linux")]
+fn disable_x11_input_focus_for_gtk_widget(widget: &impl gtk::prelude::WidgetExt) {
+    use gtk::gdk::prelude::*;
+    let Some(gdk_window) = widget.window() else {
+        widget.connect_realize(|w| {
+            disable_x11_input_focus_for_gtk_widget(w);
+        });
+        return;
+    };
+    let Some(x11_window) = gdk_window.downcast_ref::<gdkx11::X11Window>() else {
+        return;
+    };
+    let xid = x11_window.xid();
+    let Ok(xlib_lib) = x11_dl::xlib::Xlib::open() else {
+        return;
+    };
+    unsafe {
+        let display = (xlib_lib.XOpenDisplay)(std::ptr::null());
+        if display.is_null() {
+            return;
+        }
+        let mut hints: x11_dl::xlib::XWMHints = std::mem::zeroed();
+        hints.flags = x11_dl::xlib::InputHint;
+        hints.input = 0; // False — do not accept keyboard focus
+        (xlib_lib.XSetWMHints)(display, xid as _, &mut hints);
+        (xlib_lib.XFlush)(display);
+        (xlib_lib.XCloseDisplay)(display);
     }
 }
 
@@ -869,8 +915,8 @@ html,body,#loora-app{width:100%;height:100%;margin:0;overflow:hidden;background:
     if (!contextMenu.hidden && !contextMenu.contains(event.target)) hideContextMenu();
   }, true);
   window.addEventListener('blur', hideContextMenu);
-  // Keep keyboard focus on the surface: toolbar/zoom clicks must not steal it or
-  // surface-only shortcuts (R, ⌘Z, …) stop working after chrome interaction.
+  // Toolbar/zoom are not focusable — keep X11 keyboard on the GPUI host.
+  // Do not call surface.focus(): WebKit grab_focus steals keys from the embed host.
   document.querySelectorAll('#loora-toolbar button, #loora-zoom').forEach(el => {
     el.tabIndex = -1;
   });
@@ -885,7 +931,6 @@ html,body,#loora-app{width:100%;height:100%;margin:0;overflow:hidden;background:
     event.stopPropagation();
     if (btn.dataset.tool) post('command', { command: `tool:${btn.dataset.tool}` });
     else if (btn.dataset.cmd) post('command', { command: btn.dataset.cmd });
-    surface.focus({ preventScroll: true });
     post('canvas-pointer');
   });
   const emptyCta = document.getElementById('loora-empty-cta');
@@ -899,7 +944,6 @@ html,body,#loora-app{width:100%;height:100%;margin:0;overflow:hidden;background:
     event.preventDefault();
     event.stopPropagation();
     post('command', { command: 'fit-selection' });
-    surface.focus({ preventScroll: true });
     post('canvas-pointer');
   });
   const readyTimer = setInterval(() => post('ready'), 250);
@@ -1446,9 +1490,8 @@ html,body,#loora-app{width:100%;height:100%;margin:0;overflow:hidden;background:
 
   surface.addEventListener('pointerdown', event => {
     if (event.button !== 0 && event.button !== 1) return;
-    surface.focus({ preventScroll:true });
-    // GPUI never receives this click (X11 child). Ask the host to keep/reclaim
-    // keyboard focus — wry grab_focus does not receive X keys on Linux embed.
+    // Do not surface.focus() — on Linux X11 embed that makes WebKit steal
+    // keyboard from the GPUI host so Ctrl+N/tools die after artboard clicks.
     if (!(event.target instanceof Element && event.target.closest('[data-loora-editing="true"]'))) {
       post('canvas-pointer');
     }
@@ -2069,6 +2112,10 @@ html,body,#loora-app{width:100%;height:100%;margin:0;overflow:hidden;background:
       if (command.selection) setSelection(command.selection);
       else syncHandles();
     }
+    else if (command.type === 'blur-surface') {
+      try { if (document.activeElement && document.activeElement !== document.body) document.activeElement.blur(); } catch (_) {}
+      try { surface.blur(); } catch (_) {}
+    }
     else if (command.type === 'inject-key') {
       const node = document.activeElement instanceof Element
         ? document.activeElement.closest('[data-loora-editing="true"]')
@@ -2213,7 +2260,9 @@ mod tests {
         assert!(CANVAS_SHELL.contains("el.tabIndex = -1"));
         assert!(CANVAS_SHELL.contains("if (mod && code === 'KeyN') command = 'new';"));
         assert!(CANVAS_SHELL.contains("}, true);"));
-        assert!(CANVAS_SHELL.contains("surface.focus({ preventScroll: true });"));
+        // surface.focus steals X keys from the GPUI host on Linux embed.
+        assert!(!CANVAS_SHELL.contains("surface.focus({ preventScroll: true });"));
+        assert!(!CANVAS_SHELL.contains("surface.focus({ preventScroll:true });"));
         assert!(CANVAS_SHELL.contains("post('canvas-pointer')"));
         assert!(CANVAS_SHELL.contains("post('webview-editing', { active: true })"));
     }
