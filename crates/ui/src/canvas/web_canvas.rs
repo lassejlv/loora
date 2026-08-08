@@ -305,6 +305,10 @@ impl CanvasWebView {
         self.visible
     }
 
+    pub fn set_webview_owns_keyboard(&self, owns: bool) {
+        self.webview_owns_keyboard.set(owns);
+    }
+
     /// Move keyboard focus off the child webview back to the GPUI host window.
     pub fn reclaim_host_keyboard(&self) {
         self.webview_owns_keyboard.set(false);
@@ -450,11 +454,6 @@ impl CanvasWebViewElement {
     ) -> Self {
         Self { parent, view }
     }
-
-    fn visible_and_should_reclaim_keyboard(&self, cx: &App) -> bool {
-        let parent = self.parent.read(cx);
-        parent.visible() && !parent.webview_owns_keyboard.get()
-    }
 }
 
 impl IntoElement for CanvasWebViewElement {
@@ -552,23 +551,24 @@ impl Element for CanvasWebViewElement {
             .as_ref()
             .map(|hitbox| hitbox.bounds)
             .unwrap_or(bounds);
-        // Reclaim GDK/WebKit keyboard every frame so Ctrl+N/R stay on the GPUI
-        // host. Pointer events still hit the child; in-webview text editing
-        // sets `webview_owns_keyboard` via `focus_webview()`.
-        if self.visible_and_should_reclaim_keyboard(cx) {
-            let _ = self.view.focus_parent();
-        }
+        // Do not steal keyboard every frame — canvas shortcuts run in JS while the
+        // child owns focus. Only reclaim when the pointer hits GPUI chrome.
         window.with_content_mask(Some(ContentMask { bounds }), |window| {
             let webview = self.view.clone();
-            window.on_mouse_event(move |event: &MouseDownEvent, phase, _, _| {
+            let parent = self.parent.clone();
+            window.on_mouse_event(move |event: &MouseDownEvent, phase, _window, cx| {
                 if phase != gpui::DispatchPhase::Bubble {
                     return;
                 }
                 if !bounds.contains(&event.position) {
                     let _ = webview.focus_parent();
+                    parent.update(cx, |view, _| {
+                        view.set_webview_owns_keyboard(false);
+                    });
                 }
             });
         });
+        let _ = cx;
     }
 }
 
@@ -1857,21 +1857,37 @@ html,body,#loora-app{width:100%;height:100%;margin:0;overflow:hidden;background:
     else if (!mod && !event.altKey && ['v','h','f','t','r','i'].includes(key)) command = `tool:${key}`;
     if (command) { event.preventDefault(); post('command', { command }); }
   });
-  // File shortcuts via capture so GTK/WebKit (and WebView2) cannot claim Ctrl+N/O/S
-  // before JS, and so they still fire when focus is not on `#loora-surface`.
-  // GPUI bindings cover the same chords when the wry child does not own focus.
+  // Canvas shortcuts via capture so they work whenever the webview has keyboard
+  // focus (surface, toolbar sibling, or body) — including after artboard clicks.
   window.addEventListener('keydown', event => {
     if (event.defaultPrevented) return;
     const editing = event.target instanceof Element && !!event.target.closest('[data-loora-editing="true"]');
     if (editing) return;
+    if (!contextMenu.hidden) return;
     const mod = event.metaKey || event.ctrlKey;
-    if (!mod) return;
-    // Prefer `code` so layout remaps under Ctrl still match physical N/O/K/S.
     const code = event.code;
+    const key = event.key.toLowerCase();
     let command = null;
-    if (code === 'KeyN') command = 'new';
-    else if (code === 'KeyO' || code === 'KeyK') command = 'files';
-    else if (code === 'KeyS') command = 'save';
+    if (mod && code === 'KeyN') command = 'new';
+    else if (mod && (code === 'KeyO' || code === 'KeyK')) command = 'files';
+    else if (mod && code === 'KeyS') command = 'save';
+    else if (mod && code === 'KeyZ') command = event.shiftKey ? 'redo' : 'undo';
+    else if (mod && code === 'KeyY') command = 'redo';
+    else if (mod && code === 'KeyC') command = 'copy';
+    else if (mod && code === 'KeyX') command = 'cut';
+    else if (mod && code === 'KeyV') command = 'paste';
+    else if (mod && code === 'KeyD') command = 'duplicate';
+    else if (mod && code === 'KeyA') command = 'select-all';
+    else if (mod && code === 'KeyL') command = 'lock';
+    else if (mod && code === 'KeyG') command = event.shiftKey ? 'ungroup' : 'group';
+    else if (mod && (code === 'Equal' || code === 'NumpadAdd')) command = 'zoom-in';
+    else if (mod && (code === 'Minus' || code === 'NumpadSubtract')) command = 'zoom-out';
+    else if (mod && code === 'Digit0') command = 'zoom-reset';
+    else if (mod && code === 'Digit1') command = 'fit-selection';
+    else if (mod && code === 'Digit2') command = 'fit-all';
+    else if (!mod && !event.altKey && ['v','h','f','t','r','i'].includes(key)) command = `tool:${key}`;
+    else if (event.key === 'Delete' || event.key === 'Backspace') command = 'delete';
+    else if (event.key === 'Escape') command = 'escape';
     if (!command) return;
     event.preventDefault();
     event.stopPropagation();
@@ -2127,7 +2143,7 @@ mod tests {
         assert!(CANVAS_SHELL.contains("syncEmptyHints()"));
         assert!(CANVAS_SHELL.contains("#loora-surface{position:absolute;inset:0;z-index:0"));
         assert!(CANVAS_SHELL.contains("el.tabIndex = -1"));
-        assert!(CANVAS_SHELL.contains("if (code === 'KeyN') command = 'new';"));
+        assert!(CANVAS_SHELL.contains("if (mod && code === 'KeyN') command = 'new';"));
         assert!(CANVAS_SHELL.contains("}, true);"));
         assert!(CANVAS_SHELL.contains("surface.focus({ preventScroll: true });"));
         assert!(CANVAS_SHELL.contains("post('canvas-pointer')"));
@@ -2136,15 +2152,17 @@ mod tests {
 
     #[test]
     fn webview_file_shortcuts_use_capture_phase() {
-        assert!(CANVAS_SHELL.contains("if (code === 'KeyN') command = 'new';"));
-        assert!(CANVAS_SHELL.contains("else if (code === 'KeyO' || code === 'KeyK') command = 'files';"));
-        assert!(CANVAS_SHELL.contains("else if (code === 'KeyS') command = 'save';"));
+        assert!(CANVAS_SHELL.contains("if (mod && code === 'KeyN') command = 'new';"));
+        assert!(CANVAS_SHELL.contains("else if (mod && (code === 'KeyO' || code === 'KeyK')) command = 'files';"));
+        assert!(CANVAS_SHELL.contains("else if (mod && code === 'KeyS') command = 'save';"));
+        assert!(CANVAS_SHELL.contains("command = `tool:${key}`"));
         assert!(CANVAS_SHELL.contains("event.stopPropagation();"));
-        // Capture listener must be registered with the capture flag.
         assert!(CANVAS_SHELL.contains(
             "post('command', { command });\n  }, true);"
         ));
         assert!(CANVAS_SHELL.contains("post('canvas-pointer')"));
+        assert!(CANVAS_SHELL.contains("post('webview-editing', { active: true })"));
+        assert!(CANVAS_SHELL.contains("post('webview-editing', { active: false })"));
     }
 
     #[test]

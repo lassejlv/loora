@@ -144,7 +144,6 @@ pub struct CanvasWorkspace {
     pub(crate) viewport_bounds: Rc<Cell<Bounds<Pixels>>>,
     webview: Entity<CanvasWebView>,
     _web_ipc_task: Option<Task<()>>,
-    _keyboard_reclaim_task: Option<Task<()>>,
     web_document_key: Option<WebDocumentKey>,
     web_state_key: Option<WebStateKey>,
     web_ready: bool,
@@ -309,22 +308,6 @@ impl CanvasWorkspace {
 
         let viewport_bounds = Rc::new(Cell::new(Bounds::default()));
         let (web_ipc_sender, web_ipc_receiver) = async_channel::unbounded();
-        // Spawn before the webview builder borrows `window`.
-        let keyboard_reclaim_task = cx.spawn_in(window, async move |this, cx| {
-            loop {
-                cx.background_executor()
-                    .timer(Duration::from_millis(100))
-                    .await;
-                let keep_running = this
-                    .update_in(cx, |this, window, cx| {
-                        this.reclaim_keyboard_if_needed(window, cx);
-                    })
-                    .is_ok();
-                if !keep_running {
-                    break;
-                }
-            }
-        });
         let webview = cx.new({
             let viewport_bounds = viewport_bounds.clone();
             let web_ipc_sender = web_ipc_sender.clone();
@@ -340,7 +323,6 @@ impl CanvasWorkspace {
             viewport_bounds,
             webview,
             _web_ipc_task: None,
-            _keyboard_reclaim_task: Some(keyboard_reclaim_task),
             web_document_key: None,
             web_state_key: None,
             web_ready: false,
@@ -439,28 +421,15 @@ impl CanvasWorkspace {
         workspace
     }
 
-    /// Restore GPUI + host keyboard focus after wry child interaction.
+    /// Restore GPUI keyboard focus after leaving the webview (chrome click / edit end).
     fn reclaim_keyboard_if_needed(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.webview_should_be_hidden() || self.webview_text_editing {
-            return;
-        }
-        let host_inputs_focused = self.layer_search_focused
-            || self.props_focus.is_some()
-            || self.command_edit.is_some()
-            || self.layer_rename.is_some()
-            || self.image_url_edit.is_some()
-            || self.shortcut_search_focused
-            || self.shortcut_recording.is_some();
-        if host_inputs_focused {
+        if self.webview_text_editing {
             return;
         }
         self.pending_keyboard_reclaim = false;
         self.webview.update(cx, |view, _| {
             view.reclaim_host_keyboard();
         });
-        // Canvas clicks FocusOut the GPUI X11 window (child webview steals input
-        // focus). Re-activate so subsequent host keybindings can run again after
-        // the user returns to chrome, and keep the workspace focus path warm.
         if !window.is_window_active() {
             window.activate_window();
         }
@@ -553,12 +522,15 @@ impl CanvasWorkspace {
                 self.web_state_key = None;
                 self.flush_pending_fit_all(cx);
             }
-            // Canvas pointer hits the wry X11 child, so GPUI never sees the
-            // MouseDown. Ask for a keyboard reclaim on the next render frame.
+            // Canvas pointer hits the wry X11 child — give the webview keyboard so
+            // capture-phase JS shortcuts (Ctrl+N/R/…) receive keys. GPUI chrome
+            // clicks reclaim via the outside-bounds mouse handler + pending flag.
             "canvas-pointer" => {
                 if !self.webview_text_editing {
-                    self.pending_keyboard_reclaim = true;
-                    cx.notify();
+                    self.pending_keyboard_reclaim = false;
+                    self.webview.update(cx, |view, _| {
+                        view.focus_webview();
+                    });
                 }
             }
             "webview-editing" => {
@@ -573,11 +545,11 @@ impl CanvasWorkspace {
                         view.focus_webview();
                     });
                 } else {
-                    self.pending_keyboard_reclaim = true;
+                    // Still on the canvas after blur — keep webview keys for tools.
+                    self.pending_keyboard_reclaim = false;
                     self.webview.update(cx, |view, _| {
-                        view.reclaim_host_keyboard();
+                        view.focus_webview();
                     });
-                    cx.notify();
                 }
             }
             "export-png" => {
