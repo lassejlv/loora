@@ -1,11 +1,14 @@
+mod app_root;
+
+use app_root::AppRoot;
 use gpui::{
     actions, point, prelude::*, px, size, App, Bounds, KeyBinding, Menu, MenuItem, QuitMode,
     TitlebarOptions, WindowBackgroundAppearance, WindowBounds, WindowOptions,
 };
 use gpui_platform::application;
 use loora_ui::{
-    Assets, CanvasWorkspace, FitAll, FitSelection, GroupSelection, NewDesign, Redo, SaveDesign,
-    ToggleFiles, ToolFrame, ToolHand, ToolImage, ToolRectangle, ToolSelect, ToolText, Undo,
+    Assets, FitAll, FitSelection, GroupSelection, NewDesign, Redo, SaveDesign, ToggleFiles,
+    ToggleSettings, ToolFrame, ToolHand, ToolImage, ToolRectangle, ToolSelect, ToolText, Undo,
     UngroupSelection, ZoomIn, ZoomOut, ZoomReset,
 };
 use std::sync::Arc;
@@ -13,10 +16,16 @@ use std::sync::Arc;
 actions!(loora, [Quit]);
 
 fn main() {
+    #[cfg(target_os = "linux")]
+    loora_ui::init_linux_canvas();
+
     application()
         .with_assets(Assets)
         .with_quit_mode(QuitMode::LastWindowClosed)
         .run(|cx: &mut App| {
+            gpui_router::init(cx);
+            loora_ui::init_motion(cx);
+
             cx.set_app_identity("com.loora.app", "Loora");
             set_app_icon();
             cx.on_action(|_: &Quit, cx| cx.quit());
@@ -25,7 +34,11 @@ fn main() {
                 KeyBinding::new("ctrl-q", Quit, None),
             ]);
             cx.set_menus([
-                Menu::new("Loora").items([MenuItem::action("Quit Loora", Quit)]),
+                Menu::new("Loora").items([
+                    MenuItem::action("Settings…", ToggleSettings),
+                    MenuItem::separator(),
+                    MenuItem::action("Quit Loora", Quit),
+                ]),
                 Menu::new("File").items([
                     MenuItem::action("New Design", NewDesign),
                     MenuItem::action("Open Designs…", ToggleFiles),
@@ -83,7 +96,7 @@ fn open_main_window(cx: &mut App) {
         },
         |window, cx| {
             window.set_background_appearance(WindowBackgroundAppearance::Blurred);
-            cx.new(|cx| CanvasWorkspace::new(window, cx))
+            cx.new(|cx| AppRoot::new(window, cx))
         },
     )
     .expect("failed to open Loora window");
