@@ -1182,16 +1182,9 @@ impl CanvasWorkspace {
     }
 
     fn sync_web_canvas(&mut self, cx: &mut Context<Self>) {
-        // Hide the native webview for settings routes and overlays that cover the canvas.
-        // Color picker uses a right-edge webview inset instead (see viewport-host).
-        // Settings must be included here: the wry child outlives router unmount, and
-        // without this flag sync would re-show it while `/settings…` is active.
-        let hide_webview = self.settings_route_active
-            || canvas_webview_hidden_for_overlays(
-                self.command_open,
-                self.image_picker.is_some(),
-                self.context_menu.is_some(),
-            );
+        // Hide the native webview for settings and GPUI overlays that sit under wry.
+        // Canvas HTML menus stay in-webview and never set these flags.
+        let hide_webview = self.webview_should_be_hidden();
         self.webview
             .update(cx, |view, _| view.set_visible(!hide_webview));
         if !self.web_ready || hide_webview {
@@ -1438,10 +1431,8 @@ impl CanvasWorkspace {
             self.shortcut_recording = None;
             self.shortcut_search_focused = false;
         }
-        // Hide the native webview child when leaving the canvas route.
-        self.webview.update(cx, |view, _| {
-            view.set_visible(!active);
-        });
+        // Route changes must not force-show over command/image/color/inspector overlays.
+        self.sync_webview_visibility(cx);
         if changed {
             cx.notify();
         }
@@ -1450,10 +1441,24 @@ impl CanvasWorkspace {
     pub fn set_canvas_route_active(&mut self, active: bool, cx: &mut Context<Self>) {
         if active {
             self.set_settings_route_active(false, SettingsSection::General, cx);
-            self.webview.update(cx, |view, _| {
-                view.set_visible(true);
-            });
         }
+    }
+
+    fn webview_should_be_hidden(&self) -> bool {
+        self.settings_route_active
+            || canvas_webview_hidden_for_overlays(
+                self.command_open,
+                self.image_picker.is_some(),
+                self.color_picker.is_some(),
+                self.context_menu.is_some(),
+            )
+    }
+
+    fn sync_webview_visibility(&mut self, cx: &mut Context<Self>) {
+        let hide = self.webview_should_be_hidden();
+        self.webview.update(cx, |view, _| {
+            view.set_visible(!hide);
+        });
     }
 
     pub fn theme(&self) -> Theme {
@@ -5966,11 +5971,13 @@ impl CanvasWorkspace {
 fn canvas_webview_hidden_for_overlays(
     command_open: bool,
     image_picker_open: bool,
-    _context_menu_open: bool,
+    color_picker_open: bool,
+    inspector_menu_open: bool,
 ) -> bool {
-    // Canvas menus render inside the WebView, while inspector menus stay in
-    // the sidebar. Neither needs the native canvas view to disappear.
-    command_open || image_picker_open
+    // Full-window / properties GPUI chrome that can sit under the wry child.
+    // Canvas right-click menus render inside the WebView HTML and never set
+    // `inspector_menu_open` / `color_picker_open`.
+    command_open || image_picker_open || color_picker_open || inspector_menu_open
 }
 
 fn web_context_menu_entries(entries: &[ContextMenuEntry]) -> Vec<serde_json::Value> {
@@ -5995,20 +6002,33 @@ mod tests {
     use crate::context_menu::{ContextMenuAction, ContextMenuEntry};
 
     #[test]
-    fn context_menu_does_not_hide_the_canvas_webview() {
-        assert!(!canvas_webview_hidden_for_overlays(false, false, true));
-        assert!(canvas_webview_hidden_for_overlays(true, false, false));
-        assert!(canvas_webview_hidden_for_overlays(false, true, false));
+    fn gpui_overlays_hide_the_canvas_webview() {
+        // command / image picker / color picker / inspector enum menu
+        assert!(canvas_webview_hidden_for_overlays(true, false, false, false));
+        assert!(canvas_webview_hidden_for_overlays(false, true, false, false));
+        assert!(canvas_webview_hidden_for_overlays(false, false, true, false));
+        assert!(canvas_webview_hidden_for_overlays(false, false, false, true));
+        // Idle canvas (HTML context menus do not use these flags)
+        assert!(!canvas_webview_hidden_for_overlays(false, false, false, false));
     }
 
     #[test]
     fn settings_route_hides_webview_even_without_overlays() {
-        // Mirrors sync_web_canvas: settings_route_active ORs with overlay hides.
+        // Mirrors webview_should_be_hidden: settings_route_active ORs with overlay hides.
         let settings_route_active = true;
         let hide = settings_route_active
-            || canvas_webview_hidden_for_overlays(false, false, false);
+            || canvas_webview_hidden_for_overlays(false, false, false, false);
         assert!(hide);
-        assert!(!canvas_webview_hidden_for_overlays(false, false, false));
+        assert!(!canvas_webview_hidden_for_overlays(false, false, false, false));
+    }
+
+    #[test]
+    fn canvas_route_does_not_force_show_over_command_palette() {
+        // Returning to `/` must still hide while a full-window overlay is open.
+        let settings_route_active = false;
+        let hide = settings_route_active
+            || canvas_webview_hidden_for_overlays(true, false, false, false);
+        assert!(hide);
     }
 
     #[test]
