@@ -99,6 +99,11 @@ impl Render for AppRoot {
                 workspace.set_canvas_route_active(true, cx);
             }
         });
+        // Settings unmounts the canvas paint path; keep draining GTK so hide sticks.
+        #[cfg(target_os = "linux")]
+        if on_settings {
+            loora_ui::pump_linux_canvas();
+        }
 
         div()
             .size_full()

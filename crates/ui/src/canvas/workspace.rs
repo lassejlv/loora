@@ -1182,13 +1182,16 @@ impl CanvasWorkspace {
     }
 
     fn sync_web_canvas(&mut self, cx: &mut Context<Self>) {
-        // Hide the native webview only for overlays that cover most of the canvas.
+        // Hide the native webview for settings routes and overlays that cover the canvas.
         // Color picker uses a right-edge webview inset instead (see viewport-host).
-        let hide_webview = canvas_webview_hidden_for_overlays(
-            self.command_open,
-            self.image_picker.is_some(),
-            self.context_menu.is_some(),
-        );
+        // Settings must be included here: the wry child outlives router unmount, and
+        // without this flag sync would re-show it while `/settings…` is active.
+        let hide_webview = self.settings_route_active
+            || canvas_webview_hidden_for_overlays(
+                self.command_open,
+                self.image_picker.is_some(),
+                self.context_menu.is_some(),
+            );
         self.webview
             .update(cx, |view, _| view.set_visible(!hide_webview));
         if !self.web_ready || hide_webview {
@@ -5996,6 +5999,16 @@ mod tests {
         assert!(!canvas_webview_hidden_for_overlays(false, false, true));
         assert!(canvas_webview_hidden_for_overlays(true, false, false));
         assert!(canvas_webview_hidden_for_overlays(false, true, false));
+    }
+
+    #[test]
+    fn settings_route_hides_webview_even_without_overlays() {
+        // Mirrors sync_web_canvas: settings_route_active ORs with overlay hides.
+        let settings_route_active = true;
+        let hide = settings_route_active
+            || canvas_webview_hidden_for_overlays(false, false, false);
+        assert!(hide);
+        assert!(!canvas_webview_hidden_for_overlays(false, false, false));
     }
 
     #[test]

@@ -28,13 +28,44 @@ use wry::{
 
 pub type CanvasIpcSender = async_channel::Sender<String>;
 
-/// Prepare Linux for wry's WebKitGTK child webview: force the X11 GDK backend
-/// and initialize GTK on this thread. Safe to call multiple times.
+/// Prefer X11 for the whole process when an X display is available.
+///
+/// GPUI picks Wayland whenever `WAYLAND_DISPLAY` is set, even if XWayland
+/// (`DISPLAY`) exists. wry's Linux `build_as_child` is X11-only, so native
+/// Wayland sessions cannot embed the canvas. Clearing `WAYLAND_DISPLAY` before
+/// GPUI/`gtk::init` routes the app through X11/XWayland where the existing
+/// Xcb→Xlib child path works.
+///
+/// Opt out with `LOORA_NATIVE_WAYLAND=1`. Force with `LOORA_FORCE_X11=1`.
+#[cfg(target_os = "linux")]
+pub fn prefer_x11_for_canvas() {
+    let force_x11 = std::env::var_os("LOORA_FORCE_X11").is_some_and(|v| v != "0");
+    let native_wayland = std::env::var_os("LOORA_NATIVE_WAYLAND").is_some_and(|v| v != "0");
+    let has_display = std::env::var_os("DISPLAY").is_some_and(|v| !v.is_empty());
+    let has_wayland = std::env::var_os("WAYLAND_DISPLAY").is_some_and(|v| !v.is_empty());
+
+    if native_wayland && !force_x11 {
+        return;
+    }
+    if (force_x11 || has_wayland) && has_display && has_wayland {
+        eprintln!(
+            "loora: preferring X11/XWayland for embedded canvas \
+             (unset WAYLAND_DISPLAY; set LOORA_NATIVE_WAYLAND=1 to keep Wayland)"
+        );
+        // SAFETY: called once from main before GPUI/GTK touch the env.
+        unsafe { std::env::remove_var("WAYLAND_DISPLAY") };
+    }
+}
+
+/// Prepare Linux for wry's WebKitGTK child webview: prefer X11 when possible,
+/// force the X11 GDK backend, and initialize GTK on this thread. Safe to call
+/// multiple times.
 #[cfg(target_os = "linux")]
 pub fn init_linux_canvas() {
     use std::sync::Once;
     static INIT: Once = Once::new();
     INIT.call_once(|| {
+        prefer_x11_for_canvas();
         // wry downcasts gdk::Display to X11Display for build_as_child.
         std::env::set_var("GDK_BACKEND", "x11");
         if let Err(err) = gtk::init() {
@@ -112,7 +143,8 @@ impl CanvasWebView {
                 Ok(Rc::new(webview))
             })
             .map_err(|error| {
-                eprintln!("loora: embedded HTML canvas unavailable: {error}");
+                let hint = canvas_unavailable_hint();
+                eprintln!("loora: embedded HTML canvas unavailable: {error}{hint}");
                 error
             })
             .ok();
@@ -215,22 +247,85 @@ impl CanvasWebView {
     }
 
     pub fn set_visible(&mut self, visible: bool) {
-        if self.visible == visible {
-            return;
-        }
-        if let Some(webview) = self.webview.as_ref() {
-            if visible {
-                let _ = webview.set_visible(true);
-            } else {
-                let _ = webview.focus_parent();
-                let _ = webview.set_visible(false);
-            }
-        }
+        let changed = self.visible != visible;
         self.visible = visible;
+        let Some(webview) = self.webview.as_ref() else {
+            return;
+        };
+        if visible {
+            let _ = webview.set_visible(true);
+            #[cfg(target_os = "linux")]
+            pump_linux_canvas();
+            // Re-apply last layout bounds after a hide that collapsed the child.
+            if changed {
+                let bounds = self.bounds;
+                if bounds.size.width > px(0.) && bounds.size.height > px(0.) {
+                    let _ = webview.set_bounds(Rect {
+                        position: Position::Logical(LogicalPosition::new(
+                            f32::from(bounds.origin.x) as f64,
+                            f32::from(bounds.origin.y) as f64,
+                        )),
+                        size: WrySize::Logical(LogicalSize::new(
+                            f32::from(bounds.size.width) as f64,
+                            f32::from(bounds.size.height) as f64,
+                        )),
+                    });
+                    self.applied_bounds.set(bounds);
+                    #[cfg(target_os = "linux")]
+                    pump_linux_canvas();
+                }
+            }
+        } else {
+            // Always re-assert hide: Linux WebKitGTK can ignore a one-shot
+            // set_visible(false), and the child outlives GPUI route unmount.
+            collapse_webview(webview);
+            self.applied_bounds.set(Bounds::default());
+        }
     }
 
     pub fn visible(&self) -> bool {
         self.visible
+    }
+}
+
+/// Drain pending GTK events. Required so wry visibility/bounds updates apply
+/// when the GPUI host loop is not itself GTK-driven.
+#[cfg(target_os = "linux")]
+pub fn pump_linux_canvas() {
+    while gtk::events_pending() {
+        gtk::main_iteration_do(false);
+    }
+}
+
+fn collapse_webview(webview: &wry::WebView) {
+    let _ = webview.focus_parent();
+    let _ = webview.set_visible(false);
+    let _ = webview.set_bounds(Rect {
+        position: Position::Logical(LogicalPosition::new(-10_000.0, -10_000.0)),
+        size: WrySize::Logical(LogicalSize::new(0.0, 0.0)),
+    });
+    // wry's Linux hide path touches both X11 and GTK; flush so the unmap is
+    // visible even when CanvasWebViewElement::paint is not running (settings).
+    #[cfg(target_os = "linux")]
+    pump_linux_canvas();
+}
+
+fn canvas_unavailable_hint() -> &'static str {
+    #[cfg(target_os = "linux")]
+    {
+        let has_display = std::env::var_os("DISPLAY").is_some_and(|v| !v.is_empty());
+        let has_wayland = std::env::var_os("WAYLAND_DISPLAY").is_some_and(|v| !v.is_empty());
+        if has_wayland && !has_display {
+            return " (pure Wayland: child embed needs X11/XWayland; wry has no GPUI Wayland parent path)";
+        }
+        if has_wayland {
+            return " (Wayland session: set LOORA_FORCE_X11=1 or unset WAYLAND_DISPLAY for XWayland embed)";
+        }
+        ""
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        ""
     }
 }
 
@@ -287,10 +382,22 @@ impl Render for CanvasWebView {
                         .justify_center()
                         .text_size(px(13.))
                         .text_color(rgba(0xffffff66))
-                        .child("Canvas webview unavailable on this platform"),
+                        .child(canvas_unavailable_placeholder()),
                 )
             })
     }
+}
+
+fn canvas_unavailable_placeholder() -> &'static str {
+    #[cfg(target_os = "linux")]
+    {
+        let has_display = std::env::var_os("DISPLAY").is_some_and(|v| !v.is_empty());
+        let has_wayland = std::env::var_os("WAYLAND_DISPLAY").is_some_and(|v| !v.is_empty());
+        if has_wayland && !has_display {
+            return "Canvas unavailable: pure Wayland (needs X11/XWayland)";
+        }
+    }
+    "Canvas webview unavailable on this platform"
 }
 
 struct CanvasWebViewElement {
@@ -356,6 +463,12 @@ impl Element for CanvasWebViewElement {
     ) -> Self::PrepaintState {
         let parent = self.parent.read(cx);
         if !parent.visible() {
+            // Keep the native child collapsed while hidden (settings / overlays).
+            let applied_bounds = parent.applied_bounds.clone();
+            if applied_bounds.get() != Bounds::default() {
+                collapse_webview(&self.view);
+                applied_bounds.set(Bounds::default());
+            }
             return None;
         }
         let applied_bounds = parent.applied_bounds.clone();
@@ -391,9 +504,7 @@ impl Element for CanvasWebViewElement {
         #[cfg(target_os = "linux")]
         {
             // wry hosts WebKitGTK outside GPUI's event loop; drain GTK each frame.
-            while gtk::events_pending() {
-                gtk::main_iteration_do(false);
-            }
+            pump_linux_canvas();
         }
 
         let bounds = hitbox
@@ -1906,7 +2017,10 @@ mod tests {
         assert!(CANVAS_SHELL.contains("const collectSnapTargets"));
         assert!(CANVAS_SHELL.contains("drawGuides(snapped.guides, snapped.labels)"));
         assert!(CANVAS_SHELL.contains("clearGuides()"));
-        assert!(CANVAS_SHELL.contains("snapTargets:collectSnapTargets(node)"));
+        assert!(CANVAS_SHELL.contains("snapTargets:collectSnapTargets(primary)"));
+        assert!(CANVAS_SHELL.contains(
+            "snapTargets:collectSnapTargets(ordered.map(item => item.node))"
+        ));
     }
 
     #[test]

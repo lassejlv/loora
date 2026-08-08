@@ -19,7 +19,7 @@ mod tooltip;
 pub use assets::Assets;
 pub use button::{Button, ButtonVariant, BUTTON_VARIANTS};
 #[cfg(target_os = "linux")]
-pub use canvas::init_linux_canvas;
+pub use canvas::{init_linux_canvas, prefer_x11_for_canvas, pump_linux_canvas};
 pub use canvas::{
     CanvasTool, CanvasWorkspace, FitAll, FitSelection, GroupSelection, NewDesign, Redo, SaveDesign,
     ToggleFiles, ToggleSettings, ToolFrame, ToolHand, ToolImage, ToolRectangle, ToolSelect,
