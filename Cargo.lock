@@ -3574,8 +3574,10 @@ dependencies = [
  "base64",
  "gpui",
  "gpui-router",
+ "gtk",
  "image",
  "loora-engine",
+ "raw-window-handle",
  "serde_json",
  "wry",
 ]

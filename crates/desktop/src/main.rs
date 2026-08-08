@@ -16,6 +16,9 @@ use std::sync::Arc;
 actions!(loora, [Quit]);
 
 fn main() {
+    #[cfg(target_os = "linux")]
+    loora_ui::init_linux_canvas();
+
     application()
         .with_assets(Assets)
         .with_quit_mode(QuitMode::LastWindowClosed)

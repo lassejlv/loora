@@ -19,6 +19,7 @@ use gpui::{
     LayoutId, MouseDownEvent, ParentElement, Pixels, Render, Size, Style, Styled, Window,
 };
 use loora_engine::CompiledCanvas;
+use raw_window_handle::{HasWindowHandle, RawWindowHandle};
 use wry::{
     dpi::{LogicalPosition, LogicalSize, Position, Size as WrySize},
     http::{header::CONTENT_TYPE, Response},
@@ -26,6 +27,48 @@ use wry::{
 };
 
 pub type CanvasIpcSender = async_channel::Sender<String>;
+
+/// Prepare Linux for wry's WebKitGTK child webview: force the X11 GDK backend
+/// and initialize GTK on this thread. Safe to call multiple times.
+#[cfg(target_os = "linux")]
+pub fn init_linux_canvas() {
+    use std::sync::Once;
+    static INIT: Once = Once::new();
+    INIT.call_once(|| {
+        // wry downcasts gdk::Display to X11Display for build_as_child.
+        std::env::set_var("GDK_BACKEND", "x11");
+        if let Err(err) = gtk::init() {
+            eprintln!("loora: gtk::init failed (canvas webview may be unavailable): {err}");
+        }
+    });
+}
+
+/// Remap GPUI's Linux `Xcb` window handle to the `Xlib` shape wry's child
+/// webview expects. Xlib/xcb window ids are the same server-side XID; wry only
+/// reads `.window` and parents via GDK's own display.
+struct WryParent<'a>(&'a Window);
+
+impl HasWindowHandle for WryParent<'_> {
+    fn window_handle(
+        &self,
+    ) -> Result<raw_window_handle::WindowHandle<'_>, raw_window_handle::HandleError> {
+        let raw = HasWindowHandle::window_handle(self.0)?.as_raw();
+        match raw {
+            RawWindowHandle::Xlib(_) => {
+                // SAFETY: reborrowing the same raw handle already obtained above.
+                Ok(unsafe { raw_window_handle::WindowHandle::borrow_raw(raw) })
+            }
+            #[cfg(target_os = "linux")]
+            RawWindowHandle::Xcb(xcb) => {
+                let mut xlib = raw_window_handle::XlibWindowHandle::new(xcb.window.get() as _);
+                xlib.visual_id = xcb.visual_id.map(|v| v.get() as _).unwrap_or(0);
+                // SAFETY: forged Xlib handle carries the same XID wry needs for parenting.
+                Ok(unsafe { raw_window_handle::WindowHandle::borrow_raw(xlib.into()) })
+            }
+            _ => Err(raw_window_handle::HandleError::NotSupported),
+        }
+    }
+}
 
 pub struct CanvasWebView {
     focus_handle: FocusHandle,
@@ -46,6 +89,9 @@ impl CanvasWebView {
         ipc_sender: CanvasIpcSender,
         viewport_bounds: Rc<Cell<Bounds<Pixels>>>,
     ) -> Self {
+        #[cfg(target_os = "linux")]
+        init_linux_canvas();
+
         let allowed_assets = Rc::new(RefCell::new(HashSet::new()));
         let protocol_assets = allowed_assets.clone();
         let webview = WebViewBuilder::new()
@@ -57,7 +103,7 @@ impl CanvasWebView {
             .with_custom_protocol("loora-asset".into(), move |_id, request| {
                 asset_response(request.uri().path(), &protocol_assets.borrow())
             })
-            .build_as_child(window)
+            .build_as_child(&WryParent(window))
             .and_then(|webview| {
                 webview.set_bounds(Rect {
                     position: Position::Logical(LogicalPosition::new(0.0, 0.0)),
@@ -97,17 +143,13 @@ impl CanvasWebView {
         let Some(webview) = self.webview.as_ref() else {
             return Ok(());
         };
-        let selection_ids = selection
-            .iter()
-            .map(|id| id.as_str())
-            .collect::<Vec<_>>();
+        let selection_ids = selection.iter().map(|id| id.as_str()).collect::<Vec<_>>();
         let camera_json = serde_json::json!({
             "x": camera.pan.x,
             "y": camera.pan.y,
             "zoom": camera.zoom,
         });
-        let css_only = *self.last_markup.borrow() == compiled.markup
-            && !compiled.markup.is_empty();
+        let css_only = *self.last_markup.borrow() == compiled.markup && !compiled.markup.is_empty();
         if css_only {
             let payload = serde_json::json!({
                 "type": "patch-css",
@@ -346,7 +388,18 @@ impl Element for CanvasWebViewElement {
         window: &mut Window,
         _: &mut App,
     ) {
-        let bounds = hitbox.as_ref().map(|hitbox| hitbox.bounds).unwrap_or(bounds);
+        #[cfg(target_os = "linux")]
+        {
+            // wry hosts WebKitGTK outside GPUI's event loop; drain GTK each frame.
+            while gtk::events_pending() {
+                gtk::main_iteration_do(false);
+            }
+        }
+
+        let bounds = hitbox
+            .as_ref()
+            .map(|hitbox| hitbox.bounds)
+            .unwrap_or(bounds);
         window.with_content_mask(Some(ContentMask { bounds }), |window| {
             let webview = self.view.clone();
             window.on_mouse_event(move |event: &MouseDownEvent, _, _, _| {
@@ -1813,7 +1866,8 @@ mod tests {
             .nth(1)
             .and_then(|tail| tail.split("surface.addEventListener('wheel'").next())
             .expect("pointerup handler");
-        assert!(!pointer_up.contains("clearDragPreview(drag);\n      syncHandles();\n      const payload"));
+        assert!(!pointer_up
+            .contains("clearDragPreview(drag);\n      syncHandles();\n      const payload"));
     }
 
     #[test]
