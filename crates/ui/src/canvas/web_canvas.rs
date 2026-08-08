@@ -107,6 +107,8 @@ pub struct CanvasWebView {
     focus_handle: FocusHandle,
     webview: Option<Rc<wry::WebView>>,
     visible: bool,
+    /// When true, skip per-frame `focus_parent` so contenteditable can receive keys.
+    webview_owns_keyboard: Cell<bool>,
     bounds: Bounds<Pixels>,
     applied_bounds: Rc<Cell<Bounds<Pixels>>>,
     viewport_bounds: Rc<Cell<Bounds<Pixels>>>,
@@ -127,11 +129,18 @@ impl CanvasWebView {
 
         let allowed_assets = Rc::new(RefCell::new(HashSet::new()));
         let protocol_assets = allowed_assets.clone();
+        let page_load_sender = ipc_sender.clone();
         let builder = WebViewBuilder::new()
             .with_html(CANVAS_SHELL)
             .with_devtools(cfg!(debug_assertions))
+            .with_focused(false)
             .with_ipc_handler(move |request| {
                 let _ = ipc_sender.try_send(request.body().clone());
+            })
+            .with_on_page_load_handler(move |event, _url| {
+                if matches!(event, wry::PageLoadEvent::Finished) {
+                    let _ = page_load_sender.try_send(r#"{"type":"ready"}"#.to_string());
+                }
             })
             .with_custom_protocol("loora-asset".into(), move |_id, request| {
                 asset_response(request.uri().path(), &protocol_assets.borrow())
@@ -146,6 +155,8 @@ impl CanvasWebView {
                     position: Position::Logical(LogicalPosition::new(0.0, 0.0)),
                     size: WrySize::Logical(LogicalSize::new(1.0, 1.0)),
                 })?;
+                // Prefer host keyboard; pointer still targets the child.
+                let _ = webview.focus_parent();
                 Ok(Rc::new(webview))
             })
             .map_err(|error| {
@@ -159,6 +170,7 @@ impl CanvasWebView {
             focus_handle: cx.focus_handle(),
             webview,
             visible: true,
+            webview_owns_keyboard: Cell::new(false),
             bounds: Bounds::default(),
             applied_bounds: Rc::new(Cell::new(Bounds::default())),
             viewport_bounds,
@@ -292,6 +304,24 @@ impl CanvasWebView {
     pub fn visible(&self) -> bool {
         self.visible
     }
+
+    /// Move keyboard focus off the child webview back to the GPUI host window.
+    pub fn reclaim_host_keyboard(&self) {
+        self.webview_owns_keyboard.set(false);
+        let Some(webview) = self.webview.as_ref() else {
+            return;
+        };
+        let _ = webview.focus_parent();
+    }
+
+    /// Give the child webview keyboard focus (e.g. while editing text).
+    pub fn focus_webview(&self) {
+        self.webview_owns_keyboard.set(true);
+        let Some(webview) = self.webview.as_ref() else {
+            return;
+        };
+        let _ = webview.focus();
+    }
 }
 
 /// Drain pending GTK events. Required so wry visibility/bounds updates apply
@@ -420,6 +450,11 @@ impl CanvasWebViewElement {
     ) -> Self {
         Self { parent, view }
     }
+
+    fn visible_and_should_reclaim_keyboard(&self, cx: &App) -> bool {
+        let parent = self.parent.read(cx);
+        parent.visible() && !parent.webview_owns_keyboard.get()
+    }
 }
 
 impl IntoElement for CanvasWebViewElement {
@@ -505,7 +540,7 @@ impl Element for CanvasWebViewElement {
         _: &mut Self::RequestLayoutState,
         hitbox: &mut Self::PrepaintState,
         window: &mut Window,
-        _: &mut App,
+        cx: &mut App,
     ) {
         #[cfg(target_os = "linux")]
         {
@@ -517,9 +552,18 @@ impl Element for CanvasWebViewElement {
             .as_ref()
             .map(|hitbox| hitbox.bounds)
             .unwrap_or(bounds);
+        // Reclaim GDK/WebKit keyboard every frame so Ctrl+N/R stay on the GPUI
+        // host. Pointer events still hit the child; in-webview text editing
+        // sets `webview_owns_keyboard` via `focus_webview()`.
+        if self.visible_and_should_reclaim_keyboard(cx) {
+            let _ = self.view.focus_parent();
+        }
         window.with_content_mask(Some(ContentMask { bounds }), |window| {
             let webview = self.view.clone();
-            window.on_mouse_event(move |event: &MouseDownEvent, _, _, _| {
+            window.on_mouse_event(move |event: &MouseDownEvent, phase, _, _| {
+                if phase != gpui::DispatchPhase::Bubble {
+                    return;
+                }
                 if !bounds.contains(&event.position) {
                     let _ = webview.focus_parent();
                 }
@@ -814,6 +858,7 @@ html,body,#loora-app{width:100%;height:100%;margin:0;overflow:hidden;background:
     if (btn.dataset.tool) post('command', { command: `tool:${btn.dataset.tool}` });
     else if (btn.dataset.cmd) post('command', { command: btn.dataset.cmd });
     surface.focus({ preventScroll: true });
+    post('canvas-pointer');
   });
   const emptyCta = document.getElementById('loora-empty-cta');
   const emptyDivider = document.getElementById('loora-empty-divider');
@@ -827,6 +872,7 @@ html,body,#loora-app{width:100%;height:100%;margin:0;overflow:hidden;background:
     event.stopPropagation();
     post('command', { command: 'fit-selection' });
     surface.focus({ preventScroll: true });
+    post('canvas-pointer');
   });
   const readyTimer = setInterval(() => post('ready'), 250);
   const nodeForId = id => state.nodes.get(id) || null;
@@ -1373,6 +1419,10 @@ html,body,#loora-app{width:100%;height:100%;margin:0;overflow:hidden;background:
   surface.addEventListener('pointerdown', event => {
     if (event.button !== 0 && event.button !== 1) return;
     surface.focus({ preventScroll:true });
+    // GPUI never receives this click (X11 child). Ask the host to reclaim keys.
+    if (!(event.target instanceof Element && event.target.closest('[data-loora-editing="true"]'))) {
+      post('canvas-pointer');
+    }
     const point = worldPoint(event);
     // Space/middle-button panning outranks handles and tools: it is the escape
     // hatch users reach for while a create tool is armed.
@@ -1661,6 +1711,7 @@ html,body,#loora-app{width:100%;height:100%;margin:0;overflow:hidden;background:
     if (node.dataset.looraKind === 'text' && node.dataset.looraLocked !== 'true') {
       node.dataset.looraEditing = 'true';
       node.contentEditable = 'plaintext-only';
+      post('webview-editing', { active: true });
       node.focus({ preventScroll:true });
       // Place caret at click instead of selecting all — feels like a real text tool.
       try {
@@ -1712,6 +1763,7 @@ html,body,#loora-app{width:100%;height:100%;margin:0;overflow:hidden;background:
       post('text', { id:node.dataset.looraNode, text:node.innerText.replace(/\r/g,''), bounds });
       node.removeAttribute('contenteditable');
       node.removeAttribute('data-loora-editing');
+      post('webview-editing', { active: false });
     }
     if (state.preview) {
       const previewNode = targetNode(event.target);
@@ -1784,7 +1836,7 @@ html,body,#loora-app{width:100%;height:100%;margin:0;overflow:hidden;background:
     const key = event.key.toLowerCase();
     if (mod && key === 'z') command = event.shiftKey ? 'redo' : 'undo';
     else if (mod && key === 'y') command = 'redo';
-    else if (mod && key === 's') command = 'save';
+    // new / files / save: handled by the capture-phase window listener below.
     else if (mod && key === 'c') command = 'copy';
     else if (mod && key === 'x') command = 'cut';
     else if (mod && key === 'v') command = 'paste';
@@ -2078,6 +2130,8 @@ mod tests {
         assert!(CANVAS_SHELL.contains("if (code === 'KeyN') command = 'new';"));
         assert!(CANVAS_SHELL.contains("}, true);"));
         assert!(CANVAS_SHELL.contains("surface.focus({ preventScroll: true });"));
+        assert!(CANVAS_SHELL.contains("post('canvas-pointer')"));
+        assert!(CANVAS_SHELL.contains("post('webview-editing', { active: true })"));
     }
 
     #[test]
@@ -2090,6 +2144,7 @@ mod tests {
         assert!(CANVAS_SHELL.contains(
             "post('command', { command });\n  }, true);"
         ));
+        assert!(CANVAS_SHELL.contains("post('canvas-pointer')"));
     }
 
     #[test]

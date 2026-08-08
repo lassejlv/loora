@@ -144,6 +144,7 @@ pub struct CanvasWorkspace {
     pub(crate) viewport_bounds: Rc<Cell<Bounds<Pixels>>>,
     webview: Entity<CanvasWebView>,
     _web_ipc_task: Option<Task<()>>,
+    _keyboard_reclaim_task: Option<Task<()>>,
     web_document_key: Option<WebDocumentKey>,
     web_state_key: Option<WebStateKey>,
     web_ready: bool,
@@ -224,6 +225,10 @@ pub struct CanvasWorkspace {
     /// Inspector breakpoint (None = base). Canvas still paints base layout.
     pub(crate) active_breakpoint_id: Option<String>,
     focus_handle: FocusHandle,
+    /// Webview asked us to restore GPUI keyboard focus after a canvas click.
+    pending_keyboard_reclaim: bool,
+    /// True while a contenteditable text node in the webview is focused.
+    webview_text_editing: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -304,6 +309,22 @@ impl CanvasWorkspace {
 
         let viewport_bounds = Rc::new(Cell::new(Bounds::default()));
         let (web_ipc_sender, web_ipc_receiver) = async_channel::unbounded();
+        // Spawn before the webview builder borrows `window`.
+        let keyboard_reclaim_task = cx.spawn_in(window, async move |this, cx| {
+            loop {
+                cx.background_executor()
+                    .timer(Duration::from_millis(100))
+                    .await;
+                let keep_running = this
+                    .update_in(cx, |this, window, cx| {
+                        this.reclaim_keyboard_if_needed(window, cx);
+                    })
+                    .is_ok();
+                if !keep_running {
+                    break;
+                }
+            }
+        });
         let webview = cx.new({
             let viewport_bounds = viewport_bounds.clone();
             let web_ipc_sender = web_ipc_sender.clone();
@@ -319,6 +340,7 @@ impl CanvasWorkspace {
             viewport_bounds,
             webview,
             _web_ipc_task: None,
+            _keyboard_reclaim_task: Some(keyboard_reclaim_task),
             web_document_key: None,
             web_state_key: None,
             web_ready: false,
@@ -384,6 +406,8 @@ impl CanvasWorkspace {
             props_collapsed: HashSet::new(),
             active_breakpoint_id: None,
             focus_handle,
+            pending_keyboard_reclaim: false,
+            webview_text_editing: false,
         };
         workspace._web_ipc_task = Some(cx.spawn(async move |this, cx| {
             while let Ok(first_message) = web_ipc_receiver.recv().await {
@@ -413,6 +437,36 @@ impl CanvasWorkspace {
         workspace.pending_fit_all = true;
         workspace.fit_all_pages(cx);
         workspace
+    }
+
+    /// Restore GPUI + host keyboard focus after wry child interaction.
+    fn reclaim_keyboard_if_needed(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.webview_should_be_hidden() || self.webview_text_editing {
+            return;
+        }
+        let host_inputs_focused = self.layer_search_focused
+            || self.props_focus.is_some()
+            || self.command_edit.is_some()
+            || self.layer_rename.is_some()
+            || self.image_url_edit.is_some()
+            || self.shortcut_search_focused
+            || self.shortcut_recording.is_some();
+        if host_inputs_focused {
+            return;
+        }
+        self.pending_keyboard_reclaim = false;
+        self.webview.update(cx, |view, _| {
+            view.reclaim_host_keyboard();
+        });
+        // Canvas clicks FocusOut the GPUI X11 window (child webview steals input
+        // focus). Re-activate so subsequent host keybindings can run again after
+        // the user returns to chrome, and keep the workspace focus path warm.
+        if !window.is_window_active() {
+            window.activate_window();
+        }
+        if !self.focus_handle.is_focused(window) {
+            self.focus_handle.focus(window, cx);
+        }
     }
 
     fn shell_chrome_token(&self) -> ShellChromeToken {
@@ -498,6 +552,33 @@ impl CanvasWorkspace {
                 self.web_document_key = None;
                 self.web_state_key = None;
                 self.flush_pending_fit_all(cx);
+            }
+            // Canvas pointer hits the wry X11 child, so GPUI never sees the
+            // MouseDown. Ask for a keyboard reclaim on the next render frame.
+            "canvas-pointer" => {
+                if !self.webview_text_editing {
+                    self.pending_keyboard_reclaim = true;
+                    cx.notify();
+                }
+            }
+            "webview-editing" => {
+                let active = message
+                    .get("active")
+                    .and_then(|value| value.as_bool())
+                    .unwrap_or(false);
+                self.webview_text_editing = active;
+                if active {
+                    self.pending_keyboard_reclaim = false;
+                    self.webview.update(cx, |view, _| {
+                        view.focus_webview();
+                    });
+                } else {
+                    self.pending_keyboard_reclaim = true;
+                    self.webview.update(cx, |view, _| {
+                        view.reclaim_host_keyboard();
+                    });
+                    cx.notify();
+                }
             }
             "export-png" => {
                 let Some(path) = self.pending_png_export.take() else {
@@ -6269,7 +6350,10 @@ fn binding_for_action(action_id: &str, keystroke: &str) -> Option<KeyBinding> {
 }
 
 impl Render for CanvasWorkspace {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        if self.pending_keyboard_reclaim {
+            self.reclaim_keyboard_if_needed(window, cx);
+        }
         self.sync_web_canvas(cx);
         let theme = self.theme;
         let entity = cx.entity();
