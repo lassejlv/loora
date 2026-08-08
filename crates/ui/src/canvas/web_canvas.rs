@@ -25,6 +25,8 @@ use wry::{
     http::{header::CONTENT_TYPE, Response},
     Rect, WebViewBuilder,
 };
+#[cfg(windows)]
+use wry::WebViewBuilderExtWindows;
 
 pub type CanvasIpcSender = async_channel::Sender<String>;
 
@@ -125,7 +127,7 @@ impl CanvasWebView {
 
         let allowed_assets = Rc::new(RefCell::new(HashSet::new()));
         let protocol_assets = allowed_assets.clone();
-        let webview = WebViewBuilder::new()
+        let builder = WebViewBuilder::new()
             .with_html(CANVAS_SHELL)
             .with_devtools(cfg!(debug_assertions))
             .with_ipc_handler(move |request| {
@@ -133,7 +135,11 @@ impl CanvasWebView {
             })
             .with_custom_protocol("loora-asset".into(), move |_id, request| {
                 asset_response(request.uri().path(), &protocol_assets.borrow())
-            })
+            });
+        // WebView2 treats Ctrl+N/O/S as browser chrome accelerators unless disabled.
+        #[cfg(windows)]
+        let builder = builder.with_browser_accelerator_keys(false);
+        let webview = builder
             .build_as_child(&WryParent(window))
             .and_then(|webview| {
                 webview.set_bounds(Rect {
@@ -791,7 +797,13 @@ html,body,#loora-app{width:100%;height:100%;margin:0;overflow:hidden;background:
     if (!contextMenu.hidden && !contextMenu.contains(event.target)) hideContextMenu();
   }, true);
   window.addEventListener('blur', hideContextMenu);
+  // Keep keyboard focus on the surface: toolbar/zoom clicks must not steal it or
+  // surface-only shortcuts (R, ⌘Z, …) stop working after chrome interaction.
+  document.querySelectorAll('#loora-toolbar button, #loora-zoom').forEach(el => {
+    el.tabIndex = -1;
+  });
   document.getElementById('loora-toolbar')?.addEventListener('pointerdown', event => {
+    event.preventDefault();
     event.stopPropagation();
   });
   document.getElementById('loora-toolbar')?.addEventListener('click', event => {
@@ -801,15 +813,20 @@ html,body,#loora-app{width:100%;height:100%;margin:0;overflow:hidden;background:
     event.stopPropagation();
     if (btn.dataset.tool) post('command', { command: `tool:${btn.dataset.tool}` });
     else if (btn.dataset.cmd) post('command', { command: btn.dataset.cmd });
+    surface.focus({ preventScroll: true });
   });
   const emptyCta = document.getElementById('loora-empty-cta');
   const emptyDivider = document.getElementById('loora-empty-divider');
   const emptyLabel = document.getElementById('loora-empty-label');
-  zoomChip?.addEventListener('pointerdown', event => event.stopPropagation());
+  zoomChip?.addEventListener('pointerdown', event => {
+    event.preventDefault();
+    event.stopPropagation();
+  });
   zoomChip?.addEventListener('click', event => {
     event.preventDefault();
     event.stopPropagation();
     post('command', { command: 'fit-selection' });
+    surface.focus({ preventScroll: true });
   });
   const readyTimer = setInterval(() => post('ready'), 250);
   const nodeForId = id => state.nodes.get(id) || null;
@@ -1782,32 +1799,32 @@ html,body,#loora-app{width:100%;height:100%;margin:0;overflow:hidden;background:
     else if (mod && key === '0') command = 'zoom-reset';
     else if (mod && key === '1') command = 'fit-selection';
     else if (mod && key === '2') command = 'fit-all';
-    else if (mod && (key === 'k' || key === 'o')) command = 'files';
-    else if (mod && key === 'n') command = 'new';
     else if (event.key === 'Delete' || event.key === 'Backspace') command = 'delete';
     else if (event.key === 'Escape') command = 'escape';
     else if (!mod && !event.altKey && event.key.startsWith('Arrow')) command = `nudge:${event.key.slice(5).toLowerCase()}:${event.shiftKey ? 10 : 1}`;
     else if (!mod && !event.altKey && ['v','h','f','t','r','i'].includes(key)) command = `tool:${key}`;
     if (command) { event.preventDefault(); post('command', { command }); }
   });
-  // File shortcuts must work even when `#loora-surface` is not the active DOM
-  // focus target (common after chrome clicks). GPUI still handles these when the
-  // wry child does not own keyboard focus.
+  // File shortcuts via capture so GTK/WebKit (and WebView2) cannot claim Ctrl+N/O/S
+  // before JS, and so they still fire when focus is not on `#loora-surface`.
+  // GPUI bindings cover the same chords when the wry child does not own focus.
   window.addEventListener('keydown', event => {
     if (event.defaultPrevented) return;
     const editing = event.target instanceof Element && !!event.target.closest('[data-loora-editing="true"]');
     if (editing) return;
     const mod = event.metaKey || event.ctrlKey;
     if (!mod) return;
-    const key = event.key.toLowerCase();
+    // Prefer `code` so layout remaps under Ctrl still match physical N/O/K/S.
+    const code = event.code;
     let command = null;
-    if (key === 'n') command = 'new';
-    else if (key === 'o' || key === 'k') command = 'files';
-    else if (key === 's') command = 'save';
+    if (code === 'KeyN') command = 'new';
+    else if (code === 'KeyO' || code === 'KeyK') command = 'files';
+    else if (code === 'KeyS') command = 'save';
     if (!command) return;
     event.preventDefault();
+    event.stopPropagation();
     post('command', { command });
-  });
+  }, true);
   surface.addEventListener('keyup', event => {
     if (event.code === 'Space') setSpacePan(false);
   });
@@ -2057,8 +2074,22 @@ mod tests {
         assert!(CANVAS_SHELL.contains(">Draw · R</button>"));
         assert!(CANVAS_SHELL.contains("syncEmptyHints()"));
         assert!(CANVAS_SHELL.contains("#loora-surface{position:absolute;inset:0;z-index:0"));
-        assert!(CANVAS_SHELL.contains("else if (mod && key === 'n') command = 'new';"));
-        assert!(CANVAS_SHELL.contains("if (key === 'n') command = 'new';"));
+        assert!(CANVAS_SHELL.contains("el.tabIndex = -1"));
+        assert!(CANVAS_SHELL.contains("if (code === 'KeyN') command = 'new';"));
+        assert!(CANVAS_SHELL.contains("}, true);"));
+        assert!(CANVAS_SHELL.contains("surface.focus({ preventScroll: true });"));
+    }
+
+    #[test]
+    fn webview_file_shortcuts_use_capture_phase() {
+        assert!(CANVAS_SHELL.contains("if (code === 'KeyN') command = 'new';"));
+        assert!(CANVAS_SHELL.contains("else if (code === 'KeyO' || code === 'KeyK') command = 'files';"));
+        assert!(CANVAS_SHELL.contains("else if (code === 'KeyS') command = 'save';"));
+        assert!(CANVAS_SHELL.contains("event.stopPropagation();"));
+        // Capture listener must be registered with the capture flag.
+        assert!(CANVAS_SHELL.contains(
+            "post('command', { command });\n  }, true);"
+        ));
     }
 
     #[test]
