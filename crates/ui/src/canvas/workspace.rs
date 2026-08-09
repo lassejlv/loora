@@ -58,6 +58,8 @@ actions!(
         NewDesign,
         ToggleFiles,
         ToggleSettings,
+        ToggleLayersSidebar,
+        TogglePropertiesSidebar,
         ZoomIn,
         ZoomOut,
         ZoomReset,
@@ -184,6 +186,7 @@ pub struct CanvasWorkspace {
     preview_started_at: Instant,
     preview_runtime_generation: u64,
     pub(crate) sidebar_visible: bool,
+    pub(crate) properties_visible: bool,
     pub(crate) command_open: bool,
     command_query: String,
     command_index: usize,
@@ -358,6 +361,7 @@ impl CanvasWorkspace {
             preview_started_at: Instant::now(),
             preview_runtime_generation: 0,
             sidebar_visible: true,
+            properties_visible: true,
             command_open: false,
             command_query: String::new(),
             command_index: 0,
@@ -472,6 +476,7 @@ impl CanvasWorkspace {
             layer_rename_draft: self.layer_rename_draft.clone(),
             collapsed_generation: self.collapsed_generation,
             sidebar_visible: self.sidebar_visible,
+            properties_visible: self.properties_visible,
             command_open: self.command_open,
             command_query: self.command_query.clone(),
             command_index: self.command_index,
@@ -1182,6 +1187,7 @@ impl CanvasWorkspace {
             "fit-all" => self.fit_all_pages(cx),
             "files" => self.toggle_files_panel(cx),
             "sidebar" => self.toggle_sidebar(cx),
+            "properties" => self.toggle_properties(cx),
             "new" => self.create_design(cx),
             "delete" if !self.preview_mode => {
                 self.delete_selection(cx);
@@ -1376,6 +1382,15 @@ impl CanvasWorkspace {
 
     pub fn toggle_sidebar(&mut self, cx: &mut Context<Self>) {
         self.sidebar_visible = !self.sidebar_visible;
+        cx.notify();
+    }
+
+    pub fn toggle_properties(&mut self, cx: &mut Context<Self>) {
+        self.properties_visible = !self.properties_visible;
+        if !self.properties_visible {
+            self.clear_props_focus();
+            self.close_color_picker(cx);
+        }
         cx.notify();
     }
 
@@ -5453,6 +5468,24 @@ impl CanvasWorkspace {
         self.open_settings(window, cx);
     }
 
+    fn toggle_layers_sidebar(
+        &mut self,
+        _: &ToggleLayersSidebar,
+        _: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.toggle_sidebar(cx);
+    }
+
+    fn toggle_properties_sidebar(
+        &mut self,
+        _: &TogglePropertiesSidebar,
+        _: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.toggle_properties(cx);
+    }
+
     fn workspace_quit(&mut self, _: &WorkspaceQuit, _: &mut Window, cx: &mut Context<Self>) {
         cx.quit();
     }
@@ -6414,6 +6447,8 @@ fn binding_for_action(action_id: &str, keystroke: &str) -> Option<KeyBinding> {
         "zoom_reset" => KeyBinding::new(keystroke, ZoomReset, context),
         "fit_selection" => KeyBinding::new(keystroke, FitSelection, context),
         "fit_all" => KeyBinding::new(keystroke, FitAll, context),
+        "toggle_layers" => KeyBinding::new(keystroke, ToggleLayersSidebar, context),
+        "toggle_properties" => KeyBinding::new(keystroke, TogglePropertiesSidebar, context),
         "group" => KeyBinding::new(keystroke, GroupSelection, context),
         "ungroup" => KeyBinding::new(keystroke, UngroupSelection, context),
         "tool_select" => KeyBinding::new(keystroke, ToolSelect, context),
@@ -6437,6 +6472,7 @@ impl Render for CanvasWorkspace {
         let entity = cx.entity();
         let webview = self.webview.clone();
         let sidebar_visible = self.sidebar_visible;
+        let properties_visible = self.properties_visible;
         let rows = if sidebar_visible {
             self.cached_layer_rows()
         } else {
@@ -6529,6 +6565,8 @@ impl Render for CanvasWorkspace {
             .on_action(cx.listener(Self::new_design))
             .on_action(cx.listener(Self::toggle_files))
             .on_action(cx.listener(Self::toggle_settings))
+            .on_action(cx.listener(Self::toggle_layers_sidebar))
+            .on_action(cx.listener(Self::toggle_properties_sidebar))
             .on_action(cx.listener(Self::workspace_quit))
             .on_action(cx.listener(Self::tool_select))
             .on_action(cx.listener(Self::tool_hand))
@@ -6746,13 +6784,15 @@ impl Render for CanvasWorkspace {
                             .child(webview),
                     ),
             )
-            .child(PropertiesPanel::new(
-                entity.clone(),
-                theme,
-                props_nodes,
-                props_bounds,
-                props_view,
-            ))
+            .when(properties_visible, |this| {
+                this.child(PropertiesPanel::new(
+                    entity.clone(),
+                    theme,
+                    props_nodes,
+                    props_bounds,
+                    props_view,
+                ))
+            })
             .when(command_open, |this| {
                 this.child(FilesCommandDialog::new(
                     entity.clone(),

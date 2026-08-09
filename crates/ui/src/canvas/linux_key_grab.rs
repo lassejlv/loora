@@ -92,6 +92,7 @@ fn grab_loop(host_xid: u64, ipc: CanvasIpcSender) {
             let mods = key_event.state;
             let ctrl_down = mods & x11_dl::xlib::ControlMask != 0;
             let shift_down = mods & x11_dl::xlib::ShiftMask != 0;
+            let alt_down = mods & x11_dl::xlib::Mod1Mask != 0;
             // Ignore other modifiers for tool keys.
             let only_shift_or_none = mods
                 & !(x11_dl::xlib::ShiftMask
@@ -105,6 +106,8 @@ fn grab_loop(host_xid: u64, ipc: CanvasIpcSender) {
                     "n" | "N" => Some("new"),
                     "o" | "O" | "k" | "K" => Some("files"),
                     "s" | "S" => Some("save"),
+                    "b" | "B" if alt_down => Some("properties"),
+                    "b" | "B" => Some("sidebar"),
                     _ => None,
                 }
             } else if only_shift_or_none && !ctrl_down {
@@ -171,8 +174,12 @@ unsafe fn grab_shortcut_keys(
         }
     };
     let ctrl = x11_dl::xlib::ControlMask;
-    for key in ["n", "N", "o", "O", "k", "K", "s", "S"] {
+    let alt = x11_dl::xlib::Mod1Mask;
+    for key in ["n", "N", "o", "O", "k", "K", "s", "S", "b", "B"] {
         grab(key, ctrl);
+    }
+    for key in ["b", "B"] {
+        grab(key, ctrl | alt);
     }
     for key in ["r", "R", "v", "V", "h", "H", "f", "F", "t", "T", "i", "I"] {
         grab(key, 0);

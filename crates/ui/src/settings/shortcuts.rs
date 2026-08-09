@@ -118,6 +118,20 @@ pub fn shortcut_catalog() -> &'static [ShortcutDef] {
             defaults: &["secondary-2"],
         },
         ShortcutDef {
+            id: "toggle_layers",
+            label: "Toggle Layers Sidebar",
+            description: "Show or hide the layers sidebar",
+            category: ShortcutCategory::View,
+            defaults: &["secondary-b"],
+        },
+        ShortcutDef {
+            id: "toggle_properties",
+            label: "Toggle Properties Sidebar",
+            description: "Show or hide the properties sidebar",
+            category: ShortcutCategory::View,
+            defaults: &["secondary-alt-b"],
+        },
+        ShortcutDef {
             id: "group",
             label: "Group",
             description: "Group the selected layers",

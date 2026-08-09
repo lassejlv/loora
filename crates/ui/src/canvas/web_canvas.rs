@@ -19,7 +19,9 @@ use gpui::{
     LayoutId, MouseDownEvent, ParentElement, Pixels, Render, Size, Style, Styled, Window,
 };
 use loora_engine::CompiledCanvas;
-use raw_window_handle::{HasWindowHandle, RawWindowHandle};
+use raw_window_handle::HasWindowHandle;
+#[cfg(target_os = "linux")]
+use raw_window_handle::RawWindowHandle;
 use wry::{
     dpi::{LogicalPosition, LogicalSize, Position, Size as WrySize},
     http::{header::CONTENT_TYPE, Response},
@@ -79,6 +81,8 @@ pub fn init_linux_canvas() {
 /// Remap GPUI's Linux `Xcb` window handle to the `Xlib` shape wry's child
 /// webview expects. Xlib/xcb window ids are the same server-side XID; wry only
 /// reads `.window` and parents via GDK's own display.
+///
+/// On macOS / Windows, pass the native handle through unchanged (AppKit / Win32).
 struct WryParent<'a>(&'a Window);
 
 impl HasWindowHandle for WryParent<'_> {
@@ -86,20 +90,16 @@ impl HasWindowHandle for WryParent<'_> {
         &self,
     ) -> Result<raw_window_handle::WindowHandle<'_>, raw_window_handle::HandleError> {
         let raw = HasWindowHandle::window_handle(self.0)?.as_raw();
-        match raw {
-            RawWindowHandle::Xlib(_) => {
-                // SAFETY: reborrowing the same raw handle already obtained above.
-                Ok(unsafe { raw_window_handle::WindowHandle::borrow_raw(raw) })
-            }
-            #[cfg(target_os = "linux")]
-            RawWindowHandle::Xcb(xcb) => {
-                let mut xlib = raw_window_handle::XlibWindowHandle::new(xcb.window.get() as _);
-                xlib.visual_id = xcb.visual_id.map(|v| v.get() as _).unwrap_or(0);
-                // SAFETY: forged Xlib handle carries the same XID wry needs for parenting.
-                Ok(unsafe { raw_window_handle::WindowHandle::borrow_raw(xlib.into()) })
-            }
-            _ => Err(raw_window_handle::HandleError::NotSupported),
+        #[cfg(target_os = "linux")]
+        if let RawWindowHandle::Xcb(xcb) = raw {
+            let mut xlib = raw_window_handle::XlibWindowHandle::new(xcb.window.get() as _);
+            xlib.visual_id = xcb.visual_id.map(|v| v.get() as _).unwrap_or(0);
+            // SAFETY: forged Xlib handle carries the same XID wry needs for parenting.
+            return Ok(unsafe { raw_window_handle::WindowHandle::borrow_raw(xlib.into()) });
         }
+        // SAFETY: reborrowing the same raw handle already obtained above
+        // (AppKit on macOS, Win32 on Windows, Xlib on Linux).
+        Ok(unsafe { raw_window_handle::WindowHandle::borrow_raw(raw) })
     }
 }
 
@@ -787,7 +787,7 @@ html,body,#loora-app{width:100%;height:100%;margin:0;overflow:hidden;background:
       <button type="button" class="loora-tool" data-tool="hand" data-tip="Hand  H"><svg viewBox="0 0 24 24" fill="none"><path d="M14 5.5A1.5 1.5 0 0 1 17 5.5V12M14 5.5V3.5A1.5 1.5 0 0 0 11 3.5V5M14 5.5V11M11 5A1.5 1.5 0 0 0 8 5v8.46L6.38 11.84a2.05 2.05 0 0 0-2.51.14 1.9 1.9 0 0 0-.03 2.21L7.44 18.65C8.13 19.53 8.5 20.88 8.5 22M11 5v5M18 22v-1.16c0-.53.21-1.04.57-1.44.4-.46.9-1.1 1.1-1.6.33-.87.33-1.95.33-4.13V7.5A1.5 1.5 0 0 0 17 7.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
       <button type="button" class="loora-tool" data-tool="preview" data-tip="Preview"><svg viewBox="0 0 24 24" fill="none"><path d="M2.5 12s3.5-6.5 9.5-6.5S21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12Z" stroke="currentColor" stroke-width="1.5"/><circle cx="12" cy="12" r="3" stroke="currentColor" stroke-width="1.5"/></svg></button>
       <div class="loora-divider"></div>
-      <button type="button" class="loora-action" data-cmd="sidebar" data-tip="Layers"><svg viewBox="0 0 24 24" fill="none"><path d="M3.89 3.89C5.28 2.5 7.52 2.5 12 2.5s6.72 0 8.11 1.39C21.5 5.28 21.5 7.52 21.5 12s0 6.72-1.39 8.11C18.72 21.5 16.48 21.5 12 21.5s-6.72 0-8.11-1.39C2.5 18.72 2.5 16.48 2.5 12s0-6.72 1.39-8.11Z" stroke="currentColor" stroke-width="1.5"/><path d="M15 2.5v19" stroke="currentColor" stroke-width="1.5"/></svg></button>
+      <button type="button" class="loora-action" data-cmd="sidebar" data-tip="Layers  ⌘B"><svg viewBox="0 0 24 24" fill="none"><path d="M3.89 3.89C5.28 2.5 7.52 2.5 12 2.5s6.72 0 8.11 1.39C21.5 5.28 21.5 7.52 21.5 12s0 6.72-1.39 8.11C18.72 21.5 16.48 21.5 12 21.5s-6.72 0-8.11-1.39C2.5 18.72 2.5 16.48 2.5 12s0-6.72 1.39-8.11Z" stroke="currentColor" stroke-width="1.5"/><path d="M15 2.5v19" stroke="currentColor" stroke-width="1.5"/></svg></button>
       <button type="button" class="loora-action" data-cmd="files" data-tip="Open…  ⌘K"><svg viewBox="0 0 24 24" fill="none"><path d="M3.5 8.5V7a2 2 0 0 1 2-2h4.2l2 2H18.5a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2v-6.5Z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/></svg></button>
       <button type="button" class="loora-tool" data-tool="frame" data-tip="Frame  F"><svg viewBox="0 0 24 24" fill="none"><path d="M6 3v18M18 3v18M3 6h18M3 18h18" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg></button>
       <button type="button" class="loora-tool" data-tool="text" data-tip="Text  T"><svg viewBox="0 0 24 24" fill="none"><path d="M5 5h14M12 5v14M9 19h6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg></button>
@@ -1928,6 +1928,7 @@ html,body,#loora-app{width:100%;height:100%;margin:0;overflow:hidden;background:
     else if (mod && key === '0') command = 'zoom-reset';
     else if (mod && key === '1') command = 'fit-selection';
     else if (mod && key === '2') command = 'fit-all';
+    else if (mod && key === 'b') command = event.altKey ? 'properties' : 'sidebar';
     else if (event.key === 'Delete' || event.key === 'Backspace') command = 'delete';
     else if (event.key === 'Escape') command = 'escape';
     else if (!mod && !event.altKey && event.key.startsWith('Arrow')) command = `nudge:${event.key.slice(5).toLowerCase()}:${event.shiftKey ? 10 : 1}`;
@@ -1962,6 +1963,7 @@ html,body,#loora-app{width:100%;height:100%;margin:0;overflow:hidden;background:
     else if (mod && code === 'Digit0') command = 'zoom-reset';
     else if (mod && code === 'Digit1') command = 'fit-selection';
     else if (mod && code === 'Digit2') command = 'fit-all';
+    else if (mod && code === 'KeyB') command = event.altKey ? 'properties' : 'sidebar';
     else if (!mod && !event.altKey && ['v','h','f','t','r','i'].includes(key)) command = `tool:${key}`;
     else if (event.key === 'Delete' || event.key === 'Backspace') command = 'delete';
     else if (event.key === 'Escape') command = 'escape';

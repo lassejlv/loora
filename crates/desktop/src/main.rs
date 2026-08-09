@@ -8,8 +8,8 @@ use gpui::{
 use gpui_platform::application;
 use loora_ui::{
     Assets, FitAll, FitSelection, GroupSelection, NewDesign, Redo, SaveDesign, ToggleFiles,
-    ToggleSettings, ToolFrame, ToolHand, ToolImage, ToolRectangle, ToolSelect, ToolText, Undo,
-    UngroupSelection, ZoomIn, ZoomOut, ZoomReset,
+    ToggleLayersSidebar, TogglePropertiesSidebar, ToggleSettings, ToolFrame, ToolHand, ToolImage,
+    ToolRectangle, ToolSelect, ToolText, Undo, UngroupSelection, ZoomIn, ZoomOut, ZoomReset,
 };
 use std::sync::Arc;
 
@@ -60,6 +60,9 @@ fn main() {
                     MenuItem::separator(),
                     MenuItem::action("Fit Selection", FitSelection),
                     MenuItem::action("Fit All Pages", FitAll),
+                    MenuItem::separator(),
+                    MenuItem::action("Toggle Layers Sidebar", ToggleLayersSidebar),
+                    MenuItem::action("Toggle Properties Sidebar", TogglePropertiesSidebar),
                 ]),
                 Menu::new("Arrange").items([
                     MenuItem::action("Group", GroupSelection),

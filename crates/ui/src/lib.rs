@@ -22,8 +22,9 @@ pub use button::{Button, ButtonVariant, BUTTON_VARIANTS};
 pub use canvas::{init_linux_canvas, prefer_x11_for_canvas, pump_linux_canvas};
 pub use canvas::{
     CanvasTool, CanvasWorkspace, FitAll, FitSelection, GroupSelection, NewDesign, Redo, SaveDesign,
-    ToggleFiles, ToggleSettings, ToolFrame, ToolHand, ToolImage, ToolRectangle, ToolSelect,
-    ToolText, Undo, UngroupSelection, ZoomIn, ZoomOut, ZoomReset,
+    ToggleFiles, ToggleLayersSidebar, TogglePropertiesSidebar, ToggleSettings, ToolFrame, ToolHand,
+    ToolImage, ToolRectangle, ToolSelect, ToolText, Undo, UngroupSelection, ZoomIn, ZoomOut,
+    ZoomReset,
 };
 pub use color_picker::{
     color_to_rgba, format_hex as format_color_hex, parse_hex as parse_color_hex, preset_colors,
