@@ -12,6 +12,7 @@ use loora_ui::{
 pub struct AppRoot {
     canvas: Entity<CanvasWorkspace>,
     focus_handle: FocusHandle,
+    route_state: Option<(bool, SettingsSection)>,
     _observe_canvas: gpui::Subscription,
 }
 
@@ -41,6 +42,7 @@ impl AppRoot {
         Self {
             canvas,
             focus_handle,
+            route_state: None,
             _observe_canvas,
         }
     }
@@ -134,14 +136,18 @@ impl Render for AppRoot {
         let section = SettingsSection::from_pathname(&pathname);
         let theme = canvas.read(cx).theme();
 
-        // Sync native webview visibility with the active route.
-        canvas.update(cx, |workspace, cx| {
-            if on_settings {
-                workspace.set_settings_route_active(true, section, cx);
-            } else {
-                workspace.set_canvas_route_active(true, cx);
-            }
-        });
+        // Sync native webview visibility only when the route actually changes.
+        let route_state = (on_settings, section);
+        if self.route_state != Some(route_state) {
+            self.route_state = Some(route_state);
+            canvas.update(cx, |workspace, cx| {
+                if on_settings {
+                    workspace.set_settings_route_active(true, section, cx);
+                } else {
+                    workspace.set_canvas_route_active(true, cx);
+                }
+            });
+        }
         // Settings unmounts the canvas paint path; keep draining GTK so hide sticks.
         #[cfg(target_os = "linux")]
         if on_settings {

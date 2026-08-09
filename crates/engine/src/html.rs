@@ -84,15 +84,15 @@ pub fn compile_canvas(document: &Document, options: &HtmlCanvasOptions) -> Compi
             .viewport
             .map(|viewport| viewport.min_height)
             .unwrap_or(1.0);
-        let page_height = if resolved_page.layout.height_mode == SizeMode::Fixed {
-            resolved_page.layout.height.max(1.0)
-        } else {
-            resolved_page.layout.height.max(viewport_min_height)
-        };
         let page_clips = matches!(
             resolved_page.style.overflow,
             Overflow::Hidden | Overflow::Auto
         );
+        let page_height = if resolved_page.layout.height_mode == SizeMode::Fixed || page_clips {
+            resolved_page.layout.height.max(1.0)
+        } else {
+            resolved_page.layout.height.max(viewport_min_height)
+        };
         let host_height = if page_clips {
             // Hug pages normally grow with content; clipping needs a fixed box.
             format!(
@@ -110,15 +110,12 @@ pub fn compile_canvas(document: &Document, options: &HtmlCanvasOptions) -> Compi
             )
         };
         let page_class = node_class(&page.id);
+        let page_host_class = format!("{page_class}-host");
         markup.push_str(&format!(
-            "<section class=\"loora-page-host{}\" data-loora-page-host=\"{}\"{} style=\"left:{}px;top:{}px;width:{}px;{}\"><div class=\"loora-page-label\" data-loora-page-label=\"{}\">{}</div>",
+            "<section class=\"loora-page-host {page_host_class}{}\" data-loora-page-host=\"{}\"{}><div class=\"loora-page-label\" data-loora-page-label=\"{}\">{}</div>",
             if overlay_page { " loora-overlay-page-host" } else { "" },
             html_attr(page.id.as_str()),
             if overlay_page { " data-loora-overlay-page=\"true\"" } else { "" },
-            number(resolved_page.layout.x),
-            number(resolved_page.layout.y),
-            number(page_width),
-            host_height,
             html_attr(page.id.as_str()),
             html_text(&page.name),
         ));
@@ -136,6 +133,13 @@ pub fn compile_canvas(document: &Document, options: &HtmlCanvasOptions) -> Compi
             render_node(&context, &resolved_page, None, true, &mut output);
         }
         markup.push_str("</section>");
+
+        css.push_str(&format!(
+            ".{page_host_class}{{left:{}px;top:{}px;width:{}px;{host_height}}}",
+            number(resolved_page.layout.x),
+            number(resolved_page.layout.y),
+            number(page_width),
+        ));
 
         // Page roots live inside an absolutely positioned host on the editor
         // surface. Their children still use the exact Canvas layout contract.
@@ -1356,15 +1360,15 @@ html,body,#loora-app{width:100%;height:100%;overflow:hidden}
 html{-webkit-text-size-adjust:100%;font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
 body{background:var(--loora-surface-bg,#0f0f10);color:var(--loora-surface-fg,#f1f2f6)}
 img,svg{display:block;max-width:100%}button,input,textarea{font:inherit;color:inherit;background:transparent}
-#loora-surface{position:absolute;inset:0;overflow:hidden;background:var(--loora-surface-bg,#0f0f10);touch-action:none}
+#loora-surface{position:absolute;inset:0;overflow:hidden;background:var(--loora-surface-bg,#0f0f10);touch-action:none;cursor:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24'%3E%3Cpath d='M9.80282 4.62973L15.8364 6.99069C19.3164 8.35243 21.0564 9.03329 20.9987 10.1133C20.941 11.1934 19.1251 11.6886 15.4933 12.6791C14.412 12.974 13.8713 13.1215 13.4964 13.4963C13.1215 13.8712 12.9741 14.4119 12.6791 15.4933C11.6887 19.125 11.1934 20.9409 10.1134 20.9986C9.03335 21.0563 8.35249 19.3163 6.99075 15.8363L4.62979 9.80276C3.20411 6.15934 2.49127 4.33764 3.41448 3.41442C4.3377 2.49121 6.15941 3.20405 9.80282 4.62973Z' fill='black' stroke='white' stroke-width='2' stroke-linejoin='round'/%3E%3C/svg%3E") 3 3,default}
 #loora-surface[data-tool="hand"]{cursor:grab}#loora-surface[data-tool="frame"],#loora-surface[data-tool="text"],#loora-surface[data-tool="rectangle"],#loora-surface[data-tool="shapes"],#loora-surface[data-tool="image"],#loora-surface[data-tool="component"]{cursor:crosshair}
 #loora-surface.loora-space-pan{cursor:grab}
 #loora-scene{position:absolute;left:0;top:0;transform-origin:0 0;will-change:transform}
 .loora-page-host{position:absolute}.loora-page-label{position:absolute;left:0;top:-25px;height:18px;color:var(--loora-page-label,rgba(255,255,255,.58));font:500 12px/18px system-ui;white-space:nowrap;pointer-events:auto}
 .loora-node{transform-origin:center;user-select:none}.loora-node[data-loora-kind="text"]{cursor:inherit}.loora-node[data-loora-editing="true"]{user-select:text;cursor:text;outline:none}
 .loora-image-content,.loora-vector-content{width:100%;height:100%;display:block}.loora-image-content{object-fit:inherit}.loora-vector-content{overflow:visible}
-.loora-node[data-loora-selected="true"]{outline:2px solid #6f8cff;outline-offset:1px}
-.loora-group-box{position:absolute;border:1.5px solid #6f8cff;pointer-events:none;z-index:2147483644;box-sizing:border-box}
+.loora-node[data-loora-selected="true"]{outline:var(--loora-screen-pixel,1px) solid #6f8cff;outline-offset:var(--loora-screen-pixel,1px)}
+.loora-group-box{position:absolute;border:var(--loora-screen-pixel,1px) solid #6f8cff;pointer-events:none;z-index:2147483644;box-sizing:border-box}
 .loora-resize-handle{position:absolute;width:9px;height:9px;border:1.5px solid #6f8cff;background:#fff;border-radius:2px;z-index:2147483647;pointer-events:auto;transform:translate(-50%,-50%) scale(var(--loora-inverse-zoom,1))}
 .loora-resize-handle[data-handle="nw"],.loora-resize-handle[data-handle="se"]{cursor:nwse-resize}
 .loora-resize-handle[data-handle="ne"],.loora-resize-handle[data-handle="sw"]{cursor:nesw-resize}
@@ -1409,6 +1413,7 @@ mod tests {
     fn editor_surface_uses_a_plain_background() {
         assert!(EDITOR_PREFLIGHT.contains("#loora-surface{position:absolute"));
         assert!(EDITOR_PREFLIGHT.contains("var(--loora-surface-bg,#0f0f10)"));
+        assert!(EDITOR_PREFLIGHT.contains("cursor:url(\"data:image/svg+xml,"));
         assert!(!EDITOR_PREFLIGHT.contains("background-image"));
         assert!(!EDITOR_PREFLIGHT.contains("radial-gradient"));
         assert!(EDITOR_PREFLIGHT.contains("cursor:nwse-resize"));
@@ -1429,9 +1434,10 @@ mod tests {
         });
 
         let compiled = compile_canvas(&document, &HtmlCanvasOptions::default());
-        assert!(compiled
-            .markup
-            .contains("width:640px;height:360px;min-height:360px"));
+        let page_host_class = format!("{}-host", node_class(&page_id));
+        assert!(compiled.css.contains(&format!(
+            ".{page_host_class}{{left:0px;top:0px;width:640px;height:360px;min-height:360px;overflow:hidden}}"
+        )));
         assert!(!compiled.css.contains("min-height:900px!important"));
     }
 
@@ -1497,12 +1503,30 @@ mod tests {
 
         let compiled = compile_canvas(&document, &HtmlCanvasOptions::default());
         let page_class = node_class(&page_id);
-        assert!(compiled
-            .markup
-            .contains("height:360px;min-height:360px;overflow:hidden"));
+        let page_host_class = format!("{page_class}-host");
+        assert!(compiled.css.contains(&format!(
+            ".{page_host_class}{{left:0px;top:0px;width:640px;height:360px;min-height:360px;overflow:hidden}}"
+        )));
         assert!(compiled.css.contains(&format!(
             ".{page_class}{{position:relative!important;left:0!important;top:0!important;width:100%!important;height:360px!important;min-height:360px!important;overflow:hidden!important}}"
         )));
+    }
+
+    #[test]
+    fn page_geometry_changes_css_without_replacing_markup() {
+        let mut document = Document::empty("Stable page host");
+        let page_id = document.root_page_id.clone();
+        let before = compile_canvas(&document, &HtmlCanvasOptions::default());
+
+        let page = document.nodes.get_mut(&page_id).unwrap();
+        page.layout.x = 120.0;
+        page.layout.y = 80.0;
+        page.layout.width = 960.0;
+        page.layout.height = 540.0;
+
+        let after = compile_canvas(&document, &HtmlCanvasOptions::default());
+        assert_eq!(before.markup, after.markup);
+        assert_ne!(before.css, after.css);
     }
 
     #[test]
@@ -1512,6 +1536,16 @@ mod tests {
         assert!(EDITOR_PREFLIGHT.contains(".loora-guide-h{"));
         assert!(EDITOR_PREFLIGHT.contains(".loora-guide-label{"));
         assert!(EDITOR_PREFLIGHT.contains("#loora-surface.loora-space-pan{cursor:grab}"));
+    }
+
+    #[test]
+    fn selection_strokes_stay_one_screen_pixel_at_any_zoom() {
+        assert!(EDITOR_PREFLIGHT.contains(
+            ".loora-node[data-loora-selected=\"true\"]{outline:var(--loora-screen-pixel,1px) solid #6f8cff;outline-offset:var(--loora-screen-pixel,1px)}"
+        ));
+        assert!(EDITOR_PREFLIGHT.contains(
+            ".loora-group-box{position:absolute;border:var(--loora-screen-pixel,1px) solid #6f8cff;"
+        ));
     }
 
     #[test]

@@ -29,7 +29,7 @@ use crate::canvas::properties::{
     format_hex, format_number, parse_hex, PropertiesPanel, PropsField, PropsView,
 };
 use crate::canvas::text_edit::{self, TextCursor, TextEditSession};
-use crate::canvas::web_canvas::CanvasWebView;
+use crate::canvas::web_canvas::{should_apply_visibility, CanvasWebView};
 #[cfg(target_os = "linux")]
 use crate::canvas::web_canvas::pump_linux_canvas;
 #[cfg(target_os = "linux")]
@@ -149,6 +149,7 @@ pub struct CanvasWorkspace {
     pub(crate) tool: CanvasTool,
     pub(crate) viewport_bounds: Rc<Cell<Bounds<Pixels>>>,
     webview: Entity<CanvasWebView>,
+    webview_visible: bool,
     _web_ipc_task: Option<Task<()>>,
     web_document_key: Option<WebDocumentKey>,
     web_state_key: Option<WebStateKey>,
@@ -329,6 +330,7 @@ impl CanvasWorkspace {
             tool: CanvasTool::Select,
             viewport_bounds,
             webview,
+            webview_visible: true,
             _web_ipc_task: None,
             web_document_key: None,
             web_state_key: None,
@@ -1276,8 +1278,7 @@ impl CanvasWorkspace {
         // Hide the native webview for settings and GPUI overlays that sit under wry.
         // Canvas HTML menus stay in-webview and never set these flags.
         let hide_webview = self.webview_should_be_hidden();
-        self.webview
-            .update(cx, |view, _| view.set_visible(!hide_webview));
+        self.sync_webview_visibility(cx);
         if !hide_webview {
             self.flush_pending_fit_all(cx);
         }
@@ -1528,6 +1529,9 @@ impl CanvasWorkspace {
         cx: &mut Context<Self>,
     ) {
         let changed = self.settings_route_active != active || self.settings_section != section;
+        if !changed {
+            return;
+        }
         self.settings_route_active = active;
         self.settings_section = section;
         if !active {
@@ -1536,9 +1540,7 @@ impl CanvasWorkspace {
         }
         // Route changes must not force-show over command/image/color/inspector overlays.
         self.sync_webview_visibility(cx);
-        if changed {
-            cx.notify();
-        }
+        cx.notify();
     }
 
     pub fn set_canvas_route_active(&mut self, active: bool, cx: &mut Context<Self>) {
@@ -1558,9 +1560,16 @@ impl CanvasWorkspace {
     }
 
     fn sync_webview_visibility(&mut self, cx: &mut Context<Self>) {
-        let hide = self.webview_should_be_hidden();
+        let visible = !self.webview_should_be_hidden();
+        if !should_apply_visibility(
+            &mut self.webview_visible,
+            visible,
+            cfg!(target_os = "linux"),
+        ) {
+            return;
+        }
         self.webview.update(cx, |view, _| {
-            view.set_visible(!hide);
+            view.set_visible(visible);
         });
     }
 
