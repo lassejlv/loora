@@ -30,6 +30,10 @@ use crate::canvas::properties::{
 };
 use crate::canvas::text_edit::{self, TextCursor, TextEditSession};
 use crate::canvas::web_canvas::CanvasWebView;
+#[cfg(target_os = "linux")]
+use crate::canvas::web_canvas::pump_linux_canvas;
+#[cfg(target_os = "linux")]
+use raw_window_handle::{HasWindowHandle, RawWindowHandle};
 use crate::color_picker::ColorPickerPopover;
 use crate::context_menu::{
     action_id_at, first_action_index, move_highlight, ContextMenu, ContextMenuAction,
@@ -224,6 +228,10 @@ pub struct CanvasWorkspace {
     /// Inspector breakpoint (None = base). Canvas still paints base layout.
     pub(crate) active_breakpoint_id: Option<String>,
     focus_handle: FocusHandle,
+    /// Webview asked us to restore GPUI keyboard focus after a canvas click.
+    pending_keyboard_reclaim: bool,
+    /// True while a contenteditable text node in the webview is focused.
+    webview_text_editing: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -384,6 +392,8 @@ impl CanvasWorkspace {
             props_collapsed: HashSet::new(),
             active_breakpoint_id: None,
             focus_handle,
+            pending_keyboard_reclaim: false,
+            webview_text_editing: false,
         };
         workspace._web_ipc_task = Some(cx.spawn(async move |this, cx| {
             while let Ok(first_message) = web_ipc_receiver.recv().await {
@@ -413,6 +423,41 @@ impl CanvasWorkspace {
         workspace.pending_fit_all = true;
         workspace.fit_all_pages(cx);
         workspace
+    }
+
+    /// Restore GPUI keyboard focus after leaving the webview (chrome click / edit end).
+    fn reclaim_keyboard_if_needed(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.webview_text_editing {
+            return;
+        }
+        self.pending_keyboard_reclaim = false;
+        self.webview.update(cx, |view, _| {
+            view.reclaim_host_keyboard();
+            // Drop any DOM focus WebKit may have taken so it stops eating keys.
+            let _ = view.command(serde_json::json!({ "type": "blur-surface" }));
+        });
+        #[cfg(target_os = "linux")]
+        {
+            use gtk::gdk::prelude::*;
+            if let Some(display) = gtk::gdk::Display::default() {
+                if let Some(seat) = display.default_seat() {
+                    seat.ungrab();
+                }
+            }
+            // Clicking the wry child sends FocusOut(NotifyInferior) to the GPUI
+            // window. GPUI marks itself inactive; FocusIn goes to the unknown child
+            // XID and is dropped — so active stays false and keybindings die.
+            // Bounce X focus away and back so GPUI receives a real FocusIn.
+            force_x11_focus_reactivate(window);
+            pump_linux_canvas();
+        }
+        window.activate_window();
+        self.focus_handle.focus(window, cx);
+        eprintln!(
+            "loora: host keyboard reclaim (focused={} active={})",
+            self.focus_handle.is_focused(window),
+            window.is_window_active()
+        );
     }
 
     fn shell_chrome_token(&self) -> ShellChromeToken {
@@ -498,6 +543,36 @@ impl CanvasWorkspace {
                 self.web_document_key = None;
                 self.web_state_key = None;
                 self.flush_pending_fit_all(cx);
+            }
+            // Canvas pointer hits the wry X11 child. On Linux the child receives
+            // pointer events but X keyboard focus stays on the GPUI toplevel;
+            // wry's grab_focus() does not deliver keys to WebKit in this embed.
+            // Keep (or restore) host keyboard so AppRoot/Workspace shortcuts work.
+            "canvas-pointer" => {
+                if !self.webview_text_editing {
+                    eprintln!("loora: canvas-pointer → reclaim host keyboard");
+                    self.webview.update(cx, |view, _| {
+                        view.reclaim_host_keyboard();
+                    });
+                    self.pending_keyboard_reclaim = true;
+                    // Force a render so reclaim_keyboard_if_needed focuses Workspace
+                    // before the next key arrives (IPC chrome token may be unchanged).
+                    cx.notify();
+                }
+            }
+            "webview-editing" => {
+                let active = message
+                    .get("active")
+                    .and_then(|value| value.as_bool())
+                    .unwrap_or(false);
+                self.webview_text_editing = active;
+                // Never grab_focus the child for editing — keys would vanish.
+                // Host keeps X focus; we forward keystrokes into contenteditable.
+                self.webview.update(cx, |view, _| {
+                    view.reclaim_host_keyboard();
+                });
+                self.pending_keyboard_reclaim = true;
+                cx.notify();
             }
             "export-png" => {
                 let Some(path) = self.pending_png_export.take() else {
@@ -1574,10 +1649,47 @@ impl CanvasWorkspace {
         self.save_now(cx);
         match self.store.create(next_untitled_name(&self.files)) {
             Ok(doc) => {
+                eprintln!("loora: create_design → {}", doc.id);
+                let _ = std::io::Write::flush(&mut std::io::stderr());
                 self.load_document(doc, cx);
             }
             Err(err) => eprintln!("loora: create design failed: {err}"),
         }
+    }
+
+    /// Forward host keystrokes into the webview contenteditable. Needed on Linux
+    /// where the wry child never reliably receives X11 keyboard focus.
+    fn forward_key_to_webview_editor(&self, event: &KeyDownEvent, cx: &mut Context<Self>) {
+        let mods = &event.keystroke.modifiers;
+        let key = event.keystroke.key.as_str();
+        let action = match key {
+            "backspace" => Some("backspace"),
+            "delete" => Some("delete"),
+            "enter" => Some("enter"),
+            "escape" => Some("escape"),
+            "left" => Some("left"),
+            "right" => Some("right"),
+            "up" => Some("up"),
+            "down" => Some("down"),
+            "home" => Some("home"),
+            "end" => Some("end"),
+            _ => None,
+        };
+        let payload = if let Some(action) = action {
+            serde_json::json!({
+                "type": "inject-key",
+                "action": action,
+                "shift": mods.shift,
+            })
+        } else if let Some(ch) = event.keystroke.key_char.as_deref() {
+            if mods.control || mods.platform || mods.alt || ch.is_empty() {
+                return;
+            }
+            serde_json::json!({ "type": "inject-key", "text": ch })
+        } else {
+            return;
+        };
+        let _ = self.webview.update(cx, |view, _| view.command(payload));
     }
 
     pub fn open_design(&mut self, id: &str, cx: &mut Context<Self>) {
@@ -5351,6 +5463,12 @@ impl CanvasWorkspace {
             return;
         }
 
+        if self.webview_text_editing {
+            self.forward_key_to_webview_editor(event, cx);
+            cx.stop_propagation();
+            return;
+        }
+
         if self.context_menu.is_some() {
             self.on_context_menu_key_down(event, cx);
             return;
@@ -6240,6 +6358,47 @@ fn workspace_key_bindings(overrides: &HashMap<String, String>) -> Vec<KeyBinding
     bindings
 }
 
+/// Bounce X11 input focus so GPUI receives FocusIn after a wry child click.
+#[cfg(target_os = "linux")]
+fn force_x11_focus_reactivate(window: &Window) {
+    let Ok(handle) = HasWindowHandle::window_handle(window) else {
+        return;
+    };
+    let xid = match handle.as_raw() {
+        RawWindowHandle::Xlib(h) => h.window as x11_dl::xlib::Window,
+        RawWindowHandle::Xcb(h) => h.window.get() as x11_dl::xlib::Window,
+        _ => return,
+    };
+    let Ok(xlib) = x11_dl::xlib::Xlib::open() else {
+        return;
+    };
+    unsafe {
+        let display = (xlib.XOpenDisplay)(std::ptr::null());
+        if display.is_null() {
+            return;
+        }
+        // WebKit/GDK may hold a keyboard grab after child interaction.
+        (xlib.XUngrabKeyboard)(display, x11_dl::xlib::CurrentTime);
+        // PointerRoot briefly, then back to the GPUI toplevel.
+        (xlib.XSetInputFocus)(
+            display,
+            x11_dl::xlib::PointerRoot as x11_dl::xlib::Window,
+            x11_dl::xlib::RevertToPointerRoot,
+            x11_dl::xlib::CurrentTime,
+        );
+        (xlib.XFlush)(display);
+        (xlib.XSetInputFocus)(
+            display,
+            xid,
+            x11_dl::xlib::RevertToParent,
+            x11_dl::xlib::CurrentTime,
+        );
+        (xlib.XUngrabKeyboard)(display, x11_dl::xlib::CurrentTime);
+        (xlib.XFlush)(display);
+        (xlib.XCloseDisplay)(display);
+    }
+}
+
 fn binding_for_action(action_id: &str, keystroke: &str) -> Option<KeyBinding> {
     let context = Some("CanvasWorkspace");
     let binding = match action_id {
@@ -6269,7 +6428,10 @@ fn binding_for_action(action_id: &str, keystroke: &str) -> Option<KeyBinding> {
 }
 
 impl Render for CanvasWorkspace {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        if self.pending_keyboard_reclaim {
+            self.reclaim_keyboard_if_needed(window, cx);
+        }
         self.sync_web_canvas(cx);
         let theme = self.theme;
         let entity = cx.entity();
@@ -6355,7 +6517,11 @@ impl Render for CanvasWorkspace {
             .size_full()
             .bg(theme.window_fill())
             .text_color(theme.foreground)
-            .key_context("CanvasWorkspace")
+            .key_context(if self.webview_text_editing {
+                "WebviewTextEditing"
+            } else {
+                "CanvasWorkspace"
+            })
             .track_focus(&self.focus_handle)
             .on_action(cx.listener(Self::undo))
             .on_action(cx.listener(Self::redo))

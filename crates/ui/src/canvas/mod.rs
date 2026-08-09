@@ -1,6 +1,8 @@
 mod files;
 mod image_picker;
 mod layers;
+#[cfg(target_os = "linux")]
+mod linux_key_grab;
 mod properties;
 mod text_edit;
 mod web_canvas;

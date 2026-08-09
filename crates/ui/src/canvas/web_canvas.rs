@@ -25,6 +25,8 @@ use wry::{
     http::{header::CONTENT_TYPE, Response},
     Rect, WebViewBuilder,
 };
+#[cfg(windows)]
+use wry::WebViewBuilderExtWindows;
 
 pub type CanvasIpcSender = async_channel::Sender<String>;
 
@@ -105,6 +107,8 @@ pub struct CanvasWebView {
     focus_handle: FocusHandle,
     webview: Option<Rc<wry::WebView>>,
     visible: bool,
+    /// When true, skip reclaim while contenteditable is active on the host-forward path.
+    webview_owns_keyboard: Cell<bool>,
     bounds: Bounds<Pixels>,
     applied_bounds: Rc<Cell<Bounds<Pixels>>>,
     viewport_bounds: Rc<Cell<Bounds<Pixels>>>,
@@ -125,21 +129,54 @@ impl CanvasWebView {
 
         let allowed_assets = Rc::new(RefCell::new(HashSet::new()));
         let protocol_assets = allowed_assets.clone();
-        let webview = WebViewBuilder::new()
+        let page_load_sender = ipc_sender.clone();
+        #[cfg(target_os = "linux")]
+        let key_grab_sender = ipc_sender.clone();
+        let builder = WebViewBuilder::new()
             .with_html(CANVAS_SHELL)
             .with_devtools(cfg!(debug_assertions))
+            .with_focused(false)
             .with_ipc_handler(move |request| {
                 let _ = ipc_sender.try_send(request.body().clone());
             })
+            .with_on_page_load_handler(move |event, _url| {
+                if matches!(event, wry::PageLoadEvent::Finished) {
+                    let _ = page_load_sender.try_send(r#"{"type":"ready"}"#.to_string());
+                }
+            })
             .with_custom_protocol("loora-asset".into(), move |_id, request| {
                 asset_response(request.uri().path(), &protocol_assets.borrow())
-            })
+            });
+        // WebView2 treats Ctrl+N/O/S as browser chrome accelerators unless disabled.
+        #[cfg(windows)]
+        let builder = builder.with_browser_accelerator_keys(false);
+        let webview = builder
             .build_as_child(&WryParent(window))
             .and_then(|webview| {
                 webview.set_bounds(Rect {
                     position: Position::Logical(LogicalPosition::new(0.0, 0.0)),
                     size: WrySize::Logical(LogicalSize::new(1.0, 1.0)),
                 })?;
+                // Prefer host keyboard on platforms where focus_parent is the real host.
+                // On Linux this would focus the child GTK container and steal X keys.
+                #[cfg(not(target_os = "linux"))]
+                {
+                    let _ = webview.focus_parent();
+                }
+                // Keep WebKit from taking GTK/X keyboard focus after artboard clicks.
+                #[cfg(target_os = "linux")]
+                {
+                    use gtk::prelude::WidgetExt;
+                    use wry::WebViewExtUnix;
+                    let gtk_wv = webview.webview();
+                    gtk_wv.set_can_focus(false);
+                    if let Some(top) = gtk_wv.toplevel() {
+                        top.set_can_focus(false);
+                    }
+                    // Mark the embed container as non-focusable at the X level so
+                    // clicks do not move X input focus off the GPUI toplevel.
+                    disable_x11_input_focus_for_gtk_widget(&gtk_wv);
+                }
                 Ok(Rc::new(webview))
             })
             .map_err(|error| {
@@ -149,10 +186,14 @@ impl CanvasWebView {
             })
             .ok();
 
+        #[cfg(target_os = "linux")]
+        crate::canvas::linux_key_grab::start(window, key_grab_sender);
+
         Self {
             focus_handle: cx.focus_handle(),
             webview,
             visible: true,
+            webview_owns_keyboard: Cell::new(false),
             bounds: Bounds::default(),
             applied_bounds: Rc::new(Cell::new(Bounds::default())),
             viewport_bounds,
@@ -286,6 +327,40 @@ impl CanvasWebView {
     pub fn visible(&self) -> bool {
         self.visible
     }
+
+    pub fn set_webview_owns_keyboard(&self, owns: bool) {
+        self.webview_owns_keyboard.set(owns);
+    }
+
+    /// Move keyboard focus off the child webview back to the GPUI host window.
+    pub fn reclaim_host_keyboard(&self) {
+        self.webview_owns_keyboard.set(false);
+        let Some(webview) = self.webview.as_ref() else {
+            return;
+        };
+        // On Linux X11 embed, wry's parent_window is the child container GTK
+        // window — focusing it steals X keyboard away from GPUI and keys vanish.
+        // Only call focus_parent on platforms where the parent is the real host.
+        #[cfg(not(target_os = "linux"))]
+        {
+            let _ = webview.focus_parent();
+        }
+        #[cfg(target_os = "linux")]
+        {
+            let _ = webview;
+        }
+    }
+
+    /// Give the child webview keyboard focus (platforms where grab_focus delivers keys).
+    /// On Linux X11 embed this is a no-op path — host reclaim + inject-key is used instead.
+    #[allow(dead_code)]
+    pub fn focus_webview(&self) {
+        self.webview_owns_keyboard.set(true);
+        let Some(webview) = self.webview.as_ref() else {
+            return;
+        };
+        let _ = webview.focus();
+    }
 }
 
 /// Drain pending GTK events. Required so wry visibility/bounds updates apply
@@ -297,8 +372,43 @@ pub fn pump_linux_canvas() {
     }
 }
 
+/// Clear the X11 InputHint on the WebKit embed window so button presses do not
+/// move keyboard focus away from the GPUI host toplevel.
+#[cfg(target_os = "linux")]
+fn disable_x11_input_focus_for_gtk_widget(widget: &impl gtk::prelude::WidgetExt) {
+    use gtk::gdk::prelude::*;
+    let Some(gdk_window) = widget.window() else {
+        widget.connect_realize(|w| {
+            disable_x11_input_focus_for_gtk_widget(w);
+        });
+        return;
+    };
+    let Some(x11_window) = gdk_window.downcast_ref::<gdkx11::X11Window>() else {
+        return;
+    };
+    let xid = x11_window.xid();
+    let Ok(xlib_lib) = x11_dl::xlib::Xlib::open() else {
+        return;
+    };
+    unsafe {
+        let display = (xlib_lib.XOpenDisplay)(std::ptr::null());
+        if display.is_null() {
+            return;
+        }
+        let mut hints: x11_dl::xlib::XWMHints = std::mem::zeroed();
+        hints.flags = x11_dl::xlib::InputHint;
+        hints.input = 0; // False — do not accept keyboard focus
+        (xlib_lib.XSetWMHints)(display, xid as _, &mut hints);
+        (xlib_lib.XFlush)(display);
+        (xlib_lib.XCloseDisplay)(display);
+    }
+}
+
 fn collapse_webview(webview: &wry::WebView) {
-    let _ = webview.focus_parent();
+    #[cfg(not(target_os = "linux"))]
+    {
+        let _ = webview.focus_parent();
+    }
     let _ = webview.set_visible(false);
     let _ = webview.set_bounds(Rect {
         position: Position::Logical(LogicalPosition::new(-10_000.0, -10_000.0)),
@@ -499,7 +609,7 @@ impl Element for CanvasWebViewElement {
         _: &mut Self::RequestLayoutState,
         hitbox: &mut Self::PrepaintState,
         window: &mut Window,
-        _: &mut App,
+        cx: &mut App,
     ) {
         #[cfg(target_os = "linux")]
         {
@@ -511,14 +621,33 @@ impl Element for CanvasWebViewElement {
             .as_ref()
             .map(|hitbox| hitbox.bounds)
             .unwrap_or(bounds);
+        // Do not steal keyboard every frame — canvas shortcuts run on the host
+        // after canvas-pointer reclaim. Only clear the owns flag on chrome clicks.
         window.with_content_mask(Some(ContentMask { bounds }), |window| {
             let webview = self.view.clone();
-            window.on_mouse_event(move |event: &MouseDownEvent, _, _, _| {
+            let parent = self.parent.clone();
+            window.on_mouse_event(move |event: &MouseDownEvent, phase, _window, cx| {
+                if phase != gpui::DispatchPhase::Bubble {
+                    return;
+                }
                 if !bounds.contains(&event.position) {
-                    let _ = webview.focus_parent();
+                    // Linux: do not focus_parent (child GTK window). GPUI already
+                    // has this click; just clear the owns flag.
+                    #[cfg(not(target_os = "linux"))]
+                    {
+                        let _ = webview.focus_parent();
+                    }
+                    #[cfg(target_os = "linux")]
+                    {
+                        let _ = &webview;
+                    }
+                    parent.update(cx, |view, _| {
+                        view.set_webview_owns_keyboard(false);
+                    });
                 }
             });
         });
+        let _ = cx;
     }
 }
 
@@ -791,7 +920,13 @@ html,body,#loora-app{width:100%;height:100%;margin:0;overflow:hidden;background:
     if (!contextMenu.hidden && !contextMenu.contains(event.target)) hideContextMenu();
   }, true);
   window.addEventListener('blur', hideContextMenu);
+  // Toolbar/zoom are not focusable — keep X11 keyboard on the GPUI host.
+  // Do not call surface.focus(): WebKit grab_focus steals keys from the embed host.
+  document.querySelectorAll('#loora-toolbar button, #loora-zoom').forEach(el => {
+    el.tabIndex = -1;
+  });
   document.getElementById('loora-toolbar')?.addEventListener('pointerdown', event => {
+    event.preventDefault();
     event.stopPropagation();
   });
   document.getElementById('loora-toolbar')?.addEventListener('click', event => {
@@ -801,15 +936,20 @@ html,body,#loora-app{width:100%;height:100%;margin:0;overflow:hidden;background:
     event.stopPropagation();
     if (btn.dataset.tool) post('command', { command: `tool:${btn.dataset.tool}` });
     else if (btn.dataset.cmd) post('command', { command: btn.dataset.cmd });
+    post('canvas-pointer');
   });
   const emptyCta = document.getElementById('loora-empty-cta');
   const emptyDivider = document.getElementById('loora-empty-divider');
   const emptyLabel = document.getElementById('loora-empty-label');
-  zoomChip?.addEventListener('pointerdown', event => event.stopPropagation());
+  zoomChip?.addEventListener('pointerdown', event => {
+    event.preventDefault();
+    event.stopPropagation();
+  });
   zoomChip?.addEventListener('click', event => {
     event.preventDefault();
     event.stopPropagation();
     post('command', { command: 'fit-selection' });
+    post('canvas-pointer');
   });
   const readyTimer = setInterval(() => post('ready'), 250);
   const nodeForId = id => state.nodes.get(id) || null;
@@ -1355,7 +1495,11 @@ html,body,#loora-app{width:100%;height:100%;margin:0;overflow:hidden;background:
 
   surface.addEventListener('pointerdown', event => {
     if (event.button !== 0 && event.button !== 1) return;
-    surface.focus({ preventScroll:true });
+    // Do not surface.focus() — on Linux X11 embed that makes WebKit steal
+    // keyboard from the GPUI host so Ctrl+N/tools die after artboard clicks.
+    if (!(event.target instanceof Element && event.target.closest('[data-loora-editing="true"]'))) {
+      post('canvas-pointer');
+    }
     const point = worldPoint(event);
     // Space/middle-button panning outranks handles and tools: it is the escape
     // hatch users reach for while a create tool is armed.
@@ -1644,6 +1788,7 @@ html,body,#loora-app{width:100%;height:100%;margin:0;overflow:hidden;background:
     if (node.dataset.looraKind === 'text' && node.dataset.looraLocked !== 'true') {
       node.dataset.looraEditing = 'true';
       node.contentEditable = 'plaintext-only';
+      post('webview-editing', { active: true });
       node.focus({ preventScroll:true });
       // Place caret at click instead of selecting all — feels like a real text tool.
       try {
@@ -1695,6 +1840,7 @@ html,body,#loora-app{width:100%;height:100%;margin:0;overflow:hidden;background:
       post('text', { id:node.dataset.looraNode, text:node.innerText.replace(/\r/g,''), bounds });
       node.removeAttribute('contenteditable');
       node.removeAttribute('data-loora-editing');
+      post('webview-editing', { active: false });
     }
     if (state.preview) {
       const previewNode = targetNode(event.target);
@@ -1767,7 +1913,7 @@ html,body,#loora-app{width:100%;height:100%;margin:0;overflow:hidden;background:
     const key = event.key.toLowerCase();
     if (mod && key === 'z') command = event.shiftKey ? 'redo' : 'undo';
     else if (mod && key === 'y') command = 'redo';
-    else if (mod && key === 's') command = 'save';
+    // new / files / save: handled by the capture-phase window listener below.
     else if (mod && key === 'c') command = 'copy';
     else if (mod && key === 'x') command = 'cut';
     else if (mod && key === 'v') command = 'paste';
@@ -1782,32 +1928,48 @@ html,body,#loora-app{width:100%;height:100%;margin:0;overflow:hidden;background:
     else if (mod && key === '0') command = 'zoom-reset';
     else if (mod && key === '1') command = 'fit-selection';
     else if (mod && key === '2') command = 'fit-all';
-    else if (mod && (key === 'k' || key === 'o')) command = 'files';
-    else if (mod && key === 'n') command = 'new';
     else if (event.key === 'Delete' || event.key === 'Backspace') command = 'delete';
     else if (event.key === 'Escape') command = 'escape';
     else if (!mod && !event.altKey && event.key.startsWith('Arrow')) command = `nudge:${event.key.slice(5).toLowerCase()}:${event.shiftKey ? 10 : 1}`;
     else if (!mod && !event.altKey && ['v','h','f','t','r','i'].includes(key)) command = `tool:${key}`;
     if (command) { event.preventDefault(); post('command', { command }); }
   });
-  // File shortcuts must work even when `#loora-surface` is not the active DOM
-  // focus target (common after chrome clicks). GPUI still handles these when the
-  // wry child does not own keyboard focus.
+  // Canvas shortcuts via capture so they work whenever the webview has keyboard
+  // focus (surface, toolbar sibling, or body) — including after artboard clicks.
   window.addEventListener('keydown', event => {
     if (event.defaultPrevented) return;
     const editing = event.target instanceof Element && !!event.target.closest('[data-loora-editing="true"]');
     if (editing) return;
+    if (!contextMenu.hidden) return;
     const mod = event.metaKey || event.ctrlKey;
-    if (!mod) return;
+    const code = event.code;
     const key = event.key.toLowerCase();
     let command = null;
-    if (key === 'n') command = 'new';
-    else if (key === 'o' || key === 'k') command = 'files';
-    else if (key === 's') command = 'save';
+    if (mod && code === 'KeyN') command = 'new';
+    else if (mod && (code === 'KeyO' || code === 'KeyK')) command = 'files';
+    else if (mod && code === 'KeyS') command = 'save';
+    else if (mod && code === 'KeyZ') command = event.shiftKey ? 'redo' : 'undo';
+    else if (mod && code === 'KeyY') command = 'redo';
+    else if (mod && code === 'KeyC') command = 'copy';
+    else if (mod && code === 'KeyX') command = 'cut';
+    else if (mod && code === 'KeyV') command = 'paste';
+    else if (mod && code === 'KeyD') command = 'duplicate';
+    else if (mod && code === 'KeyA') command = 'select-all';
+    else if (mod && code === 'KeyL') command = 'lock';
+    else if (mod && code === 'KeyG') command = event.shiftKey ? 'ungroup' : 'group';
+    else if (mod && (code === 'Equal' || code === 'NumpadAdd')) command = 'zoom-in';
+    else if (mod && (code === 'Minus' || code === 'NumpadSubtract')) command = 'zoom-out';
+    else if (mod && code === 'Digit0') command = 'zoom-reset';
+    else if (mod && code === 'Digit1') command = 'fit-selection';
+    else if (mod && code === 'Digit2') command = 'fit-all';
+    else if (!mod && !event.altKey && ['v','h','f','t','r','i'].includes(key)) command = `tool:${key}`;
+    else if (event.key === 'Delete' || event.key === 'Backspace') command = 'delete';
+    else if (event.key === 'Escape') command = 'escape';
     if (!command) return;
     event.preventDefault();
+    event.stopPropagation();
     post('command', { command });
-  });
+  }, true);
   surface.addEventListener('keyup', event => {
     if (event.code === 'Space') setSpacePan(false);
   });
@@ -1955,6 +2117,49 @@ html,body,#loora-app{width:100%;height:100%;margin:0;overflow:hidden;background:
       if (command.selection) setSelection(command.selection);
       else syncHandles();
     }
+    else if (command.type === 'blur-surface') {
+      try { if (document.activeElement && document.activeElement !== document.body) document.activeElement.blur(); } catch (_) {}
+      try { surface.blur(); } catch (_) {}
+    }
+    else if (command.type === 'inject-key') {
+      const node = document.activeElement instanceof Element
+        ? document.activeElement.closest('[data-loora-editing="true"]')
+        : null;
+      const target = node || scene.querySelector('[data-loora-editing="true"]');
+      if (!target) return;
+      target.focus({ preventScroll:true });
+      if (typeof command.text === 'string' && command.text.length) {
+        try { document.execCommand('insertText', false, command.text); } catch (_) {
+          target.append(document.createTextNode(command.text));
+        }
+        return;
+      }
+      const action = command.action;
+      if (action === 'escape') { target.blur(); return; }
+      if (action === 'enter') {
+        try { document.execCommand('insertText', false, '\n'); } catch (_) {}
+        return;
+      }
+      if (action === 'backspace') {
+        try { document.execCommand('delete'); } catch (_) {}
+        return;
+      }
+      if (action === 'delete') {
+        try { document.execCommand('forwardDelete'); } catch (_) {}
+        return;
+      }
+      // Arrow / home / end: synthesize a key event for the contenteditable.
+      const keyMap = {
+        left: 'ArrowLeft', right: 'ArrowRight', up: 'ArrowUp', down: 'ArrowDown',
+        home: 'Home', end: 'End',
+      };
+      const keyName = keyMap[action];
+      if (!keyName) return;
+      target.dispatchEvent(new KeyboardEvent('keydown', {
+        key: keyName, code: keyName, bubbles: true, cancelable: true,
+        shiftKey: !!command.shift,
+      }));
+    }
     else if (command.type === 'state') {
       state.camera = { ...state.camera, ...(command.camera || {}) };
       state.tool = command.tool || 'select';
@@ -2057,8 +2262,31 @@ mod tests {
         assert!(CANVAS_SHELL.contains(">Draw · R</button>"));
         assert!(CANVAS_SHELL.contains("syncEmptyHints()"));
         assert!(CANVAS_SHELL.contains("#loora-surface{position:absolute;inset:0;z-index:0"));
-        assert!(CANVAS_SHELL.contains("else if (mod && key === 'n') command = 'new';"));
-        assert!(CANVAS_SHELL.contains("if (key === 'n') command = 'new';"));
+        assert!(CANVAS_SHELL.contains("el.tabIndex = -1"));
+        assert!(CANVAS_SHELL.contains("if (mod && code === 'KeyN') command = 'new';"));
+        assert!(CANVAS_SHELL.contains("}, true);"));
+        // surface.focus steals X keys from the GPUI host on Linux embed.
+        assert!(!CANVAS_SHELL.contains("surface.focus({ preventScroll: true });"));
+        assert!(!CANVAS_SHELL.contains("surface.focus({ preventScroll:true });"));
+        assert!(CANVAS_SHELL.contains("post('canvas-pointer')"));
+        assert!(CANVAS_SHELL.contains("post('webview-editing', { active: true })"));
+    }
+
+    #[test]
+    fn webview_file_shortcuts_use_capture_phase() {
+        assert!(CANVAS_SHELL.contains("if (mod && code === 'KeyN') command = 'new';"));
+        assert!(CANVAS_SHELL.contains("else if (mod && (code === 'KeyO' || code === 'KeyK')) command = 'files';"));
+        assert!(CANVAS_SHELL.contains("else if (mod && code === 'KeyS') command = 'save';"));
+        assert!(CANVAS_SHELL.contains("command = `tool:${key}`"));
+        assert!(CANVAS_SHELL.contains("event.stopPropagation();"));
+        assert!(CANVAS_SHELL.contains(
+            "post('command', { command });\n  }, true);"
+        ));
+        assert!(CANVAS_SHELL.contains("post('canvas-pointer')"));
+        assert!(CANVAS_SHELL.contains("post('webview-editing', { active: true })"));
+        assert!(CANVAS_SHELL.contains("post('webview-editing', { active: false })"));
+        assert!(CANVAS_SHELL.contains("command.type === 'inject-key'"));
+        assert!(CANVAS_SHELL.contains("document.execCommand('insertText'"));
     }
 
     #[test]

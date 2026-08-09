@@ -3572,6 +3572,7 @@ version = "0.1.0"
 dependencies = [
  "async-channel",
  "base64",
+ "gdkx11",
  "gpui",
  "gpui-router",
  "gtk",
@@ -3579,7 +3580,9 @@ dependencies = [
  "loora-engine",
  "raw-window-handle",
  "serde_json",
+ "webkit2gtk",
  "wry",
+ "x11-dl",
 ]
 
 [[package]]
