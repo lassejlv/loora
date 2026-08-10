@@ -6,7 +6,12 @@ use crate::canvas::properties::{PropsField, PropsView};
 use crate::canvas::workspace::CanvasWorkspace;
 use crate::theme::Theme;
 
-fn display_opt(view: &PropsView, field: PropsField, value: Option<f64>, digits: i32) -> SharedString {
+fn display_opt(
+    view: &PropsView,
+    field: PropsField,
+    value: Option<f64>,
+    digits: i32,
+) -> SharedString {
     if view.focus == Some(field) {
         SharedString::from(view.draft.clone())
     } else {
@@ -78,11 +83,7 @@ pub fn layout_section(
             cell(PropsField::H, "H", bounds.map(|b| b.height)),
         ))
         .child(pair(
-            cell(
-                PropsField::Rotation,
-                "Rot",
-                rotation.map(|r| r as f64),
-            ),
+            cell(PropsField::Rotation, "Rot", rotation.map(|r| r as f64)),
             div(),
         ))
 }

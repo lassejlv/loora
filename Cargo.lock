@@ -3550,6 +3550,8 @@ dependencies = [
  "gpui-router",
  "gpui_platform",
  "image",
+ "loora-inspector",
+ "loora-mcp",
  "loora-ui",
  "objc2 0.6.4",
  "objc2-app-kit 0.3.2",
@@ -3567,6 +3569,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "loora-inspector"
+version = "0.1.0"
+dependencies = [
+ "gpui",
+ "loora-ui",
+ "serde_json",
+]
+
+[[package]]
+name = "loora-mcp"
+version = "0.1.0"
+dependencies = [
+ "async-channel",
+ "base64",
+ "dirs",
+ "loora-engine",
+ "serde",
+ "serde_json",
+ "toml_edit 0.22.27",
+]
+
+[[package]]
 name = "loora-ui"
 version = "0.1.0"
 dependencies = [
@@ -3578,6 +3602,9 @@ dependencies = [
  "gtk",
  "image",
  "loora-engine",
+ "loora-mcp",
+ "objc2 0.6.4",
+ "objc2-app-kit 0.3.2",
  "raw-window-handle",
  "serde_json",
  "webkit2gtk",

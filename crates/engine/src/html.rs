@@ -8,11 +8,10 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::{
-    AnimationTrigger, Color, Document, FlexDirection, ImageFit, Layout, LayoutAlign,
-    LayoutJustify, LayoutMode, LayoutPosition, MotionTransform, Node,
-    NodeAnimation, NodeId, NodeKind, Overflow, Paint, Shadow, ShapeKind, SizeMode, Stroke,
-    StrokeStyle, StylePatch, TextAlign, TextDecoration, TextTransform,
-    TypographyPatch, VisualState,
+    AnimationTrigger, Color, Document, FlexDirection, ImageFit, Layout, LayoutAlign, LayoutJustify,
+    LayoutMode, LayoutPosition, MotionTransform, Node, NodeAnimation, NodeId, NodeKind, Overflow,
+    Paint, Shadow, ShapeKind, SizeMode, Stroke, StrokeStyle, StylePatch, TextAlign, TextDecoration,
+    TextTransform, TypographyPatch, VisualState,
 };
 
 /// View-only choices applied while compiling. None of these mutate the design.
@@ -63,8 +62,7 @@ pub fn compile_canvas(document: &Document, options: &HtmlCanvasOptions) -> Compi
     css.push_str(&animation_keyframes(document));
 
     for page in pages {
-        let overlay_page = options.preview
-            && options.overlay_page_id.as_ref() == Some(&page.id);
+        let overlay_page = options.preview && options.overlay_page_id.as_ref() == Some(&page.id);
         let current_page = options
             .current_page_id
             .as_ref()
@@ -79,7 +77,10 @@ pub fn compile_canvas(document: &Document, options: &HtmlCanvasOptions) -> Compi
             .unwrap_or(1.0)
             .max(1.0);
         let resolved_page = resolved_node(document, page, width);
-        let page_width = options.viewport_width.unwrap_or(resolved_page.layout.width).max(1.0);
+        let page_width = options
+            .viewport_width
+            .unwrap_or(resolved_page.layout.width)
+            .max(1.0);
         let viewport_min_height = resolved_page
             .viewport
             .map(|viewport| viewport.min_height)
@@ -271,9 +272,14 @@ fn render_node(
     ));
 
     let tag = semantic_tag(&resolved);
-    let interactions = serde_json::to_string(&resolved.interactions).unwrap_or_else(|_| "[]".into());
+    let interactions =
+        serde_json::to_string(&resolved.interactions).unwrap_or_else(|_| "[]".into());
     let states = serde_json::to_string(&resolved.states).unwrap_or_else(|_| "{}".into());
-    let parent_id = resolved.parent_id.as_ref().map(NodeId::as_str).unwrap_or_default();
+    let parent_id = resolved
+        .parent_id
+        .as_ref()
+        .map(NodeId::as_str)
+        .unwrap_or_default();
     let content_editable =
         resolved.kind == NodeKind::Text && !resolved.locked && !context.options.preview;
     output.markup.push_str(&format!(
@@ -344,7 +350,10 @@ fn render_text(node: &Node, markup: &mut String) {
             if let Some(color) = run.color {
                 style.push(format!("color:{}", color_css(color)));
             } else if let Some(token) = &run.color_token {
-                style.push(format!("color:{}", token_css(token, Color::rgb(0xf1, 0xf2, 0xf6))));
+                style.push(format!(
+                    "color:{}",
+                    token_css(token, Color::rgb(0xf1, 0xf2, 0xf6))
+                ));
             }
             if let Some(typography) = &run.typography {
                 style.extend(typography_patch_declarations(typography));
@@ -435,7 +444,10 @@ fn layout_declarations(layout: &Layout, parent: Option<&Layout>, page_root: bool
     let effective_parent = (!positioned).then_some(parent).flatten();
     let mut declarations = vec![
         "box-sizing:border-box".into(),
-        format!("position:{}", if positioned { "absolute" } else { "relative" }),
+        format!(
+            "position:{}",
+            if positioned { "absolute" } else { "relative" }
+        ),
     ];
     if positioned {
         declarations.push(format!("left:{}px", number(layout.x)));
@@ -493,7 +505,10 @@ fn layout_declarations(layout: &Layout, parent: Option<&Layout>, page_root: bool
             ));
             declarations.push(format!("gap:{}px", number(layout.gap as f64)));
             declarations.push(format!("align-items:{}", align_css(layout.align, true)));
-            declarations.push(format!("justify-content:{}", justify_css(layout.justify, true)));
+            declarations.push(format!(
+                "justify-content:{}",
+                justify_css(layout.justify, true)
+            ));
         }
         LayoutMode::Grid => {
             declarations.push("display:grid".into());
@@ -532,7 +547,11 @@ fn axis_declarations(layout: &Layout, parent: Option<&Layout>, width_axis: bool)
     } else {
         layout.height_mode
     };
-    let value = if width_axis { layout.width } else { layout.height };
+    let value = if width_axis {
+        layout.width
+    } else {
+        layout.height
+    };
     let percent = if width_axis {
         layout.width_percent
     } else {
@@ -543,9 +562,8 @@ fn axis_declarations(layout: &Layout, parent: Option<&Layout>, width_axis: bool)
             && ((width_axis && parent.direction == FlexDirection::Row)
                 || (!width_axis && parent.direction == FlexDirection::Column))
     });
-    let in_layout = parent.is_some_and(|parent| {
-        matches!(parent.mode, LayoutMode::Flex | LayoutMode::Grid)
-    });
+    let in_layout =
+        parent.is_some_and(|parent| matches!(parent.mode, LayoutMode::Flex | LayoutMode::Grid));
 
     if !in_layout {
         return vec![format!(
@@ -557,7 +575,10 @@ fn axis_declarations(layout: &Layout, parent: Option<&Layout>, width_axis: bool)
         SizeMode::Hug => vec![format!("{property}:fit-content")],
         SizeMode::Fill if flex_main => vec![
             format!("flex-grow:{}", number(layout.grow.max(1.0) as f64)),
-            format!("flex-shrink:{}", number(layout.shrink.unwrap_or(1.0) as f64)),
+            format!(
+                "flex-shrink:{}",
+                number(layout.shrink.unwrap_or(1.0) as f64)
+            ),
             "flex-basis:0%".into(),
         ],
         SizeMode::Fill => vec![format!(
@@ -614,17 +635,12 @@ fn enforce_clip_box(declarations: &mut Vec<String>, node: &Node) {
         });
     if hug_width {
         declarations.retain(|decl| !decl.starts_with("width:"));
-        declarations.push(format!(
-            "width:{}px",
-            number(node.layout.width.max(1.0))
-        ));
+        declarations.push(format!("width:{}px", number(node.layout.width.max(1.0))));
     }
     if hug_height {
-        declarations.retain(|decl| !decl.starts_with("height:") && !decl.starts_with("min-height:"));
-        declarations.push(format!(
-            "height:{}px",
-            number(node.layout.height.max(1.0))
-        ));
+        declarations
+            .retain(|decl| !decl.starts_with("height:") && !decl.starts_with("min-height:"));
+        declarations.push(format!("height:{}px", number(node.layout.height.max(1.0))));
     }
 }
 
@@ -642,7 +658,10 @@ fn style_declarations(node: &Node) -> Vec<String> {
         ),
     ];
     if node.rotation.abs() > f32::EPSILON {
-        declarations.push(format!("transform:rotate({}deg)", number(node.rotation as f64)));
+        declarations.push(format!(
+            "transform:rotate({}deg)",
+            number(node.rotation as f64)
+        ));
         declarations.push("transform-origin:center".into());
     }
     if node.kind == NodeKind::Text {
@@ -658,7 +677,12 @@ fn style_declarations(node: &Node) -> Vec<String> {
     } else if !style.fills.is_empty() {
         declarations.push(format!(
             "background:{}",
-            style.fills.iter().map(paint_css).collect::<Vec<_>>().join(",")
+            style
+                .fills
+                .iter()
+                .map(paint_css)
+                .collect::<Vec<_>>()
+                .join(",")
         ));
     }
     if let Some(stroke) = &style.stroke {
@@ -675,7 +699,12 @@ fn style_declarations(node: &Node) -> Vec<String> {
     if !style.shadows.is_empty() {
         declarations.push(format!(
             "box-shadow:{}",
-            style.shadows.iter().map(shadow_css).collect::<Vec<_>>().join(",")
+            style
+                .shadows
+                .iter()
+                .map(shadow_css)
+                .collect::<Vec<_>>()
+                .join(",")
         ));
     }
     if let Some(blend) = &style.blend_mode {
@@ -690,7 +719,10 @@ fn style_declarations(node: &Node) -> Vec<String> {
                 "line-height:{}",
                 number(typography.line_height.unwrap_or(1.25) as f64)
             ),
-            format!("letter-spacing:{}px", number(typography.letter_spacing as f64)),
+            format!(
+                "letter-spacing:{}px",
+                number(typography.letter_spacing as f64)
+            ),
             format!(
                 "text-align:{}",
                 match typography.align {
@@ -702,7 +734,11 @@ fn style_declarations(node: &Node) -> Vec<String> {
             ),
             format!(
                 "white-space:{}",
-                if typography.wrap { "pre-wrap" } else { "nowrap" }
+                if typography.wrap {
+                    "pre-wrap"
+                } else {
+                    "nowrap"
+                }
             ),
             format!(
                 "text-decoration:{}",
@@ -757,13 +793,22 @@ fn motion_declarations(document: &Document, node: &Node, class: &str, enabled: b
     }
     if let Some(states) = &node.visual_states {
         if let Some(state) = &states.hover {
-            output.push_str(&format!(".{class}:hover{{{}}}", visual_state_css(state, node.kind == NodeKind::Text)));
+            output.push_str(&format!(
+                ".{class}:hover{{{}}}",
+                visual_state_css(state, node.kind == NodeKind::Text)
+            ));
         }
         if let Some(state) = &states.press {
-            output.push_str(&format!(".{class}:active{{{}}}", visual_state_css(state, node.kind == NodeKind::Text)));
+            output.push_str(&format!(
+                ".{class}:active{{{}}}",
+                visual_state_css(state, node.kind == NodeKind::Text)
+            ));
         }
         if let Some(state) = &states.focus {
-            output.push_str(&format!(".{class}[data-loora-focused=\"true\"]{{{}}}", visual_state_css(state, node.kind == NodeKind::Text)));
+            output.push_str(&format!(
+                ".{class}[data-loora-focused=\"true\"]{{{}}}",
+                visual_state_css(state, node.kind == NodeKind::Text)
+            ));
         }
     }
     if enabled {
@@ -925,7 +970,10 @@ fn typography_patch_declarations(typography: &TypographyPatch) -> Vec<String> {
         declarations.push(format!("text-align:{}", css_keyword(value)));
     }
     if let Some(value) = typography.wrap {
-        declarations.push(format!("white-space:{}", if value { "pre-wrap" } else { "nowrap" }));
+        declarations.push(format!(
+            "white-space:{}",
+            if value { "pre-wrap" } else { "nowrap" }
+        ));
     }
     if let Some(value) = &typography.decoration {
         declarations.push(format!("text-decoration:{}", css_keyword(value)));
@@ -946,7 +994,10 @@ fn animation_keyframes(document: &Document) -> String {
                 declarations.push(format!("opacity:{}", number(opacity as f64)));
             }
             if let Some(transform) = frame.transform {
-                declarations.push(format!("transform:{}", transform_parts(transform).join(" ")));
+                declarations.push(format!(
+                    "transform:{}",
+                    transform_parts(transform).join(" ")
+                ));
             }
             output.push_str(&format!(
                 "{}%{{{}}}",
@@ -1017,7 +1068,11 @@ fn token_declarations(document: &Document, theme_id: &str) -> String {
                 .as_str()
                 .map(str::to_string)
                 .unwrap_or_else(|| value.to_string());
-            format!("--loora-token-{}:{}", css_ident(&token.id), css_value(&value))
+            format!(
+                "--loora-token-{}:{}",
+                css_ident(&token.id),
+                css_value(&value)
+            )
         })
         .collect::<Vec<_>>()
         .join(";");
@@ -1046,9 +1101,16 @@ fn paint_css(paint: &Paint) -> String {
                 .collect::<Vec<_>>()
                 .join(",")
         ),
-        Paint::RadialGradient { cx, cy, size, stops } => format!(
+        Paint::RadialGradient {
+            cx,
+            cy,
+            size,
+            stops,
+        } => format!(
             "radial-gradient({} at {}% {}%,{})",
-            size.as_deref().map(css_keyword).unwrap_or_else(|| "farthest-corner".into()),
+            size.as_deref()
+                .map(css_keyword)
+                .unwrap_or_else(|| "farthest-corner".into()),
             number(*cx as f64 * 100.0),
             number(*cy as f64 * 100.0),
             stops
@@ -1113,7 +1175,11 @@ fn color_css(color: Color) -> String {
 }
 
 fn token_css(token: &str, fallback: Color) -> String {
-    format!("var(--loora-token-{}, {})", css_ident(token), color_css(fallback))
+    format!(
+        "var(--loora-token-{}, {})",
+        css_ident(token),
+        color_css(fallback)
+    )
 }
 
 fn font_family_css(value: &str) -> String {
@@ -1136,7 +1202,10 @@ fn font_family_css(value: &str) -> String {
         .filter(|part| !part.is_empty())
         .map(|part| {
             let bare = part.trim_matches(['\'', '"']);
-            if generic.iter().any(|generic| generic.eq_ignore_ascii_case(bare)) {
+            if generic
+                .iter()
+                .any(|generic| generic.eq_ignore_ascii_case(bare))
+            {
                 bare.to_string()
             } else {
                 format!("\"{}\"", bare.replace('"', "\\\""))
@@ -1190,12 +1259,7 @@ fn font_imports(document: &Document) -> String {
     }
     let query = families
         .into_iter()
-        .map(|family| {
-            format!(
-                "family={}:wght@400;500;600;700",
-                family.replace(' ', "+")
-            )
-        })
+        .map(|family| format!("family={}:wght@400;500;600;700", family.replace(' ', "+")))
         .collect::<Vec<_>>()
         .join("&");
     format!("@import url('https://fonts.googleapis.com/css2?{query}&display=swap');\n")
@@ -1392,7 +1456,12 @@ mod tests {
     fn text_fill_compiles_to_glyph_color_not_box_background() {
         let mut document = Document::empty("HTML");
         let page = document.root_page_id.clone();
-        let mut text = Node::text("Headline", page, Layout::new(20.0, 20.0, 320.0, 60.0), "Hello");
+        let mut text = Node::text(
+            "Headline",
+            page,
+            Layout::new(20.0, 20.0, 320.0, 60.0),
+            "Hello",
+        );
         text.style.fills = vec![Paint::solid(Color::rgb(0xff, 0xff, 0xff))];
         let id = text.id.clone();
         document.nodes.insert(id.clone(), text);

@@ -191,10 +191,7 @@ pub fn shortcut_catalog() -> &'static [ShortcutDef] {
 }
 
 /// Resolve the active keystroke list for an action (override or defaults).
-pub fn resolve_keystrokes(
-    def: &ShortcutDef,
-    overrides: &HashMap<String, String>,
-) -> Vec<String> {
+pub fn resolve_keystrokes(def: &ShortcutDef, overrides: &HashMap<String, String>) -> Vec<String> {
     if let Some(custom) = overrides.get(def.id) {
         if !custom.is_empty() {
             return vec![custom.clone()];

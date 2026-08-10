@@ -325,9 +325,7 @@ pub fn parse_hex(input: &str) -> Option<Color> {
 
 #[cfg(test)]
 mod interaction_tests {
-    use gpui::{
-        point, Context, Entity, Modifiers, Render, TestAppContext, VisualTestContext,
-    };
+    use gpui::{point, Context, Entity, Modifiers, Render, TestAppContext, VisualTestContext};
 
     use super::*;
 
@@ -343,34 +341,32 @@ mod interaction_tests {
         ) -> impl IntoElement {
             let view: Entity<Self> = cx.entity();
             let blur_view = view.clone();
-            div()
-                .size_full()
-                .child(
-                    div()
-                        .debug_selector(|| "test-text-field".into())
-                        .w(px(200.))
-                        .child(text_field(
-                            Theme::default(),
-                            "test-field".into(),
-                            "hello".into(),
-                            "Placeholder".into(),
-                            self.focused,
-                            self.focused.then_some((5, 5)),
-                            false,
-                            move |_, _, cx| {
-                                view.update(cx, |this, cx| {
-                                    this.focused = true;
-                                    cx.notify();
-                                });
-                            },
-                            move |_, _, cx| {
-                                blur_view.update(cx, |this, cx| {
-                                    this.focused = false;
-                                    cx.notify();
-                                });
-                            },
-                        )),
-                )
+            div().size_full().child(
+                div()
+                    .debug_selector(|| "test-text-field".into())
+                    .w(px(200.))
+                    .child(text_field(
+                        Theme::default(),
+                        "test-field".into(),
+                        "hello".into(),
+                        "Placeholder".into(),
+                        self.focused,
+                        self.focused.then_some((5, 5)),
+                        false,
+                        move |_, _, cx| {
+                            view.update(cx, |this, cx| {
+                                this.focused = true;
+                                cx.notify();
+                            });
+                        },
+                        move |_, _, cx| {
+                            blur_view.update(cx, |this, cx| {
+                                this.focused = false;
+                                cx.notify();
+                            });
+                        },
+                    )),
+            )
         }
     }
 

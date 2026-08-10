@@ -4,8 +4,8 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 use crate::model::{
-    Color, Corners, FlexDirection, Layout, LayoutAlign, LayoutJustify, LayoutMode,
-    LayoutPosition, Overflow, Paint, SizeMode, Stroke, Style, Typography,
+    Color, Corners, FlexDirection, Layout, LayoutAlign, LayoutJustify, LayoutMode, LayoutPosition,
+    Overflow, Paint, SizeMode, Stroke, Style, Typography,
 };
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -29,6 +29,17 @@ pub struct DesignToken {
     pub value: serde_json::Value,
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     pub modes: HashMap<String, serde_json::Value>,
+}
+
+impl DesignToken {
+    /// Resolve this token's color for a theme mode, falling back to the base color.
+    pub fn color_for_theme(&self, theme_id: &str) -> Color {
+        self.modes
+            .get(theme_id)
+            .and_then(|value| value.as_str())
+            .and_then(Color::from_css)
+            .unwrap_or(self.color)
+    }
 }
 
 fn default_token_type() -> String {

@@ -27,11 +27,7 @@ pub struct SettingsShell {
 }
 
 impl SettingsShell {
-    pub fn new(
-        workspace: Entity<CanvasWorkspace>,
-        theme: Theme,
-        section: SettingsSection,
-    ) -> Self {
+    pub fn new(workspace: Entity<CanvasWorkspace>, theme: Theme, section: SettingsSection) -> Self {
         Self {
             workspace,
             theme,
@@ -76,8 +72,9 @@ impl Layout for SettingsShell {
                             .flex_1()
                             .min_h_0()
                             .overflow_hidden()
-                            .px(px(28.))
-                            .pb(px(28.))
+                            .px(px(32.))
+                            .pt(px(24.))
+                            .pb(px(32.))
                             .child(Outlet::from(self.outlet)),
                     ),
             )
@@ -94,6 +91,7 @@ pub struct SettingsSectionPage {
     shortcut_overrides: HashMap<String, String>,
     recording: Option<String>,
     query: String,
+    search_focused: bool,
 }
 
 impl SettingsSectionPage {
@@ -104,6 +102,7 @@ impl SettingsSectionPage {
         shortcut_overrides: HashMap<String, String>,
         recording: Option<String>,
         query: String,
+        search_focused: bool,
     ) -> Self {
         Self {
             workspace,
@@ -112,6 +111,7 @@ impl SettingsSectionPage {
             shortcut_overrides,
             recording,
             query,
+            search_focused,
         }
     }
 }
@@ -129,6 +129,7 @@ impl gpui::RenderOnce for SettingsSectionPage {
                 self.shortcut_overrides,
                 self.recording,
                 self.query,
+                self.search_focused,
             )
             .into_any_element(),
         }
@@ -163,19 +164,19 @@ fn settings_sidebar(
                 .flex()
                 .items_center()
                 .gap_2()
-                .h(px(44.))
+                .h(px(48.))
                 .px(px(16.))
-                .pt(px(10.))
                 .cursor_pointer()
                 .text_color(theme.muted)
-                .hover(|s| s.text_color(theme.foreground))
+                .hover(|s| s.text_color(theme.foreground).bg(theme.wash()))
                 .on_mouse_down(MouseButton::Left, move |_, window, cx| {
                     navigate_to("/", window, cx);
                 })
                 .child(
                     div()
                         .text_size(px(13.))
-                        .child("← Back"),
+                        .font_weight(FontWeight::MEDIUM)
+                        .child("< Canvas"),
                 ),
         )
         .child(
@@ -199,20 +200,43 @@ fn settings_sidebar(
 }
 
 fn settings_header(theme: Theme, section: SettingsSection) -> impl IntoElement {
+    let description = match section {
+        SettingsSection::General => "Manage how Loora behaves on this device.",
+        SettingsSection::Appearance => "Choose how the editor chrome looks.",
+        SettingsSection::Shortcuts => "Make the canvas respond to your workflow.",
+    };
+
     div()
         .flex()
         .items_center()
         .justify_between()
-        .h(px(64.))
-        .px(px(28.))
+        .h(px(76.))
+        .px(px(32.))
         .border_b_1()
         .border_color(theme.hairline_soft())
         .child(
             div()
-                .text_size(px(20.))
-                .font_weight(FontWeight::SEMIBOLD)
-                .text_color(theme.foreground)
-                .child(section.label()),
+                .flex()
+                .flex_col()
+                .gap_1()
+                .child(
+                    div()
+                        .text_size(px(20.))
+                        .font_weight(FontWeight::SEMIBOLD)
+                        .text_color(theme.foreground)
+                        .child(section.label()),
+                )
+                .child(row_description(theme, description)),
+        )
+        .child(
+            div()
+                .flex()
+                .items_center()
+                .gap_2()
+                .text_size(px(11.))
+                .text_color(theme.muted)
+                .child("Close")
+                .child(keycap(theme, "Esc")),
         )
 }
 
@@ -220,19 +244,27 @@ fn general_page(theme: Theme, workspace: Entity<CanvasWorkspace>) -> impl IntoEl
     div()
         .flex()
         .flex_col()
-        .gap_4()
+        .gap_5()
         .child(section_label(theme, "Loora"))
         .child(
             settings_card(theme).child(
                 div()
                     .flex()
-                    .flex_col()
-                    .gap_1()
-                    .child(row_title(theme, "Native design canvas"))
-                    .child(row_description(
-                        theme,
-                        "Built with GPUI. Designs and preferences save locally on this machine.",
-                    )),
+                    .items_center()
+                    .justify_between()
+                    .gap_4()
+                    .child(
+                        div()
+                            .flex()
+                            .flex_col()
+                            .gap_1()
+                            .child(row_title(theme, "Native design canvas"))
+                            .child(row_description(
+                                theme,
+                                "Designs, assets, and preferences stay on this machine.",
+                            )),
+                    )
+                    .child(status_pill(theme, "Local-first")),
             ),
         )
         .child(section_label(theme, "Quick actions"))
@@ -272,14 +304,14 @@ fn appearance_page(theme: Theme, workspace: Entity<CanvasWorkspace>) -> impl Int
     div()
         .flex()
         .flex_col()
-        .gap_4()
+        .gap_5()
         .child(section_label(theme, "Theme"))
         .child(
             settings_card(theme).child(
                 div()
                     .flex()
                     .flex_col()
-                    .gap_3()
+                    .gap_4()
                     .child(row_title(theme, "Color mode"))
                     .child(row_description(
                         theme,
@@ -288,7 +320,7 @@ fn appearance_page(theme: Theme, workspace: Entity<CanvasWorkspace>) -> impl Int
                     .child(
                         div()
                             .flex()
-                            .gap_2()
+                            .gap_3()
                             .child(theme_choice(
                                 theme,
                                 workspace.clone(),
@@ -322,8 +354,8 @@ fn theme_choice(
         .flex_1()
         .flex()
         .flex_col()
-        .gap_2()
-        .p_3()
+        .gap_3()
+        .p_2()
         .rounded(px(10.))
         .border_1()
         .border_color(if selected {
@@ -341,23 +373,68 @@ fn theme_choice(
         .on_mouse_down(MouseButton::Left, move |_, _, cx| {
             workspace.update(cx, |this, cx| this.set_ui_theme_kind(kind, cx));
         })
+        .child(theme_preview(kind))
         .child(
             div()
-                .h(px(48.))
-                .rounded(px(6.))
-                .bg(match kind {
-                    ThemeKind::Dark => theme.black,
-                    ThemeKind::Light => theme.bright_white,
-                })
-                .border_1()
-                .border_color(theme.hairline()),
-        )
-        .child(
-            div()
+                .px_1()
+                .pb_1()
+                .flex()
+                .items_center()
+                .justify_between()
                 .text_size(px(13.))
                 .font_weight(FontWeight::MEDIUM)
                 .text_color(theme.foreground)
-                .child(label),
+                .child(label)
+                .when(selected, |this| this.child(status_pill(theme, "Selected"))),
+        )
+}
+
+fn theme_preview(kind: ThemeKind) -> impl IntoElement {
+    let preview = Theme::from_kind(kind);
+    div()
+        .h(px(88.))
+        .rounded(px(7.))
+        .overflow_hidden()
+        .border_1()
+        .border_color(preview.hairline())
+        .bg(preview.main_bg)
+        .flex()
+        .child(
+            div()
+                .w(px(34.))
+                .h_full()
+                .bg(preview.sidebar_bg)
+                .border_r_1()
+                .border_color(preview.hairline())
+                .flex()
+                .flex_col()
+                .gap_2()
+                .p_2()
+                .child(div().h(px(4.)).rounded_full().bg(preview.muted))
+                .child(div().h(px(4.)).rounded_full().bg(preview.accent))
+                .child(div().h(px(4.)).rounded_full().bg(preview.muted)),
+        )
+        .child(
+            div()
+                .flex_1()
+                .flex()
+                .flex_col()
+                .child(
+                    div()
+                        .h(px(20.))
+                        .border_b_1()
+                        .border_color(preview.hairline())
+                        .bg(preview.header_bg()),
+                )
+                .child(
+                    div()
+                        .flex_1()
+                        .m_2()
+                        .rounded(px(4.))
+                        .border_1()
+                        .border_color(preview.hairline())
+                        .bg(preview.canvas_bg()),
+                ),
         )
 }
 
@@ -367,6 +444,7 @@ fn shortcuts_page(
     overrides: HashMap<String, String>,
     recording: Option<String>,
     query: String,
+    search_focused: bool,
 ) -> impl IntoElement {
     let q = query.to_lowercase();
     let catalog: Vec<&ShortcutDef> = shortcut_catalog()
@@ -378,6 +456,9 @@ fn shortcuts_page(
                 || def.category.label().to_lowercase().contains(&q)
         })
         .collect();
+    let has_results = !catalog.is_empty();
+    let custom_count = overrides.len();
+    let result_count = catalog.len();
 
     let categories = [
         ShortcutCategory::App,
@@ -401,6 +482,7 @@ fn shortcuts_page(
                 .gap_3()
                 .child(
                     div()
+                        .id("settings-shortcut-search")
                         .flex_1()
                         .flex()
                         .items_center()
@@ -409,8 +491,21 @@ fn shortcuts_page(
                         .px_3()
                         .rounded(px(8.))
                         .border_1()
-                        .border_color(theme.hairline())
+                        .border_color(if search_focused {
+                            theme.accent
+                        } else {
+                            theme.hairline()
+                        })
                         .bg(theme.field_bg())
+                        .cursor_pointer()
+                        .on_mouse_down(MouseButton::Left, {
+                            let workspace = workspace.clone();
+                            move |_, _, cx| {
+                                workspace.update(cx, |this, cx| {
+                                    this.focus_shortcut_search(cx);
+                                });
+                            }
+                        })
                         .child(
                             Icon::hugeicon(IconName::Search)
                                 .size(px(14.))
@@ -418,7 +513,6 @@ fn shortcuts_page(
                         )
                         .child(
                             div()
-                                .id("settings-shortcut-search")
                                 .flex_1()
                                 .text_size(px(13.))
                                 .text_color(if query.is_empty() {
@@ -430,16 +524,28 @@ fn shortcuts_page(
                                     SharedString::from("Search shortcuts…")
                                 } else {
                                     SharedString::from(query.clone())
-                                })
-                                .on_mouse_down(MouseButton::Left, {
-                                    let workspace = workspace.clone();
-                                    move |_, _, cx| {
-                                        workspace.update(cx, |this, cx| {
-                                            this.focus_shortcut_search(cx);
-                                        });
-                                    }
                                 }),
-                        ),
+                        )
+                        .when(!query.is_empty(), |this| {
+                            this.child(
+                                div()
+                                    .id("settings-shortcut-search-clear")
+                                    .px_1()
+                                    .text_size(px(11.))
+                                    .text_color(theme.muted)
+                                    .hover(|s| s.text_color(theme.foreground))
+                                    .on_mouse_down(MouseButton::Left, {
+                                        let workspace = workspace.clone();
+                                        move |_, _, cx| {
+                                            cx.stop_propagation();
+                                            workspace.update(cx, |this, cx| {
+                                                this.clear_shortcut_search(cx);
+                                            });
+                                        }
+                                    })
+                                    .child("Clear"),
+                            )
+                        }),
                 )
                 .child(
                     div()
@@ -449,27 +555,50 @@ fn shortcuts_page(
                         .rounded(px(8.))
                         .border_1()
                         .border_color(theme.hairline())
-                        .bg(theme.field_bg())
-                        .cursor_pointer()
-                        .hover(|s| s.bg(theme.hover))
+                        .bg(if custom_count > 0 {
+                            theme.field_bg()
+                        } else {
+                            gpui::transparent_black()
+                        })
                         .flex()
                         .items_center()
                         .text_size(px(12.))
                         .font_weight(FontWeight::MEDIUM)
-                        .text_color(theme.foreground)
+                        .text_color(if custom_count > 0 {
+                            theme.foreground
+                        } else {
+                            theme.muted
+                        })
                         .child("Reset all")
-                        .on_mouse_down(MouseButton::Left, {
+                        .when(custom_count > 0, |this| {
                             let workspace = workspace.clone();
-                            move |_, _, cx| {
-                                workspace.update(cx, |this, cx| this.reset_all_shortcuts(cx));
-                            }
+                            this.cursor_pointer()
+                                .hover(|s| s.bg(theme.hover))
+                                .on_mouse_down(MouseButton::Left, move |_, _, cx| {
+                                    workspace.update(cx, |this, cx| this.reset_all_shortcuts(cx));
+                                })
                         }),
                 ),
         )
-        .child(row_description(
-            theme,
-            "Click a shortcut to record a new keystroke. Esc cancels. Delete restores the default.",
-        ))
+        .child(
+            div()
+                .flex()
+                .items_center()
+                .justify_between()
+                .gap_3()
+                .child(row_description(
+                    theme,
+                    "Click a shortcut to record. Esc cancels; Delete restores its default.",
+                ))
+                .child(
+                    div()
+                        .text_size(px(11.))
+                        .text_color(theme.muted)
+                        .child(SharedString::from(format!(
+                            "{result_count} shown / {custom_count} customized"
+                        ))),
+                ),
+        )
         .child(
             div()
                 .id("settings-shortcuts-scroll")
@@ -479,6 +608,25 @@ fn shortcuts_page(
                 .flex()
                 .flex_col()
                 .gap_4()
+                .when(!has_results, |this| {
+                    this.child(
+                        div()
+                            .flex()
+                            .flex_col()
+                            .items_center()
+                            .gap_2()
+                            .py(px(48.))
+                            .rounded(px(12.))
+                            .border_1()
+                            .border_color(theme.hairline())
+                            .bg(theme.surface)
+                            .child(row_title(theme, "No shortcuts found"))
+                            .child(row_description(
+                                theme,
+                                "Try a command name such as zoom, frame, or save.",
+                            )),
+                    )
+                })
                 .children(categories.into_iter().filter_map(|category| {
                     let rows: Vec<&ShortcutDef> = catalog
                         .iter()
@@ -494,27 +642,25 @@ fn shortcuts_page(
                             .flex_col()
                             .gap_2()
                             .child(section_label(theme, category.label()))
-                            .child(
-                                settings_card(theme).children(rows.into_iter().enumerate().flat_map(
-                                    |(index, def)| {
-                                        let mut items = Vec::new();
-                                        if index > 0 {
-                                            items.push(divider(theme).into_any_element());
-                                        }
-                                        items.push(
-                                            shortcut_row(
-                                                theme,
-                                                workspace.clone(),
-                                                def,
-                                                &overrides,
-                                                recording.as_deref(),
-                                            )
-                                            .into_any_element(),
-                                        );
-                                        items
-                                    },
-                                )),
-                            )
+                            .child(settings_card(theme).children(
+                                rows.into_iter().enumerate().flat_map(|(index, def)| {
+                                    let mut items = Vec::new();
+                                    if index > 0 {
+                                        items.push(divider(theme).into_any_element());
+                                    }
+                                    items.push(
+                                        shortcut_row(
+                                            theme,
+                                            workspace.clone(),
+                                            def,
+                                            &overrides,
+                                            recording.as_deref(),
+                                        )
+                                        .into_any_element(),
+                                    );
+                                    items
+                                }),
+                            ))
                             .into_any_element(),
                     )
                 })),
@@ -631,6 +777,37 @@ fn settings_card(theme: Theme) -> gpui::Div {
         .bg(theme.surface)
         .px_4()
         .py_3()
+}
+
+fn status_pill(theme: Theme, label: &'static str) -> impl IntoElement {
+    div()
+        .h(px(24.))
+        .px_2()
+        .rounded_full()
+        .border_1()
+        .border_color(theme.hairline())
+        .bg(theme.highlight_fill())
+        .flex()
+        .items_center()
+        .text_size(px(10.))
+        .font_weight(FontWeight::MEDIUM)
+        .text_color(theme.muted_strong)
+        .child(label)
+}
+
+fn keycap(theme: Theme, label: &'static str) -> impl IntoElement {
+    div()
+        .h(px(22.))
+        .px_2()
+        .rounded(px(6.))
+        .border_1()
+        .border_color(theme.hairline())
+        .bg(theme.field_bg())
+        .flex()
+        .items_center()
+        .font_weight(FontWeight::MEDIUM)
+        .text_color(theme.muted_strong)
+        .child(label)
 }
 
 fn section_label(theme: Theme, title: &'static str) -> impl IntoElement {

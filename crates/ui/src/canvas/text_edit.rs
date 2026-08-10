@@ -154,7 +154,10 @@ pub fn move_right(session: &mut TextCursor, text: &str, extend: bool) {
 
 pub fn move_home(session: &mut TextCursor, text: &str, extend: bool) {
     session.clamp_in_text(text);
-    let line_start = text[..session.caret].rfind('\n').map(|i| i + 1).unwrap_or(0);
+    let line_start = text[..session.caret]
+        .rfind('\n')
+        .map(|i| i + 1)
+        .unwrap_or(0);
     session.set_caret(line_start, extend);
 }
 

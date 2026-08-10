@@ -18,6 +18,7 @@ use loora_engine::{
     LayoutPosition, Node, NodeId, NodeKind, Overflow, Paint, Shadow, SizeMode, StateCondition,
     StateValue, Stroke, StrokeStyle, TextAlign, Transition, Vec2, VisualState,
 };
+use loora_mcp::{McpClient, ToolCallReceiver, UiEffect};
 
 use crate::canvas::files::FilesCommandDialog;
 use crate::canvas::image_picker::{ImagePickerDialog, ImagePickerMode};
@@ -29,19 +30,20 @@ use crate::canvas::properties::{
     format_hex, format_number, parse_hex, PropertiesPanel, PropsField, PropsView,
 };
 use crate::canvas::text_edit::{self, TextCursor, TextEditSession};
-use crate::canvas::web_canvas::{should_apply_visibility, CanvasWebView};
 #[cfg(target_os = "linux")]
 use crate::canvas::web_canvas::pump_linux_canvas;
-#[cfg(target_os = "linux")]
-use raw_window_handle::{HasWindowHandle, RawWindowHandle};
+use crate::canvas::web_canvas::{should_apply_visibility, CanvasWebView};
 use crate::color_picker::ColorPickerPopover;
 use crate::context_menu::{
     action_id_at, first_action_index, move_highlight, ContextMenu, ContextMenuAction,
     ContextMenuEntry,
 };
 use crate::icon::IconName;
+use crate::motion::{Ease, Motion, MotionStyle, Transition as MotionTransition};
 use crate::settings::{resolve_keystrokes, shortcut_catalog, SettingsSection};
 use crate::theme::{Theme, ThemeKind};
+#[cfg(any(target_os = "linux", all(target_os = "macos", not(test))))]
+use raw_window_handle::{HasWindowHandle, RawWindowHandle};
 
 actions!(
     canvas_editor,
@@ -151,6 +153,11 @@ pub struct CanvasWorkspace {
     webview: Entity<CanvasWebView>,
     webview_visible: bool,
     _web_ipc_task: Option<Task<()>>,
+    _mcp_task: Option<Task<()>>,
+    mcp_endpoint: Option<String>,
+    _mcp_activity_task: Option<Task<()>>,
+    mcp_activity: Option<McpActivity>,
+    mcp_activity_sequence: u64,
     web_document_key: Option<WebDocumentKey>,
     web_state_key: Option<WebStateKey>,
     web_ready: bool,
@@ -192,6 +199,9 @@ pub struct CanvasWorkspace {
     command_query: String,
     command_index: usize,
     command_edit: Option<TextCursor>,
+    command_mcp_open: bool,
+    mcp_setup_status: Option<(String, bool)>,
+    developer_inspector_open: bool,
     settings_route_active: bool,
     settings_section: SettingsSection,
     shortcut_overrides: HashMap<String, String>,
@@ -265,6 +275,34 @@ struct ContextMenuState {
     entries: Vec<ContextMenuEntry>,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum McpActivityPhase {
+    Running,
+    Complete,
+    Failed,
+    Leaving,
+}
+
+impl McpActivityPhase {
+    fn key(self) -> &'static str {
+        match self {
+            Self::Running => "running",
+            Self::Complete => "complete",
+            Self::Failed => "failed",
+            Self::Leaving => "leaving",
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+struct McpActivity {
+    sequence: u64,
+    tool: String,
+    phase: McpActivityPhase,
+    succeeded: Option<bool>,
+    node_ids: Vec<NodeId>,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct WebDocumentKey {
     document_id: String,
@@ -280,6 +318,7 @@ struct WebStateKey {
     pan_y: u64,
     zoom: u64,
     selection: Vec<NodeId>,
+    agent_nodes: Vec<NodeId>,
     tool: CanvasTool,
     preview_mode: bool,
     can_undo: bool,
@@ -289,6 +328,23 @@ struct WebStateKey {
 
 impl CanvasWorkspace {
     pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
+        Self::new_with_mcp_endpoint(window, cx, None, None)
+    }
+
+    pub fn new_with_mcp(
+        window: &mut Window,
+        cx: &mut Context<Self>,
+        mcp_receiver: Option<ToolCallReceiver>,
+    ) -> Self {
+        Self::new_with_mcp_endpoint(window, cx, mcp_receiver, None)
+    }
+
+    pub fn new_with_mcp_endpoint(
+        window: &mut Window,
+        cx: &mut Context<Self>,
+        mcp_receiver: Option<ToolCallReceiver>,
+        mcp_endpoint: Option<String>,
+    ) -> Self {
         let focus_handle = cx.focus_handle();
         focus_handle.focus(window, cx);
 
@@ -319,6 +375,7 @@ impl CanvasWorkspace {
         let webview = cx.new({
             let viewport_bounds = viewport_bounds.clone();
             let web_ipc_sender = web_ipc_sender.clone();
+            let window = &mut *window;
             move |cx| CanvasWebView::new(window, cx, web_ipc_sender, viewport_bounds)
         });
 
@@ -332,6 +389,11 @@ impl CanvasWorkspace {
             webview,
             webview_visible: true,
             _web_ipc_task: None,
+            _mcp_task: None,
+            mcp_endpoint,
+            _mcp_activity_task: None,
+            mcp_activity: None,
+            mcp_activity_sequence: 0,
             web_document_key: None,
             web_state_key: None,
             web_ready: false,
@@ -368,6 +430,9 @@ impl CanvasWorkspace {
             command_query: String::new(),
             command_index: 0,
             command_edit: None,
+            command_mcp_open: false,
+            mcp_setup_status: None,
+            developer_inspector_open: false,
             settings_route_active: false,
             settings_section: SettingsSection::General,
             shortcut_overrides,
@@ -425,10 +490,206 @@ impl CanvasWorkspace {
                 }
             }
         }));
+        if let Some(mcp_receiver) = mcp_receiver {
+            let this = cx.weak_entity();
+            workspace._mcp_task = Some(window.spawn(cx, async move |cx| {
+                while let Ok(call) = mcp_receiver.recv().await {
+                    let reply = call.reply.clone();
+                    let sequence = match this.update_in(cx, |this, window, cx| {
+                        this.begin_mcp_activity(&call.name, &call.arguments, window, cx)
+                    }) {
+                        Ok(sequence) => sequence,
+                        Err(_) => {
+                            let _ = reply.send(Err(
+                                "The Loora canvas closed before the tool started.".into(),
+                            ));
+                            break;
+                        }
+                    };
+
+                    // Give the native title bar one frame to show the running tool
+                    // before fast local calls complete on the next UI update.
+                    cx.background_executor()
+                        .timer(Duration::from_millis(16))
+                        .await;
+                    let outcome = this.update_in(cx, |this, window, cx| {
+                        let before_document = this.engine.document().id.clone();
+                        let before_revision = this.engine.revision();
+                        let result = loora_mcp::execute_tool(
+                            &mut this.engine,
+                            &this.store,
+                            &call.name,
+                            &call.arguments,
+                        );
+                        match result {
+                            Ok(execution) => {
+                                let agent_nodes = mcp_result_node_ids(
+                                    &execution.value,
+                                    &execution.effect,
+                                    &this.engine,
+                                );
+                                let document_changed = before_document != this.engine.document().id
+                                    || before_revision != this.engine.revision();
+                                this.apply_mcp_execution(
+                                    execution.effect,
+                                    document_changed,
+                                    window,
+                                    cx,
+                                );
+                                this.finish_mcp_activity(sequence, true, agent_nodes, window, cx);
+                                let _ = call.reply.send(Ok(execution.value));
+                            }
+                            Err(error) => {
+                                this.finish_mcp_activity(sequence, false, Vec::new(), window, cx);
+                                let _ = call.reply.send(Err(error));
+                            }
+                        }
+                    });
+                    if outcome.is_err() {
+                        let _ = reply.send(Err(
+                            "The Loora canvas closed before the tool completed.".into(),
+                        ));
+                        break;
+                    }
+                }
+            }));
+        }
         // Cold start never went through load_document — fit once the viewport exists.
         workspace.pending_fit_all = true;
         workspace.fit_all_pages(cx);
         workspace
+    }
+
+    fn apply_mcp_execution(
+        &mut self,
+        effect: UiEffect,
+        document_changed: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if document_changed {
+            self.saved_revision = self.engine.revision();
+            self.dirty = false;
+            self.save_failed = false;
+            self.selection
+                .retain(|id| self.engine.document().nodes.contains_key(id));
+            self.refresh_files();
+            self.note_collapsed_changed();
+        }
+
+        match effect {
+            UiEffect::None | UiEffect::DocumentChanged => {}
+            UiEffect::DocumentReplaced => {
+                self.clear_selection();
+                self.text_edit = None;
+                self._caret_task = None;
+                self.collapsed = default_collapsed_layers(&self.engine);
+                self.layer_scroll = UniformListScrollHandle::new();
+                self.note_collapsed_changed();
+                self.camera = Camera::new(Vec2::new(40.0, 40.0), 1.0);
+                self.pending_fit_all = true;
+                self.fit_all_pages(cx);
+            }
+            UiEffect::FocusNodes(ids) => {
+                self.selection = ids
+                    .into_iter()
+                    .map(|id| NodeId::from(id.as_str()))
+                    .filter(|id| self.engine.document().nodes.contains_key(id))
+                    .collect();
+                self.fit_selection_or_page(cx);
+            }
+            UiEffect::FocusCanvas => {
+                self.clear_selection();
+                self.fit_all_pages(cx);
+            }
+        }
+        notify_mcp_window(window, cx);
+    }
+
+    fn begin_mcp_activity(
+        &mut self,
+        tool: &str,
+        arguments: &serde_json::Value,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> u64 {
+        self._mcp_activity_task = None;
+        self.mcp_activity_sequence = self.mcp_activity_sequence.wrapping_add(1);
+        let sequence = self.mcp_activity_sequence;
+        self.mcp_activity = Some(McpActivity {
+            sequence,
+            tool: tool.to_owned(),
+            phase: McpActivityPhase::Running,
+            succeeded: None,
+            node_ids: mcp_argument_node_ids(tool, arguments, &self.engine),
+        });
+        notify_mcp_window(window, cx);
+        sequence
+    }
+
+    fn finish_mcp_activity(
+        &mut self,
+        sequence: u64,
+        succeeded: bool,
+        node_ids: Vec<NodeId>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(activity) = self
+            .mcp_activity
+            .as_mut()
+            .filter(|activity| activity.sequence == sequence)
+        else {
+            return;
+        };
+        activity.phase = if succeeded {
+            McpActivityPhase::Complete
+        } else {
+            McpActivityPhase::Failed
+        };
+        activity.succeeded = Some(succeeded);
+        if !node_ids.is_empty() {
+            activity.node_ids = node_ids;
+        }
+        notify_mcp_window(window, cx);
+
+        let this = cx.weak_entity();
+        self._mcp_activity_task = Some(window.spawn(cx, async move |cx| {
+            cx.background_executor()
+                .timer(Duration::from_millis(if succeeded { 1_450 } else { 2_300 }))
+                .await;
+            let should_clear = this
+                .update_in(cx, |this, window, cx| {
+                    let Some(activity) = this
+                        .mcp_activity
+                        .as_mut()
+                        .filter(|activity| activity.sequence == sequence)
+                    else {
+                        return false;
+                    };
+                    activity.phase = McpActivityPhase::Leaving;
+                    notify_mcp_window(window, cx);
+                    true
+                })
+                .unwrap_or(false);
+            if !should_clear {
+                return;
+            }
+            cx.background_executor()
+                .timer(Duration::from_millis(180))
+                .await;
+            this.update_in(cx, |this, window, cx| {
+                if this
+                    .mcp_activity
+                    .as_ref()
+                    .is_some_and(|activity| activity.sequence == sequence)
+                {
+                    this.mcp_activity = None;
+                    notify_mcp_window(window, cx);
+                }
+            })
+            .ok();
+        }));
     }
 
     /// Restore GPUI keyboard focus after leaving the webview (chrome click / edit end).
@@ -536,11 +797,7 @@ impl CanvasWorkspace {
         }
     }
 
-    fn handle_web_message(
-        &mut self,
-        message: &serde_json::Value,
-        cx: &mut Context<Self>,
-    ) {
+    fn handle_web_message(&mut self, message: &serde_json::Value, cx: &mut Context<Self>) {
         let Some(kind) = message.get("type").and_then(|value| value.as_str()) else {
             return;
         };
@@ -709,7 +966,8 @@ impl CanvasWorkspace {
                         ))
                     })
                     .filter(|origin| origin.x.is_finite() && origin.y.is_finite());
-                let move_mode = message.get("mode").and_then(|value| value.as_str()) == Some("move");
+                let move_mode =
+                    message.get("mode").and_then(|value| value.as_str()) == Some("move");
                 let duplicate = message
                     .get("duplicate")
                     .and_then(|value| value.as_bool())
@@ -733,10 +991,7 @@ impl CanvasWorkspace {
                 let rendered_drop = message.get("drop").and_then(|drop| {
                     let id = NodeId::from(drop.get("id")?.as_str()?);
                     let parent = drop.get("parent")?;
-                    let origin = Vec2::new(
-                        parent.get("x")?.as_f64()?,
-                        parent.get("y")?.as_f64()?,
-                    );
+                    let origin = Vec2::new(parent.get("x")?.as_f64()?, parent.get("y")?.as_f64()?);
                     (origin.x.is_finite() && origin.y.is_finite()).then_some((id, origin))
                 });
                 let leading_edge_resize = message
@@ -759,10 +1014,9 @@ impl CanvasWorkspace {
                 let members = message.get("members").and_then(|value| value.as_array());
                 let changed = if multi_move {
                     match (dx, dy) {
-                        (Some(dx), Some(dy)) if dx.is_finite() && dy.is_finite() => self
-                            .engine
-                            .move_nodes(&working_ids, dx, dy, None)
-                            .is_ok(),
+                        (Some(dx), Some(dy)) if dx.is_finite() && dy.is_finite() => {
+                            self.engine.move_nodes(&working_ids, dx, dy, None).is_ok()
+                        }
                         _ => false,
                     }
                 } else if move_mode {
@@ -862,10 +1116,8 @@ impl CanvasWorkspace {
                                 .engine
                                 .node(&primary)
                                 .and_then(|node| node.parent_id.clone());
-                            let target_is_container = self
-                                .engine
-                                .node(&target)
-                                .is_some_and(Node::is_container);
+                            let target_is_container =
+                                self.engine.node(&target).is_some_and(Node::is_container);
                             if current_parent.as_ref() != Some(&target)
                                 && target != primary
                                 && target_is_container
@@ -959,15 +1211,16 @@ impl CanvasWorkspace {
                 }
             }
             "drop-files" if !self.preview_mode => {
-                let Some(paths) = message
-                    .get("paths")
-                    .and_then(|value| value.as_array())
-                    .map(|values| {
-                        values
-                            .iter()
-                            .filter_map(|value| value.as_str().map(PathBuf::from))
-                            .collect::<Vec<_>>()
-                    })
+                let Some(paths) =
+                    message
+                        .get("paths")
+                        .and_then(|value| value.as_array())
+                        .map(|values| {
+                            values
+                                .iter()
+                                .filter_map(|value| value.as_str().map(PathBuf::from))
+                                .collect::<Vec<_>>()
+                        })
                 else {
                     return;
                 };
@@ -989,19 +1242,14 @@ impl CanvasWorkspace {
                     match self.store.import_asset_file(&path) {
                         Ok(stored) => {
                             if let Ok(bytes) = fs::read(&stored) {
-                                let format = image_format_from_path(&stored)
-                                    .unwrap_or(ImageFormat::Png);
+                                let format =
+                                    image_format_from_path(&stored).unwrap_or(ImageFormat::Png);
                                 let name = stored
                                     .file_name()
                                     .and_then(|n| n.to_str())
                                     .map(|s| s.to_string());
                                 // Force paste at drop world by setting context_world.
-                                if self.paste_image_bytes(
-                                    &bytes,
-                                    format,
-                                    name.as_deref(),
-                                    cx,
-                                ) {
+                                if self.paste_image_bytes(&bytes, format, name.as_deref(), cx) {
                                     imported = true;
                                 }
                             }
@@ -1092,8 +1340,14 @@ impl CanvasWorkspace {
                         self.context_world = Some(Vec2::new(x, y));
                     }
                 }
-                let x = message.get("x").and_then(|value| value.as_f64()).unwrap_or(0.0);
-                let y = message.get("y").and_then(|value| value.as_f64()).unwrap_or(0.0);
+                let x = message
+                    .get("x")
+                    .and_then(|value| value.as_f64())
+                    .unwrap_or(0.0);
+                let y = message
+                    .get("y")
+                    .and_then(|value| value.as_f64())
+                    .unwrap_or(0.0);
                 let entries = self.context_menu_entries(cx);
                 let entries = web_context_menu_entries(&entries);
                 self.webview.update(cx, |view, _| {
@@ -1115,9 +1369,7 @@ impl CanvasWorkspace {
                     self.handle_web_command(command, cx);
                 }
             }
-            "overlay-close"
-                if self.preview_mode && self.preview_overlay.take().is_some() =>
-            {
+            "overlay-close" if self.preview_mode && self.preview_overlay.take().is_some() => {
                 self.preview_runtime_generation = self.preview_runtime_generation.wrapping_add(1);
             }
             _ => {}
@@ -1227,7 +1479,12 @@ impl CanvasWorkspace {
                 };
                 if self
                     .engine
-                    .move_nodes(&self.selection.clone(), dx, dy, Some("keyboard-nudge".into()))
+                    .move_nodes(
+                        &self.selection.clone(),
+                        dx,
+                        dy,
+                        Some("keyboard-nudge".into()),
+                    )
                     .is_ok()
                 {
                     self.note_change(cx);
@@ -1253,6 +1510,11 @@ impl CanvasWorkspace {
             pan_y: self.camera.pan.y.to_bits(),
             zoom: self.camera.zoom.to_bits(),
             selection: self.selection.clone(),
+            agent_nodes: self
+                .mcp_activity
+                .as_ref()
+                .map(|activity| activity.node_ids.clone())
+                .unwrap_or_default(),
             tool: self.tool,
             preview_mode: self.preview_mode,
             can_undo: self.engine.can_undo(),
@@ -1319,7 +1581,10 @@ impl CanvasWorkspace {
                         .clone()
                         .unwrap_or_else(|| self.engine.root_page_id().clone())
                 }),
-                overlay_page_id: self.preview_mode.then(|| self.preview_overlay.clone()).flatten(),
+                overlay_page_id: self
+                    .preview_mode
+                    .then(|| self.preview_overlay.clone())
+                    .flatten(),
                 preview: self.preview_mode,
             };
             let compiled = compile_canvas(&document, &options);
@@ -1332,6 +1597,11 @@ impl CanvasWorkspace {
                 .collect();
             let camera = self.camera;
             let selection = self.selection.clone();
+            let agent_nodes = self
+                .mcp_activity
+                .as_ref()
+                .map(|activity| activity.node_ids.clone())
+                .unwrap_or_default();
             let tool = self.tool.as_str();
             let preview = self.preview_mode;
             let can_undo = self.engine.can_undo();
@@ -1343,6 +1613,7 @@ impl CanvasWorkspace {
                     &compiled,
                     camera,
                     &selection,
+                    &agent_nodes,
                     tool,
                     preview,
                     can_undo,
@@ -1366,6 +1637,11 @@ impl CanvasWorkspace {
                     "zoom": self.camera.zoom,
                 },
                 "selection": self.selection.iter().map(NodeId::as_str).collect::<Vec<_>>(),
+                "agentNodes": self
+                    .mcp_activity
+                    .as_ref()
+                    .map(|activity| activity.node_ids.iter().map(NodeId::as_str).collect::<Vec<_>>())
+                    .unwrap_or_default(),
                 "tool": self.tool.as_str(),
                 "preview": self.preview_mode,
                 "canUndo": self.engine.can_undo(),
@@ -1402,6 +1678,8 @@ impl CanvasWorkspace {
         self.command_query.clear();
         self.command_index = 0;
         self.command_edit = Some(TextCursor::at_end(0));
+        self.command_mcp_open = false;
+        self.mcp_setup_status = None;
         self.text_edit = None;
         self.layer_search_focused = false;
         self.layer_search_edit = None;
@@ -1417,6 +1695,8 @@ impl CanvasWorkspace {
             self.command_query.clear();
             self.command_index = 0;
             self.command_edit = None;
+            self.command_mcp_open = false;
+            self.mcp_setup_status = None;
             cx.notify();
         }
     }
@@ -1465,11 +1745,54 @@ impl CanvasWorkspace {
     }
 
     fn command_item_count(&self) -> usize {
-        // New + Import… + Import Luuma + Export…
-        self.filtered_command_files().len() + COMMAND_ACTION_COUNT
+        if self.command_mcp_open {
+            MCP_SUBCOMMAND_COUNT
+        } else {
+            self.filtered_command_files().len() + self.command_action_count()
+        }
+    }
+
+    fn command_action_count(&self) -> usize {
+        command_action_count(self.mcp_endpoint.is_some(), self.command_mcp_open)
+    }
+
+    pub fn open_mcp_commands(&mut self, cx: &mut Context<Self>) {
+        if self.mcp_endpoint.is_none() {
+            return;
+        }
+        self.command_mcp_open = true;
+        self.command_query.clear();
+        self.command_index = 0;
+        self.command_edit = None;
+        self.mcp_setup_status = None;
+        cx.notify();
+    }
+
+    fn close_mcp_commands(&mut self, cx: &mut Context<Self>) {
+        self.command_mcp_open = false;
+        self.command_query.clear();
+        self.command_index = BASE_COMMAND_ACTION_COUNT;
+        self.command_edit = Some(TextCursor::at_end(0));
+        self.mcp_setup_status = None;
+        cx.notify();
     }
 
     fn confirm_command_selection(&mut self, cx: &mut Context<Self>) {
+        if self.command_mcp_open {
+            match self.command_index {
+                0 => {
+                    self.copy_mcp_url(cx);
+                    self.close_command_dialog(cx);
+                }
+                1 => self.add_mcp_to_client(McpClient::Claude, cx),
+                2 => self.add_mcp_to_client(McpClient::Codex, cx),
+                3 => self.add_mcp_to_client(McpClient::Cursor, cx),
+                4 => self.add_mcp_to_client(McpClient::OpenCode, cx),
+                _ => {}
+            }
+            return;
+        }
+
         match self.command_index {
             0 => {
                 self.create_design(cx);
@@ -1491,15 +1814,52 @@ impl CanvasWorkspace {
                 self.toggle_ui_theme(cx);
                 self.close_command_dialog(cx);
             }
+            5 if self.mcp_endpoint.is_some() => {
+                self.open_mcp_commands(cx);
+            }
             _ => {
+                let action_count = self.command_action_count();
                 let files = self.filtered_command_files();
-                if let Some(file) = files.get(self.command_index - COMMAND_ACTION_COUNT) {
+                if let Some(file) = self
+                    .command_index
+                    .checked_sub(action_count)
+                    .and_then(|index| files.get(index))
+                {
                     let id = file.id.clone();
                     self.open_design(&id, cx);
                     self.close_command_dialog(cx);
                 }
             }
         }
+    }
+
+    pub fn copy_mcp_url(&mut self, cx: &mut Context<Self>) {
+        if let Some(endpoint) = self.mcp_endpoint.as_ref() {
+            cx.write_to_clipboard(ClipboardItem::new_string(endpoint.clone()));
+        }
+    }
+
+    pub fn add_mcp_to_client(&mut self, client: McpClient, cx: &mut Context<Self>) {
+        let Some(endpoint) = self.mcp_endpoint.as_deref() else {
+            return;
+        };
+        self.mcp_setup_status = Some(match loora_mcp::install_client(client, endpoint) {
+            Ok(_) => (
+                format!(
+                    "Added to {} · reopen it if it is already running",
+                    client.name()
+                ),
+                true,
+            ),
+            Err(err) => {
+                eprintln!(
+                    "loora: failed to add MCP server to {}: {err}",
+                    client.name()
+                );
+                (format!("Could not add to {} · {err}", client.name()), false)
+            }
+        });
+        cx.notify();
     }
 
     pub fn toggle_ui_theme(&mut self, cx: &mut Context<Self>) {
@@ -1549,6 +1909,15 @@ impl CanvasWorkspace {
         }
     }
 
+    pub fn set_developer_inspector_open(&mut self, open: bool, cx: &mut Context<Self>) {
+        if self.developer_inspector_open == open {
+            return;
+        }
+        self.developer_inspector_open = open;
+        self.sync_webview_visibility(cx);
+        cx.notify();
+    }
+
     fn webview_should_be_hidden(&self) -> bool {
         self.settings_route_active
             || canvas_webview_hidden_for_overlays(
@@ -1556,6 +1925,7 @@ impl CanvasWorkspace {
                 self.image_picker.is_some(),
                 self.color_picker.is_some(),
                 self.context_menu.is_some(),
+                self.developer_inspector_open,
             )
     }
 
@@ -1587,6 +1957,10 @@ impl CanvasWorkspace {
 
     pub fn shortcut_search(&self) -> &str {
         &self.shortcut_search
+    }
+
+    pub fn shortcut_search_focused(&self) -> bool {
+        self.shortcut_search_focused
     }
 
     fn navigate_to(&mut self, path: &str, window: &mut Window, cx: &mut Context<Self>) {
@@ -1630,6 +2004,14 @@ impl CanvasWorkspace {
     pub fn focus_shortcut_search(&mut self, cx: &mut Context<Self>) {
         self.shortcut_search_focused = true;
         self.shortcut_recording = None;
+        cx.notify();
+    }
+
+    pub fn clear_shortcut_search(&mut self, cx: &mut Context<Self>) {
+        if self.shortcut_search.is_empty() {
+            return;
+        }
+        self.shortcut_search.clear();
         cx.notify();
     }
 
@@ -1788,9 +2170,7 @@ impl CanvasWorkspace {
                     .to_ascii_lowercase();
                 if ext == "png" {
                     this.pending_png_export = Some(path);
-                    let result = this
-                        .webview
-                        .update(cx, |view, _| view.request_png_export());
+                    let result = this.webview.update(cx, |view, _| view.request_png_export());
                     if let Err(error) = result {
                         this.pending_png_export = None;
                         eprintln!("loora: export failed: {error}");
@@ -1800,10 +2180,8 @@ impl CanvasWorkspace {
                 }
                 let result = match ext.as_str() {
                     "html" | "htm" => {
-                        let html = standalone_html(
-                            this.engine.document(),
-                            &HtmlCanvasOptions::default(),
-                        );
+                        let html =
+                            standalone_html(this.engine.document(), &HtmlCanvasOptions::default());
                         fs::write(&path, html).map_err(|error| error.to_string())
                     }
                     "svg" => {
@@ -1969,24 +2347,22 @@ impl CanvasWorkspace {
     }
 
     fn start_caret_blink(&mut self, cx: &mut Context<Self>) {
-        self._caret_task = Some(cx.spawn(async move |this, cx| {
-            loop {
-                cx.background_executor()
-                    .timer(Duration::from_millis(530))
-                    .await;
-                let cont = this
-                    .update(cx, |this, cx| {
-                        if this.text_edit.is_some() {
-                            cx.notify();
-                            true
-                        } else {
-                            false
-                        }
-                    })
-                    .unwrap_or(false);
-                if !cont {
-                    break;
-                }
+        self._caret_task = Some(cx.spawn(async move |this, cx| loop {
+            cx.background_executor()
+                .timer(Duration::from_millis(530))
+                .await;
+            let cont = this
+                .update(cx, |this, cx| {
+                    if this.text_edit.is_some() {
+                        cx.notify();
+                        true
+                    } else {
+                        false
+                    }
+                })
+                .unwrap_or(false);
+            if !cont {
+                break;
             }
         }));
     }
@@ -2560,10 +2936,7 @@ impl CanvasWorkspace {
     }
 
     fn reveal_layer(&mut self, id: &NodeId) {
-        let mut parent = self
-            .engine
-            .node(id)
-            .and_then(|node| node.parent_id.clone());
+        let mut parent = self.engine.node(id).and_then(|node| node.parent_id.clone());
         let mut expanded = false;
         while let Some(parent_id) = parent {
             if self.collapsed.remove(&parent_id) {
@@ -2578,7 +2951,11 @@ impl CanvasWorkspace {
         if expanded {
             self.note_collapsed_changed();
         }
-        if let Some(index) = self.cached_layer_rows().iter().position(|row| &row.id == id) {
+        if let Some(index) = self
+            .cached_layer_rows()
+            .iter()
+            .position(|row| &row.id == id)
+        {
             self.layer_scroll
                 .scroll_to_item(index, gpui::ScrollStrategy::Nearest);
         }
@@ -2914,12 +3291,10 @@ impl CanvasWorkspace {
         let all_locked = has_selection && editable.iter().all(|n| n.locked);
         let any_hidden = editable.iter().any(|n| n.hidden);
         let any_unlocked = editable.iter().any(|n| !n.locked);
-        let can_group = editable.len() >= 2
-            && editable.iter().all(|n| !n.locked)
-            && {
-                let parent = editable[0].parent_id.clone();
-                editable.iter().all(|n| n.parent_id == parent)
-            };
+        let can_group = editable.len() >= 2 && editable.iter().all(|n| !n.locked) && {
+            let parent = editable[0].parent_id.clone();
+            editable.iter().all(|n| n.parent_id == parent)
+        };
         let can_ungroup = editable
             .iter()
             .any(|n| n.kind == NodeKind::Frame && !n.locked);
@@ -3242,10 +3617,7 @@ impl CanvasWorkspace {
                     .stroke
                     .unwrap_or_else(|| Stroke::solid(Color::rgb(0xff, 0xff, 0xff), 1.0));
                 stroke.style = style;
-                changed |= self
-                    .engine
-                    .set_stroke(&id, Some(stroke), None)
-                    .is_ok();
+                changed |= self.engine.set_stroke(&id, Some(stroke), None).is_ok();
             }
         } else if let Some(axis) = action.strip_prefix("wmode:") {
             let mode = match axis {
@@ -3272,10 +3644,7 @@ impl CanvasWorkspace {
             });
         } else if let Some(name) = action.strip_prefix("variant:") {
             for id in self.selection.clone() {
-                changed |= self
-                    .engine
-                    .set_variant(&id, Some(name.to_string()))
-                    .is_ok();
+                changed |= self.engine.set_variant(&id, Some(name.to_string())).is_ok();
             }
         }
         if changed {
@@ -3675,7 +4044,11 @@ impl CanvasWorkspace {
         true
     }
 
-    fn paste_external_paths(&mut self, paths: &[std::path::PathBuf], cx: &mut Context<Self>) -> bool {
+    fn paste_external_paths(
+        &mut self,
+        paths: &[std::path::PathBuf],
+        cx: &mut Context<Self>,
+    ) -> bool {
         let mut pasted = false;
         let mut offset = 0.0_f64;
         for path in paths {
@@ -3704,10 +4077,7 @@ impl CanvasWorkspace {
 
     fn duplicate_selection(&mut self, cx: &mut Context<Self>) {
         let ids = self.selection.clone();
-        match self
-            .engine
-            .duplicate_nodes(&ids, Vec2::new(16.0, 16.0))
-        {
+        match self.engine.duplicate_nodes(&ids, Vec2::new(16.0, 16.0)) {
             Ok(new_ids) if !new_ids.is_empty() => {
                 self.selection = new_ids;
                 self.note_change(cx);
@@ -3958,7 +4328,9 @@ impl CanvasWorkspace {
                 format_number(node.effective_typography().letter_spacing as f64, 1)
             }
             PropsField::TextColor => format_hex(node.effective_typography().color),
-            PropsField::TextAlign => format!("{:?}", node.effective_typography().align).to_lowercase(),
+            PropsField::TextAlign => {
+                format!("{:?}", node.effective_typography().align).to_lowercase()
+            }
             PropsField::MinWidth => node
                 .layout
                 .min_width
@@ -4547,10 +4919,7 @@ impl CanvasWorkspace {
             if names.len() <= 1 {
                 continue;
             }
-            let current = node
-                .variant
-                .clone()
-                .unwrap_or_else(|| names[0].clone());
+            let current = node.variant.clone().unwrap_or_else(|| names[0].clone());
             changed |= self.engine.delete_variant(&id, &current).is_ok();
         }
         if changed {
@@ -4964,7 +5333,10 @@ impl CanvasWorkspace {
                             "right" => TextAlign::Right,
                             _ => TextAlign::Left,
                         };
-                        changed |= self.engine.set_typography(&selected, typography, None).is_ok();
+                        changed |= self
+                            .engine
+                            .set_typography(&selected, typography, None)
+                            .is_ok();
                     } else if field == PropsField::StrokeStyle {
                         let mut stroke = selected_node
                             .style
@@ -5049,7 +5421,7 @@ impl CanvasWorkspace {
             | PropsField::ShadowY
             | PropsField::ShadowBlur
             | PropsField::ShadowSpread
-            |             PropsField::FontWeight
+            | PropsField::FontWeight
             | PropsField::LineHeight
             | PropsField::LetterSpacing
             | PropsField::GradientAngle
@@ -5087,7 +5459,10 @@ impl CanvasWorkspace {
                             }],
                         }]
                     };
-                    changed |= self.engine.set_interactions(&selected, interactions).is_ok();
+                    changed |= self
+                        .engine
+                        .set_interactions(&selected, interactions)
+                        .is_ok();
                 }
             }
             PropsField::VectorFill => {
@@ -5175,26 +5550,14 @@ impl CanvasWorkspace {
                     if let Some(item) = cx.read_from_clipboard() {
                         for entry in item.entries() {
                             if let ClipboardEntry::String(value) = entry {
-                                text_edit::insert(
-                                    &mut self.props_draft,
-                                    &mut session,
-                                    &value.text,
-                                );
+                                text_edit::insert(&mut self.props_draft, &mut session, &value.text);
                                 break;
                             }
                         }
                     }
                 }
-                "left" => text_edit::move_home(
-                    &mut session,
-                    &self.props_draft,
-                    modifiers.shift,
-                ),
-                "right" => text_edit::move_end(
-                    &mut session,
-                    &self.props_draft,
-                    modifiers.shift,
-                ),
+                "left" => text_edit::move_home(&mut session, &self.props_draft, modifiers.shift),
+                "right" => text_edit::move_end(&mut session, &self.props_draft, modifiers.shift),
                 _ => {
                     self.props_text_edit = Some(session);
                     return;
@@ -5213,26 +5576,10 @@ impl CanvasWorkspace {
             "delete" => {
                 text_edit::delete_forward(&mut self.props_draft, &mut session);
             }
-            "left" => text_edit::move_left(
-                &mut session,
-                &self.props_draft,
-                modifiers.shift,
-            ),
-            "right" => text_edit::move_right(
-                &mut session,
-                &self.props_draft,
-                modifiers.shift,
-            ),
-            "up" | "home" => text_edit::move_home(
-                &mut session,
-                &self.props_draft,
-                modifiers.shift,
-            ),
-            "down" | "end" => text_edit::move_end(
-                &mut session,
-                &self.props_draft,
-                modifiers.shift,
-            ),
+            "left" => text_edit::move_left(&mut session, &self.props_draft, modifiers.shift),
+            "right" => text_edit::move_right(&mut session, &self.props_draft, modifiers.shift),
+            "up" | "home" => text_edit::move_home(&mut session, &self.props_draft, modifiers.shift),
+            "down" | "end" => text_edit::move_end(&mut session, &self.props_draft, modifiers.shift),
             _ => {
                 if let Some(ch) = event.keystroke.key_char.as_deref() {
                     if !modifiers.modified() {
@@ -5880,7 +6227,12 @@ impl CanvasWorkspace {
         self.on_settings_key_down(event, window, cx);
     }
 
-    fn on_settings_key_down(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
+    fn on_settings_key_down(
+        &mut self,
+        event: &KeyDownEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         let key = event.keystroke.key.as_str();
 
         if self.shortcut_recording.is_some() {
@@ -5900,6 +6252,20 @@ impl CanvasWorkspace {
             let binding = event.keystroke.unparse();
             self.apply_recorded_shortcut(&binding, cx);
             cx.stop_propagation();
+            return;
+        }
+
+        if key == "escape"
+            && self.shortcut_search_focused
+            && self.settings_section == SettingsSection::Shortcuts
+        {
+            if self.shortcut_search.is_empty() {
+                self.shortcut_search_focused = false;
+            } else {
+                self.shortcut_search.clear();
+            }
+            cx.stop_propagation();
+            cx.notify();
             return;
         }
 
@@ -5926,7 +6292,11 @@ impl CanvasWorkspace {
         let count = self.command_item_count().max(1);
 
         if key == "escape" {
-            self.close_command_dialog(cx);
+            if self.command_mcp_open {
+                self.close_mcp_commands(cx);
+            } else {
+                self.close_command_dialog(cx);
+            }
             cx.stop_propagation();
             return;
         }
@@ -6174,11 +6544,17 @@ fn canvas_webview_hidden_for_overlays(
     image_picker_open: bool,
     color_picker_open: bool,
     inspector_menu_open: bool,
+    developer_inspector_open: bool,
 ) -> bool {
-    // Full-window / properties GPUI chrome that can sit under the wry child.
+    // Full-window / properties GPUI chrome that can sit under the wry child,
+    // including the docked developer inspector.
     // Canvas right-click menus render inside the WebView HTML and never set
     // `inspector_menu_open` / `color_picker_open`.
-    command_open || image_picker_open || color_picker_open || inspector_menu_open
+    command_open
+        || image_picker_open
+        || color_picker_open
+        || inspector_menu_open
+        || developer_inspector_open
 }
 
 fn web_context_menu_entries(entries: &[ContextMenuEntry]) -> Vec<serde_json::Value> {
@@ -6197,20 +6573,286 @@ fn web_context_menu_entries(entries: &[ContextMenuEntry]) -> Vec<serde_json::Val
         .collect()
 }
 
+fn mcp_argument_node_ids(
+    tool: &str,
+    arguments: &serde_json::Value,
+    engine: &CanvasEngine,
+) -> Vec<NodeId> {
+    let mut ids = Vec::new();
+    match tool {
+        "readTree" => push_mcp_node_ref(arguments.get("root"), &mut ids),
+        "readNode" | "viewNode" => push_mcp_node_ref(arguments.get("ref"), &mut ids),
+        "insertNodes" => push_mcp_node_ref(arguments.get("parent"), &mut ids),
+        "patchNodes" => {
+            for change in arguments
+                .get("changes")
+                .and_then(serde_json::Value::as_array)
+                .into_iter()
+                .flatten()
+            {
+                push_mcp_node_ref(change.get("ref"), &mut ids);
+            }
+        }
+        "moveNodes" => {
+            for change in arguments
+                .get("changes")
+                .and_then(serde_json::Value::as_array)
+                .into_iter()
+                .flatten()
+            {
+                push_mcp_node_ref(change.get("nodeId"), &mut ids);
+                push_mcp_node_ref(change.get("parentId"), &mut ids);
+            }
+        }
+        "deleteNodes" => push_mcp_node_refs(arguments.get("nodeIds"), &mut ids),
+        "createInstance" => {
+            push_mcp_node_ref(arguments.get("parent"), &mut ids);
+            push_mcp_node_ref(arguments.get("componentId"), &mut ids);
+        }
+        "animateNodes" => push_mcp_node_refs(arguments.get("refs"), &mut ids),
+        "exportCode" | "getScreenshot" | "viewPage" => {
+            push_mcp_node_ref(arguments.get("pageId"), &mut ids)
+        }
+        _ => {}
+    }
+    retain_live_unique_nodes(ids, engine)
+}
+
+fn mcp_result_node_ids(
+    result: &serde_json::Value,
+    effect: &UiEffect,
+    engine: &CanvasEngine,
+) -> Vec<NodeId> {
+    let mut ids = Vec::new();
+    for key in ["created", "changed", "moved", "animated"] {
+        push_mcp_node_refs(result.get(key), &mut ids);
+    }
+    for key in ["page", "component", "instance", "focused"] {
+        push_mcp_node_ref(result.get(key), &mut ids);
+    }
+    if let UiEffect::FocusNodes(focused) = effect {
+        ids.extend(focused.iter().map(|id| NodeId::from(id.as_str())));
+    }
+    retain_live_unique_nodes(ids, engine)
+}
+
+fn push_mcp_node_refs(value: Option<&serde_json::Value>, ids: &mut Vec<NodeId>) {
+    if let Some(values) = value.and_then(serde_json::Value::as_array) {
+        for value in values {
+            push_mcp_node_ref(Some(value), ids);
+        }
+    }
+}
+
+fn push_mcp_node_ref(value: Option<&serde_json::Value>, ids: &mut Vec<NodeId>) {
+    let Some(value) = value else {
+        return;
+    };
+    let id = value
+        .as_str()
+        .or_else(|| value.get("nodeId").and_then(serde_json::Value::as_str));
+    if let Some(id) = id {
+        ids.push(NodeId::from(id));
+    }
+}
+
+fn retain_live_unique_nodes(ids: Vec<NodeId>, engine: &CanvasEngine) -> Vec<NodeId> {
+    let mut seen = HashSet::new();
+    ids.into_iter()
+        .filter(|id| engine.document().nodes.contains_key(id) && seen.insert(id.clone()))
+        .collect()
+}
+
+fn mcp_activity_copy(tool: &str, succeeded: Option<bool>) -> &'static str {
+    let (running, complete) = match tool {
+        "getUsage" => ("Checking local usage", "Usage checked"),
+        "listDesigns" => ("Browsing designs", "Designs loaded"),
+        "getDesignContext" => ("Reading the design", "Design read"),
+        "readTree" => ("Reading layers", "Layers read"),
+        "readNode" => ("Inspecting a layer", "Layer inspected"),
+        "searchNodes" => ("Searching the canvas", "Canvas searched"),
+        "createPage" => ("Creating a page", "Page created"),
+        "insertNodes" => ("Adding layers", "Layers added"),
+        "patchNodes" => ("Updating layers", "Layers updated"),
+        "moveNodes" => ("Moving layers", "Layers moved"),
+        "deleteNodes" => ("Removing layers", "Layers removed"),
+        "createComponent" => ("Creating a component", "Component created"),
+        "createInstance" => ("Creating an instance", "Instance created"),
+        "setTokens" => ("Updating tokens", "Tokens updated"),
+        "setAnimations" => ("Updating animations", "Animations updated"),
+        "animateNodes" => ("Animating layers", "Layers animated"),
+        "exportCode" => ("Exporting code", "Code exported"),
+        "getScreenshot" => ("Capturing the canvas", "Canvas captured"),
+        "viewNode" => ("Focusing a layer", "Layer focused"),
+        "viewPage" => ("Focusing a page", "Page focused"),
+        "viewCanvas" => ("Focusing the canvas", "Canvas focused"),
+        "createDesign" => ("Creating a design", "Design created"),
+        "renameDesign" => ("Renaming the design", "Design renamed"),
+        "deleteDesign" => ("Deleting a design", "Design deleted"),
+        "listBranches" => ("Reading branches", "Branches read"),
+        "createBranch" => ("Creating a branch", "Branch created"),
+        "proposeBranch" => ("Proposing a branch", "Branch proposed"),
+        "reopenBranch" => ("Reopening a branch", "Branch reopened"),
+        "compareBranch" => ("Comparing a branch", "Branch compared"),
+        "applyBranch" => ("Applying a branch", "Branch applied"),
+        "closeBranch" => ("Closing a branch", "Branch closed"),
+        "listVersions" => ("Reading versions", "Versions read"),
+        "listAssets" => ("Reading assets", "Assets read"),
+        _ => ("Using a canvas tool", "Tool completed"),
+    };
+    match succeeded {
+        None => running,
+        Some(true) => complete,
+        Some(false) => "Tool failed",
+    }
+}
+
+fn mcp_activity_pill(activity: McpActivity, theme: Theme) -> Motion {
+    let leaving = activity.phase == McpActivityPhase::Leaving;
+    let color = match activity.succeeded {
+        Some(true) => theme.green,
+        Some(false) => theme.red,
+        None => theme.accent,
+    };
+    let copy = mcp_activity_copy(&activity.tool, activity.succeeded);
+    let initial = if leaving {
+        MotionStyle::new().opacity(1.).y(px(0.))
+    } else {
+        MotionStyle::new().opacity(0.).y(px(-4.))
+    };
+    let animate = if leaving {
+        MotionStyle::new().opacity(0.).y(px(-4.))
+    } else {
+        MotionStyle::new().opacity(1.).y(px(0.))
+    };
+
+    Motion::new()
+        .id(SharedString::from(format!(
+            "mcp-activity-{}-{}",
+            activity.sequence,
+            activity.phase.key()
+        )))
+        .initial(initial)
+        .animate(animate)
+        .transition(
+            MotionTransition::tween(Duration::from_millis(if leaving { 180 } else { 160 }))
+                .ease(Ease::EaseOut),
+        )
+        .flex()
+        .items_center()
+        .gap_2()
+        .h(px(32.))
+        .px_3()
+        .rounded(px(10.))
+        .border_1()
+        .border_color(theme.border)
+        .bg(theme.surface_raised)
+        .child(div().size(px(6.)).rounded(px(3.)).bg(color))
+        .child(
+            div()
+                .text_size(px(11.))
+                .font_weight(gpui::FontWeight::MEDIUM)
+                .text_color(theme.foreground)
+                .child(copy),
+        )
+        .child(
+            div()
+                .text_size(px(10.))
+                .text_color(theme.muted)
+                .child(SharedString::from(activity.tool)),
+        )
+}
+
+fn notify_mcp_window<T: 'static>(window: &mut Window, cx: &mut Context<T>) {
+    cx.notify();
+    window.refresh();
+    // Background MCP work does not arrive through a platform input event, so
+    // marking the window dirty alone does not request a native frame.
+    cx.refresh_windows();
+    request_native_mcp_frame(window, cx);
+}
+
+#[cfg(all(target_os = "macos", not(test)))]
+fn request_native_mcp_frame<T: 'static>(window: &Window, cx: &Context<T>) {
+    use objc2::rc::Retained;
+    use objc2_app_kit::NSView;
+
+    let Ok(handle) = HasWindowHandle::window_handle(window) else {
+        return;
+    };
+    let RawWindowHandle::AppKit(handle) = handle.as_raw() else {
+        return;
+    };
+    // SAFETY: GPUI owns this NSView for at least as long as the Window. Retaining
+    // it lets the queued main-thread redraw finish safely if the window closes.
+    let Some(view) = (unsafe { Retained::<NSView>::retain(handle.ns_view.as_ptr().cast()) }) else {
+        return;
+    };
+    cx.spawn(async move |_, _| {
+        view.setNeedsDisplay(true);
+        view.displayIfNeeded();
+    })
+    .detach();
+}
+
+#[cfg(any(not(target_os = "macos"), test))]
+fn request_native_mcp_frame<T: 'static>(_: &Window, _: &Context<T>) {}
+
 #[cfg(test)]
 mod tests {
-    use super::{canvas_webview_hidden_for_overlays, web_context_menu_entries};
+    use super::{
+        canvas_webview_hidden_for_overlays, command_action_count, mcp_activity_copy,
+        mcp_argument_node_ids, notify_mcp_window, web_context_menu_entries,
+    };
     use crate::context_menu::{ContextMenuAction, ContextMenuEntry};
+    use gpui::{
+        div, Context, Entity, IntoElement, Render, TestAppContext, VisualTestContext, Window,
+    };
+    use loora_engine::{CanvasEngine, Document};
+
+    struct WindowRefreshProbe {
+        renders: usize,
+    }
+
+    impl Render for WindowRefreshProbe {
+        fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
+            self.renders += 1;
+            div()
+        }
+    }
+
+    #[gpui::test]
+    fn mcp_updates_refresh_the_owning_window(cx: &mut TestAppContext) {
+        let (view, cx): (Entity<WindowRefreshProbe>, &mut VisualTestContext) =
+            cx.add_window_view(|_, _| WindowRefreshProbe { renders: 0 });
+
+        view.update_in(cx, |_, window, cx| notify_mcp_window(window, cx));
+        cx.run_until_parked();
+        assert!(view.read_with(cx, |this, _| this.renders) >= 2);
+    }
 
     #[test]
     fn gpui_overlays_hide_the_canvas_webview() {
-        // command / image picker / color picker / inspector enum menu
-        assert!(canvas_webview_hidden_for_overlays(true, false, false, false));
-        assert!(canvas_webview_hidden_for_overlays(false, true, false, false));
-        assert!(canvas_webview_hidden_for_overlays(false, false, true, false));
-        assert!(canvas_webview_hidden_for_overlays(false, false, false, true));
+        // command / image picker / color picker / inspector enum menu / DevTools
+        assert!(canvas_webview_hidden_for_overlays(
+            true, false, false, false, false
+        ));
+        assert!(canvas_webview_hidden_for_overlays(
+            false, true, false, false, false
+        ));
+        assert!(canvas_webview_hidden_for_overlays(
+            false, false, true, false, false
+        ));
+        assert!(canvas_webview_hidden_for_overlays(
+            false, false, false, true, false
+        ));
+        assert!(canvas_webview_hidden_for_overlays(
+            false, false, false, false, true
+        ));
         // Idle canvas (HTML context menus do not use these flags)
-        assert!(!canvas_webview_hidden_for_overlays(false, false, false, false));
+        assert!(!canvas_webview_hidden_for_overlays(
+            false, false, false, false, false
+        ));
     }
 
     #[test]
@@ -6218,9 +6860,11 @@ mod tests {
         // Mirrors webview_should_be_hidden: settings_route_active ORs with overlay hides.
         let settings_route_active = true;
         let hide = settings_route_active
-            || canvas_webview_hidden_for_overlays(false, false, false, false);
+            || canvas_webview_hidden_for_overlays(false, false, false, false, false);
         assert!(hide);
-        assert!(!canvas_webview_hidden_for_overlays(false, false, false, false));
+        assert!(!canvas_webview_hidden_for_overlays(
+            false, false, false, false, false
+        ));
     }
 
     #[test]
@@ -6228,7 +6872,7 @@ mod tests {
         // Returning to `/` must still hide while a full-window overlay is open.
         let settings_route_active = false;
         let hide = settings_route_active
-            || canvas_webview_hidden_for_overlays(true, false, false, false);
+            || canvas_webview_hidden_for_overlays(true, false, false, false, false);
         assert!(hide);
     }
 
@@ -6250,6 +6894,32 @@ mod tests {
         assert_eq!(payload[1]["separator"], true);
         assert_eq!(payload[2]["destructive"], true);
     }
+
+    #[test]
+    fn mcp_activity_tracks_patch_targets_and_readable_status() {
+        let engine = CanvasEngine::new(Document::empty("Activity test"));
+        let root = engine.root_page_id().as_str();
+        let arguments = serde_json::json!({
+            "changes": [{"ref": {"nodeId": root}, "patch": {"name": "Updated"}}]
+        });
+
+        let ids = mcp_argument_node_ids("patchNodes", &arguments, &engine);
+        assert_eq!(ids.len(), 1);
+        assert_eq!(ids[0].as_str(), root);
+        assert_eq!(mcp_activity_copy("patchNodes", None), "Updating layers");
+        assert_eq!(
+            mcp_activity_copy("patchNodes", Some(true)),
+            "Layers updated"
+        );
+        assert_eq!(mcp_activity_copy("patchNodes", Some(false)), "Tool failed");
+    }
+
+    #[test]
+    fn command_palette_hides_mcp_subcommands_until_opened() {
+        assert_eq!(command_action_count(false, false), 5);
+        assert_eq!(command_action_count(true, false), 6);
+        assert_eq!(command_action_count(true, true), 5);
+    }
 }
 
 fn default_collapsed_layers(engine: &CanvasEngine) -> HashSet<NodeId> {
@@ -6262,8 +6932,19 @@ fn default_collapsed_layers(engine: &CanvasEngine) -> HashSet<NodeId> {
         .collect()
 }
 
-/// Files command dialog: New, Import…, Import Luuma, Export…, Toggle theme
-const COMMAND_ACTION_COUNT: usize = 5;
+/// Command palette actions always shown before the optional MCP setup actions.
+const BASE_COMMAND_ACTION_COUNT: usize = 5;
+const MCP_COMMAND_ACTION_COUNT: usize = 1;
+const MCP_SUBCOMMAND_COUNT: usize = 5;
+
+pub(super) fn command_action_count(mcp_available: bool, mcp_subcommands_open: bool) -> usize {
+    if mcp_subcommands_open {
+        MCP_SUBCOMMAND_COUNT
+    } else {
+        BASE_COMMAND_ACTION_COUNT + usize::from(mcp_available) * MCP_COMMAND_ACTION_COUNT
+    }
+}
+
 const CLIPBOARD_PREFIX: &str = "loora-nodes-v1:";
 
 fn next_untitled_name(files: &[DesignFileInfo]) -> String {
@@ -6521,6 +7202,7 @@ impl Render for CanvasWorkspace {
         let command_open = self.command_open;
         let command_query = self.command_query.clone();
         let command_index = self.command_index;
+        let command_mcp_open = self.command_mcp_open;
         let command_selection = self
             .command_edit
             .as_ref()
@@ -6530,6 +7212,9 @@ impl Render for CanvasWorkspace {
         let dirty = self.dirty;
         let save_failed = self.save_failed;
         let doc_name = self.document_name();
+        let mcp_available = self.mcp_endpoint.is_some();
+        let mcp_setup_status = self.mcp_setup_status.clone();
+        let mcp_activity = self.mcp_activity.clone();
         let image_picker = self.image_picker.clone();
         let library_assets = image_picker
             .as_ref()
@@ -6618,6 +7303,7 @@ impl Render for CanvasWorkspace {
                     .child(
                         div()
                             .id("canvas-titlebar")
+                            .relative()
                             .flex()
                             .items_center()
                             .justify_between()
@@ -6668,50 +7354,59 @@ impl Render for CanvasWorkspace {
                                             ),
                                     )
                                     .when(pages.len() > 1, |this| {
-                                        this.child(
-                                            div()
-                                                .flex()
-                                                .items_center()
-                                                .gap_1()
-                                                .children(pages.into_iter().map(|(page_id, name)| {
-                                                    let selected = page_id == active_page;
-                                                    let entity = entity.clone();
-                                                    let id_for_click = page_id.clone();
-                                                    div()
-                                                        .id(SharedString::from(format!(
-                                                            "page-tab-{}",
-                                                            page_id.as_str()
-                                                        )))
-                                                        .px_2()
-                                                        .py_1()
-                                                        .rounded(px(6.))
-                                                        .cursor_pointer()
-                                                        .bg(if selected {
-                                                            theme.highlight_fill()
-                                                        } else {
-                                                            gpui::transparent_black()
-                                                        })
-                                                        .hover(|s| s.bg(theme.wash()))
-                                                        .on_click(move |_, _, cx| {
-                                                            cx.stop_propagation();
-                                                            entity.update(cx, |this, cx| {
-                                                                this.focus_page(&id_for_click, cx);
-                                                            });
-                                                        })
-                                                        .child(
-                                                            div()
-                                                                .text_size(px(12.))
-                                                                .text_color(if selected {
-                                                                    theme.bright_white
-                                                                } else {
-                                                                    theme.muted
-                                                                })
-                                                                .child(name),
-                                                        )
-                                                })),
-                                        )
+                                        this.child(div().flex().items_center().gap_1().children(
+                                            pages.into_iter().map(|(page_id, name)| {
+                                                let selected = page_id == active_page;
+                                                let entity = entity.clone();
+                                                let id_for_click = page_id.clone();
+                                                div()
+                                                    .id(SharedString::from(format!(
+                                                        "page-tab-{}",
+                                                        page_id.as_str()
+                                                    )))
+                                                    .px_2()
+                                                    .py_1()
+                                                    .rounded(px(6.))
+                                                    .cursor_pointer()
+                                                    .bg(if selected {
+                                                        theme.highlight_fill()
+                                                    } else {
+                                                        gpui::transparent_black()
+                                                    })
+                                                    .hover(|s| s.bg(theme.wash()))
+                                                    .on_click(move |_, _, cx| {
+                                                        cx.stop_propagation();
+                                                        entity.update(cx, |this, cx| {
+                                                            this.focus_page(&id_for_click, cx);
+                                                        });
+                                                    })
+                                                    .child(
+                                                        div()
+                                                            .text_size(px(12.))
+                                                            .text_color(if selected {
+                                                                theme.bright_white
+                                                            } else {
+                                                                theme.muted
+                                                            })
+                                                            .child(name),
+                                                    )
+                                            }),
+                                        ))
                                     }),
                             )
+                            .when_some(mcp_activity, |this, activity| {
+                                this.child(
+                                    div()
+                                        .absolute()
+                                        .top(px(10.))
+                                        .left_0()
+                                        .right_0()
+                                        .flex()
+                                        .justify_center()
+                                        .h(px(32.))
+                                        .child(mcp_activity_pill(activity, theme)),
+                                )
+                            })
                             .child(
                                 div()
                                     .flex()
@@ -6811,7 +7506,10 @@ impl Render for CanvasWorkspace {
                     command_query,
                     command_index,
                     command_selection,
+                    command_mcp_open,
                     dirty,
+                    mcp_available,
+                    mcp_setup_status,
                 ))
             })
             .when_some(image_picker, |this, picker| {

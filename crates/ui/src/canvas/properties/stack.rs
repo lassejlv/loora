@@ -116,7 +116,10 @@ pub fn stack_section(
                 let ws = workspace.clone();
                 move |event, window, cx| {
                     let entries = vec![
-                        ContextMenuEntry::Action(ContextMenuAction::new("enum:mode:absolute", "Absolute")),
+                        ContextMenuEntry::Action(ContextMenuAction::new(
+                            "enum:mode:absolute",
+                            "Absolute",
+                        )),
                         ContextMenuEntry::Action(ContextMenuAction::new("enum:mode:flex", "Flex")),
                         ContextMenuEntry::Action(ContextMenuAction::new("enum:mode:grid", "Grid")),
                     ];
@@ -299,9 +302,7 @@ pub fn stack_section(
                         disabled,
                         {
                             let ws = workspace.clone();
-                            move |_, _, cx| {
-                                ws.update(cx, |this, cx| this.toggle_selection_wrap(cx))
-                            }
+                            move |_, _, cx| ws.update(cx, |this, cx| this.toggle_selection_wrap(cx))
                         },
                     )
                     .into_any_element()
@@ -314,11 +315,7 @@ pub fn stack_section(
                 },
             ))
             .child(pair(
-                numeric(
-                    PropsField::Grow,
-                    "Grow",
-                    layout.map(|l| l.grow as f64),
-                ),
+                numeric(PropsField::Grow, "Grow", layout.map(|l| l.grow as f64)),
                 numeric(
                     PropsField::Shrink,
                     "Shrink",

@@ -31,6 +31,45 @@ impl Color {
             a: 1.0,
         }
     }
+
+    /// Parse a CSS hex color (`#rgb`, `#rgba`, `#rrggbb`, `#rrggbbaa`) or `transparent`.
+    pub fn from_css(input: &str) -> Option<Self> {
+        let lower = input.trim().to_ascii_lowercase();
+        if lower == "transparent" {
+            return Some(Self::rgba(0.0, 0.0, 0.0, 0.0));
+        }
+        let hex = lower.strip_prefix('#')?;
+        let expanded;
+        let hex = if hex.len() == 3 || hex.len() == 4 {
+            expanded = hex
+                .chars()
+                .flat_map(|character| [character, character])
+                .collect::<String>();
+            expanded.as_str()
+        } else {
+            hex
+        };
+        match hex.len() {
+            6 => {
+                let n = u32::from_str_radix(hex, 16).ok()?;
+                Some(Self::rgb(
+                    ((n >> 16) & 0xff) as u8,
+                    ((n >> 8) & 0xff) as u8,
+                    (n & 0xff) as u8,
+                ))
+            }
+            8 => {
+                let n = u32::from_str_radix(hex, 16).ok()?;
+                Some(Self::rgba(
+                    ((n >> 24) & 0xff) as f32 / 255.0,
+                    ((n >> 16) & 0xff) as f32 / 255.0,
+                    ((n >> 8) & 0xff) as f32 / 255.0,
+                    (n & 0xff) as f32 / 255.0,
+                ))
+            }
+            _ => None,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, Default)]

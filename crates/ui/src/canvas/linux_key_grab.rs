@@ -95,9 +95,7 @@ fn grab_loop(host_xid: u64, ipc: CanvasIpcSender) {
             let alt_down = mods & x11_dl::xlib::Mod1Mask != 0;
             // Ignore other modifiers for tool keys.
             let only_shift_or_none = mods
-                & !(x11_dl::xlib::ShiftMask
-                    | x11_dl::xlib::LockMask
-                    | x11_dl::xlib::Mod2Mask)
+                & !(x11_dl::xlib::ShiftMask | x11_dl::xlib::LockMask | x11_dl::xlib::Mod2Mask)
                 == 0;
 
             let ks = keysym;
@@ -138,9 +136,7 @@ fn keysym_name(xlib: &x11_dl::xlib::Xlib, keysym: x11_dl::xlib::KeySym) -> Strin
         if ptr.is_null() {
             return String::new();
         }
-        std::ffi::CStr::from_ptr(ptr)
-            .to_string_lossy()
-            .into_owned()
+        std::ffi::CStr::from_ptr(ptr).to_string_lossy().into_owned()
     }
 }
 
@@ -228,7 +224,15 @@ unsafe fn focus_belongs_to_host(
         let mut parent = 0;
         let mut children: *mut x11_dl::xlib::Window = std::ptr::null_mut();
         let mut n = 0;
-        if (xlib.XQueryTree)(display, current, &mut root, &mut parent, &mut children, &mut n) == 0 {
+        if (xlib.XQueryTree)(
+            display,
+            current,
+            &mut root,
+            &mut parent,
+            &mut children,
+            &mut n,
+        ) == 0
+        {
             break;
         }
         if !children.is_null() {

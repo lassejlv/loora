@@ -5,7 +5,7 @@ build:
     cargo build --release -p loora-desktop
 
 check:
-    cargo check -p gpui-router -p loora-engine -p loora-ui -p loora-desktop
+    cargo check -p gpui-router -p loora-engine -p loora-mcp -p loora-ui -p loora-desktop
 
 icons:
     bash scripts/generate-app-icons.sh

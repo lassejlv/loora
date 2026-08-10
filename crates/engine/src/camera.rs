@@ -83,7 +83,9 @@ impl Camera {
         let avail_h = (screen_h - pad * 2.0).max(1.0);
         let bw = world.width.max(1.0);
         let bh = world.height.max(1.0);
-        let zoom = (avail_w / bw).min(avail_h / bh).clamp(Self::MIN_ZOOM, Self::MAX_ZOOM);
+        let zoom = (avail_w / bw)
+            .min(avail_h / bh)
+            .clamp(Self::MIN_ZOOM, Self::MAX_ZOOM);
         self.zoom = zoom;
         let screen_cx = screen_w * 0.5;
         let screen_cy = screen_h * 0.5;

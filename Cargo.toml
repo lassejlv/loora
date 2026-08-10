@@ -1,6 +1,13 @@
 [workspace]
 resolver = "2"
-members = ["crates/router", "crates/ui", "crates/desktop", "crates/engine"]
+members = [
+    "crates/router",
+    "crates/ui",
+    "crates/desktop",
+    "crates/engine",
+    "crates/inspector",
+    "crates/mcp",
+]
 default-members = ["crates/desktop"]
 
 [workspace.package]
@@ -8,7 +15,7 @@ version = "0.1.0"
 edition = "2021"
 
 [workspace.dependencies]
-gpui = { git = "https://github.com/zed-industries/zed" }
+gpui = { git = "https://github.com/zed-industries/zed", features = ["inspector"] }
 gpui_platform = { git = "https://github.com/zed-industries/zed", features = [
     "font-kit",
     "wayland",
@@ -17,3 +24,5 @@ gpui_platform = { git = "https://github.com/zed-industries/zed", features = [
 gpui-router = { path = "crates/router" }
 loora-ui = { path = "crates/ui" }
 loora-engine = { path = "crates/engine" }
+loora-inspector = { path = "crates/inspector" }
+loora-mcp = { path = "crates/mcp" }

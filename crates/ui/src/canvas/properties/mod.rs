@@ -112,7 +112,9 @@ impl Default for PropsView {
 
 impl PropsView {
     pub fn selection_for(&self, field: PropsField) -> Option<(usize, usize)> {
-        (self.focus == Some(field)).then_some(self.selection).flatten()
+        (self.focus == Some(field))
+            .then_some(self.selection)
+            .flatten()
     }
 }
 
@@ -256,30 +258,31 @@ impl RenderOnce for PropertiesPanel {
                             ),
                         ))
                         .when(
-                            selection.iter().any(|n| {
-                                matches!(n.kind, NodeKind::Frame | NodeKind::Component)
-                            }),
+                            selection
+                                .iter()
+                                .any(|n| matches!(n.kind, NodeKind::Frame | NodeKind::Component)),
                             |this| {
-                            this.child(section(
-                                theme,
-                                "Stack",
-                                !view.collapsed.contains("Stack"),
-                                {
-                                    let ws = workspace.clone();
-                                    move |_, _, cx| {
-                                        ws.update(cx, |this, cx| {
-                                            this.toggle_props_section("Stack", cx)
-                                        });
-                                    }
-                                },
-                                stack_section(
-                                    workspace.clone(),
+                                this.child(section(
                                     theme,
-                                    &view,
-                                    shared_layout.as_ref(),
-                                ),
-                            ))
-                        })
+                                    "Stack",
+                                    !view.collapsed.contains("Stack"),
+                                    {
+                                        let ws = workspace.clone();
+                                        move |_, _, cx| {
+                                            ws.update(cx, |this, cx| {
+                                                this.toggle_props_section("Stack", cx)
+                                            });
+                                        }
+                                    },
+                                    stack_section(
+                                        workspace.clone(),
+                                        theme,
+                                        &view,
+                                        shared_layout.as_ref(),
+                                    ),
+                                ))
+                            },
+                        )
                         .child(section(
                             theme,
                             "Appearance",
@@ -462,12 +465,7 @@ impl RenderOnce for PropertiesPanel {
                                         })
                                     }
                                 },
-                                vector_section(
-                                    workspace.clone(),
-                                    theme,
-                                    &view,
-                                    node.paths.first(),
-                                ),
+                                vector_section(workspace.clone(), theme, &view, node.paths.first()),
                             ))
                         })
                         .child(section(
@@ -482,12 +480,7 @@ impl RenderOnce for PropertiesPanel {
                                     })
                                 }
                             },
-                            tokens_section(
-                                workspace.clone(),
-                                theme,
-                                &tokens,
-                                view.readonly,
-                            ),
+                            tokens_section(workspace.clone(), theme, &tokens, view.readonly),
                         ))
                         .when(node.kind == NodeKind::Image, |this| {
                             this.child(section(
@@ -506,7 +499,6 @@ impl RenderOnce for PropertiesPanel {
                             ))
                         })
                         .into_any_element()
-
                 }
                 _ => div()
                     .flex()

@@ -21,12 +21,14 @@ pub use extras::{
     VectorPath, VisualState, VisualStates,
 };
 pub use hit::{Bounds, Vec2};
-pub use html::{compile_canvas, export_page_svg, standalone_html, CompiledCanvas, HtmlCanvasOptions};
+pub use html::{
+    compile_canvas, export_page_svg, standalone_html, CompiledCanvas, HtmlCanvasOptions,
+};
 pub use id::NodeId;
 pub use model::{
-    demo_document, Color, Corners, Document, FlexDirection, GradientStop, Insets, Layout,
-    ImageFit, LayoutAlign, LayoutJustify, LayoutMode, LayoutPosition, Node, NodeKind, Overflow,
-    Paint, Shadow, ShapeKind, SizeMode, Stroke, StrokeStyle, Style, TextAlign, TextDecoration,
+    demo_document, Color, Corners, Document, FlexDirection, GradientStop, ImageFit, Insets, Layout,
+    LayoutAlign, LayoutJustify, LayoutMode, LayoutPosition, Node, NodeKind, Overflow, Paint,
+    Shadow, ShapeKind, SizeMode, Stroke, StrokeStyle, Style, TextAlign, TextDecoration,
     TextTransform, Typography, DEFAULT_ORDER_STEP,
 };
 pub use ops::{NodePatch, Operation, Transaction};

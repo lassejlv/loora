@@ -22,13 +22,13 @@ use loora_engine::CompiledCanvas;
 use raw_window_handle::HasWindowHandle;
 #[cfg(target_os = "linux")]
 use raw_window_handle::RawWindowHandle;
+#[cfg(windows)]
+use wry::WebViewBuilderExtWindows;
 use wry::{
     dpi::{LogicalPosition, LogicalSize, Position, Size as WrySize},
     http::{header::CONTENT_TYPE, Response},
     Rect, WebViewBuilder,
 };
-#[cfg(windows)]
-use wry::WebViewBuilderExtWindows;
 
 pub type CanvasIpcSender = async_channel::Sender<String>;
 
@@ -217,6 +217,7 @@ impl CanvasWebView {
         compiled: &CompiledCanvas,
         camera: loora_engine::Camera,
         selection: &[loora_engine::NodeId],
+        agent_nodes: &[loora_engine::NodeId],
         tool: &str,
         preview: bool,
         can_undo: bool,
@@ -227,6 +228,7 @@ impl CanvasWebView {
             return Ok(());
         };
         let selection_ids = selection.iter().map(|id| id.as_str()).collect::<Vec<_>>();
+        let agent_node_ids = agent_nodes.iter().map(|id| id.as_str()).collect::<Vec<_>>();
         let camera_json = serde_json::json!({
             "x": camera.pan.x,
             "y": camera.pan.y,
@@ -239,6 +241,7 @@ impl CanvasWebView {
                 "css": compiled.css,
                 "camera": camera_json,
                 "selection": selection_ids,
+                "agentNodes": agent_node_ids,
                 "tool": tool,
                 "preview": preview,
                 "canUndo": can_undo,
@@ -253,6 +256,7 @@ impl CanvasWebView {
             "css": compiled.css,
             "camera": camera_json,
             "selection": selection_ids,
+            "agentNodes": agent_node_ids,
             "tool": tool,
             "preview": preview,
             "canUndo": can_undo,
@@ -788,6 +792,10 @@ html,body,#loora-app{width:100%;height:100%;margin:0;overflow:hidden;background:
 .loora-context-item.is-destructive{color:#ff6b72}
 .loora-context-shortcut{margin-left:24px;color:color-mix(in srgb,var(--loora-toolbar-fg) 62%,transparent);font-size:11px}
 .loora-context-separator{height:1px;margin:4px 8px;background:var(--loora-toolbar-border)}
+.loora-agent-outline{position:absolute;pointer-events:none;z-index:2147483643;box-sizing:border-box;border:var(--loora-screen-pixel,1px) solid #89b4fa;animation:loora-agent-pulse 1.15s ease-in-out infinite}
+.loora-move-rail{position:absolute;pointer-events:auto;z-index:2147483646;background:transparent;cursor:move}
+@keyframes loora-agent-pulse{0%,100%{opacity:.45}50%{opacity:1}}
+@media(prefers-reduced-motion:reduce){.loora-agent-outline{animation:none;opacity:.85}}
 </style>
 <style id="loora-document-css"></style>
 </head>
@@ -830,6 +838,8 @@ html,body,#loora-app{width:100%;height:100%;margin:0;overflow:hidden;background:
   const state = {
     camera: { x: 40, y: 40, zoom: 1 },
     selection: [],
+    agentNodes: [],
+    agentOutlines: new Map(),
     tool: 'select',
     preview: false,
     canUndo: false,
@@ -844,12 +854,18 @@ html,body,#loora-app{width:100%;height:100%;margin:0;overflow:hidden;background:
     nodes: new Map(),
     handles: new Map(),
     groupBox: null,
+    moveRail: null,
     handleSignature: '',
     guideEls: [],
     guideSignature: '',
     contextMenuIndex: 0,
   };
   const SNAP_PX = 5;
+  const RESIZE_HANDLE_PX = 9;
+  const MOVE_RAIL_PX = 12;
+  const COMPACT_MOVE_RAIL_PX = 16;
+  const MOVE_RAIL_ENDPOINT_GAP_PX = 6.5;
+  const THIN_LONG_AXIS_PX = 26;
   const GUIDE_LABEL_MIN = 1;
   const GUIDE_LABEL_MAX = 400;
 
@@ -968,6 +984,8 @@ html,body,#loora-app{width:100%;height:100%;margin:0;overflow:hidden;background:
   const readyTimer = setInterval(() => post('ready'), 250);
   const nodeForId = id => state.nodes.get(id) || null;
   const targetNode = target => {
+    const rail = target instanceof Element ? target.closest('.loora-move-rail') : null;
+    if (rail) return nodeForId(rail.dataset.node);
     const node = target instanceof Element ? target.closest('[data-loora-node]') : null;
     if (node) return node;
     const label = target instanceof Element ? target.closest('[data-loora-page-label]') : null;
@@ -982,6 +1000,8 @@ html,body,#loora-app{width:100%;height:100%;margin:0;overflow:hidden;background:
     scene.style.setProperty('--loora-inverse-zoom', String(1 / Math.max(.001, state.camera.zoom)));
     scene.style.setProperty('--loora-screen-pixel', `${1 / Math.max(.001, state.camera.zoom)}px`);
     syncOverlay();
+    syncHandles();
+    syncAgentOutlines();
     syncChrome();
   };
   const syncOverlay = () => {
@@ -1027,6 +1047,39 @@ html,body,#loora-app{width:100%;height:100%;margin:0;overflow:hidden;background:
       width: rect.width / state.camera.zoom,
       height: rect.height / state.camera.zoom,
     };
+  };
+  const syncAgentOutlines = () => {
+    const active = new Set();
+    const gap = 4 / Math.max(.001, state.camera.zoom);
+    for (const id of state.agentNodes) {
+      const node = nodeForId(id);
+      const visual = node && visualNode(node);
+      if (!visual || !visual.isConnected) continue;
+      const rect = worldRect(visual);
+      let outline = state.agentOutlines.get(id);
+      if (!outline || !outline.isConnected) {
+        outline = document.createElement('div');
+        outline.className = 'loora-agent-outline';
+        outline.dataset.agentNode = id;
+        scene.appendChild(outline);
+        state.agentOutlines.set(id, outline);
+      }
+      Object.assign(outline.style, {
+        left:`${rect.x-gap}px`, top:`${rect.y-gap}px`,
+        width:`${rect.width+gap*2}px`, height:`${rect.height+gap*2}px`,
+        borderRadius:`${gap*1.25}px`
+      });
+      active.add(id);
+    }
+    for (const [id, outline] of state.agentOutlines) {
+      if (active.has(id)) continue;
+      outline.remove();
+      state.agentOutlines.delete(id);
+    }
+  };
+  const setAgentNodes = nodes => {
+    state.agentNodes = [...new Set((nodes || []).filter(Boolean))];
+    syncAgentOutlines();
   };
   const renderedParentOrigin = node => {
     const parent = nodeForId(node?.dataset.looraParent);
@@ -1075,7 +1128,7 @@ html,body,#loora-app{width:100%;height:100%;margin:0;overflow:hidden;background:
     return labels;
   };
   const snapFeedback = (bounds, targets) => {
-    const guides = collectMatchingGuides(bounds, targets, 0.75);
+    const guides = collectMatchingGuides(bounds, targets, 0.75 / Math.max(.001, state.camera.zoom));
     return { guides, labels:spacingLabels(bounds, guides, targets) };
   };
   const drawGuideLabels = labels => {
@@ -1114,6 +1167,10 @@ html,body,#loora-app{width:100%;height:100%;margin:0;overflow:hidden;background:
       state.guideEls.push(el);
     }
     drawGuideLabels(labels);
+  };
+  const drawRenderedGuides = drag => {
+    const feedback = snapFeedback(drag.bounds || drag.origin, drag.snapTargets || []);
+    drawGuides(feedback.guides, feedback.labels);
   };
   const pushMergedGuide = (list, pos, start, end, epsilon) => {
     const existing = list.find(item => Math.abs(item[0] - pos) <= epsilon);
@@ -1376,11 +1433,49 @@ html,body,#loora-app{width:100%;height:100%;margin:0;overflow:hidden;background:
       e:[rect.x+rect.width,rect.y+rect.height/2], se:[rect.x+rect.width,rect.y+rect.height],
       s:[rect.x+rect.width/2,rect.y+rect.height], sw:[rect.x,rect.y+rect.height], w:[rect.x,rect.y+rect.height/2],
     };
+    const zoom = Math.max(.001, state.camera.zoom);
+    const screenWidth = rect.width * zoom;
+    const screenHeight = rect.height * zoom;
+    const thinWidth = screenWidth < RESIZE_HANDLE_PX * 2;
+    const thinHeight = screenHeight < RESIZE_HANDLE_PX * 2;
+    const horizontalThin = thinHeight && screenWidth >= THIN_LONG_AXIS_PX;
+    const verticalThin = thinWidth && screenHeight >= THIN_LONG_AXIS_PX;
+    const compact = (thinWidth || thinHeight) && !horizontalThin && !verticalThin;
     for (const [handle, [x,y]] of Object.entries(positions)) {
       const element = state.handles.get(handle);
       if (!element) continue;
+      // Overlapping midpoint handles swallow the only practical move target on
+      // lines and other thin layers. Keep only the axial resize endpoints when
+      // there is enough runway; compact selections prioritize moving until zoomed.
+      const hidden = compact
+        || (horizontalThin && handle !== 'w' && handle !== 'e')
+        || (verticalThin && handle !== 'n' && handle !== 's');
+      element.style.display = hidden ? 'none' : '';
       element.style.left = `${x}px`;
       element.style.top = `${y}px`;
+    }
+    if (state.moveRail) {
+      const railSize = MOVE_RAIL_PX / zoom;
+      const endpointGap = MOVE_RAIL_ENDPOINT_GAP_PX / zoom;
+      state.moveRail.style.display = horizontalThin || verticalThin || compact ? '' : 'none';
+      if (horizontalThin) {
+        Object.assign(state.moveRail.style, {
+          left:`${rect.x + endpointGap}px`, top:`${rect.y + rect.height/2 - railSize/2}px`,
+          width:`${Math.max(0, rect.width - endpointGap*2)}px`, height:`${railSize}px`,
+        });
+      } else if (verticalThin) {
+        Object.assign(state.moveRail.style, {
+          left:`${rect.x + rect.width/2 - railSize/2}px`, top:`${rect.y + endpointGap}px`,
+          width:`${railSize}px`, height:`${Math.max(0, rect.height - endpointGap*2)}px`,
+        });
+      } else if (compact) {
+        const compactSize = COMPACT_MOVE_RAIL_PX / zoom;
+        Object.assign(state.moveRail.style, {
+          left:`${rect.x + rect.width/2 - compactSize/2}px`,
+          top:`${rect.y + rect.height/2 - compactSize/2}px`,
+          width:`${compactSize}px`, height:`${compactSize}px`,
+        });
+      }
     }
     if (state.groupBox) {
       Object.assign(state.groupBox.style, {
@@ -1393,6 +1488,8 @@ html,body,#loora-app{width:100%;height:100%;margin:0;overflow:hidden;background:
     state.handles.clear();
     state.groupBox?.remove();
     state.groupBox = null;
+    state.moveRail?.remove();
+    state.moveRail = null;
     state.handleSignature = '';
   };
   const syncHandles = () => {
@@ -1405,13 +1502,18 @@ html,body,#loora-app{width:100%;height:100%;margin:0;overflow:hidden;background:
       clearHandles();
       return;
     }
+    if (union.nodes.some(node => node.dataset.looraEditing === 'true')) {
+      clearHandles();
+      return;
+    }
     const primary = union.nodes[union.nodes.length - 1];
     const group = union.nodes.length > 1;
     const signature = `${group ? 'group' : 'single'}:${union.nodes.map(node => node.dataset.looraNode).join(',')}`;
     const handlesConnected = state.handles.size === Object.keys(handleCursor).length
       && [...state.handles.values()].every(handle => handle.isConnected);
     const groupBoxConnected = !group || !!state.groupBox?.isConnected;
-    if (state.handleSignature !== signature || !handlesConnected || !groupBoxConnected) {
+    const moveRailConnected = !!state.moveRail?.isConnected;
+    if (state.handleSignature !== signature || !handlesConnected || !groupBoxConnected || !moveRailConnected) {
       clearHandles();
       state.handleSignature = signature;
       if (group) {
@@ -1419,6 +1521,11 @@ html,body,#loora-app{width:100%;height:100%;margin:0;overflow:hidden;background:
         state.groupBox.className = 'loora-group-box';
         scene.appendChild(state.groupBox);
       }
+      state.moveRail = document.createElement('div');
+      state.moveRail.className = 'loora-move-rail';
+      state.moveRail.dataset.node = primary.dataset.looraNode;
+      state.moveRail.dataset.group = group ? 'true' : 'false';
+      scene.appendChild(state.moveRail);
       for (const handle of Object.keys(handleCursor)) {
         const element = document.createElement('div');
         element.className = 'loora-resize-handle';
@@ -1468,7 +1575,7 @@ html,body,#loora-app{width:100%;height:100%;margin:0;overflow:hidden;background:
     if (drag.type === 'resize' && drag.group && drag.origins?.length) {
       const sx = bounds.width / Math.max(1, drag.origin.width);
       const sy = bounds.height / Math.max(1, drag.origin.height);
-      drag.members = [];
+      const previews = [];
       for (const item of drag.origins) {
         const next = {
           x: bounds.x + (item.origin.x - drag.origin.x) * sx,
@@ -1482,10 +1589,23 @@ html,body,#loora-app{width:100%;height:100%;margin:0;overflow:hidden;background:
           element.style.width = `${next.width}px`;
           element.style.height = `${next.height}px`;
         }
-        drag.members.push({ id:item.node.dataset.looraNode, bounds:next, parent:renderedParentOrigin(item.node) });
+        previews.push({ item, element, requested:next });
       }
-      positionHandles(bounds);
-      drag.bounds = bounds;
+      let x1 = Infinity, y1 = Infinity, x2 = -Infinity, y2 = -Infinity;
+      drag.members = previews.map(({ item, element, requested }) => {
+        const rendered = element ? worldRect(element) : requested;
+        x1 = Math.min(x1, rendered.x);
+        y1 = Math.min(y1, rendered.y);
+        x2 = Math.max(x2, rendered.x + rendered.width);
+        y2 = Math.max(y2, rendered.y + rendered.height);
+        return { id:item.node.dataset.looraNode, bounds:rendered, parent:renderedParentOrigin(item.node) };
+      });
+      const renderedBounds = Number.isFinite(x1)
+        ? { x:x1, y:y1, width:Math.max(1, x2-x1), height:Math.max(1, y2-y1) }
+        : bounds;
+      positionHandles(renderedBounds);
+      drag.bounds = renderedBounds;
+      syncAgentOutlines();
       return;
     }
     const element = visualNode(drag.node);
@@ -1517,6 +1637,7 @@ html,body,#loora-app{width:100%;height:100%;margin:0;overflow:hidden;background:
     const renderedBounds = drag.type === 'resize' && !drag.group ? worldRect(drag.node) : bounds;
     positionHandles(renderedBounds);
     drag.bounds = renderedBounds;
+    syncAgentOutlines();
   };
   const startCreate = point => {
     const element = document.createElement('div');
@@ -1599,7 +1720,7 @@ html,body,#loora-app{width:100%;height:100%;margin:0;overflow:hidden;background:
         origins: union
           ? union.nodes.map(n => ({ node:n, origin:worldRect(n) }))
           : [{ node:primary, origin:worldRect(primary) }],
-        snapTargets:collectSnapTargets(primary),
+        snapTargets:collectSnapTargets(union ? union.nodes : primary),
       };
       for (const item of state.drag.origins) {
         visualNode(item.node)?.style.setProperty('will-change', 'transform,width,height');
@@ -1615,7 +1736,8 @@ html,body,#loora-app{width:100%;height:100%;margin:0;overflow:hidden;background:
       event.preventDefault();
       return;
     }
-    const node = targetNode(event.target);
+    const rail = event.target instanceof Element ? event.target.closest('.loora-move-rail') : null;
+    const node = rail ? nodeForId(rail.dataset.node) : targetNode(event.target);
     if (!node) {
       if (!state.preview) {
         // Selection is resolved on pointerup: clearing here would drop the very
@@ -1633,9 +1755,13 @@ html,body,#loora-app{width:100%;height:100%;margin:0;overflow:hidden;background:
     }
     if (node.dataset.looraEditing === 'true') return;
     const id = node.dataset.looraNode;
-    const multi = !event.shiftKey && state.selection.length > 1 && state.selection.includes(id);
-    if (!multi) choose(id, event.shiftKey);
-    const origins = multi ? movableDragSet(state.selection) : movableDragSet([id]);
+    const multi = rail
+      ? rail.dataset.group === 'true'
+      : !event.shiftKey && state.selection.length > 1 && state.selection.includes(id);
+    if (!rail && !multi) choose(id, event.shiftKey);
+    const origins = rail
+      ? movableDragSet(multi ? state.selection : [id])
+      : (multi ? movableDragSet(state.selection) : movableDragSet([id]));
     const primary = origins.find(item => item.node === node) || origins[0];
     if (primary) {
       const ordered = [primary, ...origins.filter(item => item !== primary)];
@@ -1683,8 +1809,8 @@ html,body,#loora-app{width:100%;height:100%;margin:0;overflow:hidden;background:
       else if (axis === 'y') dx = 0;
       const proposed = { ...drag.origin, x:drag.origin.x + dx, y:drag.origin.y + dy };
       const snapped = snapMove(proposed, drag.snapTargets || [], threshold, axis);
-      drawGuides(snapped.guides, snapped.labels);
       previewBounds(drag, snapped.bounds);
+      drawRenderedGuides(drag);
     } else if (drag.type === 'resize') {
       const distance = Math.hypot(point.x-drag.start.x, point.y-drag.start.y) * state.camera.zoom;
       if (!drag.moved && distance < 2) return;
@@ -1696,8 +1822,8 @@ html,body,#loora-app{width:100%;height:100%;margin:0;overflow:hidden;background:
       const snapped = constrain
         ? { bounds:proposed, ...snapFeedback(proposed, drag.snapTargets || []) }
         : snapResize(drag.origin, proposed, drag.snapTargets || [], threshold);
-      drawGuides(snapped.guides, snapped.labels);
       previewBounds(drag, snapped.bounds);
+      drawRenderedGuides(drag);
     } else if (drag.type === 'create' || drag.type === 'marquee') {
       const x = Math.min(drag.start.x, point.x);
       const y = Math.min(drag.start.y, point.y);
@@ -1745,6 +1871,7 @@ html,body,#loora-app{width:100%;height:100%;margin:0;overflow:hidden;background:
         }
       }
     }
+    syncAgentOutlines();
   };
   const finishDragCommit = () => {
     if (!state.pendingDragCommit) return;
@@ -1858,6 +1985,7 @@ html,body,#loora-app{width:100%;height:100%;margin:0;overflow:hidden;background:
     if (node.dataset.looraKind === 'text' && node.dataset.looraLocked !== 'true') {
       node.dataset.looraEditing = 'true';
       node.contentEditable = 'plaintext-only';
+      syncHandles();
       post('webview-editing', { active: true });
       node.focus({ preventScroll:true });
       // Place caret at click instead of selecting all — feels like a real text tool.
@@ -1910,6 +2038,7 @@ html,body,#loora-app{width:100%;height:100%;margin:0;overflow:hidden;background:
       post('text', { id:node.dataset.looraNode, text:node.innerText.replace(/\r/g,''), bounds });
       node.removeAttribute('contenteditable');
       node.removeAttribute('data-loora-editing');
+      syncHandles();
       post('webview-editing', { active: false });
     }
     if (state.preview) {
@@ -2092,6 +2221,7 @@ html,body,#loora-app{width:100%;height:100%;margin:0;overflow:hidden;background:
     clearInterval(readyTimer);
     css.textContent = payload.css || '';
     scene.innerHTML = payload.markup || '';
+    state.agentOutlines.clear();
     state.nodes = new Map(
       [...scene.querySelectorAll('[data-loora-node]')]
         .map(node => [node.dataset.looraNode, node])
@@ -2106,6 +2236,7 @@ html,body,#loora-app{width:100%;height:100%;margin:0;overflow:hidden;background:
     surface.dataset.tool = state.tool;
     cameraTransform();
     setSelection(payload.selection || []);
+    setAgentNodes(payload.agentNodes || []);
     syncEmptyHints();
     requestAnimationFrame(() => { syncHandles(); syncOverlay(); });
   };
@@ -2119,7 +2250,7 @@ html,body,#loora-app{width:100%;height:100%;margin:0;overflow:hidden;background:
     const height = Math.max(1, Math.round(host.offsetHeight));
     const cssText = css.textContent || '';
     const clone = host.cloneNode(true);
-    clone.querySelectorAll('[data-loora-selected],.loora-resize-handle,.loora-guide,.loora-guide-label,.loora-page-label').forEach(el => el.remove());
+    clone.querySelectorAll('[data-loora-selected],.loora-agent-outline,.loora-move-rail,.loora-resize-handle,.loora-guide,.loora-guide-label,.loora-page-label').forEach(el => el.remove());
     clone.style.left = '0px';
     clone.style.top = '0px';
     const xhtml = `<div xmlns="http://www.w3.org/1999/xhtml" style="width:${width}px;height:${height}px;overflow:hidden;background:#fff"><style>.loora-page-host{left:0!important;top:0!important}${cssText}</style>${clone.outerHTML}</div>`;
@@ -2170,6 +2301,7 @@ html,body,#loora-app{width:100%;height:100%;margin:0;overflow:hidden;background:
       cameraTransform();
       if (command.selection) setSelection(command.selection);
       else syncHandles();
+      if ('agentNodes' in command) setAgentNodes(command.agentNodes);
     }
     else if (command.type === 'patch-css') {
       // Style-only refresh keeps DOM identity (and in-flight drag) intact.
@@ -2188,6 +2320,7 @@ html,body,#loora-app{width:100%;height:100%;margin:0;overflow:hidden;background:
       cameraTransform();
       if (command.selection) setSelection(command.selection);
       else syncHandles();
+      if ('agentNodes' in command) setAgentNodes(command.agentNodes);
     }
     else if (command.type === 'blur-surface') {
       try { if (document.activeElement && document.activeElement !== document.body) document.activeElement.blur(); } catch (_) {}
@@ -2243,6 +2376,7 @@ html,body,#loora-app{width:100%;height:100%;margin:0;overflow:hidden;background:
       surface.dataset.tool = state.tool;
       cameraTransform();
       setSelection(command.selection || []);
+      setAgentNodes(command.agentNodes || []);
     }
   };
   syncChrome();
@@ -2358,13 +2492,12 @@ mod tests {
     #[test]
     fn webview_file_shortcuts_use_capture_phase() {
         assert!(CANVAS_SHELL.contains("if (mod && code === 'KeyN') command = 'new';"));
-        assert!(CANVAS_SHELL.contains("else if (mod && (code === 'KeyO' || code === 'KeyK')) command = 'files';"));
+        assert!(CANVAS_SHELL
+            .contains("else if (mod && (code === 'KeyO' || code === 'KeyK')) command = 'files';"));
         assert!(CANVAS_SHELL.contains("else if (mod && code === 'KeyS') command = 'save';"));
         assert!(CANVAS_SHELL.contains("command = `tool:${key}`"));
         assert!(CANVAS_SHELL.contains("event.stopPropagation();"));
-        assert!(CANVAS_SHELL.contains(
-            "post('command', { command });\n  }, true);"
-        ));
+        assert!(CANVAS_SHELL.contains("post('command', { command });\n  }, true);"));
         assert!(CANVAS_SHELL.contains("post('canvas-pointer')"));
         assert!(CANVAS_SHELL.contains("post('webview-editing', { active: true })"));
         assert!(CANVAS_SHELL.contains("post('webview-editing', { active: false })"));
@@ -2378,13 +2511,100 @@ mod tests {
         assert!(CANVAS_SHELL.contains("const snapMove"));
         assert!(CANVAS_SHELL.contains("const snapResize"));
         assert!(CANVAS_SHELL.contains("const collectSnapTargets"));
-        assert!(CANVAS_SHELL.contains("drawGuides(snapped.guides, snapped.labels)"));
+        assert!(CANVAS_SHELL.contains("const drawRenderedGuides = drag =>"));
+        assert!(CANVAS_SHELL
+            .contains("snapFeedback(drag.bounds || drag.origin, drag.snapTargets || [])"));
+        assert!(CANVAS_SHELL.contains(
+            "collectMatchingGuides(bounds, targets, 0.75 / Math.max(.001, state.camera.zoom))"
+        ));
+        assert_eq!(
+            CANVAS_SHELL
+                .matches("previewBounds(drag, snapped.bounds);\n      drawRenderedGuides(drag);")
+                .count(),
+            2
+        );
         assert!(CANVAS_SHELL.contains("clearGuides()"));
         assert!(CANVAS_SHELL.contains("if (state.guideSignature === signature) return"));
-        assert!(CANVAS_SHELL.contains("snapTargets:collectSnapTargets(primary)"));
-        assert!(CANVAS_SHELL.contains(
-            "snapTargets:collectSnapTargets(ordered.map(item => item.node))"
+        assert!(
+            CANVAS_SHELL.contains("snapTargets:collectSnapTargets(union ? union.nodes : primary)")
+        );
+        assert!(
+            CANVAS_SHELL.contains("snapTargets:collectSnapTargets(ordered.map(item => item.node))")
+        );
+        let preview_bounds = CANVAS_SHELL
+            .split("const previewBounds = (drag, bounds) => {")
+            .nth(1)
+            .and_then(|tail| tail.split("const startCreate = point => {").next())
+            .expect("previewBounds function");
+        assert!(
+            preview_bounds.contains("const rendered = element ? worldRect(element) : requested")
+        );
+        assert!(preview_bounds.contains("drag.bounds = renderedBounds"));
+    }
+
+    #[test]
+    fn webview_thin_selections_keep_a_center_move_target() {
+        assert!(CANVAS_SHELL.contains("const RESIZE_HANDLE_PX = 9"));
+        assert!(CANVAS_SHELL.contains("const MOVE_RAIL_PX = 12"));
+        assert!(CANVAS_SHELL.contains("const COMPACT_MOVE_RAIL_PX = 16"));
+        assert!(CANVAS_SHELL.contains("const THIN_LONG_AXIS_PX = 26"));
+        assert!(CANVAS_SHELL.contains(".loora-move-rail{"));
+        let position_handles = CANVAS_SHELL
+            .split("const positionHandles = rect => {")
+            .nth(1)
+            .and_then(|tail| tail.split("const clearHandles = () => {").next())
+            .expect("positionHandles function");
+        assert!(position_handles.contains("screenWidth < RESIZE_HANDLE_PX * 2"));
+        assert!(position_handles.contains("screenHeight < RESIZE_HANDLE_PX * 2"));
+        assert!(position_handles.contains("thinHeight && screenWidth >= THIN_LONG_AXIS_PX"));
+        assert!(position_handles.contains("thinWidth && screenHeight >= THIN_LONG_AXIS_PX"));
+        assert!(position_handles.contains(
+            "const compact = (thinWidth || thinHeight) && !horizontalThin && !verticalThin"
         ));
+        assert!(position_handles.contains("horizontalThin && handle !== 'w' && handle !== 'e'"));
+        assert!(position_handles.contains("verticalThin && handle !== 'n' && handle !== 's'"));
+        assert!(position_handles.contains("element.style.display = hidden ? 'none' : ''"));
+        assert!(position_handles.contains("const railSize = MOVE_RAIL_PX / zoom"));
+        assert!(position_handles.contains("const endpointGap = MOVE_RAIL_ENDPOINT_GAP_PX / zoom"));
+        assert!(position_handles.contains("const compactSize = COMPACT_MOVE_RAIL_PX / zoom"));
+        assert!(position_handles.contains(
+            "state.moveRail.style.display = horizontalThin || verticalThin || compact ? '' : 'none'"
+        ));
+        assert!(CANVAS_SHELL.contains("state.moveRail.dataset.node = primary.dataset.looraNode"));
+        assert!(CANVAS_SHELL.contains("state.moveRail.dataset.group = group ? 'true' : 'false'"));
+        assert!(!CANVAS_SHELL.contains("state.moveRail.dataset.looraNode"));
+        assert!(CANVAS_SHELL.contains("const moveRailConnected = !!state.moveRail?.isConnected"));
+        assert!(
+            CANVAS_SHELL.contains("rail ? nodeForId(rail.dataset.node) : targetNode(event.target)")
+        );
+        assert!(CANVAS_SHELL.contains("? movableDragSet(multi ? state.selection : [id])"));
+
+        let target_node = CANVAS_SHELL
+            .split("const targetNode = target => {")
+            .nth(1)
+            .and_then(|tail| tail.split("const isRootFrame").next())
+            .expect("targetNode function");
+        assert!(target_node.contains("target.closest('.loora-move-rail')"));
+        assert!(target_node.contains("nodeForId(rail.dataset.node)"));
+
+        let sync_handles = CANVAS_SHELL
+            .split("const syncHandles = () => {")
+            .nth(1)
+            .and_then(|tail| tail.split("const choose =").next())
+            .expect("syncHandles function");
+        assert!(sync_handles.contains("node.dataset.looraEditing === 'true'"));
+        assert!(
+            CANVAS_SHELL.contains("node.contentEditable = 'plaintext-only';\n      syncHandles();")
+        );
+        assert!(CANVAS_SHELL
+            .contains("node.removeAttribute('data-loora-editing');\n      syncHandles();"));
+
+        let camera_transform = CANVAS_SHELL
+            .split("const cameraTransform = () => {")
+            .nth(1)
+            .and_then(|tail| tail.split("const syncOverlay = () => {").next())
+            .expect("cameraTransform function");
+        assert!(camera_transform.contains("syncHandles()"));
     }
 
     #[test]
@@ -2467,5 +2687,29 @@ mod tests {
         assert!(CANVAS_SHELL.contains("loora-group-box"));
         assert!(CANVAS_SHELL.contains("post('drop-files'"));
         assert!(CANVAS_SHELL.contains("caretRangeFromPoint"));
+    }
+
+    #[test]
+    fn webview_marks_live_agent_targets_without_reusing_selection() {
+        assert!(CANVAS_SHELL.contains("agentNodes: []"));
+        assert!(CANVAS_SHELL.contains("const setAgentNodes"));
+        assert!(CANVAS_SHELL.contains("loora-agent-outline"));
+        assert!(CANVAS_SHELL.contains("setAgentNodes(command.agentNodes || [])"));
+        assert!(CANVAS_SHELL.contains("state.agentOutlines.get(id)"));
+        assert!(CANVAS_SHELL.contains("if (active.has(id)) continue"));
+
+        let preview_bounds = CANVAS_SHELL
+            .split("const previewBounds = (drag, bounds) => {")
+            .nth(1)
+            .and_then(|tail| tail.split("const startCreate = point => {").next())
+            .expect("previewBounds function");
+        assert_eq!(preview_bounds.matches("syncAgentOutlines();").count(), 2);
+
+        let clear_preview = CANVAS_SHELL
+            .split("const clearDragPreview = drag => {")
+            .nth(1)
+            .and_then(|tail| tail.split("const finishDragCommit = () => {").next())
+            .expect("clearDragPreview function");
+        assert!(clear_preview.contains("syncAgentOutlines();"));
     }
 }

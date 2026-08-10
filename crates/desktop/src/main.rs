@@ -6,6 +6,7 @@ use gpui::{
     TitlebarOptions, WindowBackgroundAppearance, WindowBounds, WindowOptions,
 };
 use gpui_platform::application;
+use loora_inspector::ToggleInspector;
 use loora_ui::{
     Assets, FitAll, FitSelection, GroupSelection, NewDesign, Redo, SaveDesign, ToggleFiles,
     ToggleLayersSidebar, TogglePropertiesSidebar, ToggleSettings, ToolFrame, ToolHand, ToolImage,
@@ -29,6 +30,7 @@ fn main() {
         .run(|cx: &mut App| {
             gpui_router::init(cx);
             loora_ui::init_motion(cx);
+            loora_inspector::init(cx);
 
             cx.set_app_identity("com.loora.app", "Loora");
             set_app_icon();
@@ -63,6 +65,8 @@ fn main() {
                     MenuItem::separator(),
                     MenuItem::action("Toggle Layers Sidebar", ToggleLayersSidebar),
                     MenuItem::action("Toggle Properties Sidebar", TogglePropertiesSidebar),
+                    MenuItem::separator(),
+                    MenuItem::action("Toggle GPUI Inspector", ToggleInspector),
                 ]),
                 Menu::new("Arrange").items([
                     MenuItem::action("Group", GroupSelection),
@@ -103,7 +107,9 @@ fn open_main_window(cx: &mut App) {
         },
         |window, cx| {
             window.set_background_appearance(WindowBackgroundAppearance::Blurred);
-            cx.new(|cx| AppRoot::new(window, cx))
+            let root = cx.new(|cx| AppRoot::new(window, cx));
+            loora_inspector::open_on_startup(window, cx);
+            root
         },
     )
     .expect("failed to open Loora window");

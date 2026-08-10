@@ -126,8 +126,16 @@ impl CanvasEngine {
             .map(|node| node.id.clone())
             .collect();
         page_ids.sort_by(|left, right| {
-            let left = document.nodes.get(left).map(|node| node.order).unwrap_or(0.0);
-            let right = document.nodes.get(right).map(|node| node.order).unwrap_or(0.0);
+            let left = document
+                .nodes
+                .get(left)
+                .map(|node| node.order)
+                .unwrap_or(0.0);
+            let right = document
+                .nodes
+                .get(right)
+                .map(|node| node.order)
+                .unwrap_or(0.0);
             left.total_cmp(&right)
         });
         let mut x = 0.0;
@@ -145,12 +153,7 @@ impl CanvasEngine {
         }
 
         let mut engine = Self::new(document);
-        engine.resolve_relative_sizes();
-        // Nested hug/fill stacks need a bottom-up pass and then one final
-        // relative pass after their parents have settled.
-        engine.resolve_all_stacks();
-        engine.resolve_relative_sizes();
-        engine.resolve_all_stacks();
+        engine.reflow();
         engine.document
     }
 
@@ -160,7 +163,19 @@ impl CanvasEngine {
         self.redo.clear();
         self.applied_ids.clear();
         self.rebuild_indexes();
+        self.reflow();
         self.revision += 1;
+    }
+
+    /// Recompute relative sizes and flex/grid stacks across the document.
+    ///
+    /// Nested hug/fill stacks need a bottom-up pass and then one final relative
+    /// pass after their parents have settled.
+    pub fn reflow(&mut self) {
+        self.resolve_relative_sizes();
+        self.resolve_all_stacks();
+        self.resolve_relative_sizes();
+        self.resolve_all_stacks();
     }
 
     fn resolve_relative_sizes(&mut self) {
@@ -309,7 +324,11 @@ impl CanvasEngine {
             .values()
             .filter(|n| n.kind == NodeKind::Component)
             .collect();
-        comps.sort_by(|a, b| a.name.cmp(&b.name).then_with(|| a.id.as_str().cmp(b.id.as_str())));
+        comps.sort_by(|a, b| {
+            a.name
+                .cmp(&b.name)
+                .then_with(|| a.id.as_str().cmp(b.id.as_str()))
+        });
         comps
     }
 
@@ -558,11 +577,10 @@ impl CanvasEngine {
             return Err(EngineError::NodeMissing(id.to_string()));
         };
         let parent_origin = match &node.parent_id {
-            Some(parent_id) => {
-                self.absolute_bounds(parent_id)
-                    .map(|b| Vec2::new(b.x, b.y))
-                    .unwrap_or(Vec2::new(0.0, 0.0))
-            }
+            Some(parent_id) => self
+                .absolute_bounds(parent_id)
+                .map(|b| Vec2::new(b.x, b.y))
+                .unwrap_or(Vec2::new(0.0, 0.0)),
             _ => Vec2::new(0.0, 0.0),
         };
         self.set_world_bounds_from_parent_origin(id, world, parent_origin, coalesce_key)
@@ -578,13 +596,7 @@ impl CanvasEngine {
         parent_origin: Vec2,
         coalesce_key: Option<String>,
     ) -> Result<(), EngineError> {
-        self.set_rendered_world_bounds(
-            id,
-            world,
-            parent_origin,
-            false,
-            coalesce_key,
-        )
+        self.set_rendered_world_bounds(id, world, parent_origin, false, coalesce_key)
     }
 
     /// Commit browser-rendered bounds. Leading-edge resizing of an in-flow
@@ -671,11 +683,10 @@ impl CanvasEngine {
             return Err(EngineError::NodeMissing(id.to_string()));
         };
         let parent_origin = match &node.parent_id {
-            Some(parent_id) => {
-                self.absolute_bounds(parent_id)
-                    .map(|bounds| Vec2::new(bounds.x, bounds.y))
-                    .unwrap_or(Vec2::new(0.0, 0.0))
-            }
+            Some(parent_id) => self
+                .absolute_bounds(parent_id)
+                .map(|bounds| Vec2::new(bounds.x, bounds.y))
+                .unwrap_or(Vec2::new(0.0, 0.0)),
             _ => Vec2::new(0.0, 0.0),
         };
         self.set_world_position_from_parent_origin(id, world, parent_origin, coalesce_key)
@@ -1081,11 +1092,7 @@ impl CanvasEngine {
             let subtree = self.collect_subtree(root);
             let mut id_map: HashMap<NodeId, NodeId> = HashMap::new();
             for old_id in &subtree {
-                let prefix = old_id
-                    .as_str()
-                    .split('_')
-                    .next()
-                    .unwrap_or("node");
+                let prefix = old_id.as_str().split('_').next().unwrap_or("node");
                 let mut new_id = NodeId::new(prefix);
                 // Extremely unlikely, but keep insert valid.
                 while self.document.nodes.contains_key(&new_id) || used_ids.contains(&new_id) {
@@ -1114,9 +1121,7 @@ impl CanvasEngine {
                     clone.order = self.next_order(clone.parent_id.as_ref());
                     // Avoid colliding with earlier duplicates in this batch.
                     if let Some(last) = ops.iter().rev().find_map(|op| match op {
-                        Operation::Insert { node }
-                            if node.parent_id == clone.parent_id =>
-                        {
+                        Operation::Insert { node } if node.parent_id == clone.parent_id => {
                             Some(node.order)
                         }
                         _ => None,
@@ -1352,10 +1357,7 @@ impl CanvasEngine {
             });
         }
 
-        self.apply(
-            Transaction::new("Group", ops),
-            ApplyOptions::with_history(),
-        )?;
+        self.apply(Transaction::new("Group", ops), ApplyOptions::with_history())?;
         Ok(group_id)
     }
 
@@ -1387,11 +1389,7 @@ impl CanvasEngine {
             Vec2::new(0.0, 0.0)
         };
 
-        let children: Vec<Node> = self
-            .children(Some(id))
-            .into_iter()
-            .cloned()
-            .collect();
+        let children: Vec<Node> = self.children(Some(id)).into_iter().cloned().collect();
         let mut ops = Vec::new();
         let base_order = self.next_order(Some(&parent));
         for (i, child) in children.iter().enumerate() {
@@ -1803,11 +1801,7 @@ impl CanvasEngine {
         )
     }
 
-    pub fn set_variant(
-        &mut self,
-        id: &NodeId,
-        variant: Option<String>,
-    ) -> Result<(), EngineError> {
+    pub fn set_variant(&mut self, id: &NodeId, variant: Option<String>) -> Result<(), EngineError> {
         let Some(variant_name) = variant else {
             return self.patch_nodes(
                 vec![(
@@ -2259,11 +2253,7 @@ impl CanvasEngine {
                 ops.push(Operation::Patch {
                     id: id.clone(),
                     patch: NodePatch {
-                        variant: Some(
-                            next_variant
-                                .clone()
-                                .or_else(|| Some("Default".into())),
-                        ),
+                        variant: Some(next_variant.clone().or_else(|| Some("Default".into()))),
                         ..NodePatch::default()
                     },
                 });
@@ -2598,11 +2588,13 @@ impl CanvasEngine {
                 child
                     .layout
                     .shrink
-                    .unwrap_or(if matches!(main_mode, SizeMode::Fixed | SizeMode::Percent) {
-                        0.0
-                    } else {
-                        1.0
-                    })
+                    .unwrap_or(
+                        if matches!(main_mode, SizeMode::Fixed | SizeMode::Percent) {
+                            0.0
+                        } else {
+                            1.0
+                        },
+                    )
                     .max(0.0),
             );
         }
@@ -2654,15 +2646,11 @@ impl CanvasEngine {
                     }
                 }
             } else if free < -f64::EPSILON {
-                let shrink_sum: f64 = line
-                    .iter()
-                    .map(|&i| shrink[i] as f64 * pref_main[i])
-                    .sum();
+                let shrink_sum: f64 = line.iter().map(|&i| shrink[i] as f64 * pref_main[i]).sum();
                 if shrink_sum > f64::EPSILON {
                     for (j, &i) in line.iter().enumerate() {
                         let weight = shrink[i] as f64 * pref_main[i];
-                        main_sizes[j] =
-                            (main_sizes[j] + free * (weight / shrink_sum)).max(1.0);
+                        main_sizes[j] = (main_sizes[j] + free * (weight / shrink_sum)).max(1.0);
                     }
                 }
             }
@@ -3331,12 +3319,17 @@ mod tests {
     fn component_fixture() -> (CanvasEngine, NodeId, NodeId) {
         let mut doc = Document::empty("Variants");
         let page = doc.root_page_id.clone();
-        let mut component = Node::component("Button", page.clone(), Layout::new(40.0, 40.0, 120.0, 40.0));
+        let mut component =
+            Node::component("Button", page.clone(), Layout::new(40.0, 40.0, 120.0, 40.0));
         component
             .style
             .set_solid_fill(Some(Color::rgb(0x33, 0x33, 0x44)));
         let component_id = component.id.clone();
-        let mut child = Node::rectangle("Label", component_id.clone(), Layout::new(8.0, 8.0, 100.0, 24.0));
+        let mut child = Node::rectangle(
+            "Label",
+            component_id.clone(),
+            Layout::new(8.0, 8.0, 100.0, 24.0),
+        );
         child
             .style
             .set_solid_fill(Some(Color::rgb(0xaa, 0xaa, 0xaa)));
@@ -3463,7 +3456,11 @@ mod tests {
         let a = engine.node(&a_id).unwrap();
         let b = engine.node(&b_id).unwrap();
         assert!((a.layout.width - 50.0).abs() < 0.5);
-        assert!((b.layout.width - 250.0).abs() < 0.5, "got {}", b.layout.width);
+        assert!(
+            (b.layout.width - 250.0).abs() < 0.5,
+            "got {}",
+            b.layout.width
+        );
         assert!((b.layout.x - 50.0).abs() < 0.5);
     }
 

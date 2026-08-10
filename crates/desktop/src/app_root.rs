@@ -1,8 +1,6 @@
 //! Application root: routes between the canvas and the settings page.
 
-use gpui::{
-    div, prelude::*, App, Entity, FocusHandle, KeyBinding, KeyDownEvent, Render, Window,
-};
+use gpui::{div, prelude::*, App, Entity, FocusHandle, KeyBinding, KeyDownEvent, Render, Window};
 use gpui_router::{use_location, Route, Routes};
 use loora_ui::{
     CanvasWorkspace, NewDesign, SaveDesign, SettingsSection, SettingsSectionPage, SettingsShell,
@@ -11,6 +9,7 @@ use loora_ui::{
 
 pub struct AppRoot {
     canvas: Entity<CanvasWorkspace>,
+    _mcp_server: Option<loora_mcp::McpServer>,
     focus_handle: FocusHandle,
     route_state: Option<(bool, SettingsSection)>,
     _observe_canvas: gpui::Subscription,
@@ -18,7 +17,26 @@ pub struct AppRoot {
 
 impl AppRoot {
     pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
-        let canvas = cx.new(|cx| CanvasWorkspace::new(window, cx));
+        let (mcp_server, mcp_receiver) = match loora_mcp::start() {
+            Ok((server, receiver)) => {
+                eprintln!("loora-mcp: listening at {}", server.endpoint());
+                (Some(server), Some(receiver))
+            }
+            Err(error) => {
+                eprintln!("loora-mcp: built-in server unavailable: {error}");
+                (None, None)
+            }
+        };
+        let mcp_endpoint = mcp_server.as_ref().map(loora_mcp::McpServer::endpoint);
+        let canvas = cx.new(|cx| {
+            CanvasWorkspace::new_with_mcp_endpoint(window, cx, mcp_receiver, mcp_endpoint)
+        });
+        let inspector_canvas = canvas.clone();
+        loora_inspector::on_visibility_change(cx, move |open, cx| {
+            inspector_canvas.update(cx, |workspace, cx| {
+                workspace.set_developer_inspector_open(open, cx);
+            });
+        });
         let focus_handle = cx.focus_handle();
         focus_handle.focus(window, cx);
 
@@ -41,6 +59,7 @@ impl AppRoot {
 
         Self {
             canvas,
+            _mcp_server: mcp_server,
             focus_handle,
             route_state: None,
             _observe_canvas,
@@ -115,12 +134,18 @@ impl AppRoot {
     ) -> SettingsSectionPage {
         let theme = canvas.read(cx).theme();
         let overrides = canvas.read(cx).shortcut_overrides().clone();
-        let recording = canvas
-            .read(cx)
-            .shortcut_recording()
-            .map(|s| s.to_string());
+        let recording = canvas.read(cx).shortcut_recording().map(|s| s.to_string());
         let query = canvas.read(cx).shortcut_search().to_string();
-        SettingsSectionPage::new(canvas, theme, section, overrides, recording, query)
+        let search_focused = canvas.read(cx).shortcut_search_focused();
+        SettingsSectionPage::new(
+            canvas,
+            theme,
+            section,
+            overrides,
+            recording,
+            query,
+            search_focused,
+        )
     }
 }
 
@@ -135,6 +160,7 @@ impl Render for AppRoot {
         let on_settings = pathname.starts_with("/settings");
         let section = SettingsSection::from_pathname(&pathname);
         let theme = canvas.read(cx).theme();
+        loora_inspector::set_theme(theme, cx);
 
         // Sync native webview visibility only when the route actually changes.
         let route_state = (on_settings, section);
@@ -176,7 +202,11 @@ impl Render for AppRoot {
                             Route::new().index().element({
                                 let canvas = canvas.clone();
                                 move |_, cx| {
-                                    Self::settings_page(canvas.clone(), SettingsSection::General, cx)
+                                    Self::settings_page(
+                                        canvas.clone(),
+                                        SettingsSection::General,
+                                        cx,
+                                    )
                                 }
                             }),
                             Route::new().path("appearance").element({

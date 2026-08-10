@@ -169,16 +169,11 @@ impl RenderOnce for ContextMenu {
                     .children(entries.into_iter().enumerate().map({
                         let on_action = on_action.clone();
                         move |(index, entry)| match entry {
-                            ContextMenuEntry::Separator => {
-                                separator_row(theme).into_any_element()
+                            ContextMenuEntry::Separator => separator_row(theme).into_any_element(),
+                            ContextMenuEntry::Action(action) => {
+                                menu_row(theme, action, index == highlight, on_action.clone())
+                                    .into_any_element()
                             }
-                            ContextMenuEntry::Action(action) => menu_row(
-                                theme,
-                                action,
-                                index == highlight,
-                                on_action.clone(),
-                            )
-                            .into_any_element(),
                         }
                     })),
             )
@@ -192,12 +187,7 @@ fn separator_row(theme: Theme) -> impl IntoElement {
         .flex()
         .items_center()
         .px_2()
-        .child(
-            div()
-                .w_full()
-                .h(px(1.))
-                .bg(theme.hairline_soft()),
-        )
+        .child(div().w_full().h(px(1.)).bg(theme.hairline_soft()))
 }
 
 fn menu_row(
@@ -261,11 +251,7 @@ fn menu_row(
                 .min_w_0()
                 .flex_1()
                 .when_some(action.icon, |this, icon| {
-                    this.child(
-                        Icon::hugeicon(icon)
-                            .size(px(14.))
-                            .text_color(label_color),
-                    )
+                    this.child(Icon::hugeicon(icon).size(px(14.)).text_color(label_color))
                 })
                 .child(
                     div()

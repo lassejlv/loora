@@ -151,35 +151,34 @@ impl RenderOnce for ImagePickerDialog {
                                                     .text_color(theme.muted)
                                                     .child("Library"),
                                             )
-                                            .children(library.into_iter().take(12).enumerate().map(
-                                                |(index, path)| {
-                                                    let label = path
-                                                        .file_name()
-                                                        .and_then(|n| n.to_str())
-                                                        .unwrap_or("asset")
-                                                        .to_string();
-                                                    let path_for_click = path;
-                                                    library_row(
-                                                        workspace.clone(),
-                                                        theme,
-                                                        SharedString::from(format!(
-                                                            "img-lib-{index}"
-                                                        )),
-                                                        SharedString::from(label),
-                                                        path_for_click,
-                                                    )
-                                                },
-                                            ))
+                                            .children(
+                                                library.into_iter().take(12).enumerate().map(
+                                                    |(index, path)| {
+                                                        let label = path
+                                                            .file_name()
+                                                            .and_then(|n| n.to_str())
+                                                            .unwrap_or("asset")
+                                                            .to_string();
+                                                        let path_for_click = path;
+                                                        library_row(
+                                                            workspace.clone(),
+                                                            theme,
+                                                            SharedString::from(format!(
+                                                                "img-lib-{index}"
+                                                            )),
+                                                            SharedString::from(label),
+                                                            path_for_click,
+                                                        )
+                                                    },
+                                                ),
+                                            )
                                         }),
                                 )
-                                .child(
-                                    div().px_4().pb_3().child(
-                                        div()
-                                            .text_size(px(11.))
-                                            .text_color(theme.muted)
-                                            .child("Drop images onto the canvas, or double-click to replace"),
+                                .child(div().px_4().pb_3().child(
+                                    div().text_size(px(11.)).text_color(theme.muted).child(
+                                        "Drop images onto the canvas, or double-click to replace",
                                     ),
-                                )
+                                ))
                             })
                             .when(mode == ImagePickerMode::Url, |this| {
                                 this.child(

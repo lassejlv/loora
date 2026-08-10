@@ -184,10 +184,7 @@ pub fn component_section(
     variant_names: &[String],
 ) -> impl IntoElement {
     let disabled = view.readonly;
-    let variant = node
-        .variant
-        .clone()
-        .unwrap_or_else(|| "Default".into());
+    let variant = node.variant.clone().unwrap_or_else(|| "Default".into());
     let has_overrides = !node.overrides.is_empty();
     let can_delete_variant = variant_names.len() > 1;
     let variants_label = if variant_names.len() > 1 {
@@ -200,16 +197,13 @@ pub fn component_section(
         .flex()
         .flex_col()
         .gap_1()
-        .child(
-            div()
-                .text_size(px(11.))
-                .text_color(theme.muted)
-                .child(if node.kind == loora_engine::NodeKind::Component {
-                    "Master component"
-                } else {
-                    "Instance"
-                }),
-        )
+        .child(div().text_size(px(11.)).text_color(theme.muted).child(
+            if node.kind == loora_engine::NodeKind::Component {
+                "Master component"
+            } else {
+                "Instance"
+            },
+        ))
         .child(select_field(
             theme,
             "props-variant".into(),
@@ -411,12 +405,7 @@ pub fn vector_section(
             },
             move |event, window, cx| {
                 ws_fill.update(cx, |this, cx| {
-                    this.focus_props_field(
-                        PropsField::VectorFill,
-                        event.click_count,
-                        window,
-                        cx,
-                    )
+                    this.focus_props_field(PropsField::VectorFill, event.click_count, window, cx)
                 })
             },
             {
@@ -435,12 +424,7 @@ pub fn vector_section(
             None,
             move |event, window, cx| {
                 a.update(cx, |this, cx| {
-                    this.focus_props_field(
-                        PropsField::VectorWeight,
-                        event.click_count,
-                        window,
-                        cx,
-                    )
+                    this.focus_props_field(PropsField::VectorWeight, event.click_count, window, cx)
                 })
             },
             move |_, _, cx| e.update(cx, |this, cx| this.blur_props_if_needed(cx)),

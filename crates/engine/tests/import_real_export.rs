@@ -1,8 +1,6 @@
 use std::{fs, time::Instant};
 
-use loora_engine::{
-    canvas_import::parse_design_bytes, compile_canvas, HtmlCanvasOptions,
-};
+use loora_engine::{canvas_import::parse_design_bytes, compile_canvas, HtmlCanvasOptions};
 
 fn hug_page_fixture() -> String {
     let mut nodes = serde_json::Map::new();

@@ -1,6 +1,6 @@
 use loora_engine::{
-    canvas_import::parse_design_bytes, AnimationTrigger, CanvasAction, InteractionTrigger,
-    NodeId, NodeKind, Paint, ShapeKind, SizeMode, TextAlign, TextDecoration, TextTransform,
+    canvas_import::parse_design_bytes, AnimationTrigger, CanvasAction, InteractionTrigger, NodeId,
+    NodeKind, Paint, ShapeKind, SizeMode, TextAlign, TextDecoration, TextTransform,
 };
 
 fn base_layout(width: serde_json::Value, height: serde_json::Value) -> serde_json::Value {
@@ -189,12 +189,21 @@ fn imports_and_resolves_canvas_v2_feature_contract() {
     assert_eq!(group.style.corners.bl, 16.0);
     assert_eq!(group.style.blend_mode.as_deref(), Some("multiply"));
     assert!(group.visual_states.as_ref().unwrap().focus.is_some());
-    assert_eq!(group.transition.as_ref().unwrap().cubic_bezier, Some([0.2, 0.0, 0.0, 1.0]));
+    assert_eq!(
+        group.transition.as_ref().unwrap().cubic_bezier,
+        Some([0.2, 0.0, 0.0, 1.0])
+    );
     assert_eq!(group.animations[0].trigger, AnimationTrigger::InView);
-    assert_eq!(group.interactions[0].trigger, InteractionTrigger::StateChange);
+    assert_eq!(
+        group.interactions[0].trigger,
+        InteractionTrigger::StateChange
+    );
     assert_eq!(group.interactions[0].when.len(), 1);
     assert_eq!(group.interactions[0].actions.len(), 10);
-    assert!(matches!(group.interactions[0].actions[2], CanvasAction::Visibility { .. }));
+    assert!(matches!(
+        group.interactions[0].actions[2],
+        CanvasAction::Visibility { .. }
+    ));
 
     let text = &document.nodes[&NodeId::from_static("text")];
     let typography = text.typography.as_ref().unwrap();
@@ -204,15 +213,35 @@ fn imports_and_resolves_canvas_v2_feature_contract() {
     assert_eq!(typography.transform, TextTransform::Uppercase);
     assert!(!typography.wrap);
     assert_eq!(text.text_runs.len(), 1);
-    assert_eq!(text.text_runs[0].typography.as_ref().unwrap().weight, Some(700));
+    assert_eq!(
+        text.text_runs[0].typography.as_ref().unwrap().weight,
+        Some(700)
+    );
 
     let ellipse = &document.nodes[&NodeId::from_static("ellipse")];
     assert_eq!(ellipse.shape_kind, ShapeKind::Ellipse);
-    assert!(matches!(ellipse.style.fills[0], Paint::RadialGradient { .. }));
-    assert_eq!(document.nodes[&NodeId::from_static("line")].shape_kind, ShapeKind::Line);
-    assert_eq!(document.nodes[&NodeId::from_static("vector")].paths.len(), 1);
-    assert_eq!(document.nodes[&NodeId::from_static("image")].image_alt, "Example");
-    assert_eq!(document.nodes[&NodeId::from_static("component")].component_variants.len(), 2);
+    assert!(matches!(
+        ellipse.style.fills[0],
+        Paint::RadialGradient { .. }
+    ));
+    assert_eq!(
+        document.nodes[&NodeId::from_static("line")].shape_kind,
+        ShapeKind::Line
+    );
+    assert_eq!(
+        document.nodes[&NodeId::from_static("vector")].paths.len(),
+        1
+    );
+    assert_eq!(
+        document.nodes[&NodeId::from_static("image")].image_alt,
+        "Example"
+    );
+    assert_eq!(
+        document.nodes[&NodeId::from_static("component")]
+            .component_variants
+            .len(),
+        2
+    );
 
     let engine = loora_engine::CanvasEngine::new(document);
     let mobile = engine.resolved_document_at_width(390.0);
@@ -225,8 +254,14 @@ fn imports_and_resolves_canvas_v2_feature_contract() {
         mobile_group.layout.width
     );
     assert_eq!(mobile_group.style.opacity, 0.8);
-    assert!(!mobile_group.style.fills.is_empty(), "partial style patch erased base fill");
+    assert!(
+        !mobile_group.style.fills.is_empty(),
+        "partial style patch erased base fill"
+    );
 
     let desktop = engine.resolved_document_at_width(1440.0);
-    assert_eq!(desktop.nodes[&NodeId::from_static("group")].layout.gap, 24.0);
+    assert_eq!(
+        desktop.nodes[&NodeId::from_static("group")].layout.gap,
+        24.0
+    );
 }

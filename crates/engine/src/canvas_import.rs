@@ -55,8 +55,7 @@ struct PendingLayout {
 
 /// Parse a design file: native Document JSON, or wrapped `loora.canvas` export.
 pub fn parse_design_bytes(bytes: &[u8]) -> Result<Document, String> {
-    let value: Value =
-        serde_json::from_slice(bytes).map_err(|e| format!("invalid JSON: {e}"))?;
+    let value: Value = serde_json::from_slice(bytes).map_err(|e| format!("invalid JSON: {e}"))?;
     if is_canvas_export(&value) {
         return convert_canvas_export(&value);
     }
@@ -65,15 +64,11 @@ pub fn parse_design_bytes(bytes: &[u8]) -> Result<Document, String> {
 
 /// Document id for duplicate detection (native or canvas-wrapped).
 pub fn peek_design_id(bytes: &[u8]) -> Result<String, String> {
-    let value: Value =
-        serde_json::from_slice(bytes).map_err(|e| format!("invalid JSON: {e}"))?;
+    let value: Value = serde_json::from_slice(bytes).map_err(|e| format!("invalid JSON: {e}"))?;
     if let Some(id) = value.get("id").and_then(|v| v.as_str()) {
         return Ok(id.to_string());
     }
-    if let Some(id) = value
-        .pointer("/document/id")
-        .and_then(|v| v.as_str())
-    {
+    if let Some(id) = value.pointer("/document/id").and_then(|v| v.as_str()) {
         return Ok(id.to_string());
     }
     Err("missing document id".into())
@@ -107,10 +102,8 @@ fn convert_canvas_export(root: &Value) -> Result<Document, String> {
         .to_string();
 
     let tokens = convert_tokens(doc.get("tokens"));
-    let token_colors: HashMap<String, Color> = tokens
-        .iter()
-        .map(|t| (t.id.clone(), t.color))
-        .collect();
+    let token_colors: HashMap<String, Color> =
+        tokens.iter().map(|t| (t.id.clone(), t.color)).collect();
 
     let breakpoints = convert_breakpoints(doc.get("breakpoints"));
     let animations = convert_animations(doc.get("animations"));
@@ -142,7 +135,8 @@ fn convert_canvas_export(root: &Value) -> Result<Document, String> {
             ellipse_ids.push(NodeId::from_static(node_id.clone()));
         }
         if node.kind == NodeKind::Component {
-            if let Some(table) = convert_variant_overrides(raw.get("variantOverrides"), &token_colors)
+            if let Some(table) =
+                convert_variant_overrides(raw.get("variantOverrides"), &token_colors)
             {
                 variant_table.insert(node_id.clone(), table);
             }
@@ -384,7 +378,7 @@ fn place_pages_side_by_side(nodes: &mut HashMap<NodeId, Node>, page_ids: &[(f64,
 fn finalize_layout(document: &mut Document) {
     // Use the engine's flex solver so flow children get real x/y.
     let mut engine = crate::engine::CanvasEngine::new(document.clone());
-    engine.resolve_all_stacks();
+    engine.reflow();
     *document = engine.document().clone();
 
     // Grow page heights to fit stacked content.
@@ -396,7 +390,10 @@ fn finalize_layout(document: &mut Document) {
         .collect();
     for page_id in page_ids {
         let mut max_bottom = 0.0_f64;
-        for child in document.nodes.values().filter(|n| n.parent_id.as_ref() == Some(&page_id))
+        for child in document
+            .nodes
+            .values()
+            .filter(|n| n.parent_id.as_ref() == Some(&page_id))
         {
             if child.hidden {
                 continue;
@@ -412,7 +409,7 @@ fn finalize_layout(document: &mut Document) {
 
     // One more pass after page heights change (fill children).
     let mut engine = crate::engine::CanvasEngine::new(document.clone());
-    engine.resolve_all_stacks();
+    engine.reflow();
     *document = engine.document().clone();
 }
 
@@ -429,8 +426,7 @@ fn convert_tokens(value: Option<&Value>) -> Vec<DesignToken> {
             .to_string();
         let value = token.get("value").cloned().unwrap_or(Value::Null);
         let color = if token_type == "color" {
-            parse_color_value(Some(&value), &HashMap::new())
-                .unwrap_or(Color::rgb(0x80, 0x80, 0x80))
+            parse_color_value(Some(&value), &HashMap::new()).unwrap_or(Color::rgb(0x80, 0x80, 0x80))
         } else {
             Color::rgb(0x80, 0x80, 0x80)
         };
@@ -641,21 +637,11 @@ fn convert_node(
         other => return Err(format!("unsupported node type: {other}")),
     };
 
-    let is_root_frame = kind == NodeKind::Frame
-        && raw
-            .get("parentId")
-            .and_then(Value::as_str)
-            .is_none();
-    let pending = convert_pending_layout(
-        raw.get("layout"),
-        is_root_frame,
-        raw.get("viewport"),
-    );
+    let is_root_frame =
+        kind == NodeKind::Frame && raw.get("parentId").and_then(Value::as_str).is_none();
+    let pending = convert_pending_layout(raw.get("layout"), is_root_frame, raw.get("viewport"));
     let style = convert_style(raw.get("style"), tokens);
-    let text = raw
-        .get("text")
-        .and_then(|v| v.as_str())
-        .map(str::to_string);
+    let text = raw.get("text").and_then(|v| v.as_str()).map(str::to_string);
     let typography = convert_typography(raw.get("style"), tokens, text.as_deref());
 
     let mut node = Node {
@@ -676,10 +662,7 @@ fn convert_node(
         layout: Layout::new(pending.x, pending.y, 1.0, 1.0),
         style,
         text,
-        font_size: typography
-            .as_ref()
-            .map(|t| t.size)
-            .unwrap_or(16.0),
+        font_size: typography.as_ref().map(|t| t.size).unwrap_or(16.0),
         typography,
         image_path: raw.get("src").and_then(Value::as_str).map(str::to_string),
         image_alt: raw
@@ -812,7 +795,10 @@ fn convert_text_runs(value: Option<&Value>, tokens: &HashMap<String, Color>) -> 
 
 fn convert_typography_patch(value: &Value) -> TypographyPatch {
     TypographyPatch {
-        family: value.get("family").and_then(Value::as_str).map(str::to_string),
+        family: value
+            .get("family")
+            .and_then(Value::as_str)
+            .map(str::to_string),
         size: value.get("size").and_then(Value::as_f64).map(|v| v as f32),
         weight: value
             .get("weight")
@@ -828,7 +814,10 @@ fn convert_typography_patch(value: &Value) -> TypographyPatch {
             .or_else(|| value.get("letter_spacing"))
             .and_then(Value::as_f64)
             .map(|v| v as f32),
-        align: value.get("align").and_then(Value::as_str).map(str::to_string),
+        align: value
+            .get("align")
+            .and_then(Value::as_str)
+            .map(str::to_string),
         wrap: value.get("wrap").and_then(Value::as_bool),
         decoration: value
             .get("decoration")
@@ -981,10 +970,7 @@ fn convert_interactions(value: Option<&Value>) -> Vec<Interaction> {
                             .or_else(|| action.get("node_id"))?
                             .as_str()?
                             .to_string(),
-                        value: action
-                            .get("value")?
-                            .as_str()?
-                            .to_string(),
+                        value: action.get("value")?.as_str()?.to_string(),
                     }),
                     Some("open-overlay") | Some("open_overlay") => {
                         Some(CanvasAction::OpenOverlay {
@@ -1210,11 +1196,13 @@ fn convert_layout_patch(value: &Value) -> LayoutPatch {
             .then(|| object.get(key).and_then(Value::as_f64))
     };
     LayoutPatch {
-        position: object.get("position").and_then(|value| match value.as_str()? {
-            "flow" => Some(LayoutPosition::Flow),
-            "absolute" => Some(LayoutPosition::Absolute),
-            _ => None,
-        }),
+        position: object
+            .get("position")
+            .and_then(|value| match value.as_str()? {
+                "flow" => Some(LayoutPosition::Flow),
+                "absolute" => Some(LayoutPosition::Absolute),
+                _ => None,
+            }),
         x: object.get("x").and_then(Value::as_f64),
         y: object.get("y").and_then(Value::as_f64),
         width: object.get("width").map(parse_dimension_patch),
@@ -1230,23 +1218,27 @@ fn convert_layout_patch(value: &Value) -> LayoutPatch {
             "grid" => Some(LayoutMode::Grid),
             _ => None,
         }),
-        direction: object.get("direction").and_then(|value| match value.as_str()? {
-            "row" => Some(FlexDirection::Row),
-            "column" => Some(FlexDirection::Column),
-            _ => None,
-        }),
+        direction: object
+            .get("direction")
+            .and_then(|value| match value.as_str()? {
+                "row" => Some(FlexDirection::Row),
+                "column" => Some(FlexDirection::Column),
+                _ => None,
+            }),
         wrap: object.get("wrap").and_then(Value::as_bool),
         gap: object.get("gap").and_then(Value::as_f64).map(|v| v as f32),
         padding: object.get("padding").map(|value| parse_insets(Some(value))),
         align: object.get("align").and_then(parse_align_value),
-        justify: object.get("justify").and_then(|value| match value.as_str()? {
-            "start" => Some(LayoutJustify::Start),
-            "center" => Some(LayoutJustify::Center),
-            "end" => Some(LayoutJustify::End),
-            "space-between" | "space_between" => Some(LayoutJustify::SpaceBetween),
-            "space-around" | "space_around" => Some(LayoutJustify::SpaceAround),
-            _ => None,
-        }),
+        justify: object
+            .get("justify")
+            .and_then(|value| match value.as_str()? {
+                "start" => Some(LayoutJustify::Start),
+                "center" => Some(LayoutJustify::Center),
+                "end" => Some(LayoutJustify::End),
+                "space-between" | "space_between" => Some(LayoutJustify::SpaceBetween),
+                "space-around" | "space_around" => Some(LayoutJustify::SpaceAround),
+                _ => None,
+            }),
         columns: object
             .get("columns")
             .and_then(Value::as_u64)
@@ -1255,9 +1247,12 @@ fn convert_layout_patch(value: &Value) -> LayoutPatch {
             .contains_key("alignSelf")
             .then(|| object.get("alignSelf").and_then(parse_align_value)),
         grow: object.get("grow").and_then(Value::as_f64).map(|v| v as f32),
-        shrink: object
-            .contains_key("shrink")
-            .then(|| object.get("shrink").and_then(Value::as_f64).map(|v| v as f32)),
+        shrink: object.contains_key("shrink").then(|| {
+            object
+                .get("shrink")
+                .and_then(Value::as_f64)
+                .map(|v| v as f32)
+        }),
     }
 }
 
@@ -1302,25 +1297,33 @@ fn convert_style_patch(value: &Value, tokens: &HashMap<String, Color>) -> StyleP
             .get("radius")
             .or_else(|| object.get("corners"))
             .map(parse_corners),
-        shadows: object.get("shadows").and_then(Value::as_array).map(|shadows| {
-            shadows
-                .iter()
-                .map(|shadow| convert_shadow(shadow, tokens))
-                .collect()
-        }),
+        shadows: object
+            .get("shadows")
+            .and_then(Value::as_array)
+            .map(|shadows| {
+                shadows
+                    .iter()
+                    .map(|shadow| convert_shadow(shadow, tokens))
+                    .collect()
+            }),
         opacity: object
             .get("opacity")
             .and_then(Value::as_f64)
             .map(|v| v as f32),
-        overflow: object.get("overflow").and_then(|value| match value.as_str()? {
-            "visible" => Some(Overflow::Visible),
-            "hidden" => Some(Overflow::Hidden),
-            "auto" => Some(Overflow::Auto),
-            _ => None,
+        overflow: object
+            .get("overflow")
+            .and_then(|value| match value.as_str()? {
+                "visible" => Some(Overflow::Visible),
+                "hidden" => Some(Overflow::Hidden),
+                "auto" => Some(Overflow::Auto),
+                _ => None,
+            }),
+        blend_mode: object.contains_key("blendMode").then(|| {
+            object
+                .get("blendMode")
+                .and_then(Value::as_str)
+                .map(str::to_string)
         }),
-        blend_mode: object
-            .contains_key("blendMode")
-            .then(|| object.get("blendMode").and_then(Value::as_str).map(str::to_string)),
         typography: object
             .get("typography")
             .map(convert_typography_patch)
@@ -1415,11 +1418,11 @@ fn convert_pending_layout(
         align: parse_align(layout.get("align")),
         justify: parse_justify(layout.get("justify")),
         gap: layout.get("gap").and_then(|v| v.as_f64()).unwrap_or(0.0) as f32,
-        wrap: layout.get("wrap").and_then(|v| v.as_bool()).unwrap_or(false),
-        columns: layout
-            .get("columns")
-            .and_then(|v| v.as_u64())
-            .unwrap_or(2) as u32,
+        wrap: layout
+            .get("wrap")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false),
+        columns: layout.get("columns").and_then(|v| v.as_u64()).unwrap_or(2) as u32,
         padding: parse_insets(layout.get("padding")),
         position: match layout.get("position").and_then(|v| v.as_str()) {
             Some("flow") => LayoutPosition::Flow,
@@ -1431,10 +1434,7 @@ fn convert_pending_layout(
         max_height: layout.get("maxHeight").and_then(|v| v.as_f64()),
         aspect_ratio: layout.get("aspectRatio").and_then(|v| v.as_f64()),
         align_self: layout.get("alignSelf").and_then(parse_align_value),
-        grow: layout
-            .get("grow")
-            .and_then(|v| v.as_f64())
-            .unwrap_or(0.0) as f32,
+        grow: layout.get("grow").and_then(|v| v.as_f64()).unwrap_or(0.0) as f32,
         shrink: layout
             .get("shrink")
             .and_then(|v| v.as_f64())
@@ -1463,9 +1463,7 @@ fn parse_dim(value: Option<&Value>) -> Dim {
     }
     match value.get("unit").and_then(|v| v.as_str()) {
         Some("px") => Dim::Px(value.get("value").and_then(|v| v.as_f64()).unwrap_or(0.0)),
-        Some("percent") => {
-            Dim::Percent(value.get("value").and_then(Value::as_f64).unwrap_or(0.0))
-        }
+        Some("percent") => Dim::Percent(value.get("value").and_then(Value::as_f64).unwrap_or(0.0)),
         Some("fill") => Dim::Fill,
         _ => Dim::Hug,
     }
@@ -1570,10 +1568,7 @@ fn convert_shadow(value: &Value, tokens: &HashMap<String, Color>) -> Shadow {
         x: value.get("x").and_then(Value::as_f64).unwrap_or(0.0) as f32,
         y: value.get("y").and_then(Value::as_f64).unwrap_or(0.0) as f32,
         blur: value.get("blur").and_then(Value::as_f64).unwrap_or(0.0) as f32,
-        spread: value
-            .get("spread")
-            .and_then(Value::as_f64)
-            .unwrap_or(0.0) as f32,
+        spread: value.get("spread").and_then(Value::as_f64).unwrap_or(0.0) as f32,
         inset: value.get("inset").and_then(Value::as_bool).unwrap_or(false),
     }
 }
@@ -1620,10 +1615,7 @@ fn convert_style(style: Option<&Value>, tokens: &HashMap<String, Color>) -> Styl
         fills,
         stroke,
         corners,
-        opacity: style
-            .get("opacity")
-            .and_then(|v| v.as_f64())
-            .unwrap_or(1.0) as f32,
+        opacity: style.get("opacity").and_then(|v| v.as_f64()).unwrap_or(1.0) as f32,
         shadows,
         overflow,
         blend_mode: style
@@ -1648,10 +1640,8 @@ fn convert_paint(fill: &Value, tokens: &HashMap<String, Color>) -> Option<Paint>
                     arr.iter()
                         .filter_map(|stop| {
                             Some(crate::model::GradientStop {
-                                offset: stop
-                                    .get("offset")
-                                    .and_then(|v| v.as_f64())
-                                    .unwrap_or(0.0) as f32,
+                                offset: stop.get("offset").and_then(|v| v.as_f64()).unwrap_or(0.0)
+                                    as f32,
                                 color: resolve_color(stop.get("color"), tokens)?,
                                 token_id: color_token_id(stop.get("color")),
                             })
@@ -1718,11 +1708,11 @@ fn convert_typography(
             .trim()
             .to_string(),
         size: typo.get("size").and_then(|v| v.as_f64()).unwrap_or(16.0) as f32,
-        weight: typo
-            .get("weight")
-            .and_then(|v| v.as_u64())
-            .unwrap_or(400) as u16,
-        line_height: typo.get("lineHeight").and_then(|v| v.as_f64()).map(|v| v as f32),
+        weight: typo.get("weight").and_then(|v| v.as_u64()).unwrap_or(400) as u16,
+        line_height: typo
+            .get("lineHeight")
+            .and_then(|v| v.as_f64())
+            .map(|v| v as f32),
         letter_spacing: typo
             .get("letterSpacing")
             .and_then(|v| v.as_f64())
@@ -1789,10 +1779,7 @@ fn convert_transition(value: Option<&Value>) -> Option<Transition> {
     })
 }
 
-fn convert_responsive(
-    value: Option<&Value>,
-    tokens: &HashMap<String, Color>,
-) -> ResponsiveMap {
+fn convert_responsive(value: Option<&Value>, tokens: &HashMap<String, Color>) -> ResponsiveMap {
     let Some(obj) = value.and_then(|v| v.as_object()) else {
         return ResponsiveMap::new();
     };
@@ -1908,34 +1895,35 @@ fn resolve_sizes(
         .collect();
 
     for page_id in &page_ids {
-        let pending_page = pending
-            .get(page_id.as_str())
-            .cloned()
-            .unwrap_or_else(|| PendingLayout {
-                x: 0.0,
-                y: 0.0,
-                width: Dim::Px(1440.0),
-                height: Dim::Px(900.0),
-                mode: LayoutMode::Flex,
-                direction: FlexDirection::Column,
-                align: LayoutAlign::Stretch,
-                justify: LayoutJustify::Start,
-                gap: 0.0,
-                wrap: false,
-                columns: 2,
-                padding: Insets::default(),
-                position: LayoutPosition::Absolute,
-                min_width: None,
-                max_width: None,
-                min_height: None,
-                max_height: None,
-                aspect_ratio: None,
-                align_self: None,
-                grow: 0.0,
-                shrink: None,
-                viewport_width: Some(1440.0),
-                viewport_min_height: Some(900.0),
-            });
+        let pending_page =
+            pending
+                .get(page_id.as_str())
+                .cloned()
+                .unwrap_or_else(|| PendingLayout {
+                    x: 0.0,
+                    y: 0.0,
+                    width: Dim::Px(1440.0),
+                    height: Dim::Px(900.0),
+                    mode: LayoutMode::Flex,
+                    direction: FlexDirection::Column,
+                    align: LayoutAlign::Stretch,
+                    justify: LayoutJustify::Start,
+                    gap: 0.0,
+                    wrap: false,
+                    columns: 2,
+                    padding: Insets::default(),
+                    position: LayoutPosition::Absolute,
+                    min_width: None,
+                    max_width: None,
+                    min_height: None,
+                    max_height: None,
+                    aspect_ratio: None,
+                    align_self: None,
+                    grow: 0.0,
+                    shrink: None,
+                    viewport_width: Some(1440.0),
+                    viewport_min_height: Some(900.0),
+                });
         let viewport_width = pending_page.viewport_width.unwrap_or(1440.0);
         let viewport_height = pending_page.viewport_min_height.unwrap_or(900.0);
         let w = match pending_page.width {
@@ -1968,8 +1956,7 @@ fn resolve_sizes(
             continue;
         };
         let estimate = estimate_hug(nodes.get(&id));
-        let (mut w, mut h) =
-            concrete_dim(&p.width, &p.height, 1440.0, 900.0, Some(estimate));
+        let (mut w, mut h) = concrete_dim(&p.width, &p.height, 1440.0, 900.0, Some(estimate));
         w = w.max(1.0);
         h = h.max(1.0);
         if let Some(node) = nodes.get_mut(&id) {
@@ -2027,8 +2014,7 @@ fn resolve_subtree(
             continue;
         };
         let estimate = estimate_hug(nodes.get(child_id));
-        let (mut w, mut h) =
-            concrete_dim(&p.width, &p.height, inner_w, inner_h, Some(estimate));
+        let (mut w, mut h) = concrete_dim(&p.width, &p.height, inner_w, inner_h, Some(estimate));
         if let Some(min) = p.min_width {
             w = w.max(min);
         }
@@ -2133,10 +2119,7 @@ fn measure_from_children(
             max_r = max_r.max(child.layout.x + child.layout.width);
             max_b = max_b.max(child.layout.y + child.layout.height);
         }
-        return Some((
-            max_r + pad.right as f64,
-            max_b + pad.bottom as f64,
-        ));
+        return Some((max_r + pad.right as f64, max_b + pad.bottom as f64));
     }
 
     if is_row {

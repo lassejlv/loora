@@ -113,7 +113,10 @@ fn hit_test_frontmost() {
         Some(&back_id)
     );
     // Empty space on the page selects the page; outside all pages is a miss.
-    assert_eq!(engine.hit_test(Vec2::new(200.0, 200.0)).as_ref(), Some(&page));
+    assert_eq!(
+        engine.hit_test(Vec2::new(200.0, 200.0)).as_ref(),
+        Some(&page)
+    );
     assert_eq!(engine.hit_test(Vec2::new(2000.0, 2000.0)), None);
 }
 
@@ -196,11 +199,7 @@ fn page_resize_overrides_imported_viewport_minimum() {
 fn direct_page_child_drag_uses_world_coordinates() {
     let mut engine = CanvasEngine::new(loora_engine::Document::empty("page child drag"));
     let page = engine.root_page_id().clone();
-    let child = Node::rectangle(
-        "Child",
-        page.clone(),
-        Layout::new(20.0, 30.0, 40.0, 50.0),
-    );
+    let child = Node::rectangle("Child", page.clone(), Layout::new(20.0, 30.0, 40.0, 50.0));
     let child_id = child.id.clone();
     engine
         .apply(
@@ -223,11 +222,7 @@ fn direct_page_child_drag_uses_world_coordinates() {
     assert_eq!(engine.node(&child_id).unwrap().layout.y, 60.0);
 
     engine
-        .set_world_bounds(
-            &child_id,
-            Bounds::new(700.0, 300.0, 80.0, 90.0),
-            None,
-        )
+        .set_world_bounds(&child_id, Bounds::new(700.0, 300.0, 80.0, 90.0), None)
         .unwrap();
     assert_eq!(
         engine.absolute_bounds(&child_id),
@@ -293,11 +288,7 @@ fn browser_drop_target_origin_does_not_shift_reparented_drag() {
         Layout::new(100.0, 40.0, 240.0, 240.0),
     );
     let source_id = source.id.clone();
-    let target = Node::frame(
-        "Target",
-        page,
-        Layout::new(400.0, 40.0, 240.0, 240.0),
-    );
+    let target = Node::frame("Target", page, Layout::new(400.0, 40.0, 240.0, 240.0));
     let target_id = target.id.clone();
     let child = Node::rectangle(
         "Dragged child",
@@ -341,11 +332,7 @@ fn browser_drop_target_origin_does_not_shift_reparented_drag() {
 fn browser_flow_leading_edge_resize_preserves_rendered_bounds() {
     let mut document = Document::empty("browser flow resize");
     let page = document.root_page_id.clone();
-    let parent = Node::frame(
-        "Flow parent",
-        page,
-        Layout::new(100.0, 40.0, 400.0, 300.0),
-    );
+    let parent = Node::frame("Flow parent", page, Layout::new(100.0, 40.0, 400.0, 300.0));
     let parent_id = parent.id.clone();
     let mut child = Node::rectangle(
         "Flow child",
@@ -361,13 +348,7 @@ fn browser_flow_leading_edge_resize_preserves_rendered_bounds() {
     let browser_parent_origin = Vec2::new(140.0, 70.0);
     let requested = Bounds::new(170.0, 85.0, 110.0, 75.0);
     engine
-        .set_rendered_world_bounds(
-            &child_id,
-            requested,
-            browser_parent_origin,
-            true,
-            None,
-        )
+        .set_rendered_world_bounds(&child_id, requested, browser_parent_origin, true, None)
         .unwrap();
 
     let committed = engine.node(&child_id).unwrap();
@@ -435,10 +416,7 @@ fn hidden_skipped_in_hit_test() {
         .unwrap();
     engine.set_hidden(&id, true).unwrap();
     // Hidden child is skipped; empty page area selects the page.
-    assert_eq!(
-        engine.hit_test(Vec2::new(10.0, 10.0)).as_ref(),
-        Some(&page)
-    );
+    assert_eq!(engine.hit_test(Vec2::new(10.0, 10.0)).as_ref(), Some(&page));
 }
 
 #[test]

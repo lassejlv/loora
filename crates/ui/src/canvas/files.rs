@@ -4,7 +4,7 @@ use gpui::{
 };
 use loora_engine::DesignFileInfo;
 
-use crate::canvas::workspace::CanvasWorkspace;
+use crate::canvas::workspace::{command_action_count, CanvasWorkspace};
 use crate::icon::{Icon, IconName};
 use crate::motion::{Ease, Motion, MotionStyle, Transition};
 use crate::text_field::editable_field_content;
@@ -20,7 +20,10 @@ pub struct FilesCommandDialog {
     query: String,
     selected_index: usize,
     selection: Option<(usize, usize)>,
+    mcp_subcommands_open: bool,
     dirty: bool,
+    mcp_available: bool,
+    mcp_setup_status: Option<(String, bool)>,
 }
 
 impl FilesCommandDialog {
@@ -32,7 +35,10 @@ impl FilesCommandDialog {
         query: String,
         selected_index: usize,
         selection: Option<(usize, usize)>,
+        mcp_subcommands_open: bool,
         dirty: bool,
+        mcp_available: bool,
+        mcp_setup_status: Option<(String, bool)>,
     ) -> Self {
         Self {
             workspace,
@@ -42,7 +48,10 @@ impl FilesCommandDialog {
             query,
             selected_index,
             selection,
+            mcp_subcommands_open,
             dirty,
+            mcp_available,
+            mcp_setup_status,
         }
     }
 }
@@ -55,12 +64,19 @@ impl RenderOnce for FilesCommandDialog {
         let query = self.query;
         let selected_index = self.selected_index;
         let selection = self.selection;
+        let mcp_subcommands_open = self.mcp_subcommands_open;
         let dirty = self.dirty;
+        let mcp_available = self.mcp_available;
+        let mcp_setup_status = self.mcp_setup_status;
+        let action_count = command_action_count(mcp_available, mcp_subcommands_open);
 
         let filtered: Vec<DesignFileInfo> = self
             .files
             .into_iter()
             .filter(|file| {
+                if mcp_subcommands_open {
+                    return false;
+                }
                 query.is_empty() || file.name.to_lowercase().contains(&query.to_lowercase())
             })
             .collect();
@@ -101,169 +117,302 @@ impl RenderOnce for FilesCommandDialog {
                             .on_mouse_down(gpui::MouseButton::Left, |_, _, cx| {
                                 cx.stop_propagation()
                             })
-                            .child(
-                                div()
-                                    .id("files-search")
-                                    .flex()
-                                    .items_center()
-                                    .gap_3()
-                                    .h(px(52.))
-                                    .px_4()
-                                    .border_b_1()
-                                    .border_color(theme.hairline_soft())
-                                    .on_mouse_down(gpui::MouseButton::Left, {
-                                        let workspace = workspace.clone();
-                                        move |event, window, cx| {
-                                            cx.stop_propagation();
-                                            workspace.update(cx, |this, cx| {
-                                                this.focus_command_input(
-                                                    event.click_count,
-                                                    window,
-                                                    cx,
-                                                );
-                                            });
-                                        }
-                                    })
-                                    .when(selection.is_some(), |this| {
-                                        let workspace = workspace.clone();
-                                        this.on_mouse_down_out(move |_, _, cx| {
-                                            workspace.update(cx, |this, cx| {
-                                                this.blur_command_input(cx)
-                                            });
+                            .when(!mcp_subcommands_open, |this| {
+                                this.child(
+                                    div()
+                                        .id("files-search")
+                                        .flex()
+                                        .items_center()
+                                        .gap_3()
+                                        .h(px(52.))
+                                        .px_4()
+                                        .border_b_1()
+                                        .border_color(theme.hairline_soft())
+                                        .on_mouse_down(gpui::MouseButton::Left, {
+                                            let workspace = workspace.clone();
+                                            move |event, window, cx| {
+                                                cx.stop_propagation();
+                                                workspace.update(cx, |this, cx| {
+                                                    this.focus_command_input(
+                                                        event.click_count,
+                                                        window,
+                                                        cx,
+                                                    );
+                                                });
+                                            }
                                         })
-                                    })
-                                    .child(
-                                        Icon::hugeicon(IconName::Search)
-                                            .size(px(16.))
-                                            .text_color(theme.muted),
-                                    )
-                                    .child(editable_field_content(
-                                        query.clone(),
-                                        "Search designs…",
-                                        selection,
-                                        theme.bright_white,
-                                        theme.muted,
-                                        theme.bright_white,
-                                        theme.highlight_fill(),
-                                        px(15.),
-                                        px(18.),
-                                    ))
-                                    .child(
-                                        div()
-                                            .text_size(px(11.))
-                                            .text_color(theme.muted)
-                                            .child("esc"),
-                                    ),
-                            )
+                                        .when(selection.is_some(), |this| {
+                                            let workspace = workspace.clone();
+                                            this.on_mouse_down_out(move |_, _, cx| {
+                                                workspace.update(cx, |this, cx| {
+                                                    this.blur_command_input(cx)
+                                                });
+                                            })
+                                        })
+                                        .child(
+                                            Icon::hugeicon(IconName::Search)
+                                                .size(px(16.))
+                                                .text_color(theme.muted),
+                                        )
+                                        .child(editable_field_content(
+                                            query.clone(),
+                                            "Search designs…",
+                                            selection,
+                                            theme.bright_white,
+                                            theme.muted,
+                                            theme.bright_white,
+                                            theme.highlight_fill(),
+                                            px(15.),
+                                            px(18.),
+                                        ))
+                                        .child(
+                                            div()
+                                                .text_size(px(11.))
+                                                .text_color(theme.muted)
+                                                .child("esc"),
+                                        ),
+                                )
+                            })
+                            .when(mcp_subcommands_open, |this| {
+                                this.child(
+                                    div()
+                                        .id("mcp-command-heading")
+                                        .flex()
+                                        .items_center()
+                                        .gap_3()
+                                        .h(px(52.))
+                                        .px_4()
+                                        .border_b_1()
+                                        .border_color(theme.hairline_soft())
+                                        .child(
+                                            Icon::hugeicon(IconName::Copy)
+                                                .size(px(16.))
+                                                .text_color(theme.muted),
+                                        )
+                                        .child(
+                                            div()
+                                                .flex_1()
+                                                .text_size(px(14.))
+                                                .font_weight(FontWeight::MEDIUM)
+                                                .text_color(theme.bright_white)
+                                                .child("MCP server"),
+                                        )
+                                        .child(
+                                            div()
+                                                .text_size(px(11.))
+                                                .text_color(theme.muted)
+                                                .child("esc back"),
+                                        ),
+                                )
+                            })
                             .child(
                                 div()
+                                    .id("files-command-actions")
                                     .flex()
                                     .flex_col()
                                     .flex_1()
-                                    .py_1p5()
-                                    .px_1p5()
-                                    .gap_0p5()
-                                    .overflow_hidden()
-                                    .child(action_row(
-                                        workspace.clone(),
-                                        theme,
-                                        "new-design-cmd",
-                                        IconName::Add,
-                                        "New design",
-                                        Some("⌘N"),
-                                        false,
-                                        selected_index == 0,
-                                        |this, cx| {
-                                            this.create_design(cx);
-                                            this.close_command_dialog(cx);
-                                        },
-                                    ))
-                                    .child(action_row(
-                                        workspace.clone(),
-                                        theme,
-                                        "import-designs-cmd",
-                                        IconName::Layers,
-                                        "Import designs…",
-                                        None,
-                                        false,
-                                        selected_index == 1,
-                                        |this, cx| {
-                                            this.close_command_dialog(cx);
-                                            this.prompt_import_designs(cx);
-                                        },
-                                    ))
-                                    .child(action_row(
-                                        workspace.clone(),
-                                        theme,
-                                        "import-luuma-cmd",
-                                        IconName::Folder,
-                                        "Import from Luuma folder",
-                                        None,
-                                        false,
-                                        selected_index == 2,
-                                        |this, cx| {
-                                            this.import_from_luuma_folder(cx);
-                                            this.close_command_dialog(cx);
-                                        },
-                                    ))
-                                    .child(action_row(
-                                        workspace.clone(),
-                                        theme,
-                                        "export-design-cmd",
-                                        IconName::Layers,
-                                        "Export design…",
-                                        None,
-                                        false,
-                                        selected_index == 3,
-                                        |this, cx| {
-                                            this.close_command_dialog(cx);
-                                            this.prompt_export_design(cx);
-                                        },
-                                    ))
-                                    .child(action_row(
-                                        workspace.clone(),
-                                        theme,
-                                        "toggle-theme-cmd",
-                                        IconName::View,
-                                        if theme.is_dark() {
-                                            "Switch to light theme"
-                                        } else {
-                                            "Switch to dark theme"
-                                        },
-                                        None,
-                                        false,
-                                        selected_index == 4,
-                                        |this, cx| {
-                                            this.toggle_ui_theme(cx);
-                                            this.close_command_dialog(cx);
-                                        },
-                                    ))
-                                    .when(filtered.is_empty(), |this| {
-                                        this.child(
-                                            div()
-                                                .px_3()
-                                                .py_4()
-                                                .text_size(px(12.))
-                                                .text_color(theme.muted)
-                                                .child(if query.is_empty() {
-                                                    "No designs yet. Create one or import from Luuma."
-                                                } else {
-                                                    "No designs match your search."
-                                                }),
-                                        )
-                                    })
-                                    .children(filtered.into_iter().enumerate().map(|(i, file)| {
-                                        let selected = file.id == active_id;
-                                        let highlighted = selected_index == i + 5;
-                                        file_row(
+                                    .py_2()
+                                    .px_2()
+                                    .gap_1()
+                                    .overflow_y_scroll()
+                                    .when(!mcp_subcommands_open, |this| {
+                                        this.child(action_row(
                                             workspace.clone(),
                                             theme,
-                                            file,
-                                            selected,
-                                            highlighted,
-                                            dirty && selected,
-                                        )
-                                    })),
+                                            "new-design-cmd",
+                                            IconName::Add,
+                                            "New design",
+                                            Some("⌘N"),
+                                            false,
+                                            selected_index == 0,
+                                            |this, cx| {
+                                                this.create_design(cx);
+                                                this.close_command_dialog(cx);
+                                            },
+                                        ))
+                                        .child(action_row(
+                                            workspace.clone(),
+                                            theme,
+                                            "import-designs-cmd",
+                                            IconName::Layers,
+                                            "Import designs…",
+                                            None,
+                                            false,
+                                            selected_index == 1,
+                                            |this, cx| {
+                                                this.close_command_dialog(cx);
+                                                this.prompt_import_designs(cx);
+                                            },
+                                        ))
+                                        .child(action_row(
+                                            workspace.clone(),
+                                            theme,
+                                            "import-luuma-cmd",
+                                            IconName::Folder,
+                                            "Import from Luuma folder",
+                                            None,
+                                            false,
+                                            selected_index == 2,
+                                            |this, cx| {
+                                                this.import_from_luuma_folder(cx);
+                                                this.close_command_dialog(cx);
+                                            },
+                                        ))
+                                        .child(action_row(
+                                            workspace.clone(),
+                                            theme,
+                                            "export-design-cmd",
+                                            IconName::Layers,
+                                            "Export design…",
+                                            None,
+                                            false,
+                                            selected_index == 3,
+                                            |this, cx| {
+                                                this.close_command_dialog(cx);
+                                                this.prompt_export_design(cx);
+                                            },
+                                        ))
+                                        .child(action_row(
+                                            workspace.clone(),
+                                            theme,
+                                            "toggle-theme-cmd",
+                                            IconName::View,
+                                            if theme.is_dark() {
+                                                "Switch to light theme"
+                                            } else {
+                                                "Switch to dark theme"
+                                            },
+                                            None,
+                                            false,
+                                            selected_index == 4,
+                                            |this, cx| {
+                                                this.toggle_ui_theme(cx);
+                                                this.close_command_dialog(cx);
+                                            },
+                                        ))
+                                        .when(mcp_available, |this| {
+                                            this.child(action_row(
+                                                workspace.clone(),
+                                                theme,
+                                                "mcp-server-cmd",
+                                                IconName::Copy,
+                                                "MCP server",
+                                                Some("↵"),
+                                                false,
+                                                selected_index == 5,
+                                                |this, cx| this.open_mcp_commands(cx),
+                                            ))
+                                        })
+                                        .when(filtered.is_empty(), |this| {
+                                            this.child(
+                                                div()
+                                                    .px_3()
+                                                    .py_4()
+                                                    .text_size(px(12.))
+                                                    .text_color(theme.muted)
+                                                    .child(if query.is_empty() {
+                                                        "No designs yet. Create one or import from Luuma."
+                                                    } else {
+                                                        "No designs match your search."
+                                                    }),
+                                            )
+                                        })
+                                        .children(filtered.into_iter().enumerate().map(
+                                            |(i, file)| {
+                                                let selected = file.id == active_id;
+                                                let highlighted =
+                                                    selected_index == i + action_count;
+                                                file_row(
+                                                    workspace.clone(),
+                                                    theme,
+                                                    file,
+                                                    selected,
+                                                    highlighted,
+                                                    dirty && selected,
+                                                )
+                                            },
+                                        ))
+                                    })
+                                    .when(mcp_subcommands_open, |this| {
+                                        this.child(action_row(
+                                            workspace.clone(),
+                                            theme,
+                                            "copy-mcp-url-cmd",
+                                            IconName::Copy,
+                                            "Copy MCP URL",
+                                            None,
+                                            false,
+                                            selected_index == 0,
+                                            |this, cx| {
+                                                this.copy_mcp_url(cx);
+                                                this.close_command_dialog(cx);
+                                            },
+                                        ))
+                                        .child(action_row(
+                                            workspace.clone(),
+                                            theme,
+                                            "add-mcp-claude-cmd",
+                                            IconName::Message,
+                                            "Add to Claude",
+                                            None,
+                                            false,
+                                            selected_index == 1,
+                                            |this, cx| {
+                                                this.add_mcp_to_client(
+                                                    loora_mcp::McpClient::Claude,
+                                                    cx,
+                                                )
+                                            },
+                                        ))
+                                        .child(action_row(
+                                            workspace.clone(),
+                                            theme,
+                                            "add-mcp-codex-cmd",
+                                            IconName::Diamond,
+                                            "Add to Codex",
+                                            None,
+                                            false,
+                                            selected_index == 2,
+                                            |this, cx| {
+                                                this.add_mcp_to_client(
+                                                    loora_mcp::McpClient::Codex,
+                                                    cx,
+                                                )
+                                            },
+                                        ))
+                                        .child(action_row(
+                                            workspace.clone(),
+                                            theme,
+                                            "add-mcp-cursor-cmd",
+                                            IconName::Cursor,
+                                            "Add to Cursor",
+                                            None,
+                                            false,
+                                            selected_index == 3,
+                                            |this, cx| {
+                                                this.add_mcp_to_client(
+                                                    loora_mcp::McpClient::Cursor,
+                                                    cx,
+                                                )
+                                            },
+                                        ))
+                                        .child(action_row(
+                                            workspace.clone(),
+                                            theme,
+                                            "add-mcp-opencode-cmd",
+                                            IconName::PenTool,
+                                            "Add to OpenCode",
+                                            None,
+                                            false,
+                                            selected_index == 4,
+                                            |this, cx| {
+                                                this.add_mcp_to_client(
+                                                    loora_mcp::McpClient::OpenCode,
+                                                    cx,
+                                                )
+                                            },
+                                        ))
+                                    }),
                             )
                             .child(
                                 div()
@@ -274,13 +423,38 @@ impl RenderOnce for FilesCommandDialog {
                                     .px_4()
                                     .border_t_1()
                                     .border_color(theme.hairline_soft())
-                                    .child(div().text_size(px(11.)).text_color(theme.muted).child(
-                                        if dirty {
-                                            "Autosaving current file…"
-                                        } else {
-                                            "Saved locally"
-                                        },
-                                    ))
+                                    .child(
+                                        div()
+                                            .min_w_0()
+                                            .flex_1()
+                                            .text_ellipsis()
+                                            .text_size(px(11.))
+                                            .text_color(
+                                                mcp_setup_status
+                                                    .as_ref()
+                                                    .map(|(_, success)| {
+                                                        if *success {
+                                                            theme.green
+                                                        } else {
+                                                            theme.red
+                                                        }
+                                                    })
+                                                    .unwrap_or(theme.muted),
+                                            )
+                                            .child(
+                                                mcp_setup_status
+                                                    .map(|(message, _)| message)
+                                                    .unwrap_or_else(|| {
+                                                        if mcp_subcommands_open {
+                                                            "Local · no authentication".to_string()
+                                                        } else if dirty {
+                                                            "Autosaving current file…".to_string()
+                                                        } else {
+                                                            "Saved locally".to_string()
+                                                        }
+                                                    }),
+                                            ),
+                                    )
                                     .child(
                                         div()
                                             .flex()
@@ -289,7 +463,11 @@ impl RenderOnce for FilesCommandDialog {
                                             .text_size(px(11.))
                                             .text_color(theme.muted)
                                             .child("↑↓ navigate")
-                                            .child("↵ open"),
+                                            .child(if mcp_subcommands_open {
+                                                "↵ run"
+                                            } else {
+                                                "↵ open"
+                                            }),
                                     ),
                             ),
                     ),

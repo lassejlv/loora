@@ -149,9 +149,7 @@ pub fn shadow_section(
                 disabled,
                 {
                     let ws = workspace.clone();
-                    move |_, _, cx| {
-                        ws.update(cx, |this, cx| this.toggle_selection_shadow_inset(cx))
-                    }
+                    move |_, _, cx| ws.update(cx, |this, cx| this.toggle_selection_shadow_inset(cx))
                 },
             ))
         })

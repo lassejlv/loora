@@ -2,9 +2,9 @@ use std::collections::HashSet;
 use std::rc::Rc;
 
 use gpui::{
-    div, prelude::FluentBuilder, px, rgba, uniform_list, AppContext, Context, CursorStyle,
-    Entity, FontWeight, InteractiveElement, IntoElement, ParentElement, Render, RenderOnce,
-    SharedString, StatefulInteractiveElement, Styled, UniformListScrollHandle, Window,
+    div, prelude::FluentBuilder, px, rgba, uniform_list, AppContext, Context, CursorStyle, Entity,
+    FontWeight, InteractiveElement, IntoElement, ParentElement, Render, RenderOnce, SharedString,
+    StatefulInteractiveElement, Styled, UniformListScrollHandle, Window,
 };
 use loora_engine::{CanvasEngine, NodeId, NodeKind};
 
@@ -227,21 +227,19 @@ impl RenderOnce for LayerSidebar {
                         let row = row_rows[index].clone();
                         let selected = row_selection.contains(&row.id);
                         let renaming = row_rename_id.as_ref() == Some(&row.id);
-                        div()
-                            .h(px(LAYER_ROW_HEIGHT))
-                            .child(layer_row(
-                                row_workspace.clone(),
-                                theme,
-                                row,
-                                selected,
-                                renaming,
-                                if renaming {
-                                    row_rename_draft.clone()
-                                } else {
-                                    String::new()
-                                },
-                                renaming.then_some(row_rename_selection).flatten(),
-                            ))
+                        div().h(px(LAYER_ROW_HEIGHT)).child(layer_row(
+                            row_workspace.clone(),
+                            theme,
+                            row,
+                            selected,
+                            renaming,
+                            if renaming {
+                                row_rename_draft.clone()
+                            } else {
+                                String::new()
+                            },
+                            renaming.then_some(row_rename_selection).flatten(),
+                        ))
                     })
                     .collect::<Vec<_>>()
             })
@@ -310,11 +308,7 @@ impl RenderOnce for LayerSidebar {
                                 |this, cx| {
                                     if this.collapsed.is_empty() {
                                         for page in this.engine.page_ids() {
-                                            collapse_all(
-                                                &mut this.collapsed,
-                                                &this.engine,
-                                                &page,
-                                            );
+                                            collapse_all(&mut this.collapsed, &this.engine, &page);
                                         }
                                     } else {
                                         this.collapsed.clear();
@@ -405,9 +399,11 @@ impl RenderOnce for LayerSidebar {
                                 .child("No components. Use the ♦ tool to create one."),
                         )
                     })
-                    .children(self.components.into_iter().map(|(id, name)| {
-                        component_row(workspace.clone(), theme, id, name)
-                    })),
+                    .children(
+                        self.components
+                            .into_iter()
+                            .map(|(id, name)| component_row(workspace.clone(), theme, id, name)),
+                    ),
             )
     }
 }
@@ -779,8 +775,11 @@ mod tests {
         let page = doc.root_page_id.clone();
         for i in 0..nodes {
             if i % 8 == 0 {
-                let mut frame =
-                    Node::frame(format!("Frame {i}"), page.clone(), Layout::new(0.0, 0.0, 200.0, 100.0));
+                let mut frame = Node::frame(
+                    format!("Frame {i}"),
+                    page.clone(),
+                    Layout::new(0.0, 0.0, 200.0, 100.0),
+                );
                 frame.order = i as f64;
                 doc.nodes.insert(frame.id.clone(), frame);
             } else {

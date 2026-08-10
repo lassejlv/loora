@@ -9,6 +9,7 @@ crates/
   ui/        # Component library + canvas (`loora-ui`)
   router/    # React-Router style routing (`gpui-router`)
   engine/    # Document model, camera, local save (`loora-engine`)
+  mcp/       # Built-in local MCP server (`loora-mcp`)
   desktop/   # App binary (`loora`)
 ```
 
@@ -90,6 +91,13 @@ Or:
 ```sh
 cargo run --release -p loora-desktop
 ```
+
+While the desktop app is running, its no-auth MCP endpoint is available only
+on loopback at `http://127.0.0.1:6767/mcp`. Set `LOORA_MCP_PORT` to another
+valid local port before launch if needed. MCP mutations execute against the
+same live canvas engine and are persisted to the local design store.
+Open the command palette from the document title to copy the MCP URL or add
+Loora directly to Claude, Codex, Cursor, or OpenCode.
 
 Quit with **⌘Q** / **Ctrl+Q**.
 

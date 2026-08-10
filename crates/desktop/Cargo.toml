@@ -13,6 +13,8 @@ gpui_platform.workspace = true
 gpui-router.workspace = true
 image = { version = "0.25", default-features = false, features = ["png"] }
 loora-ui.workspace = true
+loora-inspector.workspace = true
+loora-mcp.workspace = true
 
 [build-dependencies]
 embed-resource = "3.0"

@@ -429,42 +429,38 @@ fn sv_plane(theme: Theme, hsv: Hsv, on_change: ColorChangeFn) -> impl IntoElemen
                         let v = 1.0 - row as f32 / (rows - 1) as f32;
                         let hsv = hsv;
                         let on_change = on_change.clone();
-                        div()
-                            .flex()
-                            .flex_1()
-                            .w_full()
-                            .children((0..cols).map({
-                                let on_change = on_change.clone();
-                                move |col| {
-                                    let s = col as f32 / (cols - 1) as f32;
-                                    let cell = Hsv {
-                                        h: hsv.h,
-                                        s,
-                                        v,
-                                        a: hsv.a,
-                                    }
-                                    .to_color();
-                                    let on_change = on_change.clone();
-                                    div()
-                                        .id(SharedString::from(format!("sv-{row}-{col}")))
-                                        .flex_1()
-                                        .h_full()
-                                        .bg(color_to_rgba(cell))
-                                        .cursor_pointer()
-                                        .on_mouse_down(MouseButton::Left, {
-                                            let on_change = on_change.clone();
-                                            move |_, w, cx| on_change(cell, w, cx)
-                                        })
-                                        .on_mouse_move({
-                                            let on_change = on_change.clone();
-                                            move |event: &MouseMoveEvent, w, cx| {
-                                                if event.pressed_button == Some(MouseButton::Left) {
-                                                    on_change(cell, w, cx);
-                                                }
-                                            }
-                                        })
+                        div().flex().flex_1().w_full().children((0..cols).map({
+                            let on_change = on_change.clone();
+                            move |col| {
+                                let s = col as f32 / (cols - 1) as f32;
+                                let cell = Hsv {
+                                    h: hsv.h,
+                                    s,
+                                    v,
+                                    a: hsv.a,
                                 }
-                            }))
+                                .to_color();
+                                let on_change = on_change.clone();
+                                div()
+                                    .id(SharedString::from(format!("sv-{row}-{col}")))
+                                    .flex_1()
+                                    .h_full()
+                                    .bg(color_to_rgba(cell))
+                                    .cursor_pointer()
+                                    .on_mouse_down(MouseButton::Left, {
+                                        let on_change = on_change.clone();
+                                        move |_, w, cx| on_change(cell, w, cx)
+                                    })
+                                    .on_mouse_move({
+                                        let on_change = on_change.clone();
+                                        move |event: &MouseMoveEvent, w, cx| {
+                                            if event.pressed_button == Some(MouseButton::Left) {
+                                                on_change(cell, w, cx);
+                                            }
+                                        }
+                                    })
+                            }
+                        }))
                     }
                 })),
         )

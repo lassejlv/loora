@@ -94,12 +94,7 @@ pub fn appearance_section(
                 Some("%"),
                 move |event, window, cx| {
                     ws_op.update(cx, |this, cx| {
-                        this.focus_props_field(
-                            PropsField::Opacity,
-                            event.click_count,
-                            window,
-                            cx,
-                        )
+                        this.focus_props_field(PropsField::Opacity, event.click_count, window, cx)
                     });
                 },
                 move |_, _, cx| ws_op5.update(cx, |this, cx| this.blur_props_if_needed(cx)),
@@ -133,12 +128,7 @@ pub fn appearance_section(
                 None,
                 move |event, window, cx| {
                     ws_rad.update(cx, |this, cx| {
-                        this.focus_props_field(
-                            PropsField::Radius,
-                            event.click_count,
-                            window,
-                            cx,
-                        )
+                        this.focus_props_field(PropsField::Radius, event.click_count, window, cx)
                     });
                 },
                 move |_, _, cx| ws_rad5.update(cx, |this, cx| this.blur_props_if_needed(cx)),
@@ -539,12 +529,7 @@ pub fn type_section(
             None,
             move |event, window, cx| {
                 ws_fs.update(cx, |this, cx| {
-                    this.focus_props_field(
-                        PropsField::FontSize,
-                        event.click_count,
-                        window,
-                        cx,
-                    )
+                    this.focus_props_field(PropsField::FontSize, event.click_count, window, cx)
                 });
             },
             move |_, _, cx| ws_fs5.update(cx, |this, cx| this.blur_props_if_needed(cx)),
@@ -628,12 +613,7 @@ pub fn type_section(
                 let ws = workspace.clone();
                 move |event, window, cx| {
                     ws.update(cx, |this, cx| {
-                        this.focus_props_field(
-                            PropsField::TextColor,
-                            event.click_count,
-                            window,
-                            cx,
-                        )
+                        this.focus_props_field(PropsField::TextColor, event.click_count, window, cx)
                     })
                 }
             },
