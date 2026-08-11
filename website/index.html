@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Loora — Native design canvas</title>
+    <meta
+      name="description"
+      content="Loora is a native design canvas built with GPUI. Infinite canvas, local-first, MCP-ready."
+    />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Instrument+Serif:ital@0;1&family=Outfit:wght@300;400;500;600&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="noise" aria-hidden="true"></div>
+
+    <header class="topbar">
+      <a class="wordmark" href="#top" aria-label="Loora home">
+        <span class="mark" aria-hidden="true"></span>
+        Loora
+      </a>
+      <nav class="nav">
+        <a href="#craft">Craft</a>
+        <a href="#stack">Stack</a>
+        <a
+          class="nav-github"
+          href="https://github.com/lassejlv/loora"
+          target="_blank"
+          rel="noopener noreferrer"
+          >GitHub</a
+        >
+      </nav>
+    </header>
+
+    <main id="top">
+      <section class="hero">
+        <div class="hero-stage" aria-hidden="true">
+          <div class="grid-fade"></div>
+          <div class="canvas-mock">
+            <div class="mock-chrome">
+              <span></span><span></span><span></span>
+              <div class="mock-tabs">
+                <em>Untitled</em>
+                <i>canvas</i>
+              </div>
+            </div>
+            <div class="mock-body">
+              <aside class="mock-side">
+                <div class="side-item active"></div>
+                <div class="side-item"></div>
+                <div class="side-item"></div>
+                <div class="side-item"></div>
+              </aside>
+              <div class="mock-canvas">
+                <div class="node node-a">
+                  <span>Frame</span>
+                  <div class="node-inner"></div>
+                </div>
+                <div class="node node-b">
+                  <span>Text</span>
+                </div>
+                <div class="node node-c"></div>
+                <div class="cursor-beam"></div>
+                <svg class="guide" viewBox="0 0 400 240" preserveAspectRatio="none">
+                  <path d="M40 180 C120 40, 280 40, 360 160" />
+                </svg>
+              </div>
+              <aside class="mock-inspector">
+                <div class="insp-row"></div>
+                <div class="insp-row short"></div>
+                <div class="insp-swatch"></div>
+                <div class="insp-row"></div>
+                <div class="insp-row short"></div>
+              </aside>
+            </div>
+          </div>
+        </div>
+
+        <div class="hero-copy">
+          <p class="brand">Loora</p>
+          <h1>Design on a native canvas.</h1>
+          <p class="lede">
+            A GPUI-powered design workspace — infinite canvas, local save, and an
+            MCP endpoint for agents that can edit with you.
+          </p>
+          <div class="cta-row">
+            <a class="btn btn-primary" href="https://github.com/lassejlv/loora"
+              >Get Loora</a
+            >
+            <a class="btn btn-ghost" href="#craft">See the craft</a>
+          </div>
+        </div>
+      </section>
+
+      <section id="craft" class="section craft">
+        <div class="section-head">
+          <h2>Built for the canvas, not the browser tab.</h2>
+          <p>
+            Loora is a native desktop app — GPU-backed chrome, document engine,
+            and routing that feels like the web without living in one.
+          </p>
+        </div>
+        <ul class="craft-list">
+          <li class="reveal">
+            <span class="craft-label">Canvas</span>
+            <strong>Nodes, camera, and transforms</strong>
+            <p>Pan, zoom, and compose frames with a document engine that persists locally.</p>
+          </li>
+          <li class="reveal">
+            <span class="craft-label">Agents</span>
+            <strong>MCP on loopback</strong>
+            <p>
+              Point Claude, Codex, Cursor, or OpenCode at
+              <code>127.0.0.1:6767/mcp</code> and mutate the live canvas.
+            </p>
+          </li>
+          <li class="reveal">
+            <span class="craft-label">Chrome</span>
+            <strong>Dark by default</strong>
+            <p>
+              Cursor-dark surfaces — <code>#141414</code> floors, hairline borders,
+              quiet accent blue for selection.
+            </p>
+          </li>
+        </ul>
+      </section>
+
+      <section id="stack" class="section stack">
+        <div class="section-head">
+          <h2>The stack underneath.</h2>
+          <p>Rust workspace. GPUI from Zed. Components you can reuse.</p>
+        </div>
+        <div class="stack-strip reveal">
+          <code>loora-ui</code>
+          <code>gpui-router</code>
+          <code>loora-engine</code>
+          <code>loora-mcp</code>
+          <code>loora-desktop</code>
+        </div>
+        <pre class="terminal reveal" tabindex="0"><code><span class="t-muted">$</span> just run
+<span class="t-muted">#</span> release build of the native app
+<span class="t-accent">→</span> canvas on <span class="t-soft">/</span>
+<span class="t-accent">→</span> settings on <span class="t-soft">Ctrl+,</span>
+<span class="t-accent">→</span> MCP at <span class="t-soft">http://127.0.0.1:6767/mcp</span></code></pre>
+      </section>
+    </main>
+
+    <footer class="footer">
+      <span class="wordmark compact">
+        <span class="mark" aria-hidden="true"></span>
+        Loora
+      </span>
+      <p>Native design canvas · GPUI · open source</p>
+      <a href="https://github.com/lassejlv/loora" target="_blank" rel="noopener noreferrer"
+        >github.com/lassejlv/loora</a
+      >
+    </footer>
+
+    <script src="script.js"></script>
+  </body>
+</html>
