@@ -4,9 +4,11 @@ version.workspace = true
 edition.workspace = true
 
 [dependencies]
+base64 = "0.22"
 gpui.workspace = true
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "webp", "bmp"] }
 loora-engine.workspace = true
+resvg = "0.46"
 smallvec = "1"
 svgtypes = "0.16.1"
 

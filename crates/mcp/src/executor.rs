@@ -231,8 +231,34 @@ fn create_page(
     arguments: &Value,
 ) -> Result<Execution, String> {
     mutate_target(engine, store, arguments, |working| {
+        let bootstrap_page = working
+            .document()
+            .nodes
+            .get(working.root_page_id())
+            .filter(|page| page.name == "Desktop")
+            .filter(|page| {
+                !working
+                    .document()
+                    .nodes
+                    .values()
+                    .any(|node| node.parent_id.as_ref() == Some(&page.id))
+            })
+            .map(|page| page.id.clone());
         let mut page = Node::root_frame(string(arguments, "name")?);
-        page.layout.x = number_or(arguments, "x", 0.0);
+        let default_x = if bootstrap_page.is_some() {
+            0.0
+        } else {
+            working
+                .document()
+                .nodes
+                .values()
+                .filter(|node| node.is_root_frame())
+                .map(|node| node.layout.x + node.layout.width)
+                .max_by(f64::total_cmp)
+                .map(|right| right + 200.0)
+                .unwrap_or(0.0)
+        };
+        page.layout.x = number_or(arguments, "x", default_x);
         page.layout.y = number_or(arguments, "y", 0.0);
         page.layout.width = number_or(arguments, "width", 1440.0).max(1.0);
         page.layout.height = number_or(arguments, "minHeight", 900.0).max(1.0);
@@ -266,6 +292,20 @@ fn create_page(
                 ApplyOptions::default(),
             )
             .map_err(|error| error.to_string())?;
+        working
+            .set_root_page(&page_id)
+            .map_err(|error| error.to_string())?;
+        if let Some(bootstrap_page) = bootstrap_page {
+            working
+                .apply(
+                    Transaction::new(
+                        "MCP: discard empty bootstrap page",
+                        vec![Operation::Delete { id: bootstrap_page }],
+                    ),
+                    ApplyOptions::default(),
+                )
+                .map_err(|error| error.to_string())?;
+        }
         working.reflow();
         Ok((
             json!({"page": node_ref(&page_id), "refs": refs}),
@@ -2906,6 +2946,31 @@ mod tests {
         let persisted = store.load(&design_id).unwrap();
         assert_eq!(persisted.nodes.len(), engine.document().nodes.len());
         assert_eq!(document_revision(&persisted), 1);
+
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn create_page_activates_and_places_the_new_artboard_after_existing_pages() {
+        let (root, store, mut engine) = temp_store();
+        let design_id = engine.document().id.clone();
+        let created = execute_tool(
+            &mut engine,
+            &store,
+            "createPage",
+            &json!({
+                "designId": design_id,
+                "name": "Homepage",
+                "children": [{"type": "text", "text": "Hello"}]
+            }),
+        )
+        .unwrap();
+        let page_id = NodeId::from(created.value["page"]["nodeId"].as_str().unwrap());
+        let page = engine.node(&page_id).unwrap();
+
+        assert_eq!(engine.root_page_id(), &page_id);
+        assert!(page.layout.x.abs() < f64::EPSILON);
+        assert_eq!(engine.page_ids(), vec![page_id]);
 
         fs::remove_dir_all(root).unwrap();
     }

@@ -1251,18 +1251,26 @@ impl Node {
             .and_then(|t| t.line_height)
             .unwrap_or(1.25) as f64;
         let text = self.text_content();
-        let advance = if weight >= 600 { 0.62 } else { 0.56 };
-        let mut max_line = 1.0_f64;
-        for line in text.split('\n') {
-            max_line = max_line.max(line.chars().count().max(1) as f64);
-        }
-        let lines = text.split('\n').count().max(1) as f64;
+        let weight_scale = if weight >= 600 { 1.04 } else { 1.0 };
         let letter = self
             .typography
             .as_ref()
-            .map(|t| t.letter_spacing as f64)
+            .map(|typography| typography.letter_spacing as f64)
             .unwrap_or(0.0);
-        let width = (max_line * (size * advance + letter)).clamp(8.0, 1200.0) + 8.0;
+        let mut max_line_width = 1.0_f64;
+        for line in text.split('\n') {
+            let characters = line.chars().collect::<Vec<_>>();
+            let glyph_width = characters
+                .iter()
+                .map(|character| estimated_glyph_width(*character))
+                .sum::<f64>()
+                * size
+                * weight_scale;
+            let spacing = letter * characters.len().saturating_sub(1) as f64;
+            max_line_width = max_line_width.max(glyph_width + spacing);
+        }
+        let lines = text.split('\n').count().max(1) as f64;
+        let width = (max_line_width + 2.0).clamp(8.0, 1200.0);
         let height = (size * lh * lines).max(size) + 4.0;
         (width, height)
     }
@@ -1298,6 +1306,42 @@ impl Node {
                 .collect::<Vec<_>>()
                 .join(" "),
         }
+    }
+}
+
+fn estimated_glyph_width(character: char) -> f64 {
+    if character.is_whitespace()
+        || matches!(
+            character,
+            'i' | 'l'
+                | 'I'
+                | 'j'
+                | 't'
+                | 'f'
+                | 'r'
+                | '!'
+                | '|'
+                | '.'
+                | ','
+                | ':'
+                | ';'
+                | '\''
+                | '"'
+                | '('
+                | ')'
+                | '['
+                | ']'
+        )
+    {
+        0.28
+    } else if matches!(character, 'm' | 'w' | 'M' | 'W' | '@' | '#' | '%' | '&') {
+        0.82
+    } else if character.is_ascii_uppercase() {
+        0.66
+    } else if character.is_ascii_lowercase() || character.is_ascii_digit() {
+        0.52
+    } else {
+        1.0
     }
 }
 
@@ -1475,5 +1519,23 @@ mod tests {
         let kind: NodeKind = serde_json::from_str("\"page\"").unwrap();
         assert_eq!(kind, NodeKind::Frame);
         assert_eq!(serde_json::to_string(&kind).unwrap(), "\"frame\"");
+    }
+
+    #[test]
+    fn hug_text_measurement_accounts_for_narrow_glyphs() {
+        let page = NodeId::from("page");
+        let mut round = Node::text(
+            "Round",
+            page.clone(),
+            Layout::new(0.0, 0.0, 60.0, 96.0),
+            "o",
+        );
+        let mut narrow = Node::text("Narrow", page, Layout::new(0.0, 0.0, 60.0, 96.0), "l");
+        round.typography.as_mut().unwrap().size = 92.0;
+        narrow.typography.as_mut().unwrap().size = 92.0;
+
+        let (round_width, _) = round.estimate_text_size();
+        let (narrow_width, _) = narrow.estimate_text_size();
+        assert!(narrow_width < round_width * 0.7);
     }
 }

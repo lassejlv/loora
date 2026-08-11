@@ -5,6 +5,8 @@
 //! this surface owns drawing and pointer interactions.
 
 mod motion;
+mod scene_raster;
+pub mod style_fixture;
 
 use std::cell::Cell;
 use std::collections::{HashMap, HashSet};
@@ -20,13 +22,13 @@ use gpui::{
     IntoElement, MouseButton, MouseDownEvent, MouseExitEvent, MouseMoveEvent, MouseUpEvent,
     ParentElement, Path as GpPath, PathBuilder, PinchEvent, Pixels, Point, Render, RenderImage,
     Rgba, ScrollWheelEvent, ShapedLine, SharedString, StatefulInteractiveElement,
-    StrikethroughStyle, Styled, TextAlign as GpTextAlign, TextRun, TransformationMatrix,
+    StrikethroughStyle, Styled, Task, TextAlign as GpTextAlign, TextRun, TransformationMatrix,
     UnderlineStyle, Window,
 };
 use loora_engine::{
-    AnimationTrigger, Bounds, Camera, Color, Document, FlexDirection, ImageFit, Insets,
-    LayoutAlign, LayoutJustify, LayoutMode, Node, NodeId, NodeKind, Overflow, Paint, ShapeKind,
-    TextAlign as EngineTextAlign, TextDecoration, Vec2,
+    AnimationTrigger, Bounds, Camera, Color, Document, FlexDirection, ImageFit, Insets, Layout,
+    LayoutMode, Node, NodeId, NodeKind, Overflow, Paint, ShapeKind, TextAlign as EngineTextAlign,
+    TextDecoration, Vec2,
 };
 use svgtypes::{PathParser, PathSegment};
 
@@ -163,16 +165,14 @@ pub enum CanvasEvent {
         duplicate: bool,
         drop_world: Vec2,
     },
-    ResizeCommitted(Vec<(NodeId, Bounds)>),
-    RotateCommitted(Vec<(NodeId, f32)>),
+    TransformCommitted {
+        bounds: Vec<(NodeId, Bounds)>,
+        rotations: Vec<(NodeId, f32)>,
+    },
     LayoutMetricsChanged {
         id: NodeId,
         gap: f32,
         padding: Insets,
-    },
-    LayoutControlTriggered {
-        id: NodeId,
-        control: LayoutControl,
     },
     CreateCommitted {
         tool: CanvasTool,
@@ -191,15 +191,6 @@ pub enum CanvasEvent {
     OverlayCloseRequested,
     BeginTextEdit(NodeId),
     ChooseImage(NodeId),
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum LayoutControl {
-    Direction,
-    Wrap,
-    Align,
-    Justify,
-    Columns,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -264,8 +255,10 @@ enum DragState {
     Resize {
         start_world: Vec2,
         handle: ResizeHandle,
+        basis: ResizeBasis,
         originals: HashMap<NodeId, Bounds>,
         group: Bounds,
+        multi: Option<MultiTransform>,
         current: HashMap<NodeId, Bounds>,
     },
     Rotate {
@@ -273,6 +266,7 @@ enum DragState {
         start_angle: f64,
         originals: HashMap<NodeId, f32>,
         current: HashMap<NodeId, f32>,
+        bounds: Option<MultiRotateBounds>,
     },
     LayoutGap {
         id: NodeId,
@@ -302,6 +296,48 @@ enum DragState {
     },
 }
 
+#[derive(Clone, Debug)]
+struct MultiTransform {
+    members: HashMap<NodeId, MultiTransformMember>,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct MultiTransformMember {
+    original: Bounds,
+    visual_center: Vec2,
+    parent_inverse: Affine2,
+}
+
+#[derive(Clone, Debug)]
+struct MultiRotateBounds {
+    current: HashMap<NodeId, Bounds>,
+    members: MultiTransform,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct ResizeBasis {
+    x_axis: Vec2,
+    y_axis: Vec2,
+    x_scale: f64,
+    y_scale: f64,
+}
+
+impl ResizeBasis {
+    const IDENTITY: Self = Self {
+        x_axis: Vec2 { x: 1.0, y: 0.0 },
+        y_axis: Vec2 { x: 0.0, y: 1.0 },
+        x_scale: 1.0,
+        y_scale: 1.0,
+    };
+
+    fn project(self, delta: Vec2) -> Vec2 {
+        Vec2::new(
+            (delta.x * self.x_axis.x + delta.y * self.x_axis.y) / self.x_scale.max(0.000_001),
+            (delta.x * self.y_axis.x + delta.y * self.y_axis.y) / self.y_scale.max(0.000_001),
+        )
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum PaddingEdge {
     Top,
@@ -312,7 +348,6 @@ enum PaddingEdge {
 
 #[derive(Clone, Debug)]
 enum LayoutBadgeKind {
-    Command(LayoutControl),
     Gap(FlexDirection),
     Padding(PaddingEdge),
 }
@@ -338,8 +373,13 @@ pub struct NativeCanvas {
     text_edit: Option<NativeTextEdit>,
     palette: CanvasPalette,
     images: HashMap<String, Arc<RenderImage>>,
-    gradient_fills: HashMap<(NodeId, usize), Arc<RenderImage>>,
+    image_opacity_variants: HashMap<NodeId, OpacityImage>,
+    gradient_fills: HashMap<(NodeId, usize), GradientRaster>,
     rotated_images: HashMap<NodeId, RotatedImage>,
+    page_rasters: HashMap<NodeId, PageRaster>,
+    page_generations: HashMap<NodeId, u64>,
+    page_raster_jobs: HashMap<NodeId, PageRasterJob>,
+    display_scale: f32,
     viewport: Rc<Cell<GpBounds<Pixels>>>,
     drag: Option<DragState>,
     guides: Vec<Guide>,
@@ -367,7 +407,13 @@ impl NativeCanvas {
     ) -> Self {
         let world_bounds = absolute_bounds(&document);
         let paint_order = Arc::new(paint_order(&document));
-        Self {
+        let page_generations = document
+            .nodes
+            .values()
+            .filter(|node| node.is_root_frame())
+            .map(|node| (node.id.clone(), 0))
+            .collect();
+        let mut canvas = Self {
             document: Arc::new(document),
             world_bounds,
             paint_order,
@@ -381,8 +427,13 @@ impl NativeCanvas {
             text_edit: None,
             palette: CanvasPalette::default(),
             images: HashMap::new(),
+            image_opacity_variants: HashMap::new(),
             gradient_fills: HashMap::new(),
             rotated_images: HashMap::new(),
+            page_rasters: HashMap::new(),
+            page_generations,
+            page_raster_jobs: HashMap::new(),
+            display_scale: 1.0,
             viewport,
             drag: None,
             guides: Vec::new(),
@@ -394,7 +445,11 @@ impl NativeCanvas {
             timeline_scrubbing: false,
             space_pan: false,
             pointer_world: None,
-        }
+        };
+        let initial_document = canvas.document.clone();
+        canvas.sync_images(&initial_document);
+        canvas.sync_rotated_images(&initial_document);
+        canvas
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -423,8 +478,27 @@ impl NativeCanvas {
             || self.text_edit != text_edit
             || self.palette != palette;
         if document_changed {
+            let changed_pages = changed_raster_pages(&self.document, &document);
+            let current_pages = document
+                .nodes
+                .values()
+                .filter(|node| node.is_root_frame())
+                .map(|node| node.id.clone())
+                .collect::<HashSet<_>>();
+            for page_id in changed_pages {
+                if current_pages.contains(&page_id) {
+                    *self.page_generations.entry(page_id.clone()).or_default() += 1;
+                }
+                self.page_raster_jobs.remove(&page_id);
+            }
+            self.page_generations
+                .retain(|id, _| current_pages.contains(id));
+            self.page_rasters.retain(|id, _| current_pages.contains(id));
+            self.page_raster_jobs
+                .retain(|id, _| current_pages.contains(id));
             self.sync_images(&document);
-            self.sync_gradient_fills(&document);
+            self.image_opacity_variants.clear();
+            self.gradient_fills.clear();
             self.sync_rotated_images(&document);
             self.world_bounds = absolute_bounds(&document);
             self.paint_order = Arc::new(paint_order(&document));
@@ -534,20 +608,37 @@ impl NativeCanvas {
         }
     }
 
-    fn sync_gradient_fills(&mut self, document: &Document) {
-        self.gradient_fills.clear();
+    fn sync_gradient_fills(
+        &mut self,
+        document: &Document,
+        motion_frames: &HashMap<NodeId, MotionFrame>,
+    ) {
+        let mut active = HashSet::new();
         for node in document.nodes.values() {
             for (index, paint) in node.style.fills.iter().enumerate() {
                 if matches!(
                     paint,
                     Paint::LinearGradient { .. } | Paint::RadialGradient { .. }
                 ) {
-                    if let Some(image) = render_gradient_image(paint, node.style.opacity) {
-                        self.gradient_fills.insert((node.id.clone(), index), image);
+                    let key = (node.id.clone(), index);
+                    active.insert(key.clone());
+                    let opacity = node_opacity(document, node, motion_frames);
+                    let alpha = (opacity * 255.0).round() as u8;
+                    if self
+                        .gradient_fills
+                        .get(&key)
+                        .is_some_and(|raster| raster.alpha == alpha)
+                    {
+                        continue;
+                    }
+                    if let Some(image) = render_gradient_image(paint, alpha as f32 / 255.0) {
+                        self.gradient_fills
+                            .insert(key, GradientRaster { alpha, image });
                     }
                 }
             }
         }
+        self.gradient_fills.retain(|key, _| active.contains(key));
     }
 
     fn sync_rotated_images(&mut self, document: &Document) {
@@ -571,6 +662,235 @@ impl NativeCanvas {
                 self.rotated_images.insert(node.id.clone(), image);
             }
         }
+    }
+
+    fn sync_image_opacity_variants(
+        &mut self,
+        document: &Document,
+        motion_frames: &HashMap<NodeId, MotionFrame>,
+    ) {
+        let mut active = HashSet::new();
+        for node in document
+            .nodes
+            .values()
+            .filter(|node| node.kind == NodeKind::Image)
+        {
+            let opacity = node_opacity(document, node, motion_frames);
+            let alpha = (opacity * 255.0).round() as u8;
+            if alpha == 255 {
+                continue;
+            }
+            let source = self
+                .rotated_images
+                .get(&node.id)
+                .map(|rotated| rotated.image.clone())
+                .or_else(|| {
+                    node.image_path
+                        .as_ref()
+                        .and_then(|path| self.images.get(path))
+                        .cloned()
+                });
+            let Some(source) = source else {
+                continue;
+            };
+            active.insert(node.id.clone());
+            if self
+                .image_opacity_variants
+                .get(&node.id)
+                .is_some_and(|variant| {
+                    variant.alpha == alpha && Arc::ptr_eq(&variant.source, &source)
+                })
+            {
+                continue;
+            }
+            self.image_opacity_variants.insert(
+                node.id.clone(),
+                OpacityImage {
+                    alpha,
+                    image: render_image_with_opacity(&source, alpha as f32 / 255.0),
+                    source,
+                },
+            );
+        }
+        self.image_opacity_variants
+            .retain(|id, _| active.contains(id));
+    }
+
+    #[cfg(test)]
+    fn sync_page_rasters(
+        &mut self,
+        document: &Document,
+        motion_frames: &HashMap<NodeId, MotionFrame>,
+        preview_bounds: &HashMap<NodeId, Bounds>,
+    ) {
+        self.sync_page_rasters_with_context(document, motion_frames, preview_bounds, None);
+    }
+
+    fn sync_page_rasters_with_context(
+        &mut self,
+        document: &Document,
+        motion_frames: &HashMap<NodeId, MotionFrame>,
+        preview_bounds: &HashMap<NodeId, Bounds>,
+        mut cx: Option<&mut Context<Self>>,
+    ) {
+        let move_roots = match &self.drag {
+            Some(DragState::Move { ids, .. }) if move_raster_can_split(document, ids) => {
+                ids.clone()
+            }
+            _ => Vec::new(),
+        };
+        let uses_interaction_layers = !move_roots.is_empty() || self.text_edit.is_some();
+        let preview_document = (!uses_interaction_layers)
+            .then(|| raster_preview_document(document, preview_bounds, self.drag.as_ref()))
+            .flatten();
+        let raster_document = preview_document.as_ref().unwrap_or(document);
+        let scale = raster_scale_for_zoom(self.camera.zoom, self.display_scale);
+        let mut active = HashSet::new();
+        let pages = raster_document
+            .nodes
+            .values()
+            .filter(|node| node.is_root_frame())
+            .map(|node| node.id.clone())
+            .collect::<Vec<_>>();
+        for page_id in pages {
+            if !scene_raster::page_needs_raster(raster_document, &page_id, motion_frames) {
+                continue;
+            }
+            let mut page_move_roots = move_roots
+                .iter()
+                .filter(|id| root_page_for_node(document, id).as_ref() == Some(&page_id))
+                .cloned()
+                .collect::<Vec<_>>();
+            page_move_roots.sort_by(|left, right| left.as_str().cmp(right.as_str()));
+            let mode =
+                if !page_move_roots.is_empty() {
+                    PageRasterMode::Move(page_move_roots)
+                } else if let Some(edit) = self.text_edit.as_ref().filter(|edit| {
+                    root_page_for_node(document, &edit.id).as_ref() == Some(&page_id)
+                }) {
+                    PageRasterMode::TextEdit(edit.id.clone())
+                } else {
+                    PageRasterMode::Full
+                };
+            let mut motion_key = motion_frames
+                .iter()
+                .filter(|(id, _)| {
+                    root_page_for_node(raster_document, id).as_ref() == Some(&page_id)
+                })
+                .map(|(id, frame)| (id.clone(), frame.clone()))
+                .collect::<Vec<_>>();
+            motion_key.sort_by(|left, right| left.0.as_str().cmp(right.0.as_str()));
+            let geometry = raster_geometry_key(raster_document, &page_id);
+            let generation = self.page_generations.get(&page_id).copied().unwrap_or(0);
+            let key = PageRasterKey {
+                generation,
+                scale_bits: scale.to_bits(),
+                motion_frames: motion_key.clone(),
+                geometry: geometry.clone(),
+                mode: mode.clone(),
+            };
+            active.insert(page_id.clone());
+            let content_matches = self.page_rasters.get(&page_id).is_some_and(|cached| {
+                cached.generation == generation
+                    && cached.motion_frames == motion_key
+                    && cached.geometry == geometry
+                    && cached.mode == mode
+            });
+            if content_matches
+                && self
+                    .page_rasters
+                    .get(&page_id)
+                    .is_some_and(|cached| cached.scale >= scale)
+            {
+                continue;
+            }
+            let source_document = if matches!(mode, PageRasterMode::Full) {
+                raster_document.clone()
+            } else {
+                document.clone()
+            };
+            if content_matches {
+                if let Some(cx) = cx.as_deref_mut() {
+                    self.schedule_page_raster(
+                        source_document,
+                        page_id.clone(),
+                        motion_frames.clone(),
+                        key,
+                        cx,
+                    );
+                }
+                continue;
+            }
+            self.page_raster_jobs.remove(&page_id);
+            let rendered =
+                render_page_raster(&source_document, &page_id, motion_frames, scale, &mode);
+            match rendered {
+                Ok((pixels, overlay)) => {
+                    self.page_rasters
+                        .insert(page_id, page_raster_from_pixels(key, pixels, overlay));
+                }
+                Err(_) => {
+                    self.page_rasters.remove(&page_id);
+                }
+            }
+        }
+        self.page_rasters.retain(|id, _| active.contains(id));
+        self.page_raster_jobs.retain(|id, _| active.contains(id));
+    }
+
+    fn schedule_page_raster(
+        &mut self,
+        document: Document,
+        page_id: NodeId,
+        motion_frames: HashMap<NodeId, MotionFrame>,
+        key: PageRasterKey,
+        cx: &mut Context<Self>,
+    ) {
+        if self
+            .page_raster_jobs
+            .get(&page_id)
+            .is_some_and(|job| job.key == key)
+        {
+            return;
+        }
+        let job_page_id = page_id.clone();
+        let job_key = key.clone();
+        let task = cx.spawn(async move |this, cx| {
+            let render_page_id = job_page_id.clone();
+            let render_key = job_key.clone();
+            let rendered = cx
+                .background_executor()
+                .spawn(async move {
+                    render_page_raster(
+                        &document,
+                        &render_page_id,
+                        &motion_frames,
+                        f32::from_bits(render_key.scale_bits),
+                        &render_key.mode,
+                    )
+                })
+                .await;
+            this.update(cx, |this, cx| {
+                let is_current = this
+                    .page_raster_jobs
+                    .get(&job_page_id)
+                    .is_some_and(|job| job.key == job_key);
+                if !is_current {
+                    return;
+                }
+                this.page_raster_jobs.remove(&job_page_id);
+                if let Ok((pixels, overlay)) = rendered {
+                    this.page_rasters.insert(
+                        job_page_id.clone(),
+                        page_raster_from_pixels(job_key, pixels, overlay),
+                    );
+                    cx.notify();
+                }
+            })
+            .ok();
+        });
+        self.page_raster_jobs
+            .insert(page_id, PageRasterJob { key, _task: task });
     }
 
     fn viewport_local(&self, position: Point<Pixels>) -> Vec2 {
@@ -626,7 +946,13 @@ impl NativeCanvas {
                     cx.stop_propagation();
                     return;
                 };
-                let hit = hit_test(&self.document, all_bounds, &self.paint_order, preview_world);
+                let hit = hit_test_with_motion(
+                    &self.document,
+                    all_bounds,
+                    &self.paint_order,
+                    preview_world,
+                    self.motion.frames(),
+                );
                 self.pressed = hit.clone();
                 self.focused = hit.clone();
                 if let Some(id) = hit {
@@ -678,18 +1004,22 @@ impl NativeCanvas {
             return;
         }
 
+        let editor_geometries = visual_geometries(
+            &self.document,
+            all_bounds,
+            self.motion.frames(),
+            self.drag.as_ref(),
+        );
         if let Some((id, badge)) = hit_layout_badge(
             world,
             &self.selection,
             &self.document,
             all_bounds,
+            &editor_geometries,
             self.camera.zoom,
         ) {
             let node = self.document.nodes.get(&id).expect("selected layout node");
             match badge.kind {
-                LayoutBadgeKind::Command(control) => {
-                    cx.emit(CanvasEvent::LayoutControlTriggered { id, control });
-                }
                 LayoutBadgeKind::Gap(direction) => {
                     self.drag = Some(DragState::LayoutGap {
                         id,
@@ -717,16 +1047,16 @@ impl NativeCanvas {
             return;
         }
 
-        if let Some(group) = hit_rotation_handle(
+        if let Some(geometry) = hit_rotation_handle(
             world,
             &self.selection,
-            all_bounds,
+            &editor_geometries,
             HANDLE_SCREEN_PX / self.camera.zoom,
             ROTATION_HANDLE_SCREEN_PX / self.camera.zoom,
         ) {
-            let center = Vec2::new(group.x + group.width * 0.5, group.y + group.height * 0.5);
-            let originals = self
-                .selection
+            let center = geometry.center();
+            let ids = top_level_selection(&self.selection, &self.document);
+            let originals = ids
                 .iter()
                 .filter_map(|id| {
                     self.document
@@ -735,24 +1065,35 @@ impl NativeCanvas {
                         .map(|node| (id.clone(), node.rotation))
                 })
                 .collect::<HashMap<_, _>>();
+            let transform = multi_transform(&ids, &self.document, all_bounds, &editor_geometries);
+            let bounds = transform.clone().map(|members| MultiRotateBounds {
+                current: members
+                    .members
+                    .iter()
+                    .map(|(id, member)| (id.clone(), member.original))
+                    .collect(),
+                members,
+            });
             self.drag = Some(DragState::Rotate {
                 center,
                 start_angle: angle_from(center, world),
                 current: originals.clone(),
                 originals,
+                bounds,
             });
             cx.stop_propagation();
             return;
         }
 
-        if let Some((handle, group)) = hit_resize_handle(
+        if let Some((handle, group, basis)) = hit_resize_handle(
             world,
             &self.selection,
             all_bounds,
+            &editor_geometries,
             HANDLE_SCREEN_PX / self.camera.zoom,
         ) {
-            let originals = self
-                .selection
+            let ids = top_level_selection(&self.selection, &self.document);
+            let originals = ids
                 .iter()
                 .filter_map(|id| {
                     all_bounds
@@ -761,11 +1102,14 @@ impl NativeCanvas {
                         .map(|bounds| (id.clone(), bounds))
                 })
                 .collect::<HashMap<_, _>>();
+            let multi = multi_transform(&ids, &self.document, all_bounds, &editor_geometries);
             self.drag = Some(DragState::Resize {
                 start_world: world,
                 handle,
+                basis,
                 originals: originals.clone(),
                 group,
+                multi,
                 current: originals,
             });
             cx.stop_propagation();
@@ -840,8 +1184,15 @@ impl NativeCanvas {
         if self.preview {
             let preview_world = self.preview_world_at(screen, all_bounds);
             self.pointer_world = preview_world;
-            let hit = preview_world
-                .and_then(|world| hit_test(&self.document, all_bounds, &self.paint_order, world));
+            let hit = preview_world.and_then(|world| {
+                hit_test_with_motion(
+                    &self.document,
+                    all_bounds,
+                    &self.paint_order,
+                    world,
+                    self.motion.frames(),
+                )
+            });
             if hit != self.hovered {
                 if let Some(id) = self.hovered.take() {
                     cx.emit(CanvasEvent::PreviewTriggered {
@@ -863,16 +1214,27 @@ impl NativeCanvas {
         if !event.dragging() && event.pressed_button != Some(MouseButton::Middle) {
             return;
         }
-        let snap_bounds = match &self.drag {
-            Some(DragState::Move { ids, .. }) => all_bounds
-                .iter()
-                .filter(|(id, _)| {
-                    !ids.iter()
-                        .any(|root| is_descendant_or_self(id, root, &self.document))
-                })
-                .map(|(id, bounds)| (id.clone(), *bounds))
-                .collect(),
-            _ => all_bounds.clone(),
+        let editor_geometries =
+            visual_geometries(&self.document, all_bounds, self.motion.frames(), None);
+        let (snap_bounds, snap_originals) = match &self.drag {
+            Some(DragState::Move { ids, .. }) => (
+                editor_geometries
+                    .iter()
+                    .filter(|(id, _)| {
+                        !ids.iter()
+                            .any(|root| is_descendant_or_self(id, root, &self.document))
+                    })
+                    .map(|(id, geometry)| (id.clone(), geometry.aabb))
+                    .collect(),
+                ids.iter()
+                    .filter_map(|id| {
+                        editor_geometries
+                            .get(id)
+                            .map(|geometry| (id.clone(), geometry.aabb))
+                    })
+                    .collect(),
+            ),
+            _ => (all_bounds.clone(), HashMap::new()),
         };
         self.guides.clear();
 
@@ -890,7 +1252,6 @@ impl NativeCanvas {
             Some(DragState::Move {
                 start_world,
                 ids,
-                originals,
                 delta,
                 ..
             }) => {
@@ -903,30 +1264,37 @@ impl NativeCanvas {
                     }
                 }
                 let (snapped, guides) =
-                    snap_move(raw, ids, originals, &snap_bounds, self.camera.zoom);
+                    snap_move(raw, ids, &snap_originals, &snap_bounds, self.camera.zoom);
                 *delta = snapped;
                 self.guides = guides;
             }
             Some(DragState::Resize {
                 start_world,
                 handle,
+                basis,
                 originals,
                 group,
+                multi,
                 current,
             }) => {
-                let delta = Vec2::new(world.x - start_world.x, world.y - start_world.y);
+                let delta =
+                    basis.project(Vec2::new(world.x - start_world.x, world.y - start_world.y));
                 let resized_group = if event.modifiers.shift {
                     resize_bounds_with_aspect(*group, *handle, delta)
                 } else {
                     resize_bounds(*group, *handle, delta)
                 };
-                *current = scale_group(originals, *group, resized_group);
+                *current = multi.as_ref().map_or_else(
+                    || scale_group(originals, *group, resized_group),
+                    |multi| scale_multi_transform(multi, *group, resized_group),
+                );
             }
             Some(DragState::Rotate {
                 center,
                 start_angle,
                 originals,
                 current,
+                bounds,
             }) => {
                 let mut delta = angle_delta(*start_angle, angle_from(*center, world));
                 if event.modifiers.shift {
@@ -936,6 +1304,9 @@ impl NativeCanvas {
                     .iter()
                     .map(|(id, rotation)| (id.clone(), normalize_degrees(*rotation + delta as f32)))
                     .collect();
+                if let Some(bounds) = bounds {
+                    bounds.current = rotate_multi_transform(&bounds.members, *center, delta);
+                }
             }
             Some(DragState::LayoutGap {
                 direction,
@@ -1032,12 +1403,24 @@ impl NativeCanvas {
             Some(DragState::Resize { current, .. }) => {
                 let mut members = current.into_iter().collect::<Vec<_>>();
                 members.sort_by(|left, right| left.0.as_str().cmp(right.0.as_str()));
-                cx.emit(CanvasEvent::ResizeCommitted(members));
+                cx.emit(CanvasEvent::TransformCommitted {
+                    bounds: members,
+                    rotations: Vec::new(),
+                });
             }
-            Some(DragState::Rotate { current, .. }) => {
-                let mut members = current.into_iter().collect::<Vec<_>>();
-                members.sort_by(|left, right| left.0.as_str().cmp(right.0.as_str()));
-                cx.emit(CanvasEvent::RotateCommitted(members));
+            Some(DragState::Rotate {
+                current, bounds, ..
+            }) => {
+                let mut transformed_bounds = bounds
+                    .map(|bounds| bounds.current.into_iter().collect::<Vec<_>>())
+                    .unwrap_or_default();
+                transformed_bounds.sort_by(|left, right| left.0.as_str().cmp(right.0.as_str()));
+                let mut rotations = current.into_iter().collect::<Vec<_>>();
+                rotations.sort_by(|left, right| left.0.as_str().cmp(right.0.as_str()));
+                cx.emit(CanvasEvent::TransformCommitted {
+                    bounds: transformed_bounds,
+                    rotations,
+                });
             }
             Some(DragState::LayoutGap {
                 id,
@@ -1065,12 +1448,14 @@ impl NativeCanvas {
             }) => {
                 let marquee = normalized_bounds(start_world, current_world);
                 let all_bounds = &self.world_bounds;
+                let geometries =
+                    visual_geometries(&self.document, all_bounds, self.motion.frames(), None);
                 let mut selection = selectable_nodes(&self.document)
                     .into_iter()
                     .filter(|id| {
-                        all_bounds
-                            .get(id)
-                            .is_some_and(|bounds| intersects(*bounds, marquee))
+                        geometries.get(id).is_some_and(|geometry| {
+                            quad_intersects_bounds(geometry.corners, marquee)
+                        })
                     })
                     .collect::<Vec<_>>();
                 selection.sort_by(|left, right| left.as_str().cmp(right.as_str()));
@@ -1166,15 +1551,160 @@ impl NativeCanvas {
             Some(DragState::Resize { current, .. }) => {
                 bounds.extend(current.iter().map(|(id, bounds)| (id.clone(), *bounds)));
             }
+            Some(DragState::Rotate {
+                bounds: Some(current),
+                ..
+            }) => {
+                bounds.extend(
+                    current
+                        .current
+                        .iter()
+                        .map(|(id, bounds)| (id.clone(), *bounds)),
+                );
+            }
             _ => {}
         }
         bounds
     }
 }
 
+fn raster_preview_document(
+    document: &Document,
+    preview_bounds: &HashMap<NodeId, Bounds>,
+    drag: Option<&DragState>,
+) -> Option<Document> {
+    let mut preview = document.clone();
+    match drag? {
+        DragState::Move { ids, .. } => {
+            for id in ids {
+                apply_preview_node_bounds(&mut preview, id, preview_bounds);
+            }
+        }
+        DragState::Resize { current, .. } => {
+            for id in current.keys() {
+                apply_preview_node_bounds(&mut preview, id, preview_bounds);
+            }
+        }
+        DragState::Rotate {
+            current, bounds, ..
+        } => {
+            if let Some(bounds) = bounds {
+                for id in bounds.current.keys() {
+                    apply_preview_node_bounds(&mut preview, id, preview_bounds);
+                }
+            }
+            for (id, rotation) in current {
+                if let Some(node) = preview.nodes.get_mut(id) {
+                    node.rotation = *rotation;
+                }
+            }
+        }
+        DragState::LayoutGap {
+            id, current_gap, ..
+        } => {
+            preview.nodes.get_mut(id)?.layout.gap = *current_gap;
+        }
+        DragState::LayoutPadding {
+            id,
+            current_padding,
+            ..
+        } => {
+            preview.nodes.get_mut(id)?.layout.padding = *current_padding;
+        }
+        DragState::Pan { .. } | DragState::Marquee { .. } | DragState::Create { .. } => {
+            return None;
+        }
+    }
+    Some(preview)
+}
+
+fn move_raster_can_split(document: &Document, roots: &[NodeId]) -> bool {
+    if roots.is_empty() {
+        return false;
+    }
+    let roots = roots.iter().cloned().collect::<HashSet<_>>();
+    let has_blend = |node: &Node| {
+        node.style
+            .blend_mode
+            .as_deref()
+            .is_some_and(|mode| mode != "normal")
+    };
+    for node in document.nodes.values() {
+        let mut current = Some(&node.id);
+        while let Some(id) = current {
+            if roots.contains(id) {
+                if has_blend(node) {
+                    return false;
+                }
+                break;
+            }
+            current = document
+                .nodes
+                .get(id)
+                .and_then(|candidate| candidate.parent_id.as_ref());
+        }
+    }
+    for root in &roots {
+        let mut current = document
+            .nodes
+            .get(root)
+            .and_then(|node| node.parent_id.as_ref());
+        while let Some(id) = current {
+            let Some(node) = document.nodes.get(id) else {
+                break;
+            };
+            if has_blend(node) {
+                return false;
+            }
+            current = node.parent_id.as_ref();
+        }
+    }
+    true
+}
+
+fn apply_preview_node_bounds(
+    document: &mut Document,
+    id: &NodeId,
+    preview_bounds: &HashMap<NodeId, Bounds>,
+) {
+    let Some(target) = preview_bounds.get(id).copied() else {
+        return;
+    };
+    let parent_origin = document
+        .nodes
+        .get(id)
+        .and_then(|node| node.parent_id.as_ref())
+        .and_then(|parent| preview_bounds.get(parent))
+        .map_or(Vec2::default(), |bounds| Vec2::new(bounds.x, bounds.y));
+    if let Some(node) = document.nodes.get_mut(id) {
+        node.layout.x = target.x - parent_origin.x;
+        node.layout.y = target.y - parent_origin.y;
+        node.layout.width = target.width;
+        node.layout.height = target.height;
+    }
+}
+
+fn raster_geometry_key(document: &Document, page_id: &NodeId) -> Vec<(NodeId, Layout, u32)> {
+    let mut geometry = document
+        .nodes
+        .values()
+        .filter(|node| root_page_for_node(document, &node.id).as_ref() == Some(page_id))
+        .map(|node| {
+            (
+                node.id.clone(),
+                node.layout.clone(),
+                node.rotation.to_bits(),
+            )
+        })
+        .collect::<Vec<_>>();
+    geometry.sort_by(|left, right| left.0.as_str().cmp(right.0.as_str()));
+    geometry
+}
+
 impl Render for NativeCanvas {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let now = Instant::now();
+        self.display_scale = window.scale_factor().max(1.0);
         let preview_bounds = self.preview_bounds();
         let viewport_bounds = self.viewport.get();
         let in_view = in_view_nodes(
@@ -1195,6 +1725,11 @@ impl Render for NativeCanvas {
             now,
             cx.reduce_motion(),
         );
+        let motion_frames = self.motion.frames().clone();
+        let document = self.document.clone();
+        self.sync_gradient_fills(&document, &motion_frames);
+        self.sync_image_opacity_variants(&document, &motion_frames);
+        self.sync_page_rasters_with_context(&document, &motion_frames, &preview_bounds, Some(cx));
         let playback = self.motion.snapshot(&self.document);
         let trigger_state = active_trigger_state(
             &self.document,
@@ -1209,17 +1744,17 @@ impl Render for NativeCanvas {
         {
             window.request_animation_frame();
         }
-        let document = self.document.clone();
         let paint_order = self.paint_order.clone();
-        let motion_frames = self.motion.frames().clone();
         let camera = self.camera;
         let selection = self.selection.clone();
         let agent_nodes = self.agent_nodes.clone();
         let palette = self.palette;
         let guides = self.guides.clone();
         let images = self.images.clone();
+        let image_opacity_variants = self.image_opacity_variants.clone();
         let gradient_fills = self.gradient_fills.clone();
         let rotated_images = self.rotated_images.clone();
+        let page_rasters = self.page_rasters.clone();
         let drag = self.drag.clone();
         let viewport = self.viewport.clone();
         let preview = self.preview;
@@ -1261,8 +1796,10 @@ impl Render for NativeCanvas {
                             drag,
                             palette,
                             &images,
+                            &image_opacity_variants,
                             &gradient_fills,
                             &rotated_images,
+                            &page_rasters,
                             preview,
                             preview_overlay,
                             text_edit,
@@ -1524,10 +2061,105 @@ struct RotatedImage {
 }
 
 #[derive(Clone)]
+struct GradientRaster {
+    alpha: u8,
+    image: Arc<RenderImage>,
+}
+
+#[derive(Clone)]
+struct OpacityImage {
+    alpha: u8,
+    image: Arc<RenderImage>,
+    source: Arc<RenderImage>,
+}
+
+#[derive(Clone)]
+struct PageRaster {
+    generation: u64,
+    scale: f32,
+    motion_frames: Vec<(NodeId, MotionFrame)>,
+    geometry: Vec<(NodeId, Layout, u32)>,
+    mode: PageRasterMode,
+    image: Arc<RenderImage>,
+    overlay: Option<Arc<RenderImage>>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+struct PageRasterKey {
+    generation: u64,
+    scale_bits: u32,
+    motion_frames: Vec<(NodeId, MotionFrame)>,
+    geometry: Vec<(NodeId, Layout, u32)>,
+    mode: PageRasterMode,
+}
+
+struct PageRasterJob {
+    key: PageRasterKey,
+    _task: Task<()>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum PageRasterMode {
+    Full,
+    Move(Vec<NodeId>),
+    TextEdit(NodeId),
+}
+
+fn render_page_raster(
+    document: &Document,
+    page_id: &NodeId,
+    motion_frames: &HashMap<NodeId, MotionFrame>,
+    scale: f32,
+    mode: &PageRasterMode,
+) -> Result<(image::RgbaImage, Option<image::RgbaImage>), String> {
+    match mode {
+        PageRasterMode::Move(roots) => {
+            scene_raster::render_page_layers(document, page_id, motion_frames, scale, roots)
+                .map(|(background, overlay)| (background, Some(overlay)))
+        }
+        PageRasterMode::TextEdit(id) => scene_raster::render_page_without_subtrees(
+            document,
+            page_id,
+            motion_frames,
+            scale,
+            std::slice::from_ref(id),
+        )
+        .map(|background| (background, None)),
+        PageRasterMode::Full => scene_raster::render_page(document, page_id, motion_frames, scale)
+            .map(|background| (background, None)),
+    }
+}
+
+fn page_raster_from_pixels(
+    key: PageRasterKey,
+    pixels: image::RgbaImage,
+    overlay: Option<image::RgbaImage>,
+) -> PageRaster {
+    let image = Arc::new(RenderImage::new(smallvec::smallvec![image::Frame::new(
+        pixels,
+    )]));
+    let overlay = overlay.map(|pixels| {
+        Arc::new(RenderImage::new(smallvec::smallvec![image::Frame::new(
+            pixels,
+        )]))
+    });
+    PageRaster {
+        generation: key.generation,
+        scale: f32::from_bits(key.scale_bits),
+        motion_frames: key.motion_frames,
+        geometry: key.geometry,
+        mode: key.mode,
+        image,
+        overlay,
+    }
+}
+
+#[derive(Clone)]
 struct PreparedNode {
     kind: NodeKind,
     shape_kind: ShapeKind,
     bounds: GpBounds<Pixels>,
+    corners_points: [Point<Pixels>; 4],
     clip: GpBounds<Pixels>,
     fills: Vec<PreparedFill>,
     border: Option<(Hsla, Pixels, BorderStyle)>,
@@ -1535,11 +2167,19 @@ struct PreparedNode {
     text: Vec<PreparedText>,
     image: Option<Arc<RenderImage>>,
     image_bounds: Option<GpBounds<Pixels>>,
+    image_overlay: Option<PreparedImageOverlay>,
     image_fit: ImageFit,
     shadows: Vec<BoxShadow>,
     vector_paths: Vec<PreparedVectorPath>,
     rotation: f32,
     overlay_root: bool,
+}
+
+#[derive(Clone)]
+struct PreparedImageOverlay {
+    image: Arc<RenderImage>,
+    bounds: GpBounds<Pixels>,
+    clip: GpBounds<Pixels>,
 }
 
 #[derive(Clone)]
@@ -1561,12 +2201,17 @@ struct PreparedLayoutBadge {
     metric: bool,
 }
 
+struct PreparedSelection {
+    corners: [Point<Pixels>; 4],
+    handles: [Point<Pixels>; 8],
+}
+
 struct PreparedScene {
     nodes: Vec<PreparedNode>,
     labels: Vec<PreparedText>,
-    selection: Vec<GpBounds<Pixels>>,
+    selection: Vec<PreparedSelection>,
     rotation_handle: Option<(Point<Pixels>, Point<Pixels>)>,
-    agents: Vec<GpBounds<Pixels>>,
+    agents: Vec<[Point<Pixels>; 4]>,
     guides: Vec<(GuideAxis, Pixels, Pixels, Pixels)>,
     guide_labels: Vec<PreparedGuideLabel>,
     layout_badges: Vec<PreparedLayoutBadge>,
@@ -1598,6 +2243,7 @@ fn in_view_nodes(
         Some((screen.center(), scale))
     });
 
+    let geometries = visual_geometries(document, world_bounds, &HashMap::new(), None);
     world_bounds
         .iter()
         .filter_map(|(id, bounds)| {
@@ -1605,7 +2251,8 @@ fn in_view_nodes(
             if node_or_ancestor_hidden(document, node) {
                 return None;
             }
-            let mut screen = world_to_screen(*bounds, camera, viewport);
+            let visual_bounds = geometries.get(id).map_or(*bounds, |geometry| geometry.aabb);
+            let mut screen = world_to_screen(visual_bounds, camera, viewport);
             if preview_overlay
                 .is_some_and(|overlay| id == overlay || is_descendant_of(document, id, overlay))
             {
@@ -1632,8 +2279,10 @@ fn prepare_scene(
     drag: Option<DragState>,
     palette: CanvasPalette,
     images: &HashMap<String, Arc<RenderImage>>,
-    gradient_fills: &HashMap<(NodeId, usize), Arc<RenderImage>>,
+    image_opacity_variants: &HashMap<NodeId, OpacityImage>,
+    gradient_fills: &HashMap<(NodeId, usize), GradientRaster>,
     rotated_images: &HashMap<NodeId, RotatedImage>,
+    page_rasters: &HashMap<NodeId, PageRaster>,
     preview: bool,
     preview_overlay: Option<NodeId>,
     text_edit: Option<NativeTextEdit>,
@@ -1642,6 +2291,7 @@ fn prepare_scene(
 ) -> PreparedScene {
     let mut nodes = Vec::new();
     let mut labels = Vec::new();
+    let geometries = visual_geometries(document, world_bounds, motion_frames, drag.as_ref());
     let overlay_transform = preview_overlay.as_ref().and_then(|overlay| {
         let bounds = world_bounds.get(overlay).copied()?;
         let screen = world_to_screen(bounds, camera, viewport);
@@ -1656,16 +2306,33 @@ fn prepare_scene(
         let Some(node) = document.nodes.get(&id) else {
             continue;
         };
-        let Some(bounds) = world_bounds.get(&id).copied() else {
+        let raster_page_id =
+            root_page_for_node(document, &id).filter(|page_id| page_rasters.contains_key(page_id));
+        if raster_page_id.as_ref().is_some_and(|page_id| {
+            page_id != &id && text_edit.as_ref().is_none_or(|edit| edit.id != id)
+        }) {
+            continue;
+        }
+        let page_raster = page_rasters.get(&id);
+        let Some(geometry) = geometries.get(&id).copied() else {
             continue;
         };
         let belongs_to_overlay = preview_overlay
             .as_ref()
             .is_some_and(|overlay| &id == overlay || is_descendant_of(document, &id, overlay));
-        let mut screen = world_to_screen(bounds, camera, viewport);
+        let mut screen = world_to_screen(geometry.bounds, camera, viewport);
+        let mut screen_corners = geometry
+            .corners
+            .map(|corner| world_point_to_screen(corner, camera, viewport));
+        let mut screen_aabb = world_to_screen(geometry.aabb, camera, viewport);
         let overlay_scale = if belongs_to_overlay {
             if let Some((overlay_center, scale)) = overlay_transform {
                 screen = overlay_screen_bounds(screen, overlay_center, scale, viewport.center());
+                screen_aabb =
+                    overlay_screen_bounds(screen_aabb, overlay_center, scale, viewport.center());
+                screen_corners = screen_corners.map(|corner| {
+                    overlay_screen_point(corner, overlay_center, scale, viewport.center())
+                });
                 scale
             } else {
                 1.0
@@ -1674,26 +2341,7 @@ fn prepare_scene(
             1.0
         };
         let motion = motion_frames.get(&id);
-        if let Some(motion) = motion {
-            let transform_scale = camera.zoom as f32 * overlay_scale;
-            let center = screen.center()
-                + point(
-                    px(motion.x * transform_scale),
-                    px(motion.y * transform_scale),
-                );
-            let scaled = size(
-                screen.size.width * motion.scale_x.max(0.01),
-                screen.size.height * motion.scale_y.max(0.01),
-            );
-            screen = GpBounds::new(
-                point(
-                    center.x - scaled.width / 2.0,
-                    center.y - scaled.height / 2.0,
-                ),
-                scaled,
-            );
-        }
-        if !screen.intersects(&viewport) || node_or_ancestor_hidden(document, node) {
+        if !screen_aabb.intersects(&viewport) || node_or_ancestor_hidden(document, node) {
             continue;
         }
         let clip_world = inherited_clip(document, world_bounds, node);
@@ -1712,11 +2360,12 @@ fn prepare_scene(
                 .intersect(&viewport)
             })
             .unwrap_or(viewport);
-        let opacity = motion
-            .map_or(node.style.opacity, |motion| motion.opacity)
-            .clamp(0.0, 1.0);
+        let opacity = node_opacity(document, node, motion_frames);
         let motion_fill = motion.and_then(|motion| motion.fill);
-        let fills = if node.kind == NodeKind::Text {
+        let text_fill = text_paint_color(node, motion_fill);
+        let fills = if page_raster.is_some() {
+            Vec::new()
+        } else if node.kind == NodeKind::Text {
             vec![PreparedFill::Background(
                 color_hsla(fallback_fill(node.kind), opacity).into(),
             )]
@@ -1725,23 +2374,30 @@ fn prepare_scene(
                 .map(|color| vec![PreparedFill::Background(color_hsla(color, opacity).into())])
                 .unwrap_or_else(|| node_fills(node, opacity, gradient_fills))
         };
-        let border = motion
-            .and_then(|motion| motion.stroke.as_ref())
-            .or(node.style.stroke.as_ref())
-            .map(|stroke| {
-                (
-                    color_hsla(stroke.color, opacity),
-                    px((stroke.width * camera.zoom as f32).max(0.5)),
-                    match stroke.style {
-                        loora_engine::StrokeStyle::Solid => BorderStyle::Solid,
-                        loora_engine::StrokeStyle::Dashed => BorderStyle::Dashed,
-                        loora_engine::StrokeStyle::Dotted => BorderStyle::Dashed,
-                    },
-                )
-            });
+        let border = page_raster
+            .is_none()
+            .then(|| {
+                motion
+                    .and_then(|motion| motion.stroke.as_ref())
+                    .or(node.style.stroke.as_ref())
+                    .map(|stroke| {
+                        (
+                            color_hsla(stroke.color, opacity),
+                            px((stroke.width * camera.zoom as f32).max(0.5)),
+                            match stroke.style {
+                                loora_engine::StrokeStyle::Solid => BorderStyle::Solid,
+                                loora_engine::StrokeStyle::Dashed => BorderStyle::Dashed,
+                                loora_engine::StrokeStyle::Dotted => BorderStyle::Dashed,
+                            },
+                        )
+                    })
+            })
+            .flatten();
         let scale = camera.zoom as f32 * overlay_scale;
         let motion_corners = motion.map_or(node.style.corners, |motion| motion.corners);
-        let corners = if node.shape_kind == ShapeKind::Ellipse {
+        let corners = if page_raster.is_some() {
+            GpCorners::all(px(0.0))
+        } else if node.shape_kind == ShapeKind::Ellipse {
             GpCorners::all(screen.size.width.min(screen.size.height) / 2.0)
         } else {
             GpCorners {
@@ -1751,24 +2407,30 @@ fn prepare_scene(
                 bottom_left: px(motion_corners.bl * scale),
             }
         };
-        let base_rotation = match &drag {
-            Some(DragState::Rotate { current, .. }) => {
-                current.get(&id).copied().unwrap_or(node.rotation)
-            }
-            _ => node.rotation,
+        let rotation = geometry.rotation;
+        let text = if page_raster.is_some() {
+            Vec::new()
+        } else {
+            prepare_node_text(
+                node,
+                screen,
+                clip,
+                scale,
+                (text_fill, opacity),
+                text_edit.as_ref().filter(|edit| edit.id == id),
+                rotation,
+                window,
+            )
         };
-        let rotation = base_rotation + motion.map_or(0.0, |motion| motion.rotate);
-        let text = prepare_node_text(
-            node,
-            screen,
-            clip,
-            scale,
-            (motion_fill, opacity),
-            text_edit.as_ref().filter(|edit| edit.id == id),
-            rotation,
-            window,
-        );
-        if node.is_root_frame() {
+        if node.is_root_frame()
+            && root_page_label_is_frontmost(
+                &id,
+                document,
+                world_bounds,
+                paint_order,
+                1.0 / camera.zoom.max(0.01),
+            )
+        {
             let label = SharedString::from(node.name.clone());
             let run = TextRun {
                 len: label.len(),
@@ -1793,35 +2455,43 @@ fn prepare_scene(
                 svg_color: palette.page_label,
             });
         }
-        let shadows = node
-            .style
-            .shadows
-            .iter()
-            .map(|shadow| BoxShadow {
-                color: color_hsla(shadow.color, opacity),
-                offset: point(px(shadow.x * scale), px(shadow.y * scale)),
-                blur_radius: px((shadow.blur * scale).max(0.0)),
-                spread_radius: px(shadow.spread * scale),
-                inset: shadow.inset,
-            })
-            .collect();
-        let vector_paths = if node.kind == NodeKind::Vector {
+        let shadows = if page_raster.is_some() {
+            Vec::new()
+        } else {
+            node.style
+                .shadows
+                .iter()
+                .map(|shadow| BoxShadow {
+                    color: color_hsla(shadow.color, opacity),
+                    offset: point(px(shadow.x * scale), px(shadow.y * scale)),
+                    blur_radius: px((shadow.blur * scale).max(0.0)),
+                    spread_radius: px(shadow.spread * scale),
+                    inset: shadow.inset,
+                })
+                .collect()
+        };
+        let vector_paths = if page_raster.is_none() && node.kind == NodeKind::Vector {
             prepare_vector_paths(node, screen, opacity, rotation)
         } else {
             Vec::new()
         };
-        let rotated_image = (!matches!(&drag, Some(DragState::Rotate { .. }))
+        let rotated_image = (page_raster.is_none()
+            && !matches!(&drag, Some(DragState::Rotate { .. }))
             && motion.map_or(0.0, |motion| motion.rotate).abs() <= f32::EPSILON)
             .then(|| rotated_images.get(&id))
             .flatten();
-        let image = rotated_image
-            .map(|rotated| rotated.image.clone())
-            .or_else(|| {
-                node.image_path
-                    .as_ref()
-                    .and_then(|path| images.get(path))
-                    .cloned()
-            });
+        let image = page_raster.map(|raster| raster.image.clone()).or_else(|| {
+            image_opacity_variants
+                .get(&id)
+                .map(|variant| variant.image.clone())
+                .or_else(|| rotated_image.map(|rotated| rotated.image.clone()))
+                .or_else(|| {
+                    node.image_path
+                        .as_ref()
+                        .and_then(|path| images.get(path))
+                        .cloned()
+                })
+        });
         let image_bounds = rotated_image.map(|rotated| {
             let expanded = size(
                 screen.size.width * rotated.width_ratio,
@@ -1835,10 +2505,36 @@ fn prepare_scene(
                 expanded,
             )
         });
+        let image_overlay = page_raster
+            .and_then(|raster| raster.overlay.as_ref().map(|image| (raster, image)))
+            .map(|(raster, image)| {
+                let delta = match (&raster.mode, &drag) {
+                    (PageRasterMode::Move(roots), Some(DragState::Move { delta, .. }))
+                        if !roots.contains(&id) =>
+                    {
+                        *delta
+                    }
+                    _ => Vec2::default(),
+                };
+                let bounds = GpBounds::new(
+                    screen.origin
+                        + point(
+                            px((delta.x * camera.zoom) as f32),
+                            px((delta.y * camera.zoom) as f32),
+                        ),
+                    screen.size,
+                );
+                PreparedImageOverlay {
+                    image: image.clone(),
+                    bounds,
+                    clip: screen.intersect(&clip),
+                }
+            });
         nodes.push(PreparedNode {
-            kind: node.kind,
+            kind: page_raster.map_or(node.kind, |_| NodeKind::Image),
             shape_kind: node.shape_kind,
             bounds: screen,
+            corners_points: screen_corners,
             clip,
             fills,
             border,
@@ -1846,7 +2542,8 @@ fn prepare_scene(
             text,
             image,
             image_bounds,
-            image_fit: if rotated_image.is_some() {
+            image_overlay,
+            image_fit: if page_raster.is_some() || rotated_image.is_some() {
                 ImageFit::Fill
             } else {
                 node.image_fit
@@ -1861,7 +2558,13 @@ fn prepare_scene(
     let layout_badges = if preview {
         Vec::new()
     } else {
-        layout_badges(&selection, document, world_bounds, camera.zoom)
+        layout_badges(
+            &selection,
+            document,
+            world_bounds,
+            &geometries,
+            camera.zoom,
+        )
             .map(|(layout_id, mut badges)| {
                 match &drag {
                     Some(DragState::LayoutGap {
@@ -1916,36 +2619,40 @@ fn prepare_scene(
                             bounds,
                             line,
                             origin,
-                            metric: matches!(
-                                badge.kind,
-                                LayoutBadgeKind::Gap(_) | LayoutBadgeKind::Padding(_)
-                            ),
+                            metric: true,
                         }
                     })
                     .collect()
             })
             .unwrap_or_default()
     };
-    let selection_world = selection_bounds(&selection, world_bounds);
-    let rotation_handle = selection_world.map(|bounds| {
-        let screen = world_to_screen(bounds, camera, viewport);
+    let selection_geometry = selection_visual_geometry(&selection, &geometries);
+    let rotation_handle = selection_geometry.map(|geometry| {
+        let (handle, anchor) = geometry.rotation_handle(ROTATION_HANDLE_SCREEN_PX / camera.zoom);
         (
-            point(
-                screen.center().x,
-                screen.top() - px(ROTATION_HANDLE_SCREEN_PX as f32),
-            ),
-            point(screen.center().x, screen.top()),
+            world_point_to_screen(handle, camera, viewport),
+            world_point_to_screen(anchor, camera, viewport),
         )
     });
-    let selection = selection
-        .iter()
-        .filter_map(|id| world_bounds.get(id).copied())
-        .map(|bounds| world_to_screen(bounds, camera, viewport))
+    let selection = selection_geometry
+        .into_iter()
+        .map(|geometry| PreparedSelection {
+            corners: geometry
+                .corners
+                .map(|corner| world_point_to_screen(corner, camera, viewport)),
+            handles: geometry
+                .handles()
+                .map(|handle| world_point_to_screen(handle, camera, viewport)),
+        })
         .collect();
     let agents = agent_nodes
         .iter()
-        .filter_map(|id| world_bounds.get(id).copied())
-        .map(|bounds| world_to_screen(bounds, camera, viewport))
+        .filter_map(|id| geometries.get(id))
+        .map(|geometry| {
+            geometry
+                .corners
+                .map(|corner| world_point_to_screen(corner, camera, viewport))
+        })
         .collect();
     let guide_labels = guides
         .iter()
@@ -2118,11 +2825,11 @@ fn paint_scene(_bounds: GpBounds<Pixels>, scene: PreparedScene, window: &mut Win
                     }
                 });
             }
-            for bounds in scene.agents {
-                window.paint_quad(outline(bounds, scene.palette.agent, BorderStyle::Dashed));
+            for corners in scene.agents {
+                paint_dashed_polygon(corners, scene.palette.agent, window);
             }
-            for bounds in scene.selection {
-                paint_selection(bounds, scene.palette.selection, window);
+            for selection in scene.selection {
+                paint_selection(selection, scene.palette.selection, window);
             }
             for badge in scene.layout_badges {
                 window.paint_quad(quad(
@@ -2147,13 +2854,12 @@ fn paint_scene(_bounds: GpBounds<Pixels>, scene: PreparedScene, window: &mut Win
                         .paint(badge.origin, px(11.0), GpTextAlign::Left, None, window, cx);
             }
             if let Some((handle, anchor)) = scene.rotation_handle {
-                window.paint_quad(fill(
-                    GpBounds::from_corners(
-                        point(handle.x - px(0.5), handle.y),
-                        point(anchor.x + px(0.5), anchor.y),
-                    ),
-                    scene.palette.selection,
-                ));
+                let mut builder = PathBuilder::stroke(px(1.0));
+                builder.move_to(handle);
+                builder.line_to(anchor);
+                if let Ok(path) = builder.build() {
+                    window.paint_path(path, scene.palette.selection);
+                }
                 window.paint_quad(quad(
                     GpBounds::new(handle - point(px(5.0), px(5.0)), size(px(10.0), px(10.0))),
                     px(5.0),
@@ -2262,9 +2968,8 @@ fn paint_node(node: &PreparedNode, window: &mut Window) {
         match fill {
             PreparedFill::Background(fill) => {
                 if node.rotation.abs() > f32::EPSILON {
-                    let points = rotated_rect_points(node.bounds, node.rotation);
                     let mut builder = PathBuilder::fill();
-                    builder.add_polygon(&points, true);
+                    builder.add_polygon(&node.corners_points, true);
                     if let Ok(path) = builder.build() {
                         window.paint_path(path, *fill);
                     }
@@ -2293,9 +2998,8 @@ fn paint_node(node: &PreparedNode, window: &mut Window) {
     }
     if border_width > px(0.0) {
         if node.rotation.abs() > f32::EPSILON {
-            let points = rotated_rect_points(node.bounds, node.rotation);
             let mut builder = PathBuilder::stroke(border_width);
-            builder.add_polygon(&points, true);
+            builder.add_polygon(&node.corners_points, true);
             if let Ok(path) = builder.build() {
                 window.paint_path(path, border_color);
             }
@@ -2336,18 +3040,24 @@ fn paint_node(node: &PreparedNode, window: &mut Window) {
             ));
         }
     }
+    if let Some(overlay) = &node.image_overlay {
+        window.with_content_mask(
+            Some(ContentMask {
+                bounds: overlay.clip,
+            }),
+            |window| {
+                let _ = window.paint_image(
+                    overlay.clip,
+                    overlay.bounds,
+                    GpCorners::all(px(0.0)),
+                    overlay.image.clone(),
+                    0,
+                    false,
+                );
+            },
+        );
+    }
     window.paint_inset_shadows(node.bounds, node.corners, &node.shadows);
-}
-
-fn rotated_rect_points(bounds: GpBounds<Pixels>, rotation: f32) -> [Point<Pixels>; 4] {
-    let center = bounds.center();
-    [
-        point(bounds.left(), bounds.top()),
-        point(bounds.right(), bounds.top()),
-        point(bounds.right(), bounds.bottom()),
-        point(bounds.left(), bounds.bottom()),
-    ]
-    .map(|point| rotate_point(point, center, rotation))
 }
 
 fn rotate_point(value: Point<Pixels>, center: Point<Pixels>, rotation: f32) -> Point<Pixels> {
@@ -2380,6 +3090,18 @@ fn overlay_screen_bounds(
     )
 }
 
+fn overlay_screen_point(
+    value: Point<Pixels>,
+    overlay_center: Point<Pixels>,
+    scale: f32,
+    viewport_center: Point<Pixels>,
+) -> Point<Pixels> {
+    point(
+        viewport_center.x + (value.x - overlay_center.x) * scale,
+        viewport_center.y + (value.y - overlay_center.y) * scale,
+    )
+}
+
 fn fitted_image_bounds(
     bounds: GpBounds<Pixels>,
     image: &RenderImage,
@@ -2408,9 +3130,13 @@ fn fitted_image_bounds(
     )
 }
 
-fn paint_selection(bounds: GpBounds<Pixels>, color: Hsla, window: &mut Window) {
-    window.paint_quad(outline(bounds, color, BorderStyle::Solid));
-    for position in handle_positions(bounds) {
+fn paint_selection(selection: PreparedSelection, color: Hsla, window: &mut Window) {
+    let mut builder = PathBuilder::stroke(px(1.0));
+    builder.add_polygon(&selection.corners, true);
+    if let Ok(path) = builder.build() {
+        window.paint_path(path, color);
+    }
+    for position in selection.handles {
         window.paint_quad(quad(
             GpBounds::new(position - point(px(3.), px(3.)), size(px(6.), px(6.))),
             px(1.),
@@ -2419,6 +3145,33 @@ fn paint_selection(bounds: GpBounds<Pixels>, color: Hsla, window: &mut Window) {
             color,
             BorderStyle::Solid,
         ));
+    }
+}
+
+fn paint_dashed_polygon(corners: [Point<Pixels>; 4], color: Hsla, window: &mut Window) {
+    const DASH: f32 = 5.0;
+    const GAP: f32 = 3.0;
+    for index in 0..4 {
+        let start = corners[index];
+        let end = corners[(index + 1) % 4];
+        let dx = f32::from(end.x - start.x);
+        let dy = f32::from(end.y - start.y);
+        let length = (dx * dx + dy * dy).sqrt();
+        if length <= f32::EPSILON {
+            continue;
+        }
+        let mut offset = 0.0;
+        while offset < length {
+            let from = offset / length;
+            let to = (offset + DASH).min(length) / length;
+            let mut builder = PathBuilder::stroke(px(1.0));
+            builder.move_to(point(start.x + px(dx * from), start.y + px(dy * from)));
+            builder.line_to(point(start.x + px(dx * to), start.y + px(dy * to)));
+            if let Ok(path) = builder.build() {
+                window.paint_path(path, color);
+            }
+            offset += DASH + GAP;
+        }
     }
 }
 
@@ -2623,11 +3376,7 @@ fn prepare_node_text(
     let typography = node.typography.clone().unwrap_or_default();
     let (color, opacity) = paint;
     let font_size = px((typography.size * scale).max(1.));
-    let line_height = px(typography
-        .line_height
-        .unwrap_or(typography.size * 1.25)
-        .max(1.)
-        * scale);
+    let line_height = px(resolved_line_height(&typography).max(1.0) * scale);
     let align = match typography.align {
         EngineTextAlign::Left | EngineTextAlign::Justify => GpTextAlign::Left,
         EngineTextAlign::Center => GpTextAlign::Center,
@@ -2690,17 +3439,19 @@ fn prepare_node_text(
                     },
                 )
             });
-            let svg = (rotation.abs() > f32::EPSILON && text_edit.is_none()).then(|| {
-                SharedString::from(rotated_text_svg(
-                    line.text.as_ref(),
-                    f32::from(bounds.size.width),
-                    f32::from(line_height),
-                    f32::from(font_size),
-                    &typography.family,
-                    typography.weight,
-                    typography.align,
-                ))
-            });
+            let svg =
+                should_use_text_svg(rotation, typography.letter_spacing, text_edit).then(|| {
+                    SharedString::from(styled_text_svg(
+                        line.text.as_ref(),
+                        f32::from(bounds.size.width),
+                        f32::from(line_height),
+                        f32::from(font_size),
+                        &typography.family,
+                        typography.weight,
+                        typography.align,
+                        typography.letter_spacing * scale,
+                    ))
+                });
             PreparedText {
                 line,
                 origin,
@@ -2719,7 +3470,50 @@ fn prepare_node_text(
         .collect()
 }
 
-fn rotated_text_svg(
+fn resolved_line_height(typography: &loora_engine::Typography) -> f32 {
+    typography.size * typography.line_height.unwrap_or(1.25)
+}
+
+fn root_page_label_is_frontmost(
+    id: &NodeId,
+    document: &Document,
+    world_bounds: &HashMap<NodeId, Bounds>,
+    paint_order: &[NodeId],
+    tolerance: f64,
+) -> bool {
+    let Some(index) = paint_order.iter().position(|candidate| candidate == id) else {
+        return true;
+    };
+    let Some(bounds) = world_bounds.get(id) else {
+        return true;
+    };
+    !paint_order[index + 1..].iter().any(|candidate| {
+        let Some(node) = document.nodes.get(candidate) else {
+            return false;
+        };
+        let Some(other) = world_bounds.get(candidate) else {
+            return false;
+        };
+        node.is_root_frame()
+            && (other.x - bounds.x).abs() <= tolerance
+            && (other.y - bounds.y).abs() <= tolerance
+    })
+}
+
+fn text_paint_color(node: &Node, motion_fill: Option<Color>) -> Option<Color> {
+    motion_fill.or_else(|| node.style.solid_fill())
+}
+
+fn should_use_text_svg(
+    rotation: f32,
+    letter_spacing: f32,
+    text_edit: Option<&NativeTextEdit>,
+) -> bool {
+    text_edit.is_none() && (rotation.abs() > f32::EPSILON || letter_spacing.abs() > f32::EPSILON)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn styled_text_svg(
     text: &str,
     width: f32,
     height: f32,
@@ -2727,6 +3521,7 @@ fn rotated_text_svg(
     family: &str,
     weight: u16,
     align: EngineTextAlign,
+    letter_spacing: f32,
 ) -> String {
     let (x, anchor) = match align {
         EngineTextAlign::Left | EngineTextAlign::Justify => (0.0, "start"),
@@ -2742,7 +3537,7 @@ fn rotated_text_svg(
             .replace('\'', "&apos;")
     };
     format!(
-        "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"{width}\" height=\"{height}\" viewBox=\"0 0 {width} {height}\"><text x=\"{x}\" y=\"{font_size}\" text-anchor=\"{anchor}\" font-family=\"{}\" font-size=\"{font_size}\" font-weight=\"{weight}\" fill=\"white\">{}</text></svg>",
+        "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"{width}\" height=\"{height}\" viewBox=\"0 0 {width} {height}\"><text x=\"{x}\" y=\"{font_size}\" text-anchor=\"{anchor}\" font-family=\"{}\" font-size=\"{font_size}\" font-weight=\"{weight}\" letter-spacing=\"{letter_spacing}\" fill=\"white\">{}</text></svg>",
         escape(family),
         escape(text),
     )
@@ -2858,7 +3653,7 @@ fn fallback_fill(kind: NodeKind) -> Color {
 fn node_fills(
     node: &Node,
     opacity: f32,
-    gradients: &HashMap<(NodeId, usize), Arc<RenderImage>>,
+    gradients: &HashMap<(NodeId, usize), GradientRaster>,
 ) -> Vec<PreparedFill> {
     let fills = node
         .style
@@ -2871,7 +3666,7 @@ fn node_fills(
             }
             Paint::LinearGradient { .. } | Paint::RadialGradient { .. } => gradients
                 .get(&(node.id.clone(), index))
-                .cloned()
+                .map(|raster| raster.image.clone())
                 .map(PreparedFill::Image),
         })
         .collect::<Vec<_>>();
@@ -2967,6 +3762,31 @@ fn load_render_image(path: &Path) -> Option<Arc<RenderImage>> {
     }
     let frame = image::Frame::new(image);
     Some(Arc::new(RenderImage::new(smallvec::smallvec![frame])))
+}
+
+fn render_image_with_opacity(source: &Arc<RenderImage>, opacity: f32) -> Arc<RenderImage> {
+    let opacity = opacity.clamp(0.0, 1.0);
+    if opacity >= 1.0 - f32::EPSILON {
+        return source.clone();
+    }
+    let frames = (0..source.frame_count())
+        .filter_map(|index| {
+            let dimensions = source.size(index);
+            let width = i32::from(dimensions.width).max(0) as u32;
+            let height = i32::from(dimensions.height).max(0) as u32;
+            let mut bytes = source.as_bytes(index)?.to_vec();
+            for pixel in bytes.chunks_exact_mut(4) {
+                pixel[3] = (pixel[3] as f32 * opacity).round() as u8;
+            }
+            let buffer = image::RgbaImage::from_raw(width, height, bytes)?;
+            Some(image::Frame::from_parts(buffer, 0, 0, source.delay(index)))
+        })
+        .collect::<Vec<_>>();
+    if frames.is_empty() {
+        source.clone()
+    } else {
+        Arc::new(RenderImage::new(frames))
+    }
 }
 
 fn load_rotated_image(
@@ -3077,6 +3897,30 @@ fn color_hsla(color: Color, opacity: f32) -> Hsla {
     .into()
 }
 
+fn node_opacity(
+    document: &Document,
+    node: &Node,
+    motion_frames: &HashMap<NodeId, MotionFrame>,
+) -> f32 {
+    let mut opacity = 1.0;
+    let mut current = Some(node);
+    let mut visited = HashSet::new();
+    while let Some(current_node) = current {
+        if !visited.insert(current_node.id.clone()) {
+            break;
+        }
+        opacity *= motion_frames
+            .get(&current_node.id)
+            .map_or(current_node.style.opacity, |motion| motion.opacity)
+            .clamp(0.0, 1.0);
+        current = current_node
+            .parent_id
+            .as_ref()
+            .and_then(|parent_id| document.nodes.get(parent_id));
+    }
+    opacity.clamp(0.0, 1.0)
+}
+
 fn world_to_screen(bounds: Bounds, camera: Camera, viewport: GpBounds<Pixels>) -> GpBounds<Pixels> {
     let origin = camera.world_to_screen(Vec2::new(bounds.x, bounds.y));
     GpBounds::new(
@@ -3088,12 +3932,373 @@ fn world_to_screen(bounds: Bounds, camera: Camera, viewport: GpBounds<Pixels>) -
     )
 }
 
+fn world_point_to_screen(value: Vec2, camera: Camera, viewport: GpBounds<Pixels>) -> Point<Pixels> {
+    let screen = camera.world_to_screen(value);
+    viewport.origin + point(px(screen.x as f32), px(screen.y as f32))
+}
+
 fn world_x(value: f64, camera: Camera, viewport: GpBounds<Pixels>) -> Pixels {
     viewport.origin.x + px((value * camera.zoom + camera.pan.x) as f32)
 }
 
 fn world_y(value: f64, camera: Camera, viewport: GpBounds<Pixels>) -> Pixels {
     viewport.origin.y + px((value * camera.zoom + camera.pan.y) as f32)
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct Affine2 {
+    xx: f64,
+    xy: f64,
+    yx: f64,
+    yy: f64,
+    tx: f64,
+    ty: f64,
+}
+
+impl Affine2 {
+    const IDENTITY: Self = Self {
+        xx: 1.0,
+        xy: 0.0,
+        yx: 0.0,
+        yy: 1.0,
+        tx: 0.0,
+        ty: 0.0,
+    };
+
+    fn translate(x: f64, y: f64) -> Self {
+        Self {
+            tx: x,
+            ty: y,
+            ..Self::IDENTITY
+        }
+    }
+
+    fn rotate(degrees: f64) -> Self {
+        let radians = degrees.to_radians();
+        let cos = radians.cos();
+        let sin = radians.sin();
+        Self {
+            xx: cos,
+            xy: -sin,
+            yx: sin,
+            yy: cos,
+            tx: 0.0,
+            ty: 0.0,
+        }
+    }
+
+    fn scale(x: f64, y: f64) -> Self {
+        Self {
+            xx: x,
+            yy: y,
+            ..Self::IDENTITY
+        }
+    }
+
+    /// Compose two transforms so `other` is applied first, followed by `self`.
+    fn compose(self, other: Self) -> Self {
+        Self {
+            xx: self.xx * other.xx + self.xy * other.yx,
+            xy: self.xx * other.xy + self.xy * other.yy,
+            yx: self.yx * other.xx + self.yy * other.yx,
+            yy: self.yx * other.xy + self.yy * other.yy,
+            tx: self.xx * other.tx + self.xy * other.ty + self.tx,
+            ty: self.yx * other.tx + self.yy * other.ty + self.ty,
+        }
+    }
+
+    fn around(center: Vec2, translate: Vec2, scale: Vec2, rotation: f64) -> Self {
+        Self::translate(center.x + translate.x, center.y + translate.y)
+            .compose(Self::rotate(rotation))
+            .compose(Self::scale(scale.x, scale.y))
+            .compose(Self::translate(-center.x, -center.y))
+    }
+
+    fn apply(self, value: Vec2) -> Vec2 {
+        Vec2::new(
+            self.xx * value.x + self.xy * value.y + self.tx,
+            self.yx * value.x + self.yy * value.y + self.ty,
+        )
+    }
+
+    fn apply_vector(self, value: Vec2) -> Vec2 {
+        Vec2::new(
+            self.xx * value.x + self.xy * value.y,
+            self.yx * value.x + self.yy * value.y,
+        )
+    }
+
+    fn inverse(self) -> Option<Self> {
+        let determinant = self.xx * self.yy - self.xy * self.yx;
+        if determinant.abs() <= f64::EPSILON {
+            return None;
+        }
+        let xx = self.yy / determinant;
+        let xy = -self.xy / determinant;
+        let yx = -self.yx / determinant;
+        let yy = self.xx / determinant;
+        Some(Self {
+            xx,
+            xy,
+            yx,
+            yy,
+            tx: -(xx * self.tx + xy * self.ty),
+            ty: -(yx * self.tx + yy * self.ty),
+        })
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+struct VisualGeometry {
+    matrix: Affine2,
+    bounds: Bounds,
+    aabb: Bounds,
+    corners: [Vec2; 4],
+    rotation: f32,
+}
+
+impl VisualGeometry {
+    fn from_matrix(base: Bounds, matrix: Affine2) -> Self {
+        let corners = [
+            Vec2::new(base.x, base.y),
+            Vec2::new(base.right(), base.y),
+            Vec2::new(base.right(), base.bottom()),
+            Vec2::new(base.x, base.bottom()),
+        ]
+        .map(|corner| matrix.apply(corner));
+        let center = matrix.apply(Vec2::new(
+            base.x + base.width * 0.5,
+            base.y + base.height * 0.5,
+        ));
+        let width = point_distance(corners[0], corners[1]);
+        let height = point_distance(corners[0], corners[3]);
+        let rotation = (corners[1].y - corners[0].y)
+            .atan2(corners[1].x - corners[0].x)
+            .to_degrees() as f32;
+        let min_x = corners
+            .iter()
+            .map(|point| point.x)
+            .fold(f64::INFINITY, f64::min);
+        let max_x = corners
+            .iter()
+            .map(|point| point.x)
+            .fold(f64::NEG_INFINITY, f64::max);
+        let min_y = corners
+            .iter()
+            .map(|point| point.y)
+            .fold(f64::INFINITY, f64::min);
+        let max_y = corners
+            .iter()
+            .map(|point| point.y)
+            .fold(f64::NEG_INFINITY, f64::max);
+        Self {
+            matrix,
+            bounds: Bounds::new(
+                center.x - width * 0.5,
+                center.y - height * 0.5,
+                width,
+                height,
+            ),
+            aabb: Bounds::new(min_x, min_y, max_x - min_x, max_y - min_y),
+            corners,
+            rotation,
+        }
+    }
+
+    fn local_point(self, world: Vec2) -> Option<Vec2> {
+        self.matrix.inverse().map(|inverse| inverse.apply(world))
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+struct SelectionGeometry {
+    corners: [Vec2; 4],
+}
+
+impl SelectionGeometry {
+    fn center(self) -> Vec2 {
+        Vec2::new(
+            self.corners.iter().map(|point| point.x).sum::<f64>() / 4.0,
+            self.corners.iter().map(|point| point.y).sum::<f64>() / 4.0,
+        )
+    }
+
+    fn aabb(self) -> Bounds {
+        let min_x = self
+            .corners
+            .iter()
+            .map(|point| point.x)
+            .fold(f64::INFINITY, f64::min);
+        let max_x = self
+            .corners
+            .iter()
+            .map(|point| point.x)
+            .fold(f64::NEG_INFINITY, f64::max);
+        let min_y = self
+            .corners
+            .iter()
+            .map(|point| point.y)
+            .fold(f64::INFINITY, f64::min);
+        let max_y = self
+            .corners
+            .iter()
+            .map(|point| point.y)
+            .fold(f64::NEG_INFINITY, f64::max);
+        Bounds::new(min_x, min_y, max_x - min_x, max_y - min_y)
+    }
+
+    fn handles(self) -> [Vec2; 8] {
+        let [top_left, top_right, bottom_right, bottom_left] = self.corners;
+        [
+            top_left,
+            midpoint(top_left, top_right),
+            top_right,
+            midpoint(top_right, bottom_right),
+            bottom_right,
+            midpoint(bottom_right, bottom_left),
+            bottom_left,
+            midpoint(bottom_left, top_left),
+        ]
+    }
+
+    fn rotation_handle(self, offset: f64) -> (Vec2, Vec2) {
+        let anchor = midpoint(self.corners[0], self.corners[1]);
+        let center = self.center();
+        let outward = unit_vector(Vec2::new(anchor.x - center.x, anchor.y - center.y))
+            .unwrap_or(Vec2::new(0.0, -1.0));
+        (
+            Vec2::new(anchor.x + outward.x * offset, anchor.y + outward.y * offset),
+            anchor,
+        )
+    }
+}
+
+fn selection_visual_geometry(
+    ids: &[NodeId],
+    geometries: &HashMap<NodeId, VisualGeometry>,
+) -> Option<SelectionGeometry> {
+    let selected = ids
+        .iter()
+        .filter_map(|id| geometries.get(id).copied())
+        .collect::<Vec<_>>();
+    match selected.as_slice() {
+        [] => None,
+        [geometry] => Some(SelectionGeometry {
+            corners: geometry.corners,
+        }),
+        geometries => {
+            let aabb = geometries
+                .iter()
+                .map(|geometry| geometry.aabb)
+                .reduce(union_bounds)?;
+            Some(SelectionGeometry {
+                corners: [
+                    Vec2::new(aabb.x, aabb.y),
+                    Vec2::new(aabb.right(), aabb.y),
+                    Vec2::new(aabb.right(), aabb.bottom()),
+                    Vec2::new(aabb.x, aabb.bottom()),
+                ],
+            })
+        }
+    }
+}
+
+fn midpoint(left: Vec2, right: Vec2) -> Vec2 {
+    Vec2::new((left.x + right.x) * 0.5, (left.y + right.y) * 0.5)
+}
+
+fn unit_vector(value: Vec2) -> Option<Vec2> {
+    let length = (value.x.powi(2) + value.y.powi(2)).sqrt();
+    (length > f64::EPSILON).then(|| Vec2::new(value.x / length, value.y / length))
+}
+
+fn point_distance(left: Vec2, right: Vec2) -> f64 {
+    ((right.x - left.x).powi(2) + (right.y - left.y).powi(2)).sqrt()
+}
+
+fn visual_geometries(
+    document: &Document,
+    bounds: &HashMap<NodeId, Bounds>,
+    motion_frames: &HashMap<NodeId, MotionFrame>,
+    drag: Option<&DragState>,
+) -> HashMap<NodeId, VisualGeometry> {
+    let mut matrices = HashMap::new();
+    let mut geometries = HashMap::new();
+    for id in document.nodes.keys() {
+        let _ = resolve_visual_geometry(
+            document,
+            bounds,
+            motion_frames,
+            drag,
+            id,
+            &mut matrices,
+            &mut geometries,
+            &mut HashSet::new(),
+        );
+    }
+    geometries
+}
+
+#[allow(clippy::too_many_arguments)]
+fn resolve_visual_geometry(
+    document: &Document,
+    bounds: &HashMap<NodeId, Bounds>,
+    motion_frames: &HashMap<NodeId, MotionFrame>,
+    drag: Option<&DragState>,
+    id: &NodeId,
+    matrices: &mut HashMap<NodeId, Affine2>,
+    geometries: &mut HashMap<NodeId, VisualGeometry>,
+    visiting: &mut HashSet<NodeId>,
+) -> Option<VisualGeometry> {
+    if let Some(geometry) = geometries.get(id) {
+        return Some(*geometry);
+    }
+    if !visiting.insert(id.clone()) {
+        return None;
+    }
+    let node = document.nodes.get(id)?;
+    let base = *bounds.get(id)?;
+    let parent_matrix = if let Some(parent_id) = node.parent_id.as_ref() {
+        let _ = resolve_visual_geometry(
+            document,
+            bounds,
+            motion_frames,
+            drag,
+            parent_id,
+            matrices,
+            geometries,
+            visiting,
+        )?;
+        *matrices.get(parent_id)?
+    } else {
+        Affine2::IDENTITY
+    };
+    let motion = motion_frames.get(id);
+    let rotation = match drag {
+        Some(DragState::Rotate { current, .. }) => {
+            current.get(id).copied().unwrap_or(node.rotation)
+        }
+        _ => node.rotation,
+    } + motion.map_or(0.0, |frame| frame.rotate);
+    let center = Vec2::new(base.x + base.width * 0.5, base.y + base.height * 0.5);
+    let own = Affine2::around(
+        center,
+        Vec2::new(
+            motion.map_or(0.0, |frame| frame.x as f64),
+            motion.map_or(0.0, |frame| frame.y as f64),
+        ),
+        Vec2::new(
+            motion.map_or(1.0, |frame| frame.scale_x.max(0.01) as f64),
+            motion.map_or(1.0, |frame| frame.scale_y.max(0.01) as f64),
+        ),
+        rotation as f64,
+    );
+    let matrix = parent_matrix.compose(own);
+    let geometry = VisualGeometry::from_matrix(base, matrix);
+    visiting.remove(id);
+    matrices.insert(id.clone(), matrix);
+    geometries.insert(id.clone(), geometry);
+    Some(geometry)
 }
 
 fn absolute_bounds(document: &Document) -> HashMap<NodeId, Bounds> {
@@ -3205,6 +4410,47 @@ fn is_descendant_of(document: &Document, id: &NodeId, ancestor: &NodeId) -> bool
     false
 }
 
+fn root_page_for_node(document: &Document, id: &NodeId) -> Option<NodeId> {
+    let mut current = document.nodes.get(id)?;
+    loop {
+        if current.is_root_frame() {
+            return Some(current.id.clone());
+        }
+        let parent_id = current.parent_id.as_ref()?;
+        current = document.nodes.get(parent_id)?;
+    }
+}
+
+fn changed_raster_pages(previous: &Document, current: &Document) -> HashSet<NodeId> {
+    let ids = previous
+        .nodes
+        .keys()
+        .chain(current.nodes.keys())
+        .cloned()
+        .collect::<HashSet<_>>();
+    let mut pages = HashSet::new();
+    for id in ids {
+        if previous.nodes.get(&id) == current.nodes.get(&id) {
+            continue;
+        }
+        if let Some(page_id) = root_page_for_node(previous, &id) {
+            pages.insert(page_id);
+        }
+        if let Some(page_id) = root_page_for_node(current, &id) {
+            pages.insert(page_id);
+        }
+    }
+    pages
+}
+
+fn raster_scale_for_zoom(zoom: f64, display_scale: f32) -> f32 {
+    let required = (zoom as f32 * display_scale.max(1.0)).clamp(0.5, 4.0);
+    [0.5, 1.0, 2.0, 4.0]
+        .into_iter()
+        .find(|scale| *scale >= required)
+        .unwrap_or(4.0)
+}
+
 fn inherited_clip(
     document: &Document,
     bounds: &HashMap<NodeId, Bounds>,
@@ -3249,6 +4495,30 @@ fn hit_test(
     paint_order: &[NodeId],
     world: Vec2,
 ) -> Option<NodeId> {
+    hit_test_with_motion(document, bounds, paint_order, world, &HashMap::new())
+}
+
+fn hit_test_with_motion(
+    document: &Document,
+    bounds: &HashMap<NodeId, Bounds>,
+    paint_order: &[NodeId],
+    world: Vec2,
+    motion_frames: &HashMap<NodeId, MotionFrame>,
+) -> Option<NodeId> {
+    let geometries = visual_geometries(document, bounds, motion_frames, None);
+    let node_contains = |id: &NodeId, node: &Node| {
+        let Some(base) = bounds.get(id).copied() else {
+            return false;
+        };
+        let Some(geometry) = geometries.get(id).copied() else {
+            return false;
+        };
+        let Some(local) = geometry.local_point(world) else {
+            return false;
+        };
+        point_inside_node_shape(node, base, local)
+            && point_inside_ancestor_clips(document, bounds, &geometries, node, world)
+    };
     paint_order
         .iter()
         .rev()
@@ -3257,7 +4527,7 @@ fn hit_test(
                 !node_or_ancestor_hidden(document, node)
                     && !node.locked
                     && !node.is_root_frame()
-                    && bounds.get(id).is_some_and(|bounds| bounds.contains(world))
+                    && node_contains(id, node)
             })
         })
         .cloned()
@@ -3269,11 +4539,78 @@ fn hit_test(
                     document.nodes.get(id).is_some_and(|node| {
                         !node_or_ancestor_hidden(document, node)
                             && !node.locked
-                            && bounds.get(id).is_some_and(|bounds| bounds.contains(world))
+                            && node_contains(id, node)
                     })
                 })
                 .cloned()
         })
+}
+
+fn point_inside_ancestor_clips(
+    document: &Document,
+    bounds: &HashMap<NodeId, Bounds>,
+    geometries: &HashMap<NodeId, VisualGeometry>,
+    node: &Node,
+    world: Vec2,
+) -> bool {
+    let mut parent = node.parent_id.as_ref();
+    while let Some(parent_id) = parent {
+        let Some(parent_node) = document.nodes.get(parent_id) else {
+            return false;
+        };
+        if parent_node.style.overflow != Overflow::Visible {
+            let Some(base) = bounds.get(parent_id).copied() else {
+                return false;
+            };
+            let Some(local) = geometries
+                .get(parent_id)
+                .and_then(|geometry| geometry.local_point(world))
+            else {
+                return false;
+            };
+            if !point_inside_node_shape(parent_node, base, local) {
+                return false;
+            }
+        }
+        parent = parent_node.parent_id.as_ref();
+    }
+    true
+}
+
+fn point_inside_node_shape(node: &Node, bounds: Bounds, point: Vec2) -> bool {
+    if !bounds.contains(point) {
+        return false;
+    }
+    let x = point.x - bounds.x;
+    let y = point.y - bounds.y;
+    if node.shape_kind == ShapeKind::Ellipse {
+        let rx = bounds.width * 0.5;
+        let ry = bounds.height * 0.5;
+        if rx <= f64::EPSILON || ry <= f64::EPSILON {
+            return false;
+        }
+        return ((x - rx) / rx).powi(2) + ((y - ry) / ry).powi(2) <= 1.0;
+    }
+    let limit = bounds.width.min(bounds.height) * 0.5;
+    let corners = node.style.corners;
+    let tl = (corners.tl as f64).clamp(0.0, limit);
+    let tr = (corners.tr as f64).clamp(0.0, limit);
+    let br = (corners.br as f64).clamp(0.0, limit);
+    let bl = (corners.bl as f64).clamp(0.0, limit);
+    if x < tl && y < tl {
+        return (x - tl).powi(2) + (y - tl).powi(2) <= tl.powi(2);
+    }
+    if x > bounds.width - tr && y < tr {
+        return (x - (bounds.width - tr)).powi(2) + (y - tr).powi(2) <= tr.powi(2);
+    }
+    if x > bounds.width - br && y > bounds.height - br {
+        return (x - (bounds.width - br)).powi(2) + (y - (bounds.height - br)).powi(2)
+            <= br.powi(2);
+    }
+    if x < bl && y > bounds.height - bl {
+        return (x - bl).powi(2) + (y - (bounds.height - bl)).powi(2) <= bl.powi(2);
+    }
+    true
 }
 
 fn flow_drop_guide(
@@ -3475,10 +4812,47 @@ fn selection_bounds(ids: &[NodeId], bounds: &HashMap<NodeId, Bounds>) -> Option<
         .reduce(union_bounds)
 }
 
+fn multi_transform(
+    ids: &[NodeId],
+    document: &Document,
+    bounds: &HashMap<NodeId, Bounds>,
+    geometries: &HashMap<NodeId, VisualGeometry>,
+) -> Option<MultiTransform> {
+    if ids.len() <= 1 {
+        return None;
+    }
+    let members = ids
+        .iter()
+        .filter_map(|id| {
+            let original = *bounds.get(id)?;
+            let geometry = geometries.get(id)?;
+            let parent_matrix = document
+                .nodes
+                .get(id)
+                .and_then(|node| node.parent_id.as_ref())
+                .and_then(|parent| geometries.get(parent))
+                .map_or(Affine2::IDENTITY, |geometry| geometry.matrix);
+            Some((
+                id.clone(),
+                MultiTransformMember {
+                    original,
+                    visual_center: Vec2::new(
+                        geometry.bounds.x + geometry.bounds.width * 0.5,
+                        geometry.bounds.y + geometry.bounds.height * 0.5,
+                    ),
+                    parent_inverse: parent_matrix.inverse()?,
+                },
+            ))
+        })
+        .collect::<HashMap<_, _>>();
+    (members.len() == ids.len()).then_some(MultiTransform { members })
+}
+
 fn layout_badges(
     selection: &[NodeId],
     document: &Document,
     bounds: &HashMap<NodeId, Bounds>,
+    geometries: &HashMap<NodeId, VisualGeometry>,
     zoom: f64,
 ) -> Option<(NodeId, Vec<LayoutBadge>)> {
     let [id] = selection else {
@@ -3490,54 +4864,7 @@ fn layout_badges(
     }
     let container = *bounds.get(id)?;
     let zoom = zoom.max(Camera::MIN_ZOOM);
-    let badge_height = 20.0 / zoom;
-    let badge_gap = 4.0 / zoom;
     let mut badges = Vec::new();
-    let mut x = container.x;
-    let y = container.bottom() + 12.0 / zoom;
-    let commands: Vec<(LayoutControl, String)> = match node.layout.mode {
-        LayoutMode::Flex => vec![
-            (
-                LayoutControl::Direction,
-                match node.layout.direction {
-                    FlexDirection::Row => "Row",
-                    FlexDirection::Column => "Column",
-                }
-                .into(),
-            ),
-            (
-                LayoutControl::Wrap,
-                if node.layout.wrap { "Wrap" } else { "No wrap" }.into(),
-            ),
-            (LayoutControl::Align, align_label(node.layout.align).into()),
-            (
-                LayoutControl::Justify,
-                justify_label(node.layout.justify).into(),
-            ),
-        ],
-        LayoutMode::Grid => vec![
-            (
-                LayoutControl::Columns,
-                format!("{} cols", node.layout.columns.max(1)),
-            ),
-            (LayoutControl::Align, align_label(node.layout.align).into()),
-            (
-                LayoutControl::Justify,
-                justify_label(node.layout.justify).into(),
-            ),
-        ],
-        LayoutMode::Absolute => Vec::new(),
-    };
-    for (control, label) in commands {
-        let width = (label.chars().count() as f64 * 6.0 + 14.0) / zoom;
-        badges.push(LayoutBadge {
-            bounds: Bounds::new(x, y, width, badge_height),
-            label,
-            kind: LayoutBadgeKind::Command(control),
-        });
-        x += width + badge_gap;
-    }
-
     if let Some((position, direction)) = gap_badge_position(node, document, bounds) {
         let label = format!("G {:.0}", node.layout.gap);
         badges.push(metric_badge(
@@ -3586,6 +4913,16 @@ fn layout_badges(
     badges.extend(handles.into_iter().map(|(edge, position, label)| {
         metric_badge(position, label, LayoutBadgeKind::Padding(edge), zoom)
     }));
+    let matrix = geometries.get(id)?.matrix;
+    for badge in &mut badges {
+        let center = Vec2::new(
+            badge.bounds.x + badge.bounds.width * 0.5,
+            badge.bounds.y + badge.bounds.height * 0.5,
+        );
+        let center = matrix.apply(center);
+        badge.bounds.x = center.x - badge.bounds.width * 0.5;
+        badge.bounds.y = center.y - badge.bounds.height * 0.5;
+    }
     Some((id.clone(), badges))
 }
 
@@ -3650,25 +4987,6 @@ fn gap_badge_position(
     })
 }
 
-fn align_label(value: LayoutAlign) -> &'static str {
-    match value {
-        LayoutAlign::Start => "Start",
-        LayoutAlign::Center => "Center",
-        LayoutAlign::End => "End",
-        LayoutAlign::Stretch => "Stretch",
-    }
-}
-
-fn justify_label(value: LayoutJustify) -> &'static str {
-    match value {
-        LayoutJustify::Start => "Start",
-        LayoutJustify::Center => "Center",
-        LayoutJustify::End => "End",
-        LayoutJustify::SpaceBetween => "Between",
-        LayoutJustify::SpaceAround => "Around",
-    }
-}
-
 fn padding_edge_label(edge: PaddingEdge) -> &'static str {
     match edge {
         PaddingEdge::Top => "T",
@@ -3683,9 +5001,10 @@ fn hit_layout_badge(
     selection: &[NodeId],
     document: &Document,
     bounds: &HashMap<NodeId, Bounds>,
+    geometries: &HashMap<NodeId, VisualGeometry>,
     zoom: f64,
 ) -> Option<(NodeId, LayoutBadge)> {
-    let (id, badges) = layout_badges(selection, document, bounds, zoom)?;
+    let (id, badges) = layout_badges(selection, document, bounds, geometries, zoom)?;
     badges
         .into_iter()
         .rev()
@@ -3725,52 +5044,66 @@ fn hit_resize_handle(
     world: Vec2,
     selection: &[NodeId],
     bounds: &HashMap<NodeId, Bounds>,
+    geometries: &HashMap<NodeId, VisualGeometry>,
     radius: f64,
-) -> Option<(ResizeHandle, Bounds)> {
-    let group = selection_bounds(selection, bounds)?;
+) -> Option<(ResizeHandle, Bounds, ResizeBasis)> {
+    let raw_group = selection_bounds(selection, bounds)?;
+    let geometry = selection_visual_geometry(selection, geometries)?;
+    let group = if selection.len() == 1 {
+        raw_group
+    } else {
+        geometry.aabb()
+    };
+    let handles = geometry.handles();
     let points = [
-        (ResizeHandle::NorthWest, Vec2::new(group.x, group.y)),
-        (
-            ResizeHandle::North,
-            Vec2::new(group.x + group.width / 2.0, group.y),
-        ),
-        (ResizeHandle::NorthEast, Vec2::new(group.right(), group.y)),
-        (
-            ResizeHandle::East,
-            Vec2::new(group.right(), group.y + group.height / 2.0),
-        ),
-        (
-            ResizeHandle::SouthEast,
-            Vec2::new(group.right(), group.bottom()),
-        ),
-        (
-            ResizeHandle::South,
-            Vec2::new(group.x + group.width / 2.0, group.bottom()),
-        ),
-        (ResizeHandle::SouthWest, Vec2::new(group.x, group.bottom())),
-        (
-            ResizeHandle::West,
-            Vec2::new(group.x, group.y + group.height / 2.0),
-        ),
+        (ResizeHandle::NorthWest, handles[0]),
+        (ResizeHandle::North, handles[1]),
+        (ResizeHandle::NorthEast, handles[2]),
+        (ResizeHandle::East, handles[3]),
+        (ResizeHandle::SouthEast, handles[4]),
+        (ResizeHandle::South, handles[5]),
+        (ResizeHandle::SouthWest, handles[6]),
+        (ResizeHandle::West, handles[7]),
     ];
+    let basis = if selection.len() == 1 {
+        let x_vector = Vec2::new(
+            geometry.corners[1].x - geometry.corners[0].x,
+            geometry.corners[1].y - geometry.corners[0].y,
+        );
+        let y_vector = Vec2::new(
+            geometry.corners[3].x - geometry.corners[0].x,
+            geometry.corners[3].y - geometry.corners[0].y,
+        );
+        let x_length = point_distance(geometry.corners[0], geometry.corners[1]);
+        let y_length = point_distance(geometry.corners[0], geometry.corners[3]);
+        ResizeBasis {
+            x_axis: unit_vector(x_vector)?,
+            y_axis: unit_vector(y_vector)?,
+            x_scale: x_length / raw_group.width.max(MIN_NODE_SIZE),
+            y_scale: y_length / raw_group.height.max(MIN_NODE_SIZE),
+        }
+    } else {
+        ResizeBasis::IDENTITY
+    };
     points
         .into_iter()
         .find(|(_, point)| {
             (world.x - point.x).abs() <= radius && (world.y - point.y).abs() <= radius
         })
-        .map(|(handle, _)| (handle, group))
+        .map(|(handle, _)| (handle, group, basis))
 }
 
 fn hit_rotation_handle(
     world: Vec2,
     selection: &[NodeId],
-    bounds: &HashMap<NodeId, Bounds>,
+    geometries: &HashMap<NodeId, VisualGeometry>,
     radius: f64,
     offset: f64,
-) -> Option<Bounds> {
-    let group = selection_bounds(selection, bounds)?;
-    let handle = Vec2::new(group.x + group.width * 0.5, group.y - offset);
-    ((world.x - handle.x).abs() <= radius && (world.y - handle.y).abs() <= radius).then_some(group)
+) -> Option<SelectionGeometry> {
+    let geometry = selection_visual_geometry(selection, geometries)?;
+    let (handle, _) = geometry.rotation_handle(offset);
+    ((world.x - handle.x).abs() <= radius && (world.y - handle.y).abs() <= radius)
+        .then_some(geometry)
 }
 
 fn angle_from(center: Vec2, point: Vec2) -> f64 {
@@ -3873,6 +5206,77 @@ fn scale_group(
                     target.y + (bounds.y - source.y) * sy,
                     (bounds.width * sx).max(MIN_NODE_SIZE),
                     (bounds.height * sy).max(MIN_NODE_SIZE),
+                ),
+            )
+        })
+        .collect()
+}
+
+fn scale_multi_transform(
+    transform: &MultiTransform,
+    source: Bounds,
+    target: Bounds,
+) -> HashMap<NodeId, Bounds> {
+    let sx = target.width / source.width.max(MIN_NODE_SIZE);
+    let sy = target.height / source.height.max(MIN_NODE_SIZE);
+    transform
+        .members
+        .iter()
+        .map(|(id, member)| {
+            let desired_center = Vec2::new(
+                target.x + (member.visual_center.x - source.x) * sx,
+                target.y + (member.visual_center.y - source.y) * sy,
+            );
+            let raw_delta = member.parent_inverse.apply_vector(Vec2::new(
+                desired_center.x - member.visual_center.x,
+                desired_center.y - member.visual_center.y,
+            ));
+            let width = (member.original.width * sx).max(MIN_NODE_SIZE);
+            let height = (member.original.height * sy).max(MIN_NODE_SIZE);
+            let original_center = Vec2::new(
+                member.original.x + member.original.width * 0.5,
+                member.original.y + member.original.height * 0.5,
+            );
+            (
+                id.clone(),
+                Bounds::new(
+                    original_center.x + raw_delta.x - width * 0.5,
+                    original_center.y + raw_delta.y - height * 0.5,
+                    width,
+                    height,
+                ),
+            )
+        })
+        .collect()
+}
+
+fn rotate_multi_transform(
+    transform: &MultiTransform,
+    center: Vec2,
+    degrees: f64,
+) -> HashMap<NodeId, Bounds> {
+    let rotation = Affine2::rotate(degrees);
+    transform
+        .members
+        .iter()
+        .map(|(id, member)| {
+            let offset = Vec2::new(
+                member.visual_center.x - center.x,
+                member.visual_center.y - center.y,
+            );
+            let rotated = rotation.apply_vector(offset);
+            let desired_center = Vec2::new(center.x + rotated.x, center.y + rotated.y);
+            let raw_delta = member.parent_inverse.apply_vector(Vec2::new(
+                desired_center.x - member.visual_center.x,
+                desired_center.y - member.visual_center.y,
+            ));
+            (
+                id.clone(),
+                Bounds::new(
+                    member.original.x + raw_delta.x,
+                    member.original.y + raw_delta.y,
+                    member.original.width,
+                    member.original.height,
                 ),
             )
         })
@@ -4015,30 +5419,38 @@ fn intersect_bounds(left: Bounds, right: Bounds) -> Bounds {
     )
 }
 
-fn intersects(left: Bounds, right: Bounds) -> bool {
-    left.x <= right.right()
-        && left.right() >= right.x
-        && left.y <= right.bottom()
-        && left.bottom() >= right.y
-}
-
-fn handle_positions(bounds: GpBounds<Pixels>) -> [Point<Pixels>; 8] {
-    let center = bounds.center();
-    [
-        bounds.origin,
-        point(center.x, bounds.top()),
-        bounds.top_right(),
-        point(bounds.right(), center.y),
-        bounds.bottom_right(),
-        point(center.x, bounds.bottom()),
-        bounds.bottom_left(),
-        point(bounds.left(), center.y),
-    ]
+fn quad_intersects_bounds(quad: [Vec2; 4], bounds: Bounds) -> bool {
+    let rectangle = [
+        Vec2::new(bounds.x, bounds.y),
+        Vec2::new(bounds.right(), bounds.y),
+        Vec2::new(bounds.right(), bounds.bottom()),
+        Vec2::new(bounds.x, bounds.bottom()),
+    ];
+    let mut axes = vec![Vec2::new(1.0, 0.0), Vec2::new(0.0, 1.0)];
+    axes.extend((0..4).map(|index| {
+        let edge = Vec2::new(
+            quad[(index + 1) % 4].x - quad[index].x,
+            quad[(index + 1) % 4].y - quad[index].y,
+        );
+        Vec2::new(-edge.y, edge.x)
+    }));
+    axes.into_iter().all(|axis| {
+        let project = |point: &Vec2| point.x * axis.x + point.y * axis.y;
+        let quad_min = quad.iter().map(project).fold(f64::INFINITY, f64::min);
+        let quad_max = quad.iter().map(project).fold(f64::NEG_INFINITY, f64::max);
+        let rect_min = rectangle.iter().map(project).fold(f64::INFINITY, f64::min);
+        let rect_max = rectangle
+            .iter()
+            .map(project)
+            .fold(f64::NEG_INFINITY, f64::max);
+        quad_max >= rect_min && rect_max >= quad_min
+    })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use gpui::{AppContext, TestAppContext};
     use loora_engine::{Layout, Node};
 
     #[test]
@@ -4098,6 +5510,266 @@ mod tests {
         assert_eq!(runs[1].len, "é".len());
         assert_eq!(runs[1].font.family.as_ref(), "Courier");
         assert_eq!(runs[1].font.weight, FontWeight(700.0));
+    }
+
+    #[test]
+    fn text_nodes_use_style_fill_before_typography_fallback() {
+        let page = NodeId::from("page");
+        let mut node = Node::text("Label", page, Layout::new(0.0, 0.0, 200.0, 40.0), "Label");
+        let fill = Color::rgb(0x20, 0x21, 0x24);
+        node.style.set_solid_fill(Some(fill));
+        node.typography.as_mut().unwrap().color = Color::rgb(0xf0, 0xf0, 0xf0);
+
+        assert_eq!(text_paint_color(&node, None), Some(fill));
+    }
+
+    #[test]
+    fn native_line_height_uses_the_css_style_multiplier() {
+        let typography = loora_engine::Typography {
+            size: 20.0,
+            line_height: Some(1.5),
+            ..loora_engine::Typography::default()
+        };
+
+        assert!((resolved_line_height(&typography) - 30.0).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn svg_text_preserves_letter_spacing() {
+        let svg = styled_text_svg(
+            "Apps",
+            100.0,
+            24.0,
+            16.0,
+            "System",
+            400,
+            EngineTextAlign::Left,
+            2.0,
+        );
+
+        assert!(svg.contains("letter-spacing=\"2\""));
+        assert!(should_use_text_svg(0.0, 2.0, None));
+    }
+
+    #[test]
+    fn child_opacity_is_compounded_with_its_ancestors() {
+        let mut document = Document::empty("Opacity");
+        let page = document.root_page_id.clone();
+        let mut parent = Node::frame("Parent", page, Layout::new(0.0, 0.0, 100.0, 100.0));
+        parent.style.opacity = 0.5;
+        let mut child = Node::rectangle(
+            "Child",
+            parent.id.clone(),
+            Layout::new(0.0, 0.0, 50.0, 50.0),
+        );
+        child.style.opacity = 0.4;
+        let child_id = child.id.clone();
+        document.nodes.insert(parent.id.clone(), parent);
+        document.nodes.insert(child_id.clone(), child);
+
+        let opacity = node_opacity(
+            &document,
+            document.nodes.get(&child_id).unwrap(),
+            &HashMap::new(),
+        );
+
+        assert!((opacity - 0.2).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn animated_parent_opacity_compounds_into_static_children() {
+        let mut document = Document::empty("Animated opacity");
+        let page = document.root_page_id.clone();
+        let parent = Node::frame("Parent", page, Layout::new(0.0, 0.0, 100.0, 100.0));
+        let parent_id = parent.id.clone();
+        let mut child = Node::rectangle(
+            "Child",
+            parent_id.clone(),
+            Layout::new(0.0, 0.0, 50.0, 50.0),
+        );
+        child.style.opacity = 0.4;
+        let child_id = child.id.clone();
+        document.nodes.insert(parent_id.clone(), parent);
+        document.nodes.insert(child_id.clone(), child);
+        let frames = HashMap::from([(
+            parent_id,
+            MotionFrame {
+                opacity: 0.25,
+                x: 0.0,
+                y: 0.0,
+                scale_x: 1.0,
+                scale_y: 1.0,
+                rotate: 0.0,
+                fill: None,
+                corners: loora_engine::Corners::default(),
+                stroke: None,
+            },
+        )]);
+
+        let opacity = node_opacity(&document, document.nodes.get(&child_id).unwrap(), &frames);
+
+        assert!((opacity - 0.1).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn nested_overflow_clips_intersect_in_world_space() {
+        let mut document = Document::empty("Nested clips");
+        let page = document.root_page_id.clone();
+        let mut outer = Node::frame("Outer", page, Layout::new(10.0, 20.0, 100.0, 100.0));
+        outer.style.overflow = Overflow::Hidden;
+        let mut inner = Node::frame(
+            "Inner",
+            outer.id.clone(),
+            Layout::new(80.0, 80.0, 50.0, 50.0),
+        );
+        inner.style.overflow = Overflow::Hidden;
+        let child = Node::rectangle("Child", inner.id.clone(), Layout::new(0.0, 0.0, 50.0, 50.0));
+        let child_id = child.id.clone();
+        document.nodes.insert(outer.id.clone(), outer);
+        document.nodes.insert(inner.id.clone(), inner);
+        document.nodes.insert(child_id.clone(), child);
+        let bounds = absolute_bounds(&document);
+
+        let clip =
+            inherited_clip(&document, &bounds, document.nodes.get(&child_id).unwrap()).unwrap();
+
+        assert_eq!(clip, Bounds::new(90.0, 100.0, 20.0, 20.0));
+    }
+
+    #[test]
+    fn gradient_raster_uses_compounded_node_opacity() {
+        let mut document = Document::empty("Gradient opacity");
+        let page = document.root_page_id.clone();
+        let mut parent = Node::frame("Parent", page, Layout::new(0.0, 0.0, 100.0, 100.0));
+        parent.style.opacity = 0.5;
+        let mut child = Node::rectangle(
+            "Gradient",
+            parent.id.clone(),
+            Layout::new(0.0, 0.0, 50.0, 50.0),
+        );
+        child.style.opacity = 0.4;
+        child.style.fills = vec![Paint::LinearGradient {
+            angle: 0.0,
+            stops: vec![
+                loora_engine::GradientStop {
+                    offset: 0.0,
+                    color: Color::rgb(255, 255, 255),
+                    token_id: None,
+                },
+                loora_engine::GradientStop {
+                    offset: 1.0,
+                    color: Color::rgb(255, 255, 255),
+                    token_id: None,
+                },
+            ],
+        }];
+        let child_id = child.id.clone();
+        document.nodes.insert(parent.id.clone(), parent);
+        document.nodes.insert(child_id.clone(), child);
+        let mut canvas = NativeCanvas::new_with_viewport(
+            document.clone(),
+            Camera::default(),
+            Rc::new(Cell::new(GpBounds::default())),
+        );
+
+        canvas.sync_gradient_fills(&document, &HashMap::new());
+
+        let raster = canvas.gradient_fills.get(&(child_id, 0)).unwrap();
+        assert_eq!(raster.image.as_bytes(0).unwrap()[3], 51);
+    }
+
+    #[test]
+    fn image_pixels_respect_effective_opacity() {
+        let frame = image::Frame::new(image::RgbaImage::from_pixel(
+            1,
+            1,
+            image::Rgba([10, 20, 30, 200]),
+        ));
+        let source = Arc::new(RenderImage::new(smallvec::smallvec![frame]));
+
+        let faded = render_image_with_opacity(&source, 0.5);
+
+        assert_eq!(faded.as_bytes(0).unwrap(), &[10, 20, 30, 100]);
+    }
+
+    #[test]
+    fn image_cache_uses_compounded_node_opacity() {
+        let mut document = Document::empty("Image opacity");
+        let page = document.root_page_id.clone();
+        let mut parent = Node::frame("Parent", page, Layout::new(0.0, 0.0, 100.0, 100.0));
+        parent.style.opacity = 0.5;
+        let mut child = Node::image(
+            "Image",
+            parent.id.clone(),
+            Layout::new(0.0, 0.0, 50.0, 50.0),
+        );
+        child.style.opacity = 0.4;
+        child.image_path = Some("fixture".into());
+        let child_id = child.id.clone();
+        document.nodes.insert(parent.id.clone(), parent);
+        document.nodes.insert(child_id.clone(), child);
+        let frame = image::Frame::new(image::RgbaImage::from_pixel(
+            1,
+            1,
+            image::Rgba([10, 20, 30, 200]),
+        ));
+        let source = Arc::new(RenderImage::new(smallvec::smallvec![frame]));
+        let mut canvas = NativeCanvas::new_with_viewport(
+            document.clone(),
+            Camera::default(),
+            Rc::new(Cell::new(GpBounds::default())),
+        );
+        canvas.images.insert("fixture".into(), source);
+
+        canvas.sync_image_opacity_variants(&document, &HashMap::new());
+
+        let variant = canvas.image_opacity_variants.get(&child_id).unwrap();
+        assert_eq!(variant.image.as_bytes(0).unwrap()[3], 40);
+    }
+
+    #[test]
+    fn initial_scene_loads_local_image_assets() {
+        let mut document = Document::empty("Initial images");
+        let page = document.root_page_id.clone();
+        let mut image = Node::image("Logo", page, Layout::new(0.0, 0.0, 64.0, 64.0));
+        let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../desktop/assets/logo.png")
+            .to_string_lossy()
+            .into_owned();
+        image.image_path = Some(path.clone());
+        document.nodes.insert(image.id.clone(), image);
+
+        let canvas = NativeCanvas::new_with_viewport(
+            document,
+            Camera::default(),
+            Rc::new(Cell::new(GpBounds::default())),
+        );
+
+        assert!(canvas.images.contains_key(&path));
+    }
+
+    #[test]
+    fn overlapping_artboards_only_paint_the_frontmost_page_label() {
+        let mut document = Document::empty("Pages");
+        let desktop = document.root_page_id.clone();
+        let mut homepage = Node::root_frame("Homepage");
+        homepage.layout.x = 0.25;
+        homepage.order = 2048.0;
+        let homepage_id = homepage.id.clone();
+        document.nodes.insert(homepage_id.clone(), homepage);
+        let bounds = absolute_bounds(&document);
+        let order = paint_order(&document);
+
+        assert!(!root_page_label_is_frontmost(
+            &desktop, &document, &bounds, &order, 1.0,
+        ));
+        assert!(root_page_label_is_frontmost(
+            &homepage_id,
+            &document,
+            &bounds,
+            &order,
+            1.0,
+        ));
     }
 
     #[test]
@@ -4166,7 +5838,11 @@ mod tests {
     fn rotation_handle_hit_and_wrapped_angle_are_stable() {
         let id = NodeId::from("selected");
         let bounds = HashMap::from([(id.clone(), Bounds::new(100.0, 100.0, 80.0, 40.0))]);
-        let group = hit_rotation_handle(Vec2::new(140.0, 76.0), &[id], &bounds, 8.0, 24.0);
+        let geometries = HashMap::from([(
+            id.clone(),
+            VisualGeometry::from_matrix(bounds[&id], Affine2::IDENTITY),
+        )]);
+        let group = hit_rotation_handle(Vec2::new(140.0, 76.0), &[id], &geometries, 8.0, 24.0);
         assert!(group.is_some());
         assert!((angle_delta(170.0, -170.0) - 20.0).abs() < f64::EPSILON);
         assert_eq!(normalize_degrees(375.0), 15.0);
@@ -4319,6 +5995,7 @@ mod tests {
         document.nodes.insert(id.clone(), node);
         let bounds = absolute_bounds(&document);
         let order = paint_order(&document);
+        let geometries = visual_geometries(&document, &bounds, &HashMap::new(), None);
 
         for zoom in [0.1, 0.25, 0.5, 1.0, 2.0, 4.0] {
             let camera = Camera::new(Vec2::new(37.0, -19.0), zoom);
@@ -4337,6 +6014,7 @@ mod tests {
                 east,
                 std::slice::from_ref(&id),
                 &bounds,
+                &geometries,
                 HANDLE_SCREEN_PX / zoom,
             )
             .is_some());
@@ -4344,7 +6022,655 @@ mod tests {
     }
 
     #[test]
-    fn direct_layout_badges_cover_flex_controls_and_drag_metrics() {
+    fn parent_rotation_moves_child_hit_geometry() {
+        let mut document = Document::empty("Parent transform");
+        let page = document.root_page_id.clone();
+        let mut parent = Node::frame("Parent", page, Layout::new(0.0, 0.0, 100.0, 100.0));
+        parent.rotation = 90.0;
+        let parent_id = parent.id.clone();
+        let child = Node::rectangle(
+            "Child",
+            parent_id.clone(),
+            Layout::new(0.0, 0.0, 20.0, 20.0),
+        );
+        let child_id = child.id.clone();
+        document.nodes.insert(parent_id, parent);
+        document.nodes.insert(child_id.clone(), child);
+        let bounds = absolute_bounds(&document);
+        let order = paint_order(&document);
+
+        assert_eq!(
+            hit_test(&document, &bounds, &order, Vec2::new(90.0, 10.0)),
+            Some(child_id)
+        );
+    }
+
+    #[test]
+    fn rotated_hit_testing_rejects_empty_aabb_corners() {
+        let mut document = Document::empty("Rotated hit");
+        let page = document.root_page_id.clone();
+        let mut node = Node::rectangle("Diamond", page, Layout::new(0.0, 0.0, 100.0, 100.0));
+        node.rotation = 45.0;
+        let node_id = node.id.clone();
+        document.nodes.insert(node_id.clone(), node);
+        let bounds = absolute_bounds(&document);
+        let order = paint_order(&document);
+
+        assert_ne!(
+            hit_test(&document, &bounds, &order, Vec2::new(0.0, 0.0)),
+            Some(node_id)
+        );
+    }
+
+    #[test]
+    fn parent_motion_translation_and_scale_propagate_to_children() {
+        let mut document = Document::empty("Parent motion");
+        let page = document.root_page_id.clone();
+        let parent = Node::frame("Parent", page, Layout::new(0.0, 0.0, 100.0, 100.0));
+        let parent_id = parent.id.clone();
+        let child = Node::rectangle(
+            "Child",
+            parent_id.clone(),
+            Layout::new(0.0, 0.0, 20.0, 20.0),
+        );
+        let child_id = child.id.clone();
+        document.nodes.insert(parent_id.clone(), parent);
+        document.nodes.insert(child_id.clone(), child);
+        let bounds = absolute_bounds(&document);
+        let frames = HashMap::from([(
+            parent_id,
+            MotionFrame {
+                opacity: 1.0,
+                x: 10.0,
+                y: 20.0,
+                scale_x: 2.0,
+                scale_y: 2.0,
+                rotate: 0.0,
+                fill: None,
+                corners: loora_engine::Corners::default(),
+                stroke: None,
+            },
+        )]);
+
+        let geometry = visual_geometries(&document, &bounds, &frames, None)[&child_id];
+
+        assert_eq!(geometry.bounds, Bounds::new(-40.0, -30.0, 40.0, 40.0));
+    }
+
+    #[test]
+    fn hit_testing_respects_rounded_overflow_corners() {
+        let mut document = Document::empty("Rounded hit clip");
+        let page = document.root_page_id.clone();
+        let mut clip = Node::frame("Clip", page, Layout::new(0.0, 0.0, 100.0, 100.0));
+        clip.style.overflow = Overflow::Hidden;
+        clip.style.corners = loora_engine::Corners::uniform(40.0);
+        let clip_id = clip.id.clone();
+        let child = Node::rectangle(
+            "Child",
+            clip_id.clone(),
+            Layout::new(0.0, 0.0, 100.0, 100.0),
+        );
+        let child_id = child.id.clone();
+        document.nodes.insert(clip_id, clip);
+        document.nodes.insert(child_id.clone(), child);
+        let bounds = absolute_bounds(&document);
+        let order = paint_order(&document);
+
+        assert_ne!(
+            hit_test(&document, &bounds, &order, Vec2::new(5.0, 5.0)),
+            Some(child_id)
+        );
+    }
+
+    #[test]
+    fn style_fixture_transformed_child_is_hittable_at_its_painted_center() {
+        let document = crate::style_fixture::style_fixture_document();
+        let child_id = NodeId::from("fixture_transform_accent");
+        let bounds = absolute_bounds(&document);
+        let order = paint_order(&document);
+        let geometry = visual_geometries(&document, &bounds, &HashMap::new(), None)[&child_id];
+        let center = Vec2::new(
+            geometry.bounds.x + geometry.bounds.width * 0.5,
+            geometry.bounds.y + geometry.bounds.height * 0.5,
+        );
+
+        assert_eq!(hit_test(&document, &bounds, &order, center), Some(child_id));
+    }
+
+    #[test]
+    fn rotated_selection_handles_follow_the_painted_geometry() {
+        let mut document = Document::empty("Rotated selection");
+        let page = document.root_page_id.clone();
+        let mut node = Node::rectangle("Rotated", page, Layout::new(0.0, 0.0, 100.0, 50.0));
+        node.rotation = 90.0;
+        let id = node.id.clone();
+        document.nodes.insert(id.clone(), node);
+        let bounds = absolute_bounds(&document);
+        let geometry = visual_geometries(&document, &bounds, &HashMap::new(), None)[&id];
+        let east = Vec2::new(
+            (geometry.corners[1].x + geometry.corners[2].x) * 0.5,
+            (geometry.corners[1].y + geometry.corners[2].y) * 0.5,
+        );
+        let top = Vec2::new(
+            (geometry.corners[0].x + geometry.corners[1].x) * 0.5,
+            (geometry.corners[0].y + geometry.corners[1].y) * 0.5,
+        );
+        let center = Vec2::new(
+            geometry.corners.iter().map(|point| point.x).sum::<f64>() / 4.0,
+            geometry.corners.iter().map(|point| point.y).sum::<f64>() / 4.0,
+        );
+        let outward = Vec2::new(top.x - center.x, top.y - center.y);
+        let length = (outward.x.powi(2) + outward.y.powi(2)).sqrt();
+        let outward = Vec2::new(outward.x / length, outward.y / length);
+        let rotation_handle = Vec2::new(top.x + outward.x * 24.0, top.y + outward.y * 24.0);
+
+        let (handle, _, basis) = hit_resize_handle(
+            east,
+            std::slice::from_ref(&id),
+            &bounds,
+            &visual_geometries(&document, &bounds, &HashMap::new(), None),
+            1.0,
+        )
+        .expect("painted east handle should be interactive");
+        assert_eq!(handle, ResizeHandle::East);
+        let local_delta = basis.project(Vec2::new(0.0, 10.0));
+        assert!((local_delta.x - 10.0).abs() < 0.001);
+        assert!(local_delta.y.abs() < 0.001);
+        assert!(hit_rotation_handle(
+            rotation_handle,
+            std::slice::from_ref(&id),
+            &visual_geometries(&document, &bounds, &HashMap::new(), None),
+            1.0,
+            24.0,
+        )
+        .is_some());
+    }
+
+    #[test]
+    fn marquee_uses_transformed_shape_instead_of_empty_aabb_corners() {
+        let geometry = VisualGeometry::from_matrix(
+            Bounds::new(0.0, 0.0, 100.0, 100.0),
+            Affine2::around(
+                Vec2::new(50.0, 50.0),
+                Vec2::default(),
+                Vec2::new(1.0, 1.0),
+                45.0,
+            ),
+        );
+
+        assert!(!quad_intersects_bounds(
+            geometry.corners,
+            Bounds::new(-20.0, -20.0, 5.0, 5.0),
+        ));
+        assert!(quad_intersects_bounds(
+            geometry.corners,
+            Bounds::new(45.0, 45.0, 10.0, 10.0),
+        ));
+    }
+
+    #[test]
+    fn complex_page_raster_survives_drag_start() {
+        let document = crate::style_fixture::style_fixture_document();
+        let page = document.root_page_id.clone();
+        let bounds = absolute_bounds(&document);
+        let mut canvas = NativeCanvas::new_with_viewport(
+            document.clone(),
+            Camera::default(),
+            Rc::new(Cell::new(GpBounds::default())),
+        );
+        canvas.sync_page_rasters(&document, &HashMap::new(), &bounds);
+        assert!(canvas.page_rasters.contains_key(&page));
+        let original_image = canvas.page_rasters[&page].image.clone();
+
+        let dragged = NodeId::from("fixture_transform_card");
+        let original = bounds[&dragged];
+        canvas.drag = Some(DragState::Move {
+            start_world: Vec2::new(original.x, original.y),
+            ids: vec![dragged.clone()],
+            originals: HashMap::from([(dragged, original)]),
+            delta: Vec2::new(10.0, 5.0),
+            duplicate: false,
+        });
+        let preview_bounds = canvas.preview_bounds();
+        canvas.sync_page_rasters(&document, &HashMap::new(), &preview_bounds);
+
+        assert!(canvas.page_rasters.contains_key(&page));
+        assert!(!Arc::ptr_eq(
+            &original_image,
+            &canvas.page_rasters[&page].image
+        ));
+    }
+
+    fn next_batch_complex_document() -> (Document, NodeId, NodeId, NodeId) {
+        let mut document = Document::empty("Interaction raster");
+        let page = document.root_page_id.clone();
+        if let Some(page_node) = document.nodes.get_mut(&page) {
+            page_node.layout.width = 320.0;
+            page_node.layout.height = 140.0;
+            page_node
+                .style
+                .set_solid_fill(Some(Color::rgb(255, 255, 255)));
+        }
+        let mut gradient = Node::rectangle(
+            "Gradient",
+            page.clone(),
+            Layout::new(20.0, 20.0, 80.0, 80.0),
+        );
+        gradient.id = NodeId::from("interaction_gradient");
+        gradient.style.fills = vec![Paint::LinearGradient {
+            angle: 90.0,
+            stops: vec![
+                loora_engine::GradientStop {
+                    offset: 0.0,
+                    color: Color::rgb(255, 0, 0),
+                    token_id: None,
+                },
+                loora_engine::GradientStop {
+                    offset: 1.0,
+                    color: Color::rgb(0, 0, 255),
+                    token_id: None,
+                },
+            ],
+        }];
+        let gradient_id = gradient.id.clone();
+        let mut text = Node::text(
+            "Editable",
+            page.clone(),
+            Layout::new(140.0, 35.0, 140.0, 48.0),
+            "Edit me",
+        );
+        text.id = NodeId::from("interaction_text");
+        text.style.fills = vec![Paint::LinearGradient {
+            angle: 90.0,
+            stops: vec![
+                loora_engine::GradientStop {
+                    offset: 0.0,
+                    color: Color::rgb(20, 20, 20),
+                    token_id: None,
+                },
+                loora_engine::GradientStop {
+                    offset: 1.0,
+                    color: Color::rgb(90, 90, 90),
+                    token_id: None,
+                },
+            ],
+        }];
+        let text_id = text.id.clone();
+        document.nodes.insert(gradient_id.clone(), gradient);
+        document.nodes.insert(text_id.clone(), text);
+        (document, page, gradient_id, text_id)
+    }
+
+    #[test]
+    fn next_batch_move_drag_reuses_raster_between_pointer_updates() {
+        let (document, page, id, _) = next_batch_complex_document();
+        let bounds = absolute_bounds(&document);
+        let original = bounds[&id];
+        let mut canvas = NativeCanvas::new_with_viewport(
+            document.clone(),
+            Camera::default(),
+            Rc::new(Cell::new(GpBounds::default())),
+        );
+        canvas.drag = Some(DragState::Move {
+            start_world: Vec2::new(original.x, original.y),
+            ids: vec![id.clone()],
+            originals: HashMap::from([(id, original)]),
+            delta: Vec2::new(10.0, 0.0),
+            duplicate: false,
+        });
+        let preview_bounds = canvas.preview_bounds();
+        canvas.sync_page_rasters(&document, &HashMap::new(), &preview_bounds);
+        let first = canvas.page_rasters[&page].image.clone();
+        let first_overlay = canvas.page_rasters[&page].overlay.clone().unwrap();
+        if let Some(DragState::Move { delta, .. }) = canvas.drag.as_mut() {
+            *delta = Vec2::new(20.0, 0.0);
+        }
+        let started = Instant::now();
+        let preview_bounds = canvas.preview_bounds();
+        canvas.sync_page_rasters(&document, &HashMap::new(), &preview_bounds);
+        eprintln!("cached move raster update took {:?}", started.elapsed());
+
+        assert!(Arc::ptr_eq(&first, &canvas.page_rasters[&page].image));
+        assert!(Arc::ptr_eq(
+            &first_overlay,
+            canvas.page_rasters[&page].overlay.as_ref().unwrap()
+        ));
+    }
+
+    #[test]
+    fn next_batch_text_edit_keeps_complex_page_rasterized() {
+        let (document, page, _, text_id) = next_batch_complex_document();
+        let bounds = absolute_bounds(&document);
+        let mut canvas = NativeCanvas::new_with_viewport(
+            document.clone(),
+            Camera::default(),
+            Rc::new(Cell::new(GpBounds::default())),
+        );
+        canvas.sync_page_rasters(&document, &HashMap::new(), &bounds);
+        assert!(canvas.page_rasters.contains_key(&page));
+        canvas.text_edit = Some(NativeTextEdit {
+            id: text_id,
+            anchor: 0,
+            caret: 0,
+            caret_visible: true,
+        });
+        canvas.sync_page_rasters(&document, &HashMap::new(), &bounds);
+
+        assert!(canvas.page_rasters.contains_key(&page));
+    }
+
+    #[test]
+    fn next_editor_small_zoom_delta_reuses_page_raster() {
+        let (document, page, _, _) = next_batch_complex_document();
+        let bounds = absolute_bounds(&document);
+        let mut canvas = NativeCanvas::new_with_viewport(
+            document.clone(),
+            Camera::default(),
+            Rc::new(Cell::new(GpBounds::default())),
+        );
+        canvas.sync_page_rasters(&document, &HashMap::new(), &bounds);
+        let first = canvas.page_rasters[&page].image.clone();
+
+        canvas.camera.zoom = 1.01;
+        let started = Instant::now();
+        canvas.sync_page_rasters(&document, &HashMap::new(), &bounds);
+        eprintln!("small zoom raster update took {:?}", started.elapsed());
+
+        assert!(Arc::ptr_eq(&first, &canvas.page_rasters[&page].image));
+    }
+
+    #[test]
+    fn zoom_raster_covers_retina_device_pixels() {
+        let zoom = 0.7;
+        let display_scale = 2.0;
+        let raster_scale = raster_scale_for_zoom(zoom, display_scale);
+
+        assert!(
+            raster_scale >= zoom as f32 * display_scale,
+            "raster scale {raster_scale} undersamples {zoom}x zoom on a {display_scale}x display"
+        );
+    }
+
+    #[test]
+    fn continuous_zoom_does_not_cross_many_raster_buckets() {
+        let scales = (35..=200)
+            .map(|percent| raster_scale_for_zoom(percent as f64 / 100.0, 2.0))
+            .collect::<Vec<_>>();
+        let changes = scales
+            .windows(2)
+            .filter(|pair| pair[0].to_bits() != pair[1].to_bits())
+            .count();
+
+        assert!(
+            changes <= 2,
+            "continuous zoom crossed {changes} raster buckets: {scales:?}"
+        );
+    }
+
+    #[gpui::test]
+    fn zoom_upgrade_keeps_current_raster_while_sharper_pixels_render(cx: &mut TestAppContext) {
+        let (document, page, _, _) = next_batch_complex_document();
+        let bounds = absolute_bounds(&document);
+        let canvas = cx.new(|cx| NativeCanvas::new(document.clone(), Camera::default(), cx));
+        let first = canvas.update(cx, |canvas, _| {
+            canvas.display_scale = 2.0;
+            canvas.camera.zoom = 0.35;
+            canvas.sync_page_rasters(&document, &HashMap::new(), &bounds);
+            canvas.page_rasters[&page].image.clone()
+        });
+
+        canvas.update(cx, |canvas, cx| {
+            canvas.camera.zoom = 0.7;
+            canvas.sync_page_rasters_with_context(&document, &HashMap::new(), &bounds, Some(cx));
+            assert!(Arc::ptr_eq(&first, &canvas.page_rasters[&page].image));
+            assert!(canvas.page_raster_jobs.contains_key(&page));
+        });
+        cx.run_until_parked();
+
+        let (upgraded, scale) = canvas.update(cx, |canvas, _| {
+            (
+                canvas.page_rasters[&page].image.clone(),
+                canvas.page_rasters[&page].scale,
+            )
+        });
+        assert!(!Arc::ptr_eq(&first, &upgraded));
+        assert_eq!(scale, 2.0);
+    }
+
+    #[gpui::test]
+    fn next_editor_unrelated_page_edit_reuses_unchanged_raster(cx: &mut TestAppContext) {
+        let mut document = Document::empty("Page-local raster cache");
+        let first_page = document.root_page_id.clone();
+        document.nodes.get_mut(&first_page).unwrap().layout = Layout::new(0.0, 0.0, 120.0, 120.0);
+        let mut second_page_node = Node::root_frame("Second");
+        second_page_node.layout = Layout::new(200.0, 0.0, 120.0, 120.0);
+        let second_page = second_page_node.id.clone();
+        document.nodes.insert(second_page.clone(), second_page_node);
+        let mut first_card = Node::rectangle(
+            "First card",
+            first_page.clone(),
+            Layout::new(20.0, 20.0, 80.0, 80.0),
+        );
+        first_card.rotation = 12.0;
+        document.nodes.insert(first_card.id.clone(), first_card);
+        let mut second_card = Node::rectangle(
+            "Second card",
+            second_page.clone(),
+            Layout::new(20.0, 20.0, 80.0, 80.0),
+        );
+        second_card.rotation = -12.0;
+        let second_card_id = second_card.id.clone();
+        document.nodes.insert(second_card_id.clone(), second_card);
+
+        let canvas = cx.new(|cx| NativeCanvas::new(document.clone(), Camera::default(), cx));
+        let (first_image, second_image) = canvas.update(cx, |canvas, _| {
+            let bounds = absolute_bounds(&document);
+            canvas.sync_page_rasters(&document, &HashMap::new(), &bounds);
+            (
+                canvas.page_rasters[&first_page].image.clone(),
+                canvas.page_rasters[&second_page].image.clone(),
+            )
+        });
+
+        let mut updated = document.clone();
+        updated
+            .nodes
+            .get_mut(&second_card_id)
+            .unwrap()
+            .style
+            .set_solid_fill(Some(Color::rgb(255, 80, 80)));
+        canvas.update(cx, |canvas, cx| {
+            canvas.set_scene(
+                Arc::new(updated.clone()),
+                1,
+                Camera::default(),
+                Vec::new(),
+                Vec::new(),
+                CanvasTool::Select,
+                false,
+                None,
+                None,
+                CanvasPalette::default(),
+                cx,
+            );
+            let bounds = absolute_bounds(&updated);
+            canvas.sync_page_rasters(&updated, &HashMap::new(), &bounds);
+
+            assert!(Arc::ptr_eq(
+                &first_image,
+                &canvas.page_rasters[&first_page].image
+            ));
+            assert!(!Arc::ptr_eq(
+                &second_image,
+                &canvas.page_rasters[&second_page].image
+            ));
+        });
+    }
+
+    #[test]
+    fn next_batch_rotated_layout_badges_follow_the_container() {
+        let mut document = Document::empty("Rotated layout controls");
+        let page = document.root_page_id.clone();
+        let mut stack = Node::frame("Stack", page, Layout::new(100.0, 80.0, 240.0, 160.0));
+        stack.layout.mode = LayoutMode::Flex;
+        stack.rotation = 90.0;
+        stack.layout.gap = 20.0;
+        let stack_id = stack.id.clone();
+        document.nodes.insert(stack_id.clone(), stack);
+        for (index, x) in [12.0, 92.0].into_iter().enumerate() {
+            let mut child = Node::rectangle(
+                format!("Child {index}"),
+                stack_id.clone(),
+                Layout::new(x, 12.0, 60.0, 48.0),
+            );
+            child.layout.position = loora_engine::LayoutPosition::Flow;
+            child.order = index as f64 * 1024.0;
+            document.nodes.insert(child.id.clone(), child);
+        }
+        let bounds = absolute_bounds(&document);
+        let geometries = visual_geometries(&document, &bounds, &HashMap::new(), None);
+        let (_, badges) = layout_badges(
+            std::slice::from_ref(&stack_id),
+            &document,
+            &bounds,
+            &geometries,
+            1.0,
+        )
+        .unwrap();
+        let badge_center = Vec2::new(
+            badges[0].bounds.x + badges[0].bounds.width * 0.5,
+            badges[0].bounds.y + badges[0].bounds.height * 0.5,
+        );
+        let raw_center = gap_badge_position(&document.nodes[&stack_id], &document, &bounds)
+            .unwrap()
+            .0;
+        let expected = geometries[&stack_id].matrix.apply(raw_center);
+
+        assert!(point_distance(badge_center, expected) < 0.001);
+    }
+
+    #[test]
+    fn next_batch_multi_resize_uses_the_painted_group_bounds() {
+        let mut document = Document::empty("Transformed multi selection");
+        let page = document.root_page_id.clone();
+        let mut rotated =
+            Node::rectangle("Rotated", page.clone(), Layout::new(0.0, 0.0, 100.0, 100.0));
+        rotated.rotation = 45.0;
+        let rotated_id = rotated.id.clone();
+        let plain = Node::rectangle("Plain", page, Layout::new(200.0, 0.0, 100.0, 100.0));
+        let plain_id = plain.id.clone();
+        document.nodes.insert(rotated_id.clone(), rotated);
+        document.nodes.insert(plain_id.clone(), plain);
+        let selection = vec![rotated_id, plain_id];
+        let bounds = absolute_bounds(&document);
+        let geometries = visual_geometries(&document, &bounds, &HashMap::new(), None);
+        let visual = selection_visual_geometry(&selection, &geometries).unwrap();
+        let handles = visual.handles();
+        let (_, group, _) =
+            hit_resize_handle(handles[3], &selection, &bounds, &geometries, 1.0).unwrap();
+
+        assert!((group.x - visual.corners[0].x).abs() < 0.001);
+        assert!((group.right() - visual.corners[2].x).abs() < 0.001);
+    }
+
+    #[test]
+    fn next_batch_multi_rotation_moves_members_around_the_group_center() {
+        let mut document = Document::empty("Multi rotation");
+        let page = document.root_page_id.clone();
+        let left = Node::rectangle("Left", page.clone(), Layout::new(0.0, 0.0, 100.0, 100.0));
+        let left_id = left.id.clone();
+        let right = Node::rectangle("Right", page, Layout::new(200.0, 0.0, 100.0, 100.0));
+        let right_id = right.id.clone();
+        document.nodes.insert(left_id.clone(), left);
+        document.nodes.insert(right_id.clone(), right);
+        let bounds = absolute_bounds(&document);
+        let selection = vec![left_id.clone(), right_id.clone()];
+        let original_geometries = visual_geometries(&document, &bounds, &HashMap::new(), None);
+        let transform =
+            multi_transform(&selection, &document, &bounds, &original_geometries).unwrap();
+        let rotated_bounds = rotate_multi_transform(&transform, Vec2::new(150.0, 50.0), 90.0);
+        let mut preview_bounds = bounds.clone();
+        preview_bounds.extend(
+            rotated_bounds
+                .iter()
+                .map(|(id, bounds)| (id.clone(), *bounds)),
+        );
+        let drag = DragState::Rotate {
+            center: Vec2::new(150.0, 50.0),
+            start_angle: 0.0,
+            originals: HashMap::from([(left_id.clone(), 0.0), (right_id.clone(), 0.0)]),
+            current: HashMap::from([(left_id.clone(), 90.0), (right_id, 90.0)]),
+            bounds: Some(MultiRotateBounds {
+                current: rotated_bounds,
+                members: transform,
+            }),
+        };
+        let geometries =
+            visual_geometries(&document, &preview_bounds, &HashMap::new(), Some(&drag));
+        let center = geometries[&left_id].bounds;
+
+        assert!((center.x + center.width * 0.5 - 150.0).abs() < 0.001);
+        assert!((center.y + center.height * 0.5 + 50.0).abs() < 0.001);
+    }
+
+    #[test]
+    fn drag_preview_raster_moves_gradient_pixels_without_dropping_style() {
+        let mut document = Document::empty("Gradient drag");
+        let page = document.root_page_id.clone();
+        if let Some(page_node) = document.nodes.get_mut(&page) {
+            page_node.layout.width = 240.0;
+            page_node.layout.height = 100.0;
+            page_node
+                .style
+                .set_solid_fill(Some(Color::rgb(255, 255, 255)));
+        }
+        let mut gradient = Node::rectangle(
+            "Gradient",
+            page.clone(),
+            Layout::new(20.0, 20.0, 40.0, 40.0),
+        );
+        gradient.id = NodeId::from("drag_gradient");
+        gradient.style.fills = vec![Paint::LinearGradient {
+            angle: 90.0,
+            stops: vec![
+                loora_engine::GradientStop {
+                    offset: 0.0,
+                    color: Color::rgb(255, 0, 0),
+                    token_id: None,
+                },
+                loora_engine::GradientStop {
+                    offset: 1.0,
+                    color: Color::rgb(0, 0, 255),
+                    token_id: None,
+                },
+            ],
+        }];
+        let id = gradient.id.clone();
+        document.nodes.insert(id.clone(), gradient);
+        let bounds = absolute_bounds(&document);
+        let original = bounds[&id];
+        let drag = DragState::Move {
+            start_world: Vec2::new(original.x, original.y),
+            ids: vec![id.clone()],
+            originals: HashMap::from([(id.clone(), original)]),
+            delta: Vec2::new(120.0, 0.0),
+            duplicate: false,
+        };
+        let mut preview_bounds = bounds.clone();
+        translate_subtree(&document, &id, 120.0, 0.0, &mut preview_bounds);
+        let preview = raster_preview_document(&document, &preview_bounds, Some(&drag)).unwrap();
+        let image = scene_raster::render_page(&preview, &page, &HashMap::new(), 1.0).unwrap();
+        let old_center = image.get_pixel(40, 40).0;
+        let moved_center = image.get_pixel(160, 40).0;
+
+        assert!(old_center[0] > 245 && old_center[1] > 245 && old_center[2] > 245);
+        assert!(moved_center[0] > 40 && moved_center[2] > 40);
+        assert!(moved_center[1] < 40);
+        assert_eq!(moved_center[3], 255);
+    }
+
+    #[test]
+    fn layout_metric_badges_stay_screen_sized_and_draggable() {
         let mut document = Document::empty("Layout controls");
         let page = document.root_page_id.clone();
         let mut stack = Node::frame("Stack", page, Layout::new(100.0, 80.0, 320.0, 180.0));
@@ -4364,13 +6690,26 @@ mod tests {
             document.nodes.insert(child.id.clone(), child);
         }
         let bounds = absolute_bounds(&document);
-        let (_, at_half) =
-            layout_badges(std::slice::from_ref(&stack_id), &document, &bounds, 0.5).unwrap();
-        let (_, at_double) =
-            layout_badges(std::slice::from_ref(&stack_id), &document, &bounds, 2.0).unwrap();
+        let geometries = visual_geometries(&document, &bounds, &HashMap::new(), None);
+        let (_, at_half) = layout_badges(
+            std::slice::from_ref(&stack_id),
+            &document,
+            &bounds,
+            &geometries,
+            0.5,
+        )
+        .unwrap();
+        let (_, at_double) = layout_badges(
+            std::slice::from_ref(&stack_id),
+            &document,
+            &bounds,
+            &geometries,
+            2.0,
+        )
+        .unwrap();
 
-        assert_eq!(at_half.len(), 9);
-        assert_eq!(at_double.len(), 9);
+        assert_eq!(at_half.len(), 5);
+        assert_eq!(at_double.len(), 5);
         assert!((at_half[0].bounds.width * 0.5 - at_double[0].bounds.width * 2.0).abs() < 0.01);
         assert!(at_half
             .iter()

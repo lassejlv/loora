@@ -1,6 +1,7 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::time::{Duration, Instant};
 
+use crate::extras::TextRun;
 use crate::hit::{Bounds, Vec2};
 use crate::id::NodeId;
 use crate::model::{
@@ -196,7 +197,8 @@ pub struct CanvasEngine {
 }
 
 impl CanvasEngine {
-    pub fn new(document: Document) -> Self {
+    pub fn new(mut document: Document) -> Self {
+        prefer_populated_root_page(&mut document);
         let mut engine = Self {
             document,
             children: HashMap::new(),
@@ -206,6 +208,8 @@ impl CanvasEngine {
             applied_ids: HashSet::new(),
         };
         engine.rebuild_indexes();
+        engine.reflow();
+        engine.revision = 0;
         engine
     }
 
@@ -280,7 +284,8 @@ impl CanvasEngine {
         engine.document
     }
 
-    pub fn replace_document(&mut self, document: Document) {
+    pub fn replace_document(&mut self, mut document: Document) {
+        prefer_populated_root_page(&mut document);
         self.document = document;
         self.undo.clear();
         self.redo.clear();
@@ -742,38 +747,7 @@ impl CanvasEngine {
             return Ok(());
         }
 
-        // Root frame artboards are the editor viewport itself. Imported viewport
-        // `minHeight` values describe the initial responsive canvas, not a
-        // permanent resize constraint. Treat a direct page resize as explicit
-        // geometry so an old viewport minimum cannot make the artboard snap
-        // back under the pointer.
-        let (width, height) = if node.is_root_frame() {
-            (world.width.max(1.0), world.height.max(1.0))
-        } else {
-            node.layout.clamp_size(world.width, world.height)
-        };
-        let mut layout = node.layout.clone();
-        layout.x = world.x - parent_origin.x;
-        layout.y = world.y - parent_origin.y;
-        layout.width = width;
-        layout.height = height;
-        // A direct resize is an explicit size. Leaving a node as hug/fill made
-        // the next stack pass silently undo the user's drag, most visibly for
-        // imported hug-height pages.
-        layout.width_mode = SizeMode::Fixed;
-        layout.height_mode = SizeMode::Fixed;
-        layout.width_percent = None;
-        layout.height_percent = None;
-        if extract_from_flow && !node.is_root_frame() {
-            layout.position = LayoutPosition::Absolute;
-        }
-        if node.is_root_frame() {
-            layout.min_width = None;
-            layout.max_width = None;
-            layout.min_height = None;
-            layout.max_height = None;
-            layout.aspect_ratio = None;
-        }
+        let layout = resized_layout(&node, world, parent_origin, extract_from_flow);
         let mut tx = Transaction::new(
             "Resize",
             vec![Operation::Patch {
@@ -792,6 +766,58 @@ impl CanvasEngine {
         if let Some(parent) = self.node(id).and_then(|n| n.parent_id.clone()) {
             let _ = self.resolve_stack(&parent);
         }
+        Ok(())
+    }
+
+    /// Commit every member of a multi-selection transform as one history step.
+    /// Bounds and rotations are merged per node so a rotate gesture that also
+    /// changes group geometry cannot be partially undone.
+    pub fn transform_nodes(
+        &mut self,
+        bounds: &[(NodeId, Bounds)],
+        rotations: &[(NodeId, f32)],
+    ) -> Result<(), EngineError> {
+        let mut patches = BTreeMap::<NodeId, NodePatch>::new();
+
+        for (id, world) in bounds {
+            let Some(node) = self.node(id).cloned() else {
+                continue;
+            };
+            if node.locked {
+                continue;
+            }
+            let parent_origin = node
+                .parent_id
+                .as_ref()
+                .and_then(|parent_id| self.absolute_bounds(parent_id))
+                .map(|bounds| Vec2::new(bounds.x, bounds.y))
+                .unwrap_or(Vec2::new(0.0, 0.0));
+            patches.entry(id.clone()).or_default().layout =
+                Some(resized_layout(&node, *world, parent_origin, false));
+        }
+
+        for (id, rotation) in rotations {
+            let Some(node) = self.node(id) else {
+                continue;
+            };
+            if node.locked {
+                continue;
+            }
+            patches.entry(id.clone()).or_default().rotation = Some(*rotation);
+        }
+
+        if patches.is_empty() {
+            return Ok(());
+        }
+        let operations = patches
+            .into_iter()
+            .map(|(id, patch)| Operation::Patch { id, patch })
+            .collect();
+        self.apply(
+            Transaction::new("Transform", operations),
+            ApplyOptions::with_history(),
+        )?;
+        self.reflow();
         Ok(())
     }
 
@@ -1662,6 +1688,11 @@ impl CanvasEngine {
         };
         let mut patch = NodePatch {
             text: Some(text.clone()),
+            text_runs: Some(remap_text_runs(
+                node.text.as_deref().unwrap_or_default(),
+                &text,
+                &node.text_runs,
+            )),
             ..NodePatch::default()
         };
         if node.kind == NodeKind::Text {
@@ -3036,6 +3067,43 @@ impl CanvasEngine {
     }
 }
 
+fn prefer_populated_root_page(document: &mut Document) {
+    let active_id = document.root_page_id.clone();
+    let Some(active) = document.nodes.get(&active_id) else {
+        return;
+    };
+    if active.name != "Desktop"
+        || document
+            .nodes
+            .values()
+            .any(|node| node.parent_id.as_ref() == Some(&active.id))
+    {
+        return;
+    }
+
+    let mut populated_pages = document
+        .nodes
+        .values()
+        .filter(|node| node.is_root_frame() && node.id != active.id)
+        .filter(|page| {
+            document
+                .nodes
+                .values()
+                .any(|node| node.parent_id.as_ref() == Some(&page.id))
+        })
+        .map(|page| (page.order, page.id.clone()))
+        .collect::<Vec<_>>();
+    populated_pages.sort_by(|left, right| {
+        left.0
+            .total_cmp(&right.0)
+            .then_with(|| left.1.as_str().cmp(right.1.as_str()))
+    });
+    if let Some((_, page_id)) = populated_pages.into_iter().next() {
+        document.root_page_id = page_id;
+        document.nodes.remove(&active_id);
+    }
+}
+
 fn stack_insertion_index(
     engine: &CanvasEngine,
     stack: &Node,
@@ -3063,6 +3131,97 @@ fn stack_insertion_index(
             }
         })
         .unwrap_or(siblings.len())
+}
+
+fn resized_layout(
+    node: &Node,
+    world: Bounds,
+    parent_origin: Vec2,
+    extract_from_flow: bool,
+) -> Layout {
+    // Root frame artboards are the editor viewport itself. Imported viewport
+    // minimums describe the initial responsive canvas, not a permanent resize
+    // constraint.
+    let (width, height) = if node.is_root_frame() {
+        (world.width.max(1.0), world.height.max(1.0))
+    } else {
+        node.layout.clamp_size(world.width, world.height)
+    };
+    let mut layout = node.layout.clone();
+    layout.x = world.x - parent_origin.x;
+    layout.y = world.y - parent_origin.y;
+    layout.width = width;
+    layout.height = height;
+    // Direct manipulation is explicit sizing. Keeping hug/fill here would let
+    // the next layout pass silently undo the user's drag.
+    layout.width_mode = SizeMode::Fixed;
+    layout.height_mode = SizeMode::Fixed;
+    layout.width_percent = None;
+    layout.height_percent = None;
+    if extract_from_flow && !node.is_root_frame() {
+        layout.position = LayoutPosition::Absolute;
+    }
+    if node.is_root_frame() {
+        layout.min_width = None;
+        layout.max_width = None;
+        layout.min_height = None;
+        layout.max_height = None;
+        layout.aspect_ratio = None;
+    }
+    layout
+}
+
+fn remap_text_runs(old_text: &str, new_text: &str, runs: &[TextRun]) -> Vec<TextRun> {
+    if old_text == new_text || runs.is_empty() {
+        return runs.to_vec();
+    }
+    let old = old_text.chars().collect::<Vec<_>>();
+    let new = new_text.chars().collect::<Vec<_>>();
+    let prefix = old
+        .iter()
+        .zip(&new)
+        .take_while(|(left, right)| left == right)
+        .count();
+    let suffix = old[prefix..]
+        .iter()
+        .rev()
+        .zip(new[prefix..].iter().rev())
+        .take_while(|(left, right)| left == right)
+        .count();
+    let old_end = old.len() - suffix;
+    let inserted = new.len() - prefix - suffix;
+    let removed = old_end - prefix;
+    let delta = inserted as isize - removed as isize;
+    let shift = |value: usize| {
+        if delta >= 0 {
+            value.saturating_add(delta as usize)
+        } else {
+            value.saturating_sub((-delta) as usize)
+        }
+    };
+
+    runs.iter()
+        .filter_map(|run| {
+            let mut next = run.clone();
+            next.start = if run.start < prefix {
+                run.start
+            } else if run.start >= old_end {
+                shift(run.start)
+            } else {
+                prefix
+            };
+            next.end = if run.end <= prefix {
+                run.end
+            } else if run.end >= old_end {
+                shift(run.end)
+            } else {
+                prefix + inserted
+            };
+            next.start = next.start.min(new.len());
+            next.end = next.end.min(new.len());
+            (next.start < next.end).then_some(next)
+        })
+        .collect()
 }
 
 fn apply_transaction(
@@ -3195,6 +3354,7 @@ fn snapshot_patch(node: &Node, patch: &NodePatch) -> NodePatch {
             .text
             .as_ref()
             .map(|_| node.text.clone().unwrap_or_default()),
+        text_runs: patch.text_runs.as_ref().map(|_| node.text_runs.clone()),
         font_size: patch.font_size.map(|_| node.font_size),
         typography: patch.typography.as_ref().map(|_| node.typography.clone()),
         image_path: patch.image_path.as_ref().map(|_| node.image_path.clone()),
@@ -3243,6 +3403,9 @@ fn node_diff_patch(before: &Node, after: &Node) -> NodePatch {
     if before.text != after.text {
         patch.text = after.text.clone();
     }
+    if before.text_runs != after.text_runs {
+        patch.text_runs = Some(after.text_runs.clone());
+    }
     if before.typography != after.typography {
         patch.typography = Some(after.typography.clone());
     }
@@ -3282,6 +3445,9 @@ fn apply_patch(mut node: Node, patch: &NodePatch) -> Node {
     }
     if let Some(text) = &patch.text {
         node.text = Some(text.clone());
+    }
+    if let Some(text_runs) = &patch.text_runs {
+        node.text_runs = text_runs.clone();
     }
     if let Some(font_size) = patch.font_size {
         node.font_size = font_size;
@@ -3407,7 +3573,36 @@ fn collect_descendants(document: &Document, id: &NodeId) -> Result<Vec<Node>, En
 mod tests {
     use super::*;
     use crate::extras::OverrideMap;
-    use crate::model::{Color, Document, Layout, Node, Paint};
+    use crate::model::{Color, Document, Insets, Layout, Node, Paint};
+
+    #[test]
+    fn next_editor_text_edits_remap_rich_text_runs() {
+        let mut document = Document::empty("rich text editing");
+        let page = document.root_page_id.clone();
+        let mut text = Node::text("Rich", page, Layout::new(0.0, 0.0, 200.0, 40.0), "AéB");
+        text.text_runs.push(crate::TextRun {
+            start: 1,
+            end: 2,
+            typography: Some(crate::TypographyPatch {
+                weight: Some(700),
+                ..crate::TypographyPatch::default()
+            }),
+            color: None,
+            color_token: None,
+        });
+        let id = text.id.clone();
+        document.nodes.insert(id.clone(), text);
+        let mut engine = CanvasEngine::new(document);
+
+        engine.set_text(&id, "AXéB").unwrap();
+        assert_eq!(engine.node(&id).unwrap().text_runs[0].start, 2);
+        assert_eq!(engine.node(&id).unwrap().text_runs[0].end, 3);
+
+        assert!(engine.undo().unwrap());
+        assert_eq!(engine.node(&id).unwrap().text.as_deref(), Some("AéB"));
+        assert_eq!(engine.node(&id).unwrap().text_runs[0].start, 1);
+        assert_eq!(engine.node(&id).unwrap().text_runs[0].end, 2);
+    }
 
     fn component_fixture() -> (CanvasEngine, NodeId, NodeId) {
         let mut doc = Document::empty("Variants");
@@ -3714,6 +3909,128 @@ mod tests {
         assert_eq!(children[0].id, second_id);
         assert_eq!(children[1].id, first_id);
         assert_eq!(children[1].layout.position, LayoutPosition::Flow);
+    }
+
+    #[test]
+    fn populated_page_becomes_active_when_the_bootstrap_page_is_empty() {
+        let mut document = Document::empty("Imported design");
+        let bootstrap = document.root_page_id.clone();
+        let page = Node::root_frame("Homepage");
+        let page_id = page.id.clone();
+        let child = Node::rectangle(
+            "Hero",
+            page_id.clone(),
+            Layout::new(40.0, 40.0, 320.0, 180.0),
+        );
+        document.nodes.insert(page_id.clone(), page);
+        document.nodes.insert(child.id.clone(), child);
+
+        let engine = CanvasEngine::new(document);
+
+        assert_eq!(engine.root_page_id(), &page_id);
+        assert!(engine.node(&bootstrap).is_none());
+    }
+
+    #[test]
+    fn loading_a_document_reflows_hug_text_with_current_metrics() {
+        let mut document = Document::empty("Imported layout");
+        let page = document.root_page_id.clone();
+        let mut row = Node::frame("Word", page, Layout::new(0.0, 0.0, 300.0, 100.0));
+        row.layout.mode = LayoutMode::Flex;
+        let row_id = row.id.clone();
+        let mut narrow = Node::text(
+            "Narrow",
+            row_id.clone(),
+            Layout::new(0.0, 0.0, 60.0, 96.0),
+            "l",
+        );
+        narrow.layout.position = LayoutPosition::Flow;
+        narrow.layout.width_mode = SizeMode::Hug;
+        narrow.typography.as_mut().unwrap().size = 92.0;
+        let narrow_id = narrow.id.clone();
+        let mut round = Node::text("Round", row_id, Layout::new(60.0, 0.0, 60.0, 96.0), "e");
+        round.layout.position = LayoutPosition::Flow;
+        round.layout.width_mode = SizeMode::Hug;
+        round.typography.as_mut().unwrap().size = 92.0;
+        round.order = 2048.0;
+        let round_id = round.id.clone();
+        document.nodes.insert(row.id.clone(), row);
+        document.nodes.insert(narrow_id.clone(), narrow);
+        document.nodes.insert(round_id.clone(), round);
+
+        let engine = CanvasEngine::new(document);
+        let narrow = engine.node(&narrow_id).unwrap();
+        let round = engine.node(&round_id).unwrap();
+
+        assert!(narrow.layout.width < round.layout.width * 0.7);
+        assert!((round.layout.x - narrow.layout.width).abs() < 0.01);
+    }
+
+    #[test]
+    fn nested_hug_row_keeps_every_child_inside_a_space_between_parent() {
+        let mut document = Document::empty("Footer layout");
+        let page = document.root_page_id.clone();
+        let mut footer = Node::frame("Footer links", page, Layout::new(0.0, 0.0, 1440.0, 64.0));
+        footer.layout.mode = LayoutMode::Flex;
+        footer.layout.justify = LayoutJustify::SpaceBetween;
+        footer.layout.align = LayoutAlign::Center;
+        footer.layout.padding = Insets {
+            top: 15.0,
+            right: 30.0,
+            bottom: 15.0,
+            left: 30.0,
+        };
+        let footer_id = footer.id.clone();
+
+        let mut left = Node::frame(
+            "Left links",
+            footer_id.clone(),
+            Layout::new(0.0, 0.0, 368.0, 25.0),
+        );
+        left.layout.mode = LayoutMode::Flex;
+        left.layout.position = LayoutPosition::Flow;
+        left.layout.width_mode = SizeMode::Hug;
+        let left_id = left.id.clone();
+
+        let mut right = Node::frame(
+            "Right links",
+            footer_id.clone(),
+            Layout::new(0.0, 0.0, 198.0, 25.0),
+        );
+        right.layout.mode = LayoutMode::Flex;
+        right.layout.position = LayoutPosition::Flow;
+        right.layout.width_mode = SizeMode::Hug;
+        right.layout.gap = 28.0;
+        right.order = DEFAULT_ORDER_STEP * 2.0;
+        let right_id = right.id.clone();
+
+        document.nodes.insert(footer_id.clone(), footer);
+        document.nodes.insert(left_id, left);
+        document.nodes.insert(right_id.clone(), right);
+        for (index, label) in ["Privacy", "Terms", "Settings"].into_iter().enumerate() {
+            let mut text = Node::text(
+                label,
+                right_id.clone(),
+                Layout::new(0.0, 0.0, 48.0, 23.0),
+                label,
+            );
+            text.layout.position = LayoutPosition::Flow;
+            text.layout.width_mode = SizeMode::Hug;
+            text.layout.height_mode = SizeMode::Hug;
+            text.order = DEFAULT_ORDER_STEP * (index as f64 + 1.0);
+            text.typography.as_mut().unwrap().size = 14.0;
+            document.nodes.insert(text.id.clone(), text);
+        }
+
+        let engine = CanvasEngine::new(document);
+        let right = engine.node(&right_id).unwrap();
+        let children = engine.children(Some(&right_id));
+
+        assert_eq!(children.len(), 3);
+        assert!(children
+            .iter()
+            .all(|child| child.layout.x + child.layout.width <= right.layout.width + 0.01));
+        assert!(right.layout.x + right.layout.width <= 1410.01);
     }
 
     #[test]

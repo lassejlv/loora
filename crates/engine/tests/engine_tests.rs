@@ -206,6 +206,55 @@ fn page_world_bounds_can_move_resize_and_undo() {
 }
 
 #[test]
+fn next_editor_transform_batch_is_one_undo_step() {
+    let mut engine = CanvasEngine::demo();
+    let page = engine.root_page_id().clone();
+    let ids = engine
+        .children(Some(&page))
+        .into_iter()
+        .take(2)
+        .map(|node| node.id.clone())
+        .collect::<Vec<_>>();
+    let original = ids
+        .iter()
+        .map(|id| {
+            (
+                id.clone(),
+                engine.absolute_bounds(id).unwrap(),
+                engine.node(id).unwrap().rotation,
+            )
+        })
+        .collect::<Vec<_>>();
+    let bounds = original
+        .iter()
+        .map(|(id, bounds, _)| {
+            (
+                id.clone(),
+                Bounds::new(
+                    bounds.x + 40.0,
+                    bounds.y + 20.0,
+                    bounds.width * 1.25,
+                    bounds.height * 1.25,
+                ),
+            )
+        })
+        .collect::<Vec<_>>();
+    let rotations = original
+        .iter()
+        .map(|(id, _, rotation)| (id.clone(), rotation + 30.0))
+        .collect::<Vec<_>>();
+
+    engine.transform_nodes(&bounds, &rotations).unwrap();
+    assert!(engine.undo().unwrap());
+
+    for (id, bounds, rotation) in original {
+        assert_eq!(engine.absolute_bounds(&id), Some(bounds));
+        assert!((engine.node(&id).unwrap().rotation - rotation).abs() < f32::EPSILON);
+    }
+    assert!(!engine.undo().unwrap());
+}
+
+#[test]
 fn page_resize_overrides_imported_viewport_minimum() {
     let mut document = Document::empty("responsive page");
     let page = document.root_page_id.clone();

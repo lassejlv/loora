@@ -1,5 +1,5 @@
 use crate::extras::{
-    DocumentAnimation, Interaction, NodeAnimation, OverrideMap, ResponsiveMap, Transition,
+    DocumentAnimation, Interaction, NodeAnimation, OverrideMap, ResponsiveMap, TextRun, Transition,
     VectorPath, VisualStates,
 };
 use crate::id::NodeId;
@@ -14,6 +14,7 @@ pub struct NodePatch {
     pub style: Option<Style>,
     pub order: Option<f64>,
     pub text: Option<String>,
+    pub text_runs: Option<Vec<TextRun>>,
     pub font_size: Option<f32>,
     pub typography: Option<Option<Typography>>,
     pub image_path: Option<Option<String>>,

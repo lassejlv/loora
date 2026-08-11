@@ -14,9 +14,7 @@ use gpui::{
     UniformListScrollHandle, Window,
 };
 pub use loora_canvas::CanvasTool;
-use loora_canvas::{
-    CanvasEvent, CanvasPalette, LayoutControl, NativeCanvas, NativeTextEdit, PreviewTrigger,
-};
+use loora_canvas::{CanvasEvent, CanvasPalette, NativeCanvas, NativeTextEdit, PreviewTrigger};
 use loora_engine::{
     export_page_svg, standalone_html, AnimationKeyframe, AnimationTrigger, Bounds as EngineBounds,
     Camera, CanvasAction, CanvasEngine, Color, Corners, DesignFileInfo, DesignStore,
@@ -270,9 +268,14 @@ impl CanvasWorkspace {
             let fallback = std::env::temp_dir().join("loora-designs");
             DesignStore::open_at(fallback).expect("temp design store")
         });
-        let document = store
-            .load_or_create_default()
-            .unwrap_or_else(|_| loora_engine::Document::empty("Untitled"));
+        let using_style_fixture = std::env::var_os("LOORA_STYLE_FIXTURE").is_some();
+        let document = if using_style_fixture {
+            loora_canvas::style_fixture::style_fixture_document()
+        } else {
+            store
+                .load_or_create_default()
+                .unwrap_or_else(|_| loora_engine::Document::empty("Untitled"))
+        };
         let engine = CanvasEngine::new(document);
         let collapsed = default_collapsed_layers(&engine);
         let saved_revision = engine.revision();
@@ -302,7 +305,11 @@ impl CanvasWorkspace {
             theme,
             engine,
             camera: initial_camera,
-            selection: Vec::new(),
+            selection: if using_style_fixture {
+                vec![NodeId::from("fixture_transform_card")]
+            } else {
+                Vec::new()
+            },
             tool: CanvasTool::Select,
             viewport_bounds,
             native_canvas,
@@ -804,32 +811,19 @@ impl CanvasWorkspace {
                     self.note_change(cx);
                 }
             }
-            CanvasEvent::ResizeCommitted(members) => {
-                let mut changed = false;
-                let mut selection = Vec::new();
-                for (id, bounds) in members {
-                    if self.engine.set_world_bounds(id, *bounds, None).is_ok() {
-                        changed = true;
-                        selection.push(id.clone());
+            CanvasEvent::TransformCommitted { bounds, rotations } => {
+                if self.engine.transform_nodes(bounds, rotations).is_ok() {
+                    let mut selection = bounds
+                        .iter()
+                        .map(|(id, _)| id.clone())
+                        .chain(rotations.iter().map(|(id, _)| id.clone()))
+                        .collect::<Vec<_>>();
+                    selection.sort();
+                    selection.dedup();
+                    if !selection.is_empty() {
+                        self.selection = selection;
+                        self.note_change(cx);
                     }
-                }
-                if changed {
-                    self.selection = selection;
-                    self.note_change(cx);
-                }
-            }
-            CanvasEvent::RotateCommitted(members) => {
-                let mut changed = false;
-                let mut selection = Vec::new();
-                for (id, rotation) in members {
-                    if self.engine.set_rotation(id, *rotation, None).is_ok() {
-                        changed = true;
-                        selection.push(id.clone());
-                    }
-                }
-                if changed {
-                    self.selection = selection;
-                    self.note_change(cx);
                 }
             }
             CanvasEvent::LayoutMetricsChanged { id, gap, padding } => {
@@ -841,18 +835,6 @@ impl CanvasWorkspace {
                         },
                         cx,
                     );
-                }
-            }
-            CanvasEvent::LayoutControlTriggered { id, control } => {
-                if self.selection.as_slice() != std::slice::from_ref(id) {
-                    return;
-                }
-                match control {
-                    LayoutControl::Direction => self.cycle_selection_direction(cx),
-                    LayoutControl::Wrap => self.toggle_selection_wrap(cx),
-                    LayoutControl::Align => self.cycle_selection_align(cx),
-                    LayoutControl::Justify => self.cycle_selection_justify(cx),
-                    LayoutControl::Columns => self.cycle_selection_columns(cx),
                 }
             }
             CanvasEvent::CreateCommitted { tool, bounds } => {

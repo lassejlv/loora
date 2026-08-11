@@ -3055,9 +3055,11 @@ dependencies = [
 name = "loora-canvas"
 version = "0.1.0"
 dependencies = [
+ "base64",
  "gpui",
  "image",
  "loora-engine",
+ "resvg",
  "smallvec",
  "svgtypes",
 ]
