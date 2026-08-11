@@ -3542,6 +3542,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "loora-canvas"
+version = "0.1.0"
+dependencies = [
+ "gpui",
+ "image",
+ "loora-engine",
+ "smallvec",
+ "svgtypes",
+]
+
+[[package]]
 name = "loora-desktop"
 version = "0.1.0"
 dependencies = [
@@ -3565,6 +3576,7 @@ dependencies = [
  "dirs",
  "serde",
  "serde_json",
+ "taffy",
  "uuid",
 ]
 
@@ -3601,6 +3613,7 @@ dependencies = [
  "gpui-router",
  "gtk",
  "image",
+ "loora-canvas",
  "loora-engine",
  "loora-mcp",
  "objc2 0.6.4",

@@ -9,6 +9,14 @@ use crate::model::{
     DEFAULT_ORDER_STEP,
 };
 use crate::ops::{NodePatch, Operation, Transaction};
+use taffy::prelude::{
+    auto as taffy_auto, fr as taffy_fr, length as taffy_length, percent as taffy_percent,
+    AlignItems as TaffyAlignItems, AvailableSpace as TaffyAvailableSpace,
+    BoxSizing as TaffyBoxSizing, Dimension as TaffyDimension, Display as TaffyDisplay,
+    FlexDirection as TaffyFlexDirection, FlexWrap as TaffyFlexWrap,
+    JustifyContent as TaffyJustifyContent, Position as TaffyPosition, Rect as TaffyRect,
+    Size as TaffySize, Style as TaffyStyle, TaffyTree,
+};
 
 const COALESCE_WINDOW: Duration = Duration::from_millis(750);
 const DEFAULT_HISTORY_MAX: usize = 200;
@@ -35,6 +43,121 @@ impl std::fmt::Display for EngineError {
 }
 
 impl std::error::Error for EngineError {}
+
+fn taffy_error(error: taffy::TaffyError) -> EngineError {
+    EngineError::InvalidParent(format!("layout failed: {error}"))
+}
+
+fn taffy_align(value: LayoutAlign, flex: bool) -> TaffyAlignItems {
+    match value {
+        LayoutAlign::Start if flex => TaffyAlignItems::FLEX_START,
+        LayoutAlign::Start => TaffyAlignItems::START,
+        LayoutAlign::Center => TaffyAlignItems::CENTER,
+        LayoutAlign::End if flex => TaffyAlignItems::FLEX_END,
+        LayoutAlign::End => TaffyAlignItems::END,
+        LayoutAlign::Stretch => TaffyAlignItems::STRETCH,
+    }
+}
+
+fn taffy_align_justify(value: LayoutJustify) -> TaffyAlignItems {
+    match value {
+        LayoutJustify::Start => TaffyAlignItems::START,
+        LayoutJustify::Center => TaffyAlignItems::CENTER,
+        LayoutJustify::End => TaffyAlignItems::END,
+        LayoutJustify::SpaceBetween | LayoutJustify::SpaceAround => TaffyAlignItems::STRETCH,
+    }
+}
+
+fn taffy_justify(value: LayoutJustify, flex: bool) -> TaffyJustifyContent {
+    match value {
+        LayoutJustify::Start if flex => TaffyJustifyContent::FLEX_START,
+        LayoutJustify::Start => TaffyJustifyContent::START,
+        LayoutJustify::Center => TaffyJustifyContent::CENTER,
+        LayoutJustify::End if flex => TaffyJustifyContent::FLEX_END,
+        LayoutJustify::End => TaffyJustifyContent::END,
+        LayoutJustify::SpaceBetween => TaffyJustifyContent::SPACE_BETWEEN,
+        LayoutJustify::SpaceAround => TaffyJustifyContent::SPACE_AROUND,
+    }
+}
+
+fn taffy_dimension(mode: SizeMode, value: f64, percent: Option<f64>) -> TaffyDimension {
+    match mode {
+        SizeMode::Fixed => taffy_length(value.max(0.0) as f32),
+        SizeMode::Percent => taffy_percent((percent.unwrap_or(0.0) / 100.0) as f32),
+        SizeMode::Hug | SizeMode::Fill => taffy_auto(),
+    }
+}
+
+fn taffy_optional_dimension(value: Option<f64>) -> TaffyDimension {
+    value
+        .map(|value| taffy_length(value.max(0.0) as f32))
+        .unwrap_or_else(taffy_auto)
+}
+
+fn taffy_child_style(node: &Node, parent: &Layout) -> TaffyStyle {
+    let layout = &node.layout;
+    let is_flex = parent.mode == LayoutMode::Flex;
+    let row = parent.direction == FlexDirection::Row;
+    let main_mode = if row {
+        layout.width_mode
+    } else {
+        layout.height_mode
+    };
+    let cross_mode = if row {
+        layout.height_mode
+    } else {
+        layout.width_mode
+    };
+    let mut style = TaffyStyle {
+        position: TaffyPosition::Relative,
+        box_sizing: TaffyBoxSizing::BorderBox,
+        size: TaffySize {
+            width: taffy_dimension(layout.width_mode, layout.width, layout.width_percent),
+            height: taffy_dimension(layout.height_mode, layout.height, layout.height_percent),
+        },
+        min_size: TaffySize {
+            width: taffy_optional_dimension(layout.min_width),
+            height: taffy_optional_dimension(layout.min_height),
+        },
+        max_size: TaffySize {
+            width: taffy_optional_dimension(layout.max_width),
+            height: taffy_optional_dimension(layout.max_height),
+        },
+        aspect_ratio: layout.aspect_ratio.map(|ratio| ratio.max(0.0) as f32),
+        align_self: layout.align_self.map(|align| taffy_align(align, is_flex)),
+        ..TaffyStyle::default()
+    };
+
+    if is_flex {
+        style.flex_grow = if main_mode == SizeMode::Fill {
+            layout.grow.max(1.0)
+        } else {
+            layout.grow.max(0.0)
+        };
+        style.flex_shrink =
+            layout
+                .shrink
+                .unwrap_or(if matches!(main_mode, SizeMode::Fill | SizeMode::Hug) {
+                    1.0
+                } else {
+                    0.0
+                });
+        if main_mode == SizeMode::Fill {
+            style.flex_basis = taffy_percent(0.0);
+        }
+        if cross_mode == SizeMode::Fill {
+            style.align_self = Some(TaffyAlignItems::STRETCH);
+        }
+    } else {
+        if layout.width_mode == SizeMode::Fill {
+            style.justify_self = Some(TaffyAlignItems::STRETCH);
+        }
+        if layout.height_mode == SizeMode::Fill {
+            style.align_self = Some(TaffyAlignItems::STRETCH);
+        }
+    }
+    style
+}
 
 #[derive(Clone, Debug)]
 struct HistoryEntry {
@@ -493,6 +616,7 @@ impl CanvasEngine {
             apply_transaction(&self.document, &entry.inverse.operations)?;
         self.document = document;
         self.rebuild_indexes();
+        self.reflow();
         self.revision += 1;
         self.redo.push(HistoryEntry {
             inverse: Transaction {
@@ -515,6 +639,7 @@ impl CanvasEngine {
             apply_transaction(&self.document, &entry.inverse.operations)?;
         self.document = document;
         self.rebuild_indexes();
+        self.reflow();
         self.revision += 1;
         self.undo.push(HistoryEntry {
             inverse: Transaction {
@@ -845,6 +970,90 @@ impl CanvasEngine {
             }
         }
         self.root_page_id().clone()
+    }
+
+    /// Insert or reorder a node in a flex/grid container at the pointer position.
+    /// Returns `true` when the document changed.
+    pub fn place_in_stack_at(
+        &mut self,
+        id: &NodeId,
+        stack_id: &NodeId,
+        world: Vec2,
+    ) -> Result<bool, EngineError> {
+        let Some(node) = self.node(id).cloned() else {
+            return Err(EngineError::NodeMissing(id.to_string()));
+        };
+        let Some(stack) = self.node(stack_id).cloned() else {
+            return Err(EngineError::NodeMissing(stack_id.to_string()));
+        };
+        if !matches!(stack.layout.mode, LayoutMode::Flex | LayoutMode::Grid) {
+            return Ok(false);
+        }
+        if would_cycle(self.document(), id, Some(stack_id)) {
+            return Err(EngineError::Cycle);
+        }
+
+        let siblings = self
+            .children(Some(stack_id))
+            .into_iter()
+            .filter(|sibling| {
+                sibling.id != *id
+                    && !sibling.hidden
+                    && sibling.layout.position == LayoutPosition::Flow
+            })
+            .cloned()
+            .collect::<Vec<_>>();
+        let insertion = stack_insertion_index(self, &stack, &siblings, world);
+        let previous = insertion
+            .checked_sub(1)
+            .and_then(|index| siblings.get(index));
+        let next = siblings.get(insertion);
+        let order = match (previous, next) {
+            (Some(previous), Some(next)) => (previous.order + next.order) * 0.5,
+            (Some(previous), None) => previous.order + DEFAULT_ORDER_STEP,
+            (None, Some(next)) => next.order - DEFAULT_ORDER_STEP,
+            (None, None) => DEFAULT_ORDER_STEP,
+        };
+
+        let mut layout = node.layout.clone();
+        layout.position = LayoutPosition::Flow;
+        layout.x = 0.0;
+        layout.y = 0.0;
+        if node.parent_id.as_ref() == Some(stack_id)
+            && node.layout.position == LayoutPosition::Flow
+            && (node.order - order).abs() < f64::EPSILON
+        {
+            return Ok(false);
+        }
+
+        let old_parent = node.parent_id.clone();
+        self.apply(
+            Transaction::new(
+                "Reorder stack",
+                vec![
+                    Operation::Move {
+                        id: id.clone(),
+                        parent_id: Some(stack_id.clone()),
+                        order,
+                    },
+                    Operation::Patch {
+                        id: id.clone(),
+                        patch: NodePatch {
+                            layout: Some(layout),
+                            ..NodePatch::default()
+                        },
+                    },
+                ],
+            ),
+            ApplyOptions::with_history(),
+        )?;
+        if let Some(old_parent) = old_parent {
+            if old_parent != *stack_id {
+                let _ = self.resolve_stack(&old_parent);
+            }
+        }
+        let _ = self.resolve_stack(stack_id);
+        Ok(true)
     }
 
     fn find_drop_target(
@@ -1679,7 +1888,6 @@ impl CanvasEngine {
         if node.locked {
             return Err(EngineError::InvalidParent("node is locked".into()));
         }
-        let parent_for_resolve = id.clone();
         let mut tx = Transaction::new(
             "Edit layout",
             vec![Operation::Patch {
@@ -1694,7 +1902,11 @@ impl CanvasEngine {
             tx = tx.with_coalesce_key(key);
         }
         self.apply(tx, ApplyOptions::with_history())?;
-        let _ = self.resolve_stack(&parent_for_resolve);
+        // Layout is derived across both directions of the tree: a container
+        // positions its children, while a flow child's size affects its parent
+        // and potentially every hug ancestor. Reuse the canonical reflow pass
+        // so property edits cannot leave a neighboring stack stale.
+        self.reflow();
         Ok(())
     }
 
@@ -2387,8 +2599,7 @@ impl CanvasEngine {
         };
         match parent.layout.mode {
             LayoutMode::Absolute => return Ok(()),
-            LayoutMode::Flex => self.resolve_flex(parent_id, &parent)?,
-            LayoutMode::Grid => self.resolve_grid(parent_id, &parent)?,
+            LayoutMode::Flex | LayoutMode::Grid => self.resolve_taffy_stack(parent_id, &parent)?,
         }
         Ok(())
     }
@@ -2498,314 +2709,127 @@ impl CanvasEngine {
         true
     }
 
-    fn resolve_flex(&mut self, parent_id: &NodeId, parent: &Node) -> Result<(), EngineError> {
-        let pad = parent.layout.padding;
-        let gap = parent.layout.gap as f64;
-        let inner_w = (parent.layout.width - pad.left as f64 - pad.right as f64).max(0.0);
-        let inner_h = (parent.layout.height - pad.top as f64 - pad.bottom as f64).max(0.0);
-
-        let children: Vec<Node> = self
+    fn resolve_taffy_stack(
+        &mut self,
+        parent_id: &NodeId,
+        parent: &Node,
+    ) -> Result<(), EngineError> {
+        let children = self
             .children(Some(parent_id))
             .into_iter()
-            .filter(|c| !c.hidden && c.layout.position == LayoutPosition::Flow)
+            .filter(|child| !child.hidden && child.layout.position == LayoutPosition::Flow)
             .cloned()
-            .collect();
+            .collect::<Vec<_>>();
         if children.is_empty() {
             return Ok(());
         }
 
-        let is_row = parent.layout.direction == FlexDirection::Row;
-        let hug_main_axis = if is_row {
-            parent.layout.width_mode == SizeMode::Hug
-        } else {
-            parent.layout.height_mode == SizeMode::Hug
-        };
-
-        // Preferred main/cross sizes with Fill → grow.
-        let mut pref_main: Vec<f64> = Vec::with_capacity(children.len());
-        let mut pref_cross: Vec<f64> = Vec::with_capacity(children.len());
-        let mut grow: Vec<f32> = Vec::with_capacity(children.len());
-        let mut shrink: Vec<f32> = Vec::with_capacity(children.len());
+        let is_flex = parent.layout.mode == LayoutMode::Flex;
+        let mut tree = TaffyTree::<TaffySize<f32>>::new();
+        let mut child_nodes = Vec::with_capacity(children.len());
         for child in &children {
-            let (mut main, mut cross) = if is_row {
-                (child.layout.width, child.layout.height)
-            } else {
-                (child.layout.height, child.layout.width)
-            };
-            let main_mode = if is_row {
-                child.layout.width_mode
-            } else {
-                child.layout.height_mode
-            };
-            let cross_mode = if is_row {
-                child.layout.height_mode
-            } else {
-                child.layout.width_mode
-            };
-            let mut g = child.layout.grow;
-            if main_mode == SizeMode::Fill {
-                g = g.max(1.0);
-                main = child
-                    .layout
-                    .min_width
-                    .or(child.layout.min_height)
-                    .unwrap_or(0.0)
-                    .max(0.0);
-                if is_row {
-                    if let Some(min) = child.layout.min_width {
-                        main = min;
-                    }
-                } else if let Some(min) = child.layout.min_height {
-                    main = min;
+            let intrinsic = if child.kind == NodeKind::Text {
+                let (width, height) = child.estimate_text_size();
+                TaffySize {
+                    width: width as f32,
+                    height: height as f32,
                 }
-            }
-            if cross_mode == SizeMode::Fill {
-                // Prefer stretch on cross axis.
-                cross = if is_row { inner_h } else { inner_w };
-            }
-            if main_mode == SizeMode::Hug && child.kind == NodeKind::Text {
-                let (tw, th) = child.estimate_text_size();
-                main = if is_row { tw } else { th };
-            }
-            if cross_mode == SizeMode::Hug && child.kind == NodeKind::Text {
-                let (tw, th) = child.estimate_text_size();
-                cross = if is_row { th } else { tw };
-            }
-            let (cw, ch) = if is_row {
-                child.layout.clamp_size(main, cross)
             } else {
-                child.layout.clamp_size(cross, main)
+                TaffySize {
+                    width: child.layout.width as f32,
+                    height: child.layout.height as f32,
+                }
             };
-            if is_row {
-                pref_main.push(cw);
-                pref_cross.push(ch);
-            } else {
-                pref_main.push(ch);
-                pref_cross.push(cw);
-            }
-            grow.push(g);
-            shrink.push(
-                child
-                    .layout
-                    .shrink
-                    .unwrap_or(
-                        if matches!(main_mode, SizeMode::Fixed | SizeMode::Percent) {
-                            0.0
-                        } else {
-                            1.0
-                        },
-                    )
-                    .max(0.0),
-            );
+            let node = tree
+                .new_leaf_with_context(taffy_child_style(child, &parent.layout), intrinsic)
+                .map_err(taffy_error)?;
+            child_nodes.push(node);
         }
 
-        let mut lines: Vec<Vec<usize>> = vec![Vec::new()];
-        let mut line_main = 0.0_f64;
-        for (i, &main) in pref_main.iter().enumerate() {
-            let limit = if is_row { inner_w } else { inner_h };
-            let needs_wrap = !hug_main_axis
-                && parent.layout.wrap
-                && !lines.last().map(|l| l.is_empty()).unwrap_or(true)
-                && line_main + gap + main > limit + f64::EPSILON;
-            if needs_wrap {
-                lines.push(Vec::new());
-                line_main = 0.0;
-            }
-            if let Some(line) = lines.last_mut() {
-                if !line.is_empty() {
-                    line_main += gap;
-                }
-                line.push(i);
-                line_main += main;
-            }
-        }
-
-        let mut ops = Vec::new();
-        let mut cross_cursor = 0.0_f64;
-        for line in &lines {
-            let mut main_sizes: Vec<f64> = line.iter().map(|&i| pref_main[i]).collect();
-            let mut cross_sizes: Vec<f64> = line.iter().map(|&i| pref_cross[i]).collect();
-            let gaps = gap * (line.len().saturating_sub(1) as f64);
-            let total_main: f64 = main_sizes.iter().sum::<f64>() + gaps;
-            let free = if hug_main_axis {
-                0.0
-            } else if is_row {
-                inner_w - total_main
+        let padding = parent.layout.padding;
+        let gap = parent.layout.gap.max(0.0);
+        let mut root_style = TaffyStyle {
+            display: if is_flex {
+                TaffyDisplay::Flex
             } else {
-                inner_h - total_main
-            };
-
-            // Grow into free space / shrink on overflow.
-            if free > f64::EPSILON {
-                let grow_sum: f32 = line.iter().map(|&i| grow[i]).sum();
-                if grow_sum > 0.0 {
-                    for (j, &i) in line.iter().enumerate() {
-                        if grow[i] > 0.0 {
-                            main_sizes[j] += free * (grow[i] as f64 / grow_sum as f64);
-                        }
-                    }
-                }
-            } else if free < -f64::EPSILON {
-                let shrink_sum: f64 = line.iter().map(|&i| shrink[i] as f64 * pref_main[i]).sum();
-                if shrink_sum > f64::EPSILON {
-                    for (j, &i) in line.iter().enumerate() {
-                        let weight = shrink[i] as f64 * pref_main[i];
-                        main_sizes[j] = (main_sizes[j] + free * (weight / shrink_sum)).max(1.0);
-                    }
-                }
-            }
-
-            // Clamp after grow/shrink.
-            for (j, &i) in line.iter().enumerate() {
-                let (w, h) = if is_row {
-                    children[i].layout.clamp_size(main_sizes[j], cross_sizes[j])
-                } else {
-                    children[i].layout.clamp_size(cross_sizes[j], main_sizes[j])
-                };
-                if is_row {
-                    main_sizes[j] = w;
-                    cross_sizes[j] = h;
-                } else {
-                    main_sizes[j] = h;
-                    cross_sizes[j] = w;
-                }
-            }
-
-            let line_cross = cross_sizes.iter().cloned().fold(0.0_f64, f64::max);
-            let used_main: f64 = main_sizes.iter().sum::<f64>() + gaps;
-            let free_after = if is_row {
-                inner_w - used_main
-            } else {
-                inner_h - used_main
-            };
-
-            let (mut cursor, spacing) = match parent.layout.justify {
-                LayoutJustify::Start => (0.0_f64, 0.0),
-                LayoutJustify::Center => (free_after.max(0.0) * 0.5, 0.0),
-                LayoutJustify::End => (free_after.max(0.0), 0.0),
-                LayoutJustify::SpaceBetween if line.len() > 1 => {
-                    (0.0, free_after.max(0.0) / (line.len() - 1) as f64)
-                }
-                LayoutJustify::SpaceBetween => (0.0, 0.0),
-                LayoutJustify::SpaceAround => {
-                    let slot = free_after.max(0.0) / line.len().max(1) as f64;
-                    (slot * 0.5, slot)
-                }
-            };
-
-            for (j, &i) in line.iter().enumerate() {
-                let child = &children[i];
-                let main = main_sizes[j];
-                let mut cross = cross_sizes[j];
-                let align = child.layout.align_self.unwrap_or(parent.layout.align);
-                let cross_mode = if is_row {
-                    child.layout.height_mode
-                } else {
-                    child.layout.width_mode
-                };
-                // CSS `align-items: stretch` only stretches an auto cross-size.
-                // Every Canvas size mode except Fill emits an explicit size
-                // (`px`, `%`, or max-content), so those dimensions must win.
-                if cross_mode == SizeMode::Fill {
-                    cross = if is_row {
-                        inner_h.max(1.0)
-                    } else {
-                        inner_w.max(1.0)
-                    };
-                }
-                let cross_free = line_cross.max(cross) - cross;
-                let cross_off = match align {
-                    LayoutAlign::Start | LayoutAlign::Stretch => 0.0,
-                    LayoutAlign::Center => cross_free.max(0.0) * 0.5,
-                    LayoutAlign::End => cross_free.max(0.0),
-                };
-
-                let mut layout = child.layout.clone();
-                if is_row {
-                    layout.x = pad.left as f64 + cursor;
-                    layout.y = pad.top as f64 + cross_cursor + cross_off;
-                    layout.width = main;
-                    layout.height = cross;
-                } else {
-                    layout.x = pad.left as f64 + cross_cursor + cross_off;
-                    layout.y = pad.top as f64 + cursor;
-                    layout.width = cross;
-                    layout.height = main;
-                }
-                let (w, h) = layout.clamp_size(layout.width, layout.height);
-                layout.width = w;
-                layout.height = h;
-
-                if (layout.x - child.layout.x).abs() > f64::EPSILON
-                    || (layout.y - child.layout.y).abs() > f64::EPSILON
-                    || (layout.width - child.layout.width).abs() > f64::EPSILON
-                    || (layout.height - child.layout.height).abs() > f64::EPSILON
-                {
-                    ops.push(Operation::Patch {
-                        id: child.id.clone(),
-                        patch: NodePatch {
-                            layout: Some(layout),
-                            ..NodePatch::default()
-                        },
-                    });
-                }
-
-                cursor += main + gap + spacing;
-            }
-
-            cross_cursor += line_cross + gap;
-        }
-
-        if ops.is_empty() {
-            return Ok(());
-        }
-        let tx = Transaction::new("Resolve stack", ops);
-        self.apply(
-            tx,
-            ApplyOptions {
-                record_history: false,
+                TaffyDisplay::Grid
             },
-        )?;
-        Ok(())
-    }
-
-    fn resolve_grid(&mut self, parent_id: &NodeId, parent: &Node) -> Result<(), EngineError> {
-        let pad = parent.layout.padding;
-        let gap = parent.layout.gap as f64;
-        let cols = parent.layout.columns.max(1) as usize;
-        let inner_w = (parent.layout.width - pad.left as f64 - pad.right as f64).max(0.0);
-        let cell_w = ((inner_w - gap * (cols.saturating_sub(1) as f64)) / cols as f64).max(1.0);
-
-        let children: Vec<Node> = self
-            .children(Some(parent_id))
-            .into_iter()
-            .filter(|c| !c.hidden && c.layout.position == LayoutPosition::Flow)
-            .cloned()
-            .collect();
-        if children.is_empty() {
-            return Ok(());
+            box_sizing: TaffyBoxSizing::BorderBox,
+            size: TaffySize {
+                width: taffy_length(parent.layout.width.max(0.0) as f32),
+                height: taffy_length(parent.layout.height.max(0.0) as f32),
+            },
+            padding: TaffyRect {
+                left: taffy_length(padding.left.max(0.0)),
+                right: taffy_length(padding.right.max(0.0)),
+                top: taffy_length(padding.top.max(0.0)),
+                bottom: taffy_length(padding.bottom.max(0.0)),
+            },
+            gap: TaffySize {
+                width: taffy_length(gap),
+                height: taffy_length(gap),
+            },
+            align_items: Some(taffy_align(parent.layout.align, is_flex)),
+            ..TaffyStyle::default()
+        };
+        if is_flex {
+            root_style.flex_direction = match parent.layout.direction {
+                FlexDirection::Row => TaffyFlexDirection::Row,
+                FlexDirection::Column => TaffyFlexDirection::Column,
+            };
+            root_style.flex_wrap = if parent.layout.wrap {
+                TaffyFlexWrap::Wrap
+            } else {
+                TaffyFlexWrap::NoWrap
+            };
+            root_style.justify_content = Some(taffy_justify(parent.layout.justify, true));
+        } else {
+            root_style.grid_template_columns =
+                vec![taffy_fr(1.0); parent.layout.columns.max(1) as usize];
+            match parent.layout.justify {
+                LayoutJustify::SpaceBetween | LayoutJustify::SpaceAround => {
+                    root_style.justify_content = Some(taffy_justify(parent.layout.justify, false));
+                }
+                _ => {
+                    root_style.justify_items = Some(taffy_align_justify(parent.layout.justify));
+                }
+            }
         }
 
+        let root = tree
+            .new_with_children(root_style, &child_nodes)
+            .map_err(taffy_error)?;
+        tree.compute_layout_with_measure(
+            root,
+            TaffySize {
+                width: TaffyAvailableSpace::Definite(parent.layout.width.max(0.0) as f32),
+                height: TaffyAvailableSpace::Definite(parent.layout.height.max(0.0) as f32),
+            },
+            |known, _available, _node, intrinsic, _style| {
+                let intrinsic = intrinsic.copied().unwrap_or(TaffySize {
+                    width: 0.0,
+                    height: 0.0,
+                });
+                TaffySize {
+                    width: known.width.unwrap_or(intrinsic.width),
+                    height: known.height.unwrap_or(intrinsic.height),
+                }
+            },
+        )
+        .map_err(taffy_error)?;
+
         let mut ops = Vec::new();
-        let mut row_y = pad.top as f64;
-        let mut row_max_h = 0.0_f64;
-        for (i, child) in children.iter().enumerate() {
-            let col = i % cols;
-            if col == 0 && i > 0 {
-                row_y += row_max_h + gap;
-                row_max_h = 0.0;
-            }
-            row_max_h = row_max_h.max(child.layout.height);
-
+        for (child, node) in children.iter().zip(child_nodes) {
+            let computed = tree.layout(node).map_err(taffy_error)?;
             let mut layout = child.layout.clone();
-            layout.x = pad.left as f64 + col as f64 * (cell_w + gap);
-            layout.y = row_y;
-            layout.width = cell_w;
-
-            if (layout.x - child.layout.x).abs() > f64::EPSILON
-                || (layout.y - child.layout.y).abs() > f64::EPSILON
-                || (layout.width - child.layout.width).abs() > f64::EPSILON
-            {
+            layout.x = computed.location.x as f64;
+            layout.y = computed.location.y as f64;
+            layout.width = computed.size.width as f64;
+            layout.height = computed.size.height as f64;
+            let (width, height) = layout.clamp_size(layout.width, layout.height);
+            layout.width = width;
+            layout.height = height;
+            if layout != child.layout {
                 ops.push(Operation::Patch {
                     id: child.id.clone(),
                     patch: NodePatch {
@@ -2815,13 +2839,11 @@ impl CanvasEngine {
                 });
             }
         }
-
         if ops.is_empty() {
             return Ok(());
         }
-        let tx = Transaction::new("Resolve grid", ops);
         self.apply(
-            tx,
+            Transaction::new("Resolve stack", ops),
             ApplyOptions {
                 record_history: false,
             },
@@ -2980,6 +3002,35 @@ impl CanvasEngine {
             });
         }
     }
+}
+
+fn stack_insertion_index(
+    engine: &CanvasEngine,
+    stack: &Node,
+    siblings: &[Node],
+    world: Vec2,
+) -> usize {
+    siblings
+        .iter()
+        .position(|sibling| {
+            let Some(bounds) = engine.absolute_bounds(&sibling.id) else {
+                return false;
+            };
+            let center_x = bounds.x + bounds.width * 0.5;
+            let center_y = bounds.y + bounds.height * 0.5;
+            match stack.layout.mode {
+                LayoutMode::Flex if stack.layout.direction == FlexDirection::Row => {
+                    world.x < center_x
+                }
+                LayoutMode::Flex => world.y < center_y,
+                LayoutMode::Grid => {
+                    world.y < center_y
+                        || ((world.y - center_y).abs() <= bounds.height * 0.5 && world.x < center_x)
+                }
+                LayoutMode::Absolute => false,
+            }
+        })
+        .unwrap_or(siblings.len())
 }
 
 fn apply_transaction(
@@ -3462,6 +3513,191 @@ mod tests {
             b.layout.width
         );
         assert!((b.layout.x - 50.0).abs() < 0.5);
+    }
+
+    #[test]
+    fn editing_a_flow_child_reflows_its_parent_stack() {
+        let mut doc = Document::empty("Child layout edit");
+        let page = doc.root_page_id.clone();
+        let mut frame = Node::frame("Stack", page, Layout::new(0.0, 0.0, 300.0, 100.0));
+        frame.layout.mode = LayoutMode::Flex;
+        let frame_id = frame.id.clone();
+        doc.nodes.insert(frame_id.clone(), frame);
+
+        let mut fixed =
+            Node::rectangle("Fixed", frame_id.clone(), Layout::new(0.0, 0.0, 50.0, 40.0));
+        fixed.layout.position = LayoutPosition::Flow;
+        let fixed_id = fixed.id.clone();
+        doc.nodes.insert(fixed_id, fixed);
+
+        let mut growing = Node::rectangle(
+            "Growing",
+            frame_id.clone(),
+            Layout::new(0.0, 0.0, 50.0, 40.0),
+        );
+        growing.order = DEFAULT_ORDER_STEP * 2.0;
+        growing.layout.position = LayoutPosition::Flow;
+        let growing_id = growing.id.clone();
+        doc.nodes.insert(growing_id.clone(), growing);
+
+        let mut engine = CanvasEngine::new(doc);
+        engine.reflow();
+        let mut layout = engine.node(&growing_id).unwrap().layout.clone();
+        layout.width_mode = SizeMode::Fill;
+        layout.grow = 1.0;
+        engine.set_layout(&growing_id, layout, None).unwrap();
+
+        let growing = engine.node(&growing_id).unwrap();
+        assert!((growing.layout.x - 50.0).abs() < 0.5);
+        assert!((growing.layout.width - 250.0).abs() < 0.5);
+    }
+
+    #[test]
+    fn undo_and_redo_reflow_derived_stack_geometry() {
+        let mut doc = Document::empty("Layout history");
+        let page = doc.root_page_id.clone();
+        let mut frame = Node::frame("Stack", page, Layout::new(0.0, 0.0, 300.0, 100.0));
+        frame.layout.mode = LayoutMode::Flex;
+        let frame_id = frame.id.clone();
+        doc.nodes.insert(frame_id.clone(), frame);
+
+        let mut first =
+            Node::rectangle("First", frame_id.clone(), Layout::new(0.0, 0.0, 50.0, 40.0));
+        first.layout.position = LayoutPosition::Flow;
+        let first_id = first.id.clone();
+        doc.nodes.insert(first_id, first);
+
+        let mut second = Node::rectangle(
+            "Second",
+            frame_id.clone(),
+            Layout::new(0.0, 0.0, 50.0, 40.0),
+        );
+        second.order = DEFAULT_ORDER_STEP * 2.0;
+        second.layout.position = LayoutPosition::Flow;
+        let second_id = second.id.clone();
+        doc.nodes.insert(second_id.clone(), second);
+
+        let mut engine = CanvasEngine::new(doc);
+        engine.reflow();
+        assert!((engine.node(&second_id).unwrap().layout.x - 50.0).abs() < 0.5);
+
+        let mut layout = engine.node(&frame_id).unwrap().layout.clone();
+        layout.gap = 20.0;
+        engine.set_layout(&frame_id, layout, None).unwrap();
+        assert!((engine.node(&second_id).unwrap().layout.x - 70.0).abs() < 0.5);
+
+        assert!(engine.undo().unwrap());
+        assert!((engine.node(&second_id).unwrap().layout.x - 50.0).abs() < 0.5);
+
+        assert!(engine.redo().unwrap());
+        assert!((engine.node(&second_id).unwrap().layout.x - 70.0).abs() < 0.5);
+    }
+
+    #[test]
+    fn flex_cross_axis_alignment_uses_the_container() {
+        let mut doc = Document::empty("Align");
+        let page = doc.root_page_id.clone();
+        let mut frame = Node::frame("Stack", page, Layout::new(0.0, 0.0, 300.0, 120.0));
+        frame.layout.mode = LayoutMode::Flex;
+        frame.layout.direction = FlexDirection::Row;
+        frame.layout.align = LayoutAlign::Center;
+        let frame_id = frame.id.clone();
+        doc.nodes.insert(frame_id.clone(), frame);
+
+        let mut child =
+            Node::rectangle("Child", frame_id.clone(), Layout::new(0.0, 0.0, 80.0, 20.0));
+        child.layout.position = LayoutPosition::Flow;
+        let child_id = child.id.clone();
+        doc.nodes.insert(child_id.clone(), child);
+
+        let mut engine = CanvasEngine::new(doc);
+        engine.resolve_stack(&frame_id).unwrap();
+        assert!((engine.node(&child_id).unwrap().layout.y - 50.0).abs() < 0.5);
+    }
+
+    #[test]
+    fn grid_keeps_fixed_item_width_and_honors_justify_items() {
+        let mut doc = Document::empty("Grid");
+        let page = doc.root_page_id.clone();
+        let mut frame = Node::frame("Grid", page, Layout::new(0.0, 0.0, 300.0, 120.0));
+        frame.layout.mode = LayoutMode::Grid;
+        frame.layout.columns = 2;
+        frame.layout.justify = LayoutJustify::Center;
+        let frame_id = frame.id.clone();
+        doc.nodes.insert(frame_id.clone(), frame);
+
+        let mut child =
+            Node::rectangle("Child", frame_id.clone(), Layout::new(0.0, 0.0, 50.0, 20.0));
+        child.layout.position = LayoutPosition::Flow;
+        let child_id = child.id.clone();
+        doc.nodes.insert(child_id.clone(), child);
+
+        let mut engine = CanvasEngine::new(doc);
+        engine.resolve_stack(&frame_id).unwrap();
+        let layout = &engine.node(&child_id).unwrap().layout;
+        assert!((layout.width - 50.0).abs() < 0.5);
+        assert!((layout.x - 50.0).abs() < 0.5);
+    }
+
+    #[test]
+    fn pointer_drop_reorders_flow_children_without_extracting_them() {
+        let mut doc = Document::empty("Reorder");
+        let page = doc.root_page_id.clone();
+        let mut frame = Node::frame("Stack", page, Layout::new(0.0, 0.0, 300.0, 80.0));
+        frame.layout.mode = LayoutMode::Flex;
+        let frame_id = frame.id.clone();
+        doc.nodes.insert(frame_id.clone(), frame);
+
+        let mut first =
+            Node::rectangle("First", frame_id.clone(), Layout::new(0.0, 0.0, 80.0, 40.0));
+        first.layout.position = LayoutPosition::Flow;
+        let first_id = first.id.clone();
+        doc.nodes.insert(first_id.clone(), first);
+        let mut second = Node::rectangle(
+            "Second",
+            frame_id.clone(),
+            Layout::new(0.0, 0.0, 80.0, 40.0),
+        );
+        second.layout.position = LayoutPosition::Flow;
+        second.order = DEFAULT_ORDER_STEP * 2.0;
+        let second_id = second.id.clone();
+        doc.nodes.insert(second_id.clone(), second);
+
+        let mut engine = CanvasEngine::new(doc);
+        engine.reflow();
+        assert!(engine
+            .place_in_stack_at(&first_id, &frame_id, Vec2::new(250.0, 20.0))
+            .unwrap());
+        let children = engine.children(Some(&frame_id));
+        assert_eq!(children[0].id, second_id);
+        assert_eq!(children[1].id, first_id);
+        assert_eq!(children[1].layout.position, LayoutPosition::Flow);
+    }
+
+    #[test]
+    fn pointer_drop_into_stack_converts_absolute_child_to_flow() {
+        let mut doc = Document::empty("Insert");
+        let page = doc.root_page_id.clone();
+        let mut frame = Node::frame(
+            "Stack",
+            page.clone(),
+            Layout::new(100.0, 100.0, 300.0, 80.0),
+        );
+        frame.layout.mode = LayoutMode::Flex;
+        let frame_id = frame.id.clone();
+        doc.nodes.insert(frame_id.clone(), frame);
+        let child = Node::rectangle("Child", page, Layout::new(10.0, 10.0, 80.0, 40.0));
+        let child_id = child.id.clone();
+        doc.nodes.insert(child_id.clone(), child);
+
+        let mut engine = CanvasEngine::new(doc);
+        assert!(engine
+            .place_in_stack_at(&child_id, &frame_id, Vec2::new(150.0, 120.0))
+            .unwrap());
+        let child = engine.node(&child_id).unwrap();
+        assert_eq!(child.parent_id.as_ref(), Some(&frame_id));
+        assert_eq!(child.layout.position, LayoutPosition::Flow);
+        assert!((child.layout.x - 0.0).abs() < 0.5);
     }
 
     #[test]

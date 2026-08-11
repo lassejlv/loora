@@ -1,0 +1,14 @@
+[package]
+name = "loora-canvas"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+gpui.workspace = true
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "webp", "bmp"] }
+loora-engine.workspace = true
+smallvec = "1"
+svgtypes = "0.16.1"
+
+[dev-dependencies]
+gpui = { workspace = true, features = ["test-support"] }

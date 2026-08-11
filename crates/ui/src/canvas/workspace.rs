@@ -6,11 +6,14 @@ use std::rc::Rc;
 use std::time::{Duration, Instant};
 
 use gpui::{
-    actions, div, prelude::FluentBuilder, px, AppContext, Bounds, ClipboardEntry, ClipboardItem,
-    Context, Entity, FocusHandle, ImageFormat, InteractiveElement, IntoElement, KeyBinding,
-    KeyDownEvent, ParentElement, PathPromptOptions, Pixels, Point, Render, SharedString,
-    StatefulInteractiveElement, Styled, Task, UniformListScrollHandle, Window,
+    actions, div, prelude::FluentBuilder, px, relative, AppContext, Bounds, ClipboardEntry,
+    ClipboardItem, Context, Entity, ExternalPaths, FocusHandle, ImageFormat, InteractiveElement,
+    IntoElement, KeyBinding, KeyDownEvent, KeyUpEvent, ParentElement, PathPromptOptions, Pixels,
+    Point, Render, SharedString, StatefulInteractiveElement, Styled, Subscription, Task,
+    UniformListScrollHandle, Window,
 };
+pub use loora_canvas::CanvasTool;
+use loora_canvas::{CanvasEvent, CanvasPalette, NativeCanvas, NativeTextEdit, PreviewTrigger};
 use loora_engine::{
     compile_canvas, export_page_svg, standalone_html, Bounds as EngineBounds, Camera, CanvasAction,
     CanvasEngine, Color, Corners, DesignFileInfo, DesignStore, FlexDirection, HtmlCanvasOptions,
@@ -38,10 +41,11 @@ use crate::context_menu::{
     action_id_at, first_action_index, move_highlight, ContextMenu, ContextMenuAction,
     ContextMenuEntry,
 };
-use crate::icon::IconName;
+use crate::icon::{Icon, IconName};
 use crate::motion::{Ease, Motion, MotionStyle, Transition as MotionTransition};
 use crate::settings::{resolve_keystrokes, shortcut_catalog, SettingsSection};
 use crate::theme::{Theme, ThemeKind};
+use crate::tooltip::Tooltip;
 #[cfg(any(target_os = "linux", all(target_os = "macos", not(test))))]
 use raw_window_handle::{HasWindowHandle, RawWindowHandle};
 
@@ -73,74 +77,8 @@ actions!(
     ]
 );
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum CanvasTool {
-    Select,
-    Hand,
-    Preview,
-    Frame,
-    Text,
-    Rectangle,
-    Shapes,
-    Image,
-    Component,
-}
-
-impl CanvasTool {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::Select => "select",
-            Self::Hand => "hand",
-            Self::Preview => "preview",
-            Self::Frame => "frame",
-            Self::Text => "text",
-            Self::Rectangle => "rectangle",
-            Self::Shapes => "shapes",
-            Self::Image => "image",
-            Self::Component => "component",
-        }
-    }
-
-    pub fn label(self) -> &'static str {
-        match self {
-            Self::Select => "Select",
-            Self::Hand => "Hand",
-            Self::Preview => "Preview",
-            Self::Frame => "Frame",
-            Self::Text => "Text",
-            Self::Rectangle => "Rectangle",
-            Self::Shapes => "Shape",
-            Self::Image => "Image",
-            Self::Component => "Component",
-        }
-    }
-
-    pub fn shortcut(self) -> Option<&'static str> {
-        match self {
-            Self::Select => Some("V"),
-            Self::Hand => Some("H"),
-            Self::Frame => Some("F"),
-            Self::Text => Some("T"),
-            Self::Rectangle => Some("R"),
-            Self::Image => Some("I"),
-            _ => None,
-        }
-    }
-}
-
 fn canvas_tool_from_name(value: &str) -> Option<CanvasTool> {
-    match value {
-        "select" => Some(CanvasTool::Select),
-        "hand" => Some(CanvasTool::Hand),
-        "preview" => Some(CanvasTool::Preview),
-        "frame" => Some(CanvasTool::Frame),
-        "text" => Some(CanvasTool::Text),
-        "rectangle" => Some(CanvasTool::Rectangle),
-        "shapes" => Some(CanvasTool::Shapes),
-        "image" => Some(CanvasTool::Image),
-        "component" => Some(CanvasTool::Component),
-        _ => None,
-    }
+    CanvasTool::from_name(value)
 }
 
 pub struct CanvasWorkspace {
@@ -150,6 +88,9 @@ pub struct CanvasWorkspace {
     pub(crate) selection: Vec<NodeId>,
     pub(crate) tool: CanvasTool,
     pub(crate) viewport_bounds: Rc<Cell<Bounds<Pixels>>>,
+    native_canvas: Entity<NativeCanvas>,
+    native_canvas_active: bool,
+    _native_canvas_subscription: Subscription,
     webview: Entity<CanvasWebView>,
     webview_visible: bool,
     _web_ipc_task: Option<Task<()>>,
@@ -218,6 +159,7 @@ pub struct CanvasWorkspace {
     _image_tasks: Vec<Task<()>>,
     _caret_task: Option<Task<()>>,
     text_edit: Option<TextEditSession>,
+    native_caret_visible: bool,
     /// Image source picker for a target image node.
     image_picker: Option<ImagePickerState>,
     image_url_edit: Option<TextCursor>,
@@ -246,6 +188,8 @@ pub struct CanvasWorkspace {
     pending_keyboard_reclaim: bool,
     /// True while a contenteditable text node in the webview is focused.
     webview_text_editing: bool,
+    /// Space temporarily turns the native select tool into the hand tool.
+    native_space_pan: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -371,6 +315,18 @@ impl CanvasWorkspace {
         Self::bind_workspace_keys(cx, &shortcut_overrides);
 
         let viewport_bounds = Rc::new(Cell::new(Bounds::default()));
+        let initial_camera = Camera::new(Vec2::new(40.0, 40.0), 1.0);
+        let native_canvas = cx.new({
+            let document = engine.document().clone();
+            let viewport_bounds = viewport_bounds.clone();
+            move |_cx| NativeCanvas::new_with_viewport(document, initial_camera, viewport_bounds)
+        });
+        let native_canvas_subscription =
+            cx.subscribe(&native_canvas, |workspace, _, event: &CanvasEvent, cx| {
+                workspace.handle_native_canvas_event(event, cx);
+            });
+        let renderer = std::env::var("LOORA_CANVAS_RENDERER").ok();
+        let native_canvas_active = native_canvas_active_from(renderer.as_deref());
         let (web_ipc_sender, web_ipc_receiver) = async_channel::unbounded();
         let webview = cx.new({
             let viewport_bounds = viewport_bounds.clone();
@@ -382,10 +338,13 @@ impl CanvasWorkspace {
         let mut workspace = Self {
             theme,
             engine,
-            camera: Camera::new(Vec2::new(40.0, 40.0), 1.0),
+            camera: initial_camera,
             selection: Vec::new(),
             tool: CanvasTool::Select,
             viewport_bounds,
+            native_canvas,
+            native_canvas_active,
+            _native_canvas_subscription: native_canvas_subscription,
             webview,
             webview_visible: true,
             _web_ipc_task: None,
@@ -448,6 +407,7 @@ impl CanvasWorkspace {
             _image_tasks: Vec::new(),
             _caret_task: None,
             text_edit: None,
+            native_caret_visible: true,
             image_picker: None,
             image_url_edit: None,
             color_picker: None,
@@ -465,6 +425,7 @@ impl CanvasWorkspace {
             focus_handle,
             pending_keyboard_reclaim: false,
             webview_text_editing: false,
+            native_space_pan: false,
         };
         workspace._web_ipc_task = Some(cx.spawn(async move |this, cx| {
             while let Ok(first_message) = web_ipc_receiver.recv().await {
@@ -1536,6 +1497,278 @@ impl CanvasWorkspace {
         runtime.document().clone()
     }
 
+    fn sync_native_canvas(&mut self, cx: &mut Context<Self>) {
+        if !self.native_canvas_active {
+            return;
+        }
+        let mut document = {
+            let runtime = self.web_runtime_document();
+            self.active_breakpoint_id
+                .as_ref()
+                .and_then(|id| {
+                    runtime
+                        .breakpoints
+                        .iter()
+                        .find(|breakpoint| &breakpoint.id == id)
+                        .map(|breakpoint| breakpoint.preview_width.max(1.0))
+                })
+                .map(|width| CanvasEngine::new(runtime.clone()).resolved_document_at_width(width))
+                .unwrap_or(runtime)
+        };
+        if self.preview_mode {
+            let current_page = self
+                .preview_current_page
+                .as_ref()
+                .unwrap_or(&document.root_page_id)
+                .clone();
+            let overlay = self.preview_overlay.clone();
+            for node in document.nodes.values_mut() {
+                if node.is_root_frame()
+                    && node.id != current_page
+                    && overlay.as_ref() != Some(&node.id)
+                {
+                    node.hidden = true;
+                }
+            }
+            for id in &self.preview_hidden {
+                if let Some(node) = document.nodes.get_mut(id) {
+                    node.hidden = true;
+                }
+            }
+        }
+        let revision = self
+            .engine
+            .revision()
+            .wrapping_add(self.preview_runtime_generation);
+        let camera = self.camera;
+        let selection = self.selection.clone();
+        let agent_nodes = self
+            .mcp_activity
+            .as_ref()
+            .map(|activity| activity.node_ids.clone())
+            .unwrap_or_default();
+        let tool = self.tool;
+        let preview = self.preview_mode;
+        let preview_overlay = self
+            .preview_mode
+            .then(|| self.preview_overlay.clone())
+            .flatten();
+        let text_edit = self.text_edit.as_ref().map(|session| NativeTextEdit {
+            id: session.id.clone(),
+            anchor: session.anchor,
+            caret: session.caret,
+            caret_visible: self.native_caret_visible,
+        });
+        self.native_canvas.update(cx, |canvas, cx| {
+            canvas.set_scene(
+                document,
+                revision,
+                camera,
+                selection,
+                agent_nodes,
+                tool,
+                preview,
+                preview_overlay,
+                text_edit,
+                CanvasPalette::default(),
+                cx,
+            );
+        });
+    }
+
+    fn handle_native_canvas_event(&mut self, event: &CanvasEvent, cx: &mut Context<Self>) {
+        match event {
+            CanvasEvent::SelectionChanged(selection) => {
+                self.selection = selection
+                    .iter()
+                    .filter(|id| self.engine.node(id).is_some())
+                    .cloned()
+                    .collect();
+                self.clear_props_focus();
+                if let Some(last) = self.selection.last().cloned() {
+                    self.reveal_layer(&last);
+                }
+            }
+            CanvasEvent::CameraChanged(camera) => {
+                self.camera = *camera;
+            }
+            CanvasEvent::MoveCommitted {
+                ids,
+                dx,
+                dy,
+                duplicate,
+                drop_world,
+            } => {
+                let mut working_ids = ids.clone();
+                if *duplicate {
+                    if let Ok(new_ids) = self.engine.duplicate_nodes(&working_ids, Vec2::default())
+                    {
+                        if !new_ids.is_empty() {
+                            working_ids = new_ids;
+                        }
+                    }
+                }
+                let mut changed = false;
+                let mut handled_by_stack = false;
+                if working_ids.len() == 1 {
+                    let id = &working_ids[0];
+                    let target = self.engine.drop_target_at(*drop_world, Some(id));
+                    let target_is_stack = self.engine.node(&target).is_some_and(|node| {
+                        matches!(node.layout.mode, LayoutMode::Flex | LayoutMode::Grid)
+                    });
+                    if target_is_stack {
+                        if let Ok(placed) = self.engine.place_in_stack_at(id, &target, *drop_world)
+                        {
+                            handled_by_stack = true;
+                            changed |= placed;
+                        }
+                    } else {
+                        let was_flow = self
+                            .engine
+                            .node(id)
+                            .is_some_and(|node| node.layout.position == LayoutPosition::Flow);
+                        if was_flow {
+                            if let Some(bounds) = self.engine.absolute_bounds(id) {
+                                changed |= self
+                                    .engine
+                                    .set_world_position(
+                                        id,
+                                        Vec2::new(bounds.x + dx, bounds.y + dy),
+                                        None,
+                                    )
+                                    .is_ok();
+                            }
+                            let current_parent =
+                                self.engine.node(id).and_then(|node| node.parent_id.clone());
+                            if current_parent.as_ref() != Some(&target)
+                                && self.engine.node(&target).is_some_and(Node::is_container)
+                            {
+                                changed |= self.engine.reparent_keep_world(id, &target).is_ok();
+                            }
+                            handled_by_stack = true;
+                        }
+                    }
+                }
+                if !handled_by_stack && self.engine.move_nodes(&working_ids, *dx, *dy, None).is_ok()
+                {
+                    changed = true;
+                    if working_ids.len() == 1 {
+                        let id = &working_ids[0];
+                        let target = self.engine.drop_target_at(*drop_world, Some(id));
+                        let current_parent =
+                            self.engine.node(id).and_then(|node| node.parent_id.clone());
+                        if current_parent.as_ref() != Some(&target)
+                            && self.engine.node(&target).is_some_and(Node::is_container)
+                        {
+                            changed |= self.engine.reparent_keep_world(id, &target).is_ok();
+                        }
+                    }
+                }
+                if changed {
+                    self.selection = working_ids;
+                    self.note_change(cx);
+                }
+            }
+            CanvasEvent::ResizeCommitted(members) => {
+                let mut changed = false;
+                let mut selection = Vec::new();
+                for (id, bounds) in members {
+                    if self.engine.set_world_bounds(id, *bounds, None).is_ok() {
+                        changed = true;
+                        selection.push(id.clone());
+                    }
+                }
+                if changed {
+                    self.selection = selection;
+                    self.note_change(cx);
+                }
+            }
+            CanvasEvent::CreateCommitted { tool, bounds } => {
+                if let Some(id) =
+                    self.commit_draw(*tool, bounds.x, bounds.y, bounds.width, bounds.height, cx)
+                {
+                    self.select_only(id.clone());
+                    self.tool = CanvasTool::Select;
+                    if *tool == CanvasTool::Image {
+                        self.open_image_picker(id, cx);
+                    }
+                    self.note_change(cx);
+                }
+            }
+            CanvasEvent::ToolChanged(tool) => self.set_tool(*tool, cx),
+            CanvasEvent::ContextMenuRequested {
+                position,
+                world,
+                hit,
+            } => {
+                self.blur_props_if_needed(cx);
+                self.context_menu = None;
+                if let Some(id) = hit {
+                    if self.engine.node(id).is_some() && !self.selection.contains(id) {
+                        self.select_only(id.clone());
+                    }
+                } else {
+                    self.clear_selection();
+                }
+                self.context_world = Some(*world);
+                let entries = self.context_menu_entries(cx);
+                let highlight = first_action_index(&entries);
+                self.context_menu = Some(ContextMenuState {
+                    position: *position,
+                    highlight,
+                    entries,
+                });
+            }
+            CanvasEvent::PreviewTriggered { id, trigger } => {
+                let trigger = match trigger {
+                    PreviewTrigger::Click => InteractionTrigger::Click,
+                    PreviewTrigger::DoubleClick => InteractionTrigger::DoubleClick,
+                    PreviewTrigger::Hover => {
+                        self.preview_hovered = Some(id.clone());
+                        self.preview_hover_started_at = Some(Instant::now());
+                        self.preview_hover_exited = None;
+                        InteractionTrigger::Hover
+                    }
+                    PreviewTrigger::HoverEnd => {
+                        self.preview_hovered = None;
+                        self.preview_hover_exited = Some((id.clone(), Instant::now()));
+                        InteractionTrigger::HoverEnd
+                    }
+                };
+                self.dispatch_preview_trigger(id, trigger, None, cx);
+            }
+            CanvasEvent::OverlayCloseRequested => {
+                if self.preview_mode && self.preview_overlay.take().is_some() {
+                    self.preview_runtime_generation =
+                        self.preview_runtime_generation.wrapping_add(1);
+                }
+            }
+            CanvasEvent::BeginTextEdit(id) => self.begin_edit_text(id.clone(), cx),
+            CanvasEvent::ChooseImage(id) => {
+                self.select_only(id.clone());
+                self.open_image_picker(id.clone(), cx);
+            }
+        }
+        cx.notify();
+    }
+
+    fn handle_native_external_drop(
+        &mut self,
+        paths: &ExternalPaths,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if !self.native_canvas_active {
+            return;
+        }
+        let world = self.native_canvas.read(cx).pointer_world();
+        self.context_world = world;
+        self.last_pointer_world = world;
+        if !self.paste_external_paths(paths.paths(), cx) {
+            cx.notify();
+        }
+    }
+
     fn sync_web_canvas(&mut self, cx: &mut Context<Self>) {
         // Hide the native webview for settings and GPUI overlays that sit under wry.
         // Canvas HTML menus stay in-webview and never set these flags.
@@ -1544,7 +1777,7 @@ impl CanvasWorkspace {
         if !hide_webview {
             self.flush_pending_fit_all(cx);
         }
-        if !self.web_ready || hide_webview {
+        if self.native_canvas_active || !self.web_ready || hide_webview {
             return;
         }
 
@@ -1919,7 +2152,8 @@ impl CanvasWorkspace {
     }
 
     fn webview_should_be_hidden(&self) -> bool {
-        self.settings_route_active
+        self.native_canvas_active
+            || self.settings_route_active
             || canvas_webview_hidden_for_overlays(
                 self.command_open,
                 self.image_picker.is_some(),
@@ -2331,6 +2565,7 @@ impl CanvasWorkspace {
             }
             let len = node.text.as_deref().unwrap_or("").len();
             self.text_edit = Some(TextEditSession::new(id.clone(), len));
+            self.native_caret_visible = true;
             self.select_only(id);
             self.start_caret_blink(cx);
             cx.notify();
@@ -2339,6 +2574,7 @@ impl CanvasWorkspace {
 
     fn end_edit_text(&mut self, cx: &mut Context<Self>) {
         self._caret_task = None;
+        self.native_caret_visible = true;
         if self.text_edit.take().is_some() {
             self.note_change(cx);
         } else {
@@ -2354,6 +2590,7 @@ impl CanvasWorkspace {
             let cont = this
                 .update(cx, |this, cx| {
                     if this.text_edit.is_some() {
+                        this.native_caret_visible = !this.native_caret_visible;
                         cx.notify();
                         true
                     } else {
@@ -6047,6 +6284,62 @@ impl CanvasWorkspace {
         }
 
         let key = event.keystroke.key.as_str();
+        if self.native_canvas_active && key == "space" {
+            self.native_space_pan = true;
+            self.native_canvas
+                .update(cx, |canvas, cx| canvas.set_space_pan(true, cx));
+            cx.stop_propagation();
+            return;
+        }
+        if self.native_canvas_active && key == "escape" {
+            if self.preview_mode {
+                if self.preview_overlay.take().is_some() {
+                    self.preview_runtime_generation =
+                        self.preview_runtime_generation.wrapping_add(1);
+                    cx.notify();
+                } else {
+                    self.set_tool(CanvasTool::Preview, cx);
+                }
+            } else if self.tool != CanvasTool::Select {
+                self.set_tool(CanvasTool::Select, cx);
+            } else {
+                self.clear_selection();
+                cx.notify();
+            }
+            cx.stop_propagation();
+            return;
+        }
+        if self.native_canvas_active
+            && matches!(key, "left" | "right" | "up" | "down")
+            && !self.selection.is_empty()
+        {
+            let amount = if event.keystroke.modifiers.shift {
+                10.0
+            } else {
+                1.0
+            };
+            let (dx, dy) = match key {
+                "left" => (-amount, 0.0),
+                "right" => (amount, 0.0),
+                "up" => (0.0, -amount),
+                "down" => (0.0, amount),
+                _ => unreachable!(),
+            };
+            if self
+                .engine
+                .move_nodes(
+                    &self.selection.clone(),
+                    dx,
+                    dy,
+                    Some("keyboard-nudge".into()),
+                )
+                .is_ok()
+            {
+                self.note_change(cx);
+            }
+            cx.stop_propagation();
+            return;
+        }
         if key == "delete" || key == "backspace" {
             if self.delete_selection(cx) {
                 cx.stop_propagation();
@@ -6108,6 +6401,18 @@ impl CanvasWorkspace {
                 }
                 _ => {}
             }
+        }
+    }
+
+    fn on_key_up(&mut self, event: &KeyUpEvent, _window: &mut Window, cx: &mut Context<Self>) {
+        if self.native_canvas_active
+            && self.native_space_pan
+            && event.keystroke.key.as_str() == "space"
+        {
+            self.native_space_pan = false;
+            self.native_canvas
+                .update(cx, |canvas, cx| canvas.set_space_pan(false, cx));
+            cx.stop_propagation();
         }
     }
 
@@ -6557,6 +6862,10 @@ fn canvas_webview_hidden_for_overlays(
         || developer_inspector_open
 }
 
+fn native_canvas_active_from(renderer: Option<&str>) -> bool {
+    !renderer.is_some_and(|renderer| renderer.eq_ignore_ascii_case("web"))
+}
+
 fn web_context_menu_entries(entries: &[ContextMenuEntry]) -> Vec<serde_json::Value> {
     entries
         .iter()
@@ -6802,7 +7111,8 @@ fn request_native_mcp_frame<T: 'static>(_: &Window, _: &Context<T>) {}
 mod tests {
     use super::{
         canvas_webview_hidden_for_overlays, command_action_count, mcp_activity_copy,
-        mcp_argument_node_ids, notify_mcp_window, web_context_menu_entries,
+        mcp_argument_node_ids, native_canvas_active_from, notify_mcp_window,
+        web_context_menu_entries,
     };
     use crate::context_menu::{ContextMenuAction, ContextMenuEntry};
     use gpui::{
@@ -6853,6 +7163,14 @@ mod tests {
         assert!(!canvas_webview_hidden_for_overlays(
             false, false, false, false, false
         ));
+    }
+
+    #[test]
+    fn native_canvas_is_default_with_an_explicit_web_fallback() {
+        assert!(native_canvas_active_from(None));
+        assert!(native_canvas_active_from(Some("native")));
+        assert!(!native_canvas_active_from(Some("web")));
+        assert!(!native_canvas_active_from(Some("WEB")));
     }
 
     #[test]
@@ -7152,15 +7470,310 @@ fn binding_for_action(action_id: &str, keystroke: &str) -> Option<KeyBinding> {
     Some(binding)
 }
 
+#[allow(clippy::too_many_arguments)]
+fn native_toolbar_button(
+    entity: Entity<CanvasWorkspace>,
+    id: impl Into<SharedString>,
+    icon: IconName,
+    title: &'static str,
+    shortcut: Option<&'static str>,
+    selected: bool,
+    enabled: bool,
+    theme: Theme,
+    action: impl 'static + Fn(&mut CanvasWorkspace, &mut Context<CanvasWorkspace>),
+) -> impl IntoElement {
+    let icon_color = if selected {
+        theme.bright_white
+    } else {
+        theme.muted_strong
+    };
+    let button = div()
+        .id(id.into())
+        .flex()
+        .items_center()
+        .justify_center()
+        .size(px(30.))
+        .rounded(px(8.))
+        .text_color(if selected {
+            theme.bright_white
+        } else {
+            theme.muted_strong
+        })
+        .bg(if selected {
+            theme.selected
+        } else {
+            gpui::transparent_black()
+        })
+        .when(enabled, |this| {
+            this.cursor_pointer()
+                .hover(move |style| style.bg(theme.hover))
+                .on_click(move |_, _, cx| {
+                    cx.stop_propagation();
+                    entity.update(cx, |workspace, cx| action(workspace, cx));
+                })
+        })
+        .when(!enabled, |this| this.opacity(0.35))
+        .child(Icon::hugeicon(icon).size(px(15.)).text_color(icon_color));
+    match shortcut {
+        Some(shortcut) => button.tooltip(Tooltip::with_key(title, shortcut)),
+        None => button.tooltip(Tooltip::text(title)),
+    }
+}
+
+fn native_toolbar_divider(theme: Theme) -> impl IntoElement {
+    div().w(px(1.)).h(px(18.)).mx(px(3.)).bg(theme.hairline())
+}
+
+#[allow(clippy::too_many_arguments)]
+fn native_canvas_toolbar(
+    entity: Entity<CanvasWorkspace>,
+    selected_tool: CanvasTool,
+    can_undo: bool,
+    can_redo: bool,
+    empty_page: bool,
+    theme: Theme,
+) -> impl IntoElement {
+    let width = if empty_page { 532.0 } else { 444.0 };
+    div()
+        .absolute()
+        .left(relative(0.5))
+        .ml(px(-width / 2.0))
+        .bottom(px(16.))
+        .w(px(width))
+        .h(px(40.))
+        .px(px(6.))
+        .flex()
+        .items_center()
+        .gap(px(2.))
+        .rounded(px(12.))
+        .border_1()
+        .border_color(theme.hairline())
+        .bg(theme.panel_bg())
+        .shadow_lg()
+        .child(native_toolbar_button(
+            entity.clone(),
+            "native-tool-select",
+            IconName::Cursor,
+            "Select",
+            Some("V"),
+            selected_tool == CanvasTool::Select,
+            true,
+            theme,
+            |workspace, cx| workspace.set_tool(CanvasTool::Select, cx),
+        ))
+        .child(native_toolbar_button(
+            entity.clone(),
+            "native-tool-hand",
+            IconName::Hand,
+            "Hand",
+            Some("H"),
+            selected_tool == CanvasTool::Hand,
+            true,
+            theme,
+            |workspace, cx| workspace.set_tool(CanvasTool::Hand, cx),
+        ))
+        .child(native_toolbar_button(
+            entity.clone(),
+            "native-tool-preview",
+            IconName::View,
+            "Preview",
+            None,
+            selected_tool == CanvasTool::Preview,
+            true,
+            theme,
+            |workspace, cx| workspace.set_tool(CanvasTool::Preview, cx),
+        ))
+        .child(native_toolbar_divider(theme))
+        .child(native_toolbar_button(
+            entity.clone(),
+            "native-toolbar-layers",
+            IconName::LayoutRight,
+            "Layers",
+            Some("⌘B"),
+            false,
+            true,
+            theme,
+            |workspace, cx| workspace.toggle_sidebar(cx),
+        ))
+        .child(native_toolbar_button(
+            entity.clone(),
+            "native-toolbar-files",
+            IconName::Folder,
+            "Open…",
+            Some("⌘K"),
+            false,
+            true,
+            theme,
+            |workspace, cx| workspace.toggle_files_panel(cx),
+        ))
+        .child(native_toolbar_button(
+            entity.clone(),
+            "native-tool-frame",
+            IconName::Grid,
+            "Frame",
+            Some("F"),
+            selected_tool == CanvasTool::Frame,
+            true,
+            theme,
+            |workspace, cx| workspace.set_tool(CanvasTool::Frame, cx),
+        ))
+        .child(native_toolbar_button(
+            entity.clone(),
+            "native-tool-text",
+            IconName::Text,
+            "Text",
+            Some("T"),
+            selected_tool == CanvasTool::Text,
+            true,
+            theme,
+            |workspace, cx| workspace.set_tool(CanvasTool::Text, cx),
+        ))
+        .child(native_toolbar_button(
+            entity.clone(),
+            "native-tool-rectangle",
+            IconName::Square,
+            "Rectangle",
+            Some("R"),
+            selected_tool == CanvasTool::Rectangle,
+            true,
+            theme,
+            |workspace, cx| workspace.set_tool(CanvasTool::Rectangle, cx),
+        ))
+        .child(native_toolbar_button(
+            entity.clone(),
+            "native-tool-shapes",
+            IconName::Shapes,
+            "Shape",
+            None,
+            selected_tool == CanvasTool::Shapes,
+            true,
+            theme,
+            |workspace, cx| workspace.set_tool(CanvasTool::Shapes, cx),
+        ))
+        .child(native_toolbar_button(
+            entity.clone(),
+            "native-tool-image",
+            IconName::Image,
+            "Image",
+            Some("I"),
+            selected_tool == CanvasTool::Image,
+            true,
+            theme,
+            |workspace, cx| workspace.set_tool(CanvasTool::Image, cx),
+        ))
+        .child(native_toolbar_button(
+            entity.clone(),
+            "native-tool-component",
+            IconName::Diamond,
+            "Component",
+            None,
+            selected_tool == CanvasTool::Component,
+            true,
+            theme,
+            |workspace, cx| workspace.set_tool(CanvasTool::Component, cx),
+        ))
+        .child(native_toolbar_divider(theme))
+        .child(native_toolbar_button(
+            entity.clone(),
+            "native-toolbar-undo",
+            IconName::Undo,
+            "Undo",
+            Some("⌘Z"),
+            false,
+            can_undo,
+            theme,
+            |workspace, cx| {
+                if workspace.engine.undo().unwrap_or(false) {
+                    workspace.note_change(cx);
+                }
+            },
+        ))
+        .child(native_toolbar_button(
+            entity.clone(),
+            "native-toolbar-redo",
+            IconName::Redo,
+            "Redo",
+            Some("⌘⇧Z"),
+            false,
+            can_redo,
+            theme,
+            |workspace, cx| {
+                if workspace.engine.redo().unwrap_or(false) {
+                    workspace.note_change(cx);
+                }
+            },
+        ))
+        .when(empty_page, |this| {
+            this.child(native_toolbar_divider(theme)).child(
+                div()
+                    .id("native-empty-draw")
+                    .h(px(28.))
+                    .px(px(10.))
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .rounded(px(8.))
+                    .border_1()
+                    .border_color(theme.hairline())
+                    .bg(theme.highlight_fill())
+                    .text_size(px(11.))
+                    .text_color(theme.muted_strong)
+                    .cursor_pointer()
+                    .hover(move |style| style.text_color(theme.bright_white))
+                    .on_click(move |_, _, cx| {
+                        cx.stop_propagation();
+                        entity.update(cx, |workspace, cx| {
+                            workspace.set_tool(CanvasTool::Rectangle, cx);
+                        });
+                    })
+                    .child("Draw · R"),
+            )
+        })
+}
+
+fn native_zoom_chip(entity: Entity<CanvasWorkspace>, zoom: f64, theme: Theme) -> impl IntoElement {
+    div()
+        .id("native-canvas-zoom")
+        .absolute()
+        .right(px(16.))
+        .bottom(px(16.))
+        .h(px(28.))
+        .px(px(10.))
+        .flex()
+        .items_center()
+        .justify_center()
+        .rounded(px(7.))
+        .border_1()
+        .border_color(theme.hairline())
+        .bg(theme.panel_bg())
+        .shadow_lg()
+        .text_size(px(11.))
+        .text_color(theme.muted_strong)
+        .cursor_pointer()
+        .hover(move |style| style.text_color(theme.bright_white))
+        .on_click(move |_, _, cx| {
+            cx.stop_propagation();
+            entity.update(cx, |workspace, cx| workspace.fit_selection_or_page(cx));
+        })
+        .child(format!("{:.0}%", zoom * 100.0))
+}
+
 impl Render for CanvasWorkspace {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         if self.pending_keyboard_reclaim {
             self.reclaim_keyboard_if_needed(window, cx);
         }
+        self.sync_native_canvas(cx);
         self.sync_web_canvas(cx);
         let theme = self.theme;
         let entity = cx.entity();
         let webview = self.webview.clone();
+        let native_canvas = self.native_canvas.clone();
+        let native_canvas_active = self.native_canvas_active;
+        let native_tool = self.tool;
+        let native_zoom = self.camera.zoom;
+        let native_can_undo = self.engine.can_undo();
+        let native_can_redo = self.engine.can_redo();
         let sidebar_visible = self.sidebar_visible;
         let properties_visible = self.properties_visible;
         let rows = if sidebar_visible {
@@ -7184,6 +7797,15 @@ impl Render for CanvasWorkspace {
                     .map(|n| (id, SharedString::from(n.name.clone())))
             })
             .collect();
+        let native_empty_page = !self.preview_mode
+            && pages.iter().any(|(page_id, _)| {
+                !self
+                    .engine
+                    .document()
+                    .nodes
+                    .values()
+                    .any(|node| node.parent_id.as_ref() == Some(page_id))
+            });
         let active_page = self.engine.root_page_id().clone();
         let selection_set: HashSet<NodeId> = self.selection.iter().cloned().collect();
         let query = self.layer_query.clone();
@@ -7276,6 +7898,8 @@ impl Render for CanvasWorkspace {
             .on_action(cx.listener(Self::group_action))
             .on_action(cx.listener(Self::ungroup_action))
             .on_key_down(cx.listener(Self::on_key_down))
+            .on_key_up(cx.listener(Self::on_key_up))
+            .on_drop(cx.listener(Self::handle_native_external_drop))
             .when(sidebar_visible, |this| {
                 this.child(LayerSidebar::new(
                     entity.clone(),
@@ -7484,8 +8108,20 @@ impl Render for CanvasWorkspace {
                             .min_h_0()
                             .overflow_hidden()
                             .bg(theme.canvas_bg())
-                            // Full-bleed webview — floating toolbar/zoom live inside HTML.
-                            .child(webview),
+                            .when(native_canvas_active, |this| {
+                                this.child(native_canvas)
+                                    .child(native_canvas_toolbar(
+                                        entity.clone(),
+                                        native_tool,
+                                        native_can_undo,
+                                        native_can_redo,
+                                        native_empty_page,
+                                        theme,
+                                    ))
+                                    .child(native_zoom_chip(entity.clone(), native_zoom, theme))
+                            })
+                            // Full-bleed fallback while native parity is being verified.
+                            .when(!native_canvas_active, |this| this.child(webview)),
                     ),
             )
             .when(properties_visible, |this| {

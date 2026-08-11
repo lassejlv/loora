@@ -579,7 +579,11 @@ fn flex_wrap_starts_new_line() {
         .unwrap();
     engine.resolve_stack(&frame_id).unwrap();
     assert!((engine.node(&a_id).unwrap().layout.y - 0.0).abs() < f64::EPSILON);
-    assert!((engine.node(&b_id).unwrap().layout.y - 20.0).abs() < f64::EPSILON);
+    let second_row_y = engine.node(&b_id).unwrap().layout.y;
+    assert!(
+        (second_row_y - 100.0).abs() < f64::EPSILON,
+        "got {second_row_y}"
+    );
 }
 
 #[test]

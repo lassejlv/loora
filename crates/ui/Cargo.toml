@@ -8,6 +8,7 @@ async-channel = "2"
 base64 = "0.22"
 gpui.workspace = true
 gpui-router.workspace = true
+loora-canvas.workspace = true
 loora-engine.workspace = true
 loora-mcp.workspace = true
 raw-window-handle = "0.6"
