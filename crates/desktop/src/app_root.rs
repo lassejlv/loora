@@ -38,7 +38,6 @@ impl AppRoot {
             });
         });
         let focus_handle = cx.focus_handle();
-        focus_handle.focus(window, cx);
 
         // Re-render when theme / shortcut prefs change on the canvas workspace.
         let _observe_canvas = cx.observe(&canvas, |_, _, cx| cx.notify());
@@ -150,7 +149,7 @@ impl AppRoot {
 }
 
 impl Render for AppRoot {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let canvas = self.canvas.clone();
         let pathname = if cx.has_global::<gpui_router::RouterState>() {
             use_location(cx).pathname.to_string()
@@ -162,7 +161,7 @@ impl Render for AppRoot {
         let theme = canvas.read(cx).theme();
         loora_inspector::set_theme(theme, cx);
 
-        // Sync native webview visibility only when the route actually changes.
+        // Keep the canvas runtime in sync only when the route actually changes.
         let route_state = (on_settings, section);
         if self.route_state != Some(route_state) {
             self.route_state = Some(route_state);
@@ -171,15 +170,13 @@ impl Render for AppRoot {
                     workspace.set_settings_route_active(true, section, cx);
                 } else {
                     workspace.set_canvas_route_active(true, cx);
+                    workspace.focus_canvas(window, cx);
                 }
             });
+            if on_settings {
+                self.focus_handle.focus(window, cx);
+            }
         }
-        // Settings unmounts the canvas paint path; keep draining GTK so hide sticks.
-        #[cfg(target_os = "linux")]
-        if on_settings {
-            loora_ui::pump_linux_canvas();
-        }
-
         div()
             .size_full()
             .track_focus(&self.focus_handle)

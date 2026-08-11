@@ -47,6 +47,8 @@ pub enum PropsField {
     Gap,
     Grow,
     Shrink,
+    WidthPercent,
+    HeightPercent,
     Wrap,
     PaddingTop,
     PaddingRight,
@@ -84,6 +86,8 @@ pub enum PropsField {
     AspectRatio,
     Columns,
     MotionDuration,
+    MotionDelay,
+    AnimationDelay,
     ActionUrl,
     VectorFill,
     VectorWeight,
@@ -411,6 +415,7 @@ impl RenderOnce for PropertiesPanel {
                                 &view,
                                 node.visual_states.as_ref(),
                                 node.transition.as_ref(),
+                                &node.animations,
                             ),
                         ))
                         .when(

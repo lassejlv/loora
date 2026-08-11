@@ -1995,6 +1995,38 @@ impl CanvasEngine {
         )
     }
 
+    pub fn set_node_animations(
+        &mut self,
+        id: &NodeId,
+        animations: Vec<crate::extras::NodeAnimation>,
+    ) -> Result<(), EngineError> {
+        self.patch_nodes(
+            vec![(
+                id.clone(),
+                NodePatch {
+                    animations: Some(animations),
+                    ..NodePatch::default()
+                },
+            )],
+            "Animations",
+            None,
+        )
+    }
+
+    pub fn set_document_animations(
+        &mut self,
+        animations: Vec<crate::extras::DocumentAnimation>,
+    ) -> Result<(), EngineError> {
+        self.apply(
+            Transaction::new(
+                "Animation library",
+                vec![Operation::SetAnimations { animations }],
+            ),
+            ApplyOptions::with_history(),
+        )?;
+        Ok(())
+    }
+
     pub fn set_interactions(
         &mut self,
         id: &NodeId,
@@ -3043,6 +3075,16 @@ fn apply_transaction(
 
     for op in operations {
         match op {
+            Operation::SetAnimations { animations } => {
+                inverse.insert(
+                    0,
+                    Operation::SetAnimations {
+                        animations: document.animations.clone(),
+                    },
+                );
+                document.animations = animations.clone();
+                changed.extend(document.nodes.keys().cloned());
+            }
             Operation::Insert { node } => {
                 if document.nodes.contains_key(&node.id) {
                     return Err(EngineError::NodeExists(node.id.to_string()));

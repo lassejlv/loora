@@ -4,7 +4,10 @@ use gpui::{
     div, prelude::FluentBuilder, px, Entity, InteractiveElement, IntoElement, MouseButton,
     MouseDownEvent, ParentElement, SharedString, Styled,
 };
-use loora_engine::{Breakpoint, DesignToken, Node, Transition, VectorPath, VisualStates};
+use loora_engine::{
+    AnimationTrigger, Breakpoint, DesignToken, Node, NodeAnimation, Transition, VectorPath,
+    VisualStates,
+};
 
 use crate::canvas::properties::controls::{
     format_hex, format_number, number_field, pair, select_field, text_field,
@@ -63,7 +66,7 @@ pub fn responsive_section(
                         }),
                 )
                 .when(has_override && !disabled, |this| {
-                    let ws = workspace;
+                    let ws = workspace.clone();
                     this.cursor_pointer()
                         .on_mouse_down(MouseButton::Left, move |_, _, cx| {
                             ws.update(cx, |this, cx| this.clear_responsive_overrides(cx))
@@ -84,10 +87,14 @@ pub fn motion_section(
     view: &PropsView,
     visual_states: Option<&VisualStates>,
     transition: Option<&Transition>,
+    animations: &[NodeAnimation],
 ) -> impl IntoElement {
     let disabled = view.readonly;
     let hover_on = visual_states.and_then(|v| v.hover.as_ref()).is_some();
+    let press_on = visual_states.and_then(|v| v.press.as_ref()).is_some();
+    let focus_on = visual_states.and_then(|v| v.focus.as_ref()).is_some();
     let duration = transition.map(|t| t.duration_ms as f64).unwrap_or(300.0);
+    let transition_delay = transition.map(|t| t.delay_ms as f64).unwrap_or(0.0);
     let easing = transition
         .map(|t| SharedString::from(t.easing.clone()))
         .unwrap_or_else(|| "ease-out".into());
@@ -97,6 +104,38 @@ pub fn motion_section(
     } else {
         SharedString::from(format_number(duration, 0))
     };
+    let transition_delay_display = if view.focus == Some(PropsField::MotionDelay) {
+        SharedString::from(view.draft.clone())
+    } else {
+        SharedString::from(format_number(transition_delay, 0))
+    };
+    let attachment = animations.first();
+    let animation_delay = attachment.map(|a| a.delay_ms as f64).unwrap_or(0.0);
+    let animation_delay_display = if view.focus == Some(PropsField::AnimationDelay) {
+        SharedString::from(view.draft.clone())
+    } else {
+        SharedString::from(format_number(animation_delay, 0))
+    };
+    let animation_label = attachment
+        .map(|attachment| match attachment.animation_id.as_str() {
+            "loora-fade-up" => "Fade up",
+            "loora-scale-in" => "Scale in",
+            "loora-pulse" => "Pulse",
+            _ => "Custom",
+        })
+        .unwrap_or("None");
+    let trigger_label = attachment
+        .map(|attachment| match attachment.trigger {
+            AnimationTrigger::Load => "Load",
+            AnimationTrigger::InView => "In view",
+            AnimationTrigger::Always => "Always",
+            AnimationTrigger::Hover => "Hover",
+            AnimationTrigger::Press => "Press",
+        })
+        .unwrap_or("Load");
+    let once_label = attachment
+        .map(|attachment| if attachment.once { "Once" } else { "Repeat" })
+        .unwrap_or("Repeat");
 
     div()
         .flex()
@@ -116,6 +155,30 @@ pub fn motion_section(
                 let ws = workspace.clone();
                 move |_, _, cx| ws.update(cx, |this, cx| this.toggle_hover_preset(cx))
             },
+        ))
+        .child(pair(
+            select_field(
+                theme,
+                "props-motion-press".into(),
+                "Press",
+                Some(SharedString::from(if press_on { "Scale" } else { "None" })),
+                disabled,
+                {
+                    let ws = workspace.clone();
+                    move |_, _, cx| ws.update(cx, |this, cx| this.toggle_press_preset(cx))
+                },
+            ),
+            select_field(
+                theme,
+                "props-motion-focus".into(),
+                "Focus",
+                Some(SharedString::from(if focus_on { "Lift" } else { "None" })),
+                disabled,
+                {
+                    let ws = workspace.clone();
+                    move |_, _, cx| ws.update(cx, |this, cx| this.toggle_focus_preset(cx))
+                },
+            ),
         ))
         .child(pair(
             {
@@ -169,10 +232,149 @@ pub fn motion_section(
                 Some(easing),
                 disabled,
                 {
-                    let ws = workspace;
+                    let ws = workspace.clone();
                     move |_, _, cx| ws.update(cx, |this, cx| this.cycle_transition_easing(cx))
                 },
             ),
+        ))
+        .child(number_field(
+            theme,
+            "props-motion-delay".into(),
+            "Delay",
+            transition_delay_display,
+            view.focus == Some(PropsField::MotionDelay),
+            view.selection_for(PropsField::MotionDelay),
+            disabled,
+            None,
+            {
+                let ws = workspace.clone();
+                move |event, window, cx| {
+                    ws.update(cx, |this, cx| {
+                        this.focus_props_field(
+                            PropsField::MotionDelay,
+                            event.click_count,
+                            window,
+                            cx,
+                        )
+                    })
+                }
+            },
+            {
+                let ws = workspace.clone();
+                move |_, _, cx| ws.update(cx, |this, cx| this.blur_props_if_needed(cx))
+            },
+            {
+                let ws = workspace.clone();
+                move |event, _, cx| {
+                    ws.update(cx, |this, cx| {
+                        this.begin_props_scrub(
+                            PropsField::MotionDelay,
+                            transition_delay,
+                            f32::from(event.position.x),
+                            cx,
+                        )
+                    })
+                }
+            },
+            {
+                let ws = workspace.clone();
+                move |event, _, cx| {
+                    ws.update(cx, |this, cx| {
+                        this.update_props_scrub(f32::from(event.position.x), 1.0, cx)
+                    })
+                }
+            },
+            {
+                let ws = workspace.clone();
+                move |_, _, cx| ws.update(cx, |this, cx| this.end_props_scrub(cx))
+            },
+        ))
+        .child(select_field(
+            theme,
+            "props-animation-preset".into(),
+            "Animation",
+            Some(animation_label.into()),
+            disabled,
+            {
+                let ws = workspace.clone();
+                move |_, _, cx| ws.update(cx, |this, cx| this.cycle_animation_preset(cx))
+            },
+        ))
+        .child(pair(
+            select_field(
+                theme,
+                "props-animation-trigger".into(),
+                "Trigger",
+                Some(trigger_label.into()),
+                disabled || attachment.is_none(),
+                {
+                    let ws = workspace.clone();
+                    move |_, _, cx| ws.update(cx, |this, cx| this.cycle_animation_trigger(cx))
+                },
+            ),
+            select_field(
+                theme,
+                "props-animation-once".into(),
+                "Run",
+                Some(once_label.into()),
+                disabled || attachment.is_none(),
+                {
+                    let ws = workspace.clone();
+                    move |_, _, cx| ws.update(cx, |this, cx| this.toggle_animation_once(cx))
+                },
+            ),
+        ))
+        .child(number_field(
+            theme,
+            "props-animation-delay".into(),
+            "Anim delay",
+            animation_delay_display,
+            view.focus == Some(PropsField::AnimationDelay),
+            view.selection_for(PropsField::AnimationDelay),
+            disabled || attachment.is_none(),
+            None,
+            {
+                let ws = workspace.clone();
+                move |event, window, cx| {
+                    ws.update(cx, |this, cx| {
+                        this.focus_props_field(
+                            PropsField::AnimationDelay,
+                            event.click_count,
+                            window,
+                            cx,
+                        )
+                    })
+                }
+            },
+            {
+                let ws = workspace.clone();
+                move |_, _, cx| ws.update(cx, |this, cx| this.blur_props_if_needed(cx))
+            },
+            {
+                let ws = workspace.clone();
+                move |event, _, cx| {
+                    ws.update(cx, |this, cx| {
+                        this.begin_props_scrub(
+                            PropsField::AnimationDelay,
+                            animation_delay,
+                            f32::from(event.position.x),
+                            cx,
+                        )
+                    })
+                }
+            },
+            {
+                let ws = workspace.clone();
+                move |event, _, cx| {
+                    ws.update(cx, |this, cx| {
+                        this.update_props_scrub(f32::from(event.position.x), 1.0, cx)
+                    })
+                }
+            },
+            {
+                let ws = workspace;
+                move |_, _, cx| ws.update(cx, |this, cx| this.end_props_scrub(cx))
+            },
         ))
 }
 

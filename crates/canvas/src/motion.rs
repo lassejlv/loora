@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::time::{Duration, Instant};
 
 use loora_engine::{
@@ -161,8 +161,20 @@ pub(crate) struct MotionRuntime {
     preview: bool,
     preview_started: Instant,
     tracks: HashMap<NodeId, TransitionTrack>,
-    animation_starts: HashMap<(NodeId, String), Instant>,
+    animation_starts: HashMap<(NodeId, usize), Instant>,
+    completed_once: HashSet<(NodeId, usize)>,
     frames: HashMap<NodeId, MotionFrame>,
+    playback_elapsed: Duration,
+    playback_last_wall: Instant,
+    playback_playing: bool,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct PlaybackSnapshot {
+    pub playing: bool,
+    pub progress: f32,
+    pub elapsed_ms: f32,
+    pub duration_ms: f32,
 }
 
 impl Default for MotionRuntime {
@@ -173,7 +185,11 @@ impl Default for MotionRuntime {
             preview_started: Instant::now(),
             tracks: HashMap::new(),
             animation_starts: HashMap::new(),
+            completed_once: HashSet::new(),
             frames: HashMap::new(),
+            playback_elapsed: Duration::ZERO,
+            playback_last_wall: Instant::now(),
+            playback_playing: true,
         }
     }
 }
@@ -188,6 +204,7 @@ impl MotionRuntime {
         hovered: Option<&NodeId>,
         pressed: Option<&NodeId>,
         focused: Option<&NodeId>,
+        in_view: &HashSet<NodeId>,
         now: Instant,
         reduce_motion: bool,
     ) -> bool {
@@ -197,19 +214,53 @@ impl MotionRuntime {
             self.preview_started = now;
             self.tracks.clear();
             self.animation_starts.clear();
+            self.completed_once.clear();
             self.frames.clear();
+            self.playback_elapsed = Duration::ZERO;
+            self.playback_last_wall = now;
+            self.playback_playing = true;
         }
+
+        if !preview {
+            self.frames.clear();
+            return false;
+        }
+
+        if self.playback_playing {
+            self.playback_elapsed += now.saturating_duration_since(self.playback_last_wall);
+        }
+        self.playback_last_wall = now;
+        let (timeline_duration, timeline_loops) = timeline_duration(document);
+        if self.playback_elapsed >= timeline_duration {
+            if timeline_loops {
+                let duration = timeline_duration.as_secs_f64();
+                let wrapped = self.playback_elapsed.as_secs_f64() % duration.max(f64::EPSILON);
+                self.playback_elapsed = Duration::from_secs_f64(wrapped);
+                self.tracks.clear();
+                self.animation_starts.clear();
+                self.completed_once.clear();
+            } else {
+                self.playback_elapsed = timeline_duration;
+                self.playback_playing = false;
+            }
+        }
+        let timeline_now = self.preview_started + self.playback_elapsed;
 
         let mut animating = false;
         self.frames.retain(|id, _| document.nodes.contains_key(id));
         self.tracks.retain(|id, _| document.nodes.contains_key(id));
+        self.animation_starts
+            .retain(|(id, _), _| document.nodes.contains_key(id));
+        self.completed_once
+            .retain(|(id, _)| document.nodes.contains_key(id));
 
         for (id, node) in &document.nodes {
-            let base = MotionFrame::from_node(node);
-            if !preview {
-                self.frames.insert(id.clone(), base);
+            if node.visual_states.is_none() && node.animations.is_empty() {
+                self.frames.remove(id);
+                self.tracks.remove(id);
                 continue;
             }
+            let base = MotionFrame::from_node(node);
 
             let mut target = base.clone();
             if let Some(states) = &node.visual_states {
@@ -231,40 +282,41 @@ impl MotionRuntime {
             }
 
             let transition_frame = if reduce_motion || node.transition.is_none() {
-                self.tracks
-                    .insert(id.clone(), TransitionTrack::settled(target.clone(), now));
+                self.tracks.insert(
+                    id.clone(),
+                    TransitionTrack::settled(target.clone(), timeline_now),
+                );
                 target
             } else {
                 let transition = node.transition.clone().unwrap_or_default();
                 let track = self
                     .tracks
                     .entry(id.clone())
-                    .or_insert_with(|| TransitionTrack::settled(base.clone(), now));
+                    .or_insert_with(|| TransitionTrack::settled(base.clone(), timeline_now));
                 if track.target != target {
-                    let current = track.sample(now).0;
+                    let current = track.sample(timeline_now).0;
                     *track = TransitionTrack {
                         from: current,
                         target,
-                        started: now,
+                        started: timeline_now,
                         transition,
                     };
                 }
-                let (frame, active) = track.sample(now);
+                let (frame, active) = track.sample(timeline_now);
                 animating |= active;
                 frame
             };
 
             let mut frame = transition_frame;
             if !reduce_motion {
-                for attachment in &node.animations {
+                for (attachment_index, attachment) in node.animations.iter().enumerate() {
                     let enabled = match attachment.trigger {
-                        AnimationTrigger::Load
-                        | AnimationTrigger::InView
-                        | AnimationTrigger::Always => true,
+                        AnimationTrigger::Load | AnimationTrigger::Always => true,
+                        AnimationTrigger::InView => in_view.contains(id),
                         AnimationTrigger::Hover => hovered == Some(id),
                         AnimationTrigger::Press => pressed == Some(id),
                     };
-                    let key = (id.clone(), attachment.animation_id.clone());
+                    let key = (id.clone(), attachment_index);
                     if !enabled {
                         self.animation_starts.remove(&key);
                         continue;
@@ -276,31 +328,116 @@ impl MotionRuntime {
                     else {
                         continue;
                     };
+                    if attachment.once && self.completed_once.contains(&key) {
+                        if matches!(animation.fill.as_str(), "forwards" | "both") {
+                            frame = sample_keyframes(animation, 1.0, &frame);
+                        }
+                        continue;
+                    }
                     let start = match attachment.trigger {
-                        AnimationTrigger::Load
-                        | AnimationTrigger::InView
-                        | AnimationTrigger::Always => self.preview_started,
-                        AnimationTrigger::Hover | AnimationTrigger::Press => {
-                            *self.animation_starts.entry(key).or_insert(now)
+                        AnimationTrigger::Load | AnimationTrigger::Always => self.preview_started,
+                        AnimationTrigger::InView
+                        | AnimationTrigger::Hover
+                        | AnimationTrigger::Press => {
+                            *self.animation_starts.entry(key).or_insert(timeline_now)
                         }
                     };
-                    let elapsed = now.saturating_duration_since(start);
+                    let elapsed = timeline_now.saturating_duration_since(start);
                     let (sample, active) =
                         sample_animation(animation, attachment.delay_ms, elapsed, &frame);
                     animating |= active;
                     if let Some(sample) = sample {
                         frame = sample;
                     }
+                    if attachment.once && !active {
+                        self.completed_once.insert((id.clone(), attachment_index));
+                    }
                 }
             }
             self.frames.insert(id.clone(), frame);
         }
-        animating
+        animating && self.playback_playing
     }
 
     pub fn frames(&self) -> &HashMap<NodeId, MotionFrame> {
         &self.frames
     }
+
+    pub fn toggle_playback(&mut self, now: Instant) {
+        if self.playback_playing {
+            self.playback_elapsed += now.saturating_duration_since(self.playback_last_wall);
+        }
+        self.playback_last_wall = now;
+        self.playback_playing = !self.playback_playing;
+    }
+
+    pub fn restart(&mut self, now: Instant) {
+        self.playback_elapsed = Duration::ZERO;
+        self.playback_last_wall = now;
+        self.playback_playing = true;
+        self.tracks.clear();
+        self.animation_starts.clear();
+        self.completed_once.clear();
+        self.frames.clear();
+    }
+
+    pub fn scrub(&mut self, document: &Document, progress: f32, now: Instant) {
+        let (duration, _) = timeline_duration(document);
+        self.playback_elapsed = duration.mul_f32(progress.clamp(0.0, 1.0));
+        self.playback_last_wall = now;
+        self.playback_playing = false;
+        self.tracks.clear();
+        self.animation_starts.clear();
+        self.completed_once.clear();
+        self.frames.clear();
+    }
+
+    pub fn snapshot(&self, document: &Document) -> PlaybackSnapshot {
+        let (duration, _) = timeline_duration(document);
+        let duration_ms = duration.as_secs_f32() * 1000.0;
+        let elapsed_ms = self.playback_elapsed.as_secs_f32() * 1000.0;
+        PlaybackSnapshot {
+            playing: self.playback_playing,
+            progress: (elapsed_ms / duration_ms.max(f32::EPSILON)).clamp(0.0, 1.0),
+            elapsed_ms,
+            duration_ms,
+        }
+    }
+}
+
+fn timeline_duration(document: &Document) -> (Duration, bool) {
+    let mut duration_ms = 0.0_f32;
+    let mut loops = false;
+    for node in document.nodes.values() {
+        if let Some(transition) = &node.transition {
+            duration_ms =
+                duration_ms.max(transition.delay_ms.max(0.0) + transition.duration_ms.max(0.0));
+        }
+        for attachment in &node.animations {
+            let Some(animation) = document
+                .animations
+                .iter()
+                .find(|animation| animation.id == attachment.animation_id)
+            else {
+                continue;
+            };
+            loops |= animation.infinite;
+            let iterations = if animation.infinite {
+                1.0
+            } else {
+                animation.iterations.max(1.0)
+            };
+            duration_ms = duration_ms.max(
+                attachment.delay_ms.max(0.0)
+                    + animation.delay_ms.max(0.0)
+                    + animation.duration_ms.max(0.0) * iterations,
+            );
+        }
+    }
+    (
+        Duration::from_secs_f32(duration_ms.max(1_000.0) / 1000.0),
+        loops,
+    )
 }
 
 fn sample_animation(
@@ -511,7 +648,7 @@ fn lerp_stroke(from: Option<&Stroke>, to: Option<&Stroke>, progress: f32) -> Opt
 #[cfg(test)]
 mod tests {
     use super::*;
-    use loora_engine::{AnimationKeyframe, Layout, Node};
+    use loora_engine::{AnimationKeyframe, Layout, Node, NodeAnimation};
 
     #[test]
     fn transition_uses_real_cubic_bezier_progress_and_can_reverse_smoothly() {
@@ -579,5 +716,184 @@ mod tests {
         assert!(active);
         assert!((sample.opacity - 0.5).abs() < 0.001);
         assert!((sample.y - 10.0).abs() < 0.001);
+    }
+
+    #[test]
+    fn in_view_animation_waits_until_the_node_is_visible() {
+        let mut document = Document::empty("In view");
+        let page = document.root_page_id.clone();
+        let mut node = Node::rectangle("Card", page, Layout::new(0.0, 0.0, 100.0, 60.0));
+        node.animations.push(NodeAnimation {
+            animation_id: "fade".into(),
+            trigger: AnimationTrigger::InView,
+            delay_ms: 0.0,
+            once: false,
+        });
+        let node_id = node.id.clone();
+        document.nodes.insert(node_id.clone(), node);
+        document.animations.push(DocumentAnimation {
+            id: "fade".into(),
+            name: "Fade".into(),
+            duration_ms: 200.0,
+            easing: "linear".into(),
+            cubic_bezier: None,
+            delay_ms: 0.0,
+            keyframes: vec![
+                AnimationKeyframe {
+                    offset: 0.0,
+                    opacity: Some(0.0),
+                    transform: None,
+                },
+                AnimationKeyframe {
+                    offset: 1.0,
+                    opacity: Some(1.0),
+                    transform: None,
+                },
+            ],
+            iterations: 1.0,
+            infinite: false,
+            direction: "normal".into(),
+            fill: "both".into(),
+        });
+        let now = Instant::now();
+        let mut runtime = MotionRuntime::default();
+        assert!(!runtime.tick(
+            &document,
+            1,
+            true,
+            None,
+            None,
+            None,
+            &HashSet::new(),
+            now,
+            false,
+        ));
+        assert_eq!(runtime.frames()[&node_id].opacity, 1.0);
+
+        let visible = HashSet::from([node_id.clone()]);
+        assert!(runtime.tick(&document, 1, true, None, None, None, &visible, now, false,));
+        assert_eq!(runtime.frames()[&node_id].opacity, 0.0);
+    }
+
+    #[test]
+    fn static_nodes_do_not_enter_the_per_frame_motion_map() {
+        let mut document = Document::empty("Static");
+        let page = document.root_page_id.clone();
+        let node = Node::rectangle("Card", page, Layout::new(0.0, 0.0, 100.0, 60.0));
+        let node_id = node.id.clone();
+        document.nodes.insert(node_id.clone(), node);
+        let mut runtime = MotionRuntime::default();
+
+        assert!(!runtime.tick(
+            &document,
+            1,
+            true,
+            None,
+            None,
+            None,
+            &HashSet::from([node_id.clone()]),
+            Instant::now(),
+            false,
+        ));
+        assert!(!runtime.frames().contains_key(&node_id));
+    }
+
+    #[test]
+    fn playback_can_pause_scrub_and_restart_the_animation_clock() {
+        let mut document = Document::empty("Playback");
+        let page = document.root_page_id.clone();
+        let mut node = Node::rectangle("Card", page, Layout::new(0.0, 0.0, 100.0, 60.0));
+        node.animations.push(NodeAnimation {
+            animation_id: "fade".into(),
+            trigger: AnimationTrigger::Load,
+            delay_ms: 0.0,
+            once: false,
+        });
+        let node_id = node.id.clone();
+        document.nodes.insert(node_id.clone(), node);
+        document.animations.push(DocumentAnimation {
+            id: "fade".into(),
+            name: "Fade".into(),
+            duration_ms: 1_000.0,
+            easing: "linear".into(),
+            cubic_bezier: None,
+            delay_ms: 0.0,
+            keyframes: vec![
+                AnimationKeyframe {
+                    offset: 0.0,
+                    opacity: Some(0.0),
+                    transform: None,
+                },
+                AnimationKeyframe {
+                    offset: 1.0,
+                    opacity: Some(1.0),
+                    transform: None,
+                },
+            ],
+            iterations: 1.0,
+            infinite: false,
+            direction: "normal".into(),
+            fill: "both".into(),
+        });
+        let start = Instant::now();
+        let visible = HashSet::from([node_id.clone()]);
+        let mut runtime = MotionRuntime::default();
+        runtime.tick(&document, 1, true, None, None, None, &visible, start, false);
+        runtime.tick(
+            &document,
+            1,
+            true,
+            None,
+            None,
+            None,
+            &visible,
+            start + Duration::from_millis(500),
+            false,
+        );
+        assert!((runtime.frames()[&node_id].opacity - 0.5).abs() < 0.01);
+
+        runtime.toggle_playback(start + Duration::from_millis(500));
+        runtime.tick(
+            &document,
+            1,
+            true,
+            None,
+            None,
+            None,
+            &visible,
+            start + Duration::from_millis(900),
+            false,
+        );
+        assert!((runtime.frames()[&node_id].opacity - 0.5).abs() < 0.01);
+        assert!(!runtime.snapshot(&document).playing);
+
+        runtime.scrub(&document, 0.25, start + Duration::from_millis(900));
+        runtime.tick(
+            &document,
+            1,
+            true,
+            None,
+            None,
+            None,
+            &visible,
+            start + Duration::from_millis(900),
+            false,
+        );
+        assert!((runtime.frames()[&node_id].opacity - 0.25).abs() < 0.01);
+
+        runtime.restart(start + Duration::from_millis(900));
+        runtime.tick(
+            &document,
+            1,
+            true,
+            None,
+            None,
+            None,
+            &visible,
+            start + Duration::from_millis(900),
+            false,
+        );
+        assert!(runtime.snapshot(&document).playing);
+        assert!(runtime.frames()[&node_id].opacity < 0.01);
     }
 }

@@ -247,6 +247,10 @@ pub fn stack_section(
                                     "Fixed",
                                 )),
                                 ContextMenuEntry::Action(ContextMenuAction::new(
+                                    "enum:wmode:percent",
+                                    "Percent",
+                                )),
+                                ContextMenuEntry::Action(ContextMenuAction::new(
                                     "enum:wmode:hug",
                                     "Hug",
                                 )),
@@ -276,6 +280,10 @@ pub fn stack_section(
                                     "Fixed",
                                 )),
                                 ContextMenuEntry::Action(ContextMenuAction::new(
+                                    "enum:hmode:percent",
+                                    "Percent",
+                                )),
+                                ContextMenuEntry::Action(ContextMenuAction::new(
                                     "enum:hmode:hug",
                                     "Hug",
                                 )),
@@ -291,6 +299,30 @@ pub fn stack_section(
                     },
                 ),
             ))
+            .when(
+                layout.is_some_and(|layout| {
+                    layout.width_mode == SizeMode::Percent
+                        || layout.height_mode == SizeMode::Percent
+                }),
+                |this| {
+                    this.child(pair(
+                        numeric(
+                            PropsField::WidthPercent,
+                            "W %",
+                            layout
+                                .and_then(|layout| layout.width_percent)
+                                .or(Some(100.0)),
+                        ),
+                        numeric(
+                            PropsField::HeightPercent,
+                            "H %",
+                            layout
+                                .and_then(|layout| layout.height_percent)
+                                .or(Some(100.0)),
+                        ),
+                    ))
+                },
+            )
             .child(pair(
                 numeric(PropsField::Gap, "Gap", layout.map(|l| l.gap as f64)),
                 if show_flex {

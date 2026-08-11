@@ -7,7 +7,7 @@ use crate::theme::Theme;
 
 const TOOLTIP_GAP: f32 = 8.0;
 /// Button height (30) + gap — places the chip just above the host.
-/// Must fit inside the bottom toolbar strip (webview covers anything above it).
+/// Compact tooltip used by the bottom canvas toolbar.
 const TOOLTIP_ABOVE: f32 = 30.0 + TOOLTIP_GAP;
 
 /// Compact dark tooltip for Loora chrome (toolbar, icons, etc.).

@@ -1,7 +1,42 @@
 use loora_engine::{
-    ApplyOptions, Bounds, Camera, CanvasEngine, Document, Layout, Node, NodeId, NodeKind,
-    NodePatch, Operation, PageViewport, SizeMode, Transaction, Vec2, DEFAULT_ORDER_STEP,
+    AnimationKeyframe, ApplyOptions, Bounds, Camera, CanvasEngine, Document, DocumentAnimation,
+    Layout, MotionTransform, Node, NodeId, NodeKind, NodePatch, Operation, PageViewport, SizeMode,
+    Transaction, Vec2, DEFAULT_ORDER_STEP,
 };
+
+#[test]
+fn animation_library_is_undoable() {
+    let mut engine = CanvasEngine::new(Document::empty("animation history"));
+    let animation = DocumentAnimation {
+        id: "fade-up".into(),
+        name: "Fade up".into(),
+        duration_ms: 300.0,
+        easing: "ease-out".into(),
+        cubic_bezier: None,
+        delay_ms: 0.0,
+        keyframes: vec![AnimationKeyframe {
+            offset: 0.0,
+            opacity: Some(0.0),
+            transform: Some(MotionTransform {
+                y: Some(16.0),
+                ..MotionTransform::default()
+            }),
+        }],
+        iterations: 1.0,
+        infinite: false,
+        direction: "normal".into(),
+        fill: "both".into(),
+    };
+
+    engine
+        .set_document_animations(vec![animation.clone()])
+        .unwrap();
+    assert_eq!(engine.document().animations, vec![animation.clone()]);
+    assert!(engine.undo().unwrap());
+    assert!(engine.document().animations.is_empty());
+    assert!(engine.redo().unwrap());
+    assert_eq!(engine.document().animations, vec![animation]);
+}
 
 #[test]
 fn demo_document_has_page_and_shapes() {
@@ -617,6 +652,38 @@ fn grid_resolves_columns() {
     engine.resolve_stack(&frame_id).unwrap();
     assert!((engine.node(&a_id).unwrap().layout.x - 0.0).abs() < f64::EPSILON);
     assert!((engine.node(&b_id).unwrap().layout.x - 110.0).abs() < f64::EPSILON);
+}
+
+#[test]
+fn percent_sized_flow_children_resolve_against_the_parent() {
+    let mut engine = CanvasEngine::new(Document::empty("percent"));
+    let page = engine.root_page_id().clone();
+    let mut frame = Node::frame("Frame", page, Layout::new(0.0, 0.0, 240.0, 120.0));
+    frame.layout.mode = loora_engine::LayoutMode::Flex;
+    let frame_id = frame.id.clone();
+    let mut child = Node::rectangle("Half", frame_id.clone(), Layout::new(0.0, 0.0, 20.0, 20.0));
+    child.layout.position = loora_engine::LayoutPosition::Flow;
+    child.layout.width_mode = SizeMode::Percent;
+    child.layout.width_percent = Some(50.0);
+    child.layout.height_mode = SizeMode::Percent;
+    child.layout.height_percent = Some(50.0);
+    let child_id = child.id.clone();
+    engine
+        .apply(
+            Transaction::new(
+                "insert",
+                vec![
+                    Operation::Insert { node: frame },
+                    Operation::Insert { node: child },
+                ],
+            ),
+            ApplyOptions::with_history(),
+        )
+        .unwrap();
+    engine.resolve_stack(&frame_id).unwrap();
+    let layout = &engine.node(&child_id).unwrap().layout;
+    assert!((layout.width - 120.0).abs() < f64::EPSILON);
+    assert!((layout.height - 60.0).abs() < f64::EPSILON);
 }
 
 #[test]

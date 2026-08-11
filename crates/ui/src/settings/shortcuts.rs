@@ -160,6 +160,13 @@ pub fn shortcut_catalog() -> &'static [ShortcutDef] {
             defaults: &["h"],
         },
         ShortcutDef {
+            id: "tool_preview",
+            label: "Preview Tool",
+            description: "Preview interactions and animations",
+            category: ShortcutCategory::Tools,
+            defaults: &["p"],
+        },
+        ShortcutDef {
             id: "tool_rectangle",
             label: "Rectangle Tool",
             description: "Draw rectangles",

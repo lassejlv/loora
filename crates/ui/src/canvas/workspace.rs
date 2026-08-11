@@ -3,6 +3,7 @@ use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use gpui::{
@@ -13,29 +14,26 @@ use gpui::{
     UniformListScrollHandle, Window,
 };
 pub use loora_canvas::CanvasTool;
-use loora_canvas::{CanvasEvent, CanvasPalette, NativeCanvas, NativeTextEdit, PreviewTrigger};
+use loora_canvas::{
+    CanvasEvent, CanvasPalette, LayoutControl, NativeCanvas, NativeTextEdit, PreviewTrigger,
+};
 use loora_engine::{
-    compile_canvas, export_page_svg, standalone_html, Bounds as EngineBounds, Camera, CanvasAction,
-    CanvasEngine, Color, Corners, DesignFileInfo, DesignStore, FlexDirection, HtmlCanvasOptions,
-    ImportReport, Interaction, InteractionTrigger, Layout, LayoutAlign, LayoutJustify, LayoutMode,
-    LayoutPosition, Node, NodeId, NodeKind, Overflow, Paint, Shadow, SizeMode, StateCondition,
-    StateValue, Stroke, StrokeStyle, TextAlign, Transition, Vec2, VisualState,
+    export_page_svg, standalone_html, AnimationKeyframe, AnimationTrigger, Bounds as EngineBounds,
+    Camera, CanvasAction, CanvasEngine, Color, Corners, DesignFileInfo, DesignStore,
+    DocumentAnimation, FlexDirection, HtmlCanvasOptions, ImportReport, Interaction,
+    InteractionTrigger, Layout, LayoutAlign, LayoutJustify, LayoutMode, LayoutPosition,
+    MotionTransform, Node, NodeAnimation, NodeId, NodeKind, Overflow, Paint, Shadow, SizeMode,
+    StateCondition, StateValue, Stroke, StrokeStyle, TextAlign, Transition, Vec2, VisualState,
 };
 use loora_mcp::{McpClient, ToolCallReceiver, UiEffect};
 
 use crate::canvas::files::FilesCommandDialog;
 use crate::canvas::image_picker::{ImagePickerDialog, ImagePickerMode};
-use crate::canvas::layers::{
-    build_layer_rows, ipc_should_notify_chrome, LayerListKey, LayerRow, LayerSidebar,
-    ShellChromeToken,
-};
+use crate::canvas::layers::{build_layer_rows, LayerListKey, LayerRow, LayerSidebar};
 use crate::canvas::properties::{
     format_hex, format_number, parse_hex, PropertiesPanel, PropsField, PropsView,
 };
 use crate::canvas::text_edit::{self, TextCursor, TextEditSession};
-#[cfg(target_os = "linux")]
-use crate::canvas::web_canvas::pump_linux_canvas;
-use crate::canvas::web_canvas::{should_apply_visibility, CanvasWebView};
 use crate::color_picker::ColorPickerPopover;
 use crate::context_menu::{
     action_id_at, first_action_index, move_highlight, ContextMenu, ContextMenuAction,
@@ -46,7 +44,7 @@ use crate::motion::{Ease, Motion, MotionStyle, Transition as MotionTransition};
 use crate::settings::{resolve_keystrokes, shortcut_catalog, SettingsSection};
 use crate::theme::{Theme, ThemeKind};
 use crate::tooltip::Tooltip;
-#[cfg(any(target_os = "linux", all(target_os = "macos", not(test))))]
+#[cfg(all(target_os = "macos", not(test)))]
 use raw_window_handle::{HasWindowHandle, RawWindowHandle};
 
 actions!(
@@ -56,6 +54,7 @@ actions!(
         Redo,
         ToolSelect,
         ToolHand,
+        ToolPreview,
         ToolRectangle,
         ToolFrame,
         ToolText,
@@ -77,10 +76,6 @@ actions!(
     ]
 );
 
-fn canvas_tool_from_name(value: &str) -> Option<CanvasTool> {
-    CanvasTool::from_name(value)
-}
-
 pub struct CanvasWorkspace {
     pub(crate) theme: Theme,
     pub(crate) engine: CanvasEngine,
@@ -89,23 +84,16 @@ pub struct CanvasWorkspace {
     pub(crate) tool: CanvasTool,
     pub(crate) viewport_bounds: Rc<Cell<Bounds<Pixels>>>,
     native_canvas: Entity<NativeCanvas>,
-    native_canvas_active: bool,
     _native_canvas_subscription: Subscription,
-    webview: Entity<CanvasWebView>,
-    webview_visible: bool,
-    _web_ipc_task: Option<Task<()>>,
+    runtime_document_cache: Option<(RuntimeDocumentKey, Arc<loora_engine::Document>)>,
+    runtime_document_generation: u64,
     _mcp_task: Option<Task<()>>,
     mcp_endpoint: Option<String>,
     _mcp_activity_task: Option<Task<()>>,
     mcp_activity: Option<McpActivity>,
     mcp_activity_sequence: u64,
-    web_document_key: Option<WebDocumentKey>,
-    web_state_key: Option<WebStateKey>,
-    web_ready: bool,
-    /// Fit-all deferred until the webview viewport has a real size.
+    /// Fit-all deferred until the native viewport has a real size.
     pending_fit_all: bool,
-    /// Path waiting for a webview PNG rasterization result.
-    pending_png_export: Option<PathBuf>,
     pub(crate) collapsed: HashSet<NodeId>,
     /// Incremented on any collapse/expand — keeps IPC chrome tokens O(1).
     collapsed_generation: u64,
@@ -184,12 +172,16 @@ pub struct CanvasWorkspace {
     /// Inspector breakpoint (None = base). Canvas still paints base layout.
     pub(crate) active_breakpoint_id: Option<String>,
     focus_handle: FocusHandle,
-    /// Webview asked us to restore GPUI keyboard focus after a canvas click.
-    pending_keyboard_reclaim: bool,
-    /// True while a contenteditable text node in the webview is focused.
-    webview_text_editing: bool,
     /// Space temporarily turns the native select tool into the hand tool.
     native_space_pan: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct RuntimeDocumentKey {
+    revision: u64,
+    preview_generation: u64,
+    preview_mode: bool,
+    breakpoint_id: Option<String>,
 }
 
 #[derive(Clone, Debug)]
@@ -247,32 +239,13 @@ struct McpActivity {
     node_ids: Vec<NodeId>,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
-struct WebDocumentKey {
-    document_id: String,
-    revision: u64,
-    preview_mode: bool,
-    preview_runtime_generation: u64,
-    active_breakpoint_id: Option<String>,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-struct WebStateKey {
-    pan_x: u64,
-    pan_y: u64,
-    zoom: u64,
-    selection: Vec<NodeId>,
-    agent_nodes: Vec<NodeId>,
-    tool: CanvasTool,
-    preview_mode: bool,
-    can_undo: bool,
-    can_redo: bool,
-    chrome: ThemeKind,
-}
-
 impl CanvasWorkspace {
     pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
         Self::new_with_mcp_endpoint(window, cx, None, None)
+    }
+
+    pub fn focus_canvas(&self, window: &mut Window, cx: &mut Context<Self>) {
+        self.focus_handle.focus(window, cx);
     }
 
     pub fn new_with_mcp(
@@ -325,16 +298,6 @@ impl CanvasWorkspace {
             cx.subscribe(&native_canvas, |workspace, _, event: &CanvasEvent, cx| {
                 workspace.handle_native_canvas_event(event, cx);
             });
-        let renderer = std::env::var("LOORA_CANVAS_RENDERER").ok();
-        let native_canvas_active = native_canvas_active_from(renderer.as_deref());
-        let (web_ipc_sender, web_ipc_receiver) = async_channel::unbounded();
-        let webview = cx.new({
-            let viewport_bounds = viewport_bounds.clone();
-            let web_ipc_sender = web_ipc_sender.clone();
-            let window = &mut *window;
-            move |cx| CanvasWebView::new(window, cx, web_ipc_sender, viewport_bounds)
-        });
-
         let mut workspace = Self {
             theme,
             engine,
@@ -343,21 +306,15 @@ impl CanvasWorkspace {
             tool: CanvasTool::Select,
             viewport_bounds,
             native_canvas,
-            native_canvas_active,
             _native_canvas_subscription: native_canvas_subscription,
-            webview,
-            webview_visible: true,
-            _web_ipc_task: None,
+            runtime_document_cache: None,
+            runtime_document_generation: 0,
             _mcp_task: None,
             mcp_endpoint,
             _mcp_activity_task: None,
             mcp_activity: None,
             mcp_activity_sequence: 0,
-            web_document_key: None,
-            web_state_key: None,
-            web_ready: false,
             pending_fit_all: true,
-            pending_png_export: None,
             collapsed,
             collapsed_generation: 0,
             layer_scroll: UniformListScrollHandle::new(),
@@ -423,34 +380,8 @@ impl CanvasWorkspace {
             props_collapsed: HashSet::new(),
             active_breakpoint_id: None,
             focus_handle,
-            pending_keyboard_reclaim: false,
-            webview_text_editing: false,
             native_space_pan: false,
         };
-        workspace._web_ipc_task = Some(cx.spawn(async move |this, cx| {
-            while let Ok(first_message) = web_ipc_receiver.recv().await {
-                let mut messages = vec![first_message];
-                while let Ok(message) = web_ipc_receiver.try_recv() {
-                    messages.push(message);
-                }
-
-                let keep_running = this
-                    .update(cx, |this, cx| {
-                        let before = this.shell_chrome_token();
-                        for message in messages {
-                            this.handle_web_payload(&message, cx);
-                        }
-                        // Pan-only camera updates must not rebuild layers / props.
-                        if ipc_should_notify_chrome(&before, &this.shell_chrome_token()) {
-                            cx.notify();
-                        }
-                    })
-                    .is_ok();
-                if !keep_running {
-                    break;
-                }
-            }
-        }));
         if let Some(mcp_receiver) = mcp_receiver {
             let this = cx.weak_entity();
             workspace._mcp_task = Some(window.spawn(cx, async move |cx| {
@@ -653,75 +584,6 @@ impl CanvasWorkspace {
         }));
     }
 
-    /// Restore GPUI keyboard focus after leaving the webview (chrome click / edit end).
-    fn reclaim_keyboard_if_needed(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.webview_text_editing {
-            return;
-        }
-        self.pending_keyboard_reclaim = false;
-        self.webview.update(cx, |view, _| {
-            view.reclaim_host_keyboard();
-            // Drop any DOM focus WebKit may have taken so it stops eating keys.
-            let _ = view.command(serde_json::json!({ "type": "blur-surface" }));
-        });
-        #[cfg(target_os = "linux")]
-        {
-            use gtk::gdk::prelude::*;
-            if let Some(display) = gtk::gdk::Display::default() {
-                if let Some(seat) = display.default_seat() {
-                    seat.ungrab();
-                }
-            }
-            // Clicking the wry child sends FocusOut(NotifyInferior) to the GPUI
-            // window. GPUI marks itself inactive; FocusIn goes to the unknown child
-            // XID and is dropped — so active stays false and keybindings die.
-            // Bounce X focus away and back so GPUI receives a real FocusIn.
-            force_x11_focus_reactivate(window);
-            pump_linux_canvas();
-        }
-        window.activate_window();
-        self.focus_handle.focus(window, cx);
-        eprintln!(
-            "loora: host keyboard reclaim (focused={} active={})",
-            self.focus_handle.is_focused(window),
-            window.is_window_active()
-        );
-    }
-
-    fn shell_chrome_token(&self) -> ShellChromeToken {
-        ShellChromeToken {
-            revision: self.engine.revision(),
-            selection: self.selection.clone(),
-            tool: self.tool,
-            zoom_bits: self.camera.zoom.to_bits(),
-            layer_query: self.layer_query.clone(),
-            layer_search_focused: self.layer_search_focused,
-            layer_rename: self.layer_rename.clone(),
-            layer_rename_draft: self.layer_rename_draft.clone(),
-            collapsed_generation: self.collapsed_generation,
-            sidebar_visible: self.sidebar_visible,
-            properties_visible: self.properties_visible,
-            command_open: self.command_open,
-            command_query: self.command_query.clone(),
-            command_index: self.command_index,
-            dirty: self.dirty || self.save_failed,
-            doc_name: self.document_name(),
-            doc_id: self.document_id(),
-            files_len: self.files.len(),
-            web_ready: self.web_ready,
-            preview_mode: self.preview_mode,
-            preview_runtime_generation: self.preview_runtime_generation,
-            image_picker: self.image_picker.is_some(),
-            color_picker: self.color_picker.is_some(),
-            context_menu: self.context_menu.is_some(),
-            can_undo: self.engine.can_undo(),
-            can_redo: self.engine.can_redo(),
-            props_focus: self.props_focus.is_some() || self.props_scrub.is_some(),
-            props_draft: self.props_draft.clone(),
-            active_breakpoint_id: self.active_breakpoint_id.clone(),
-        }
-    }
-
     pub(crate) fn invalidate_layer_rows(&mut self) {
         self.layer_rows_cache = None;
     }
@@ -751,770 +613,39 @@ impl CanvasWorkspace {
         rows
     }
 
-    fn handle_web_payload(&mut self, payload: &str, cx: &mut Context<Self>) {
-        match serde_json::from_str::<serde_json::Value>(payload) {
-            Ok(message) => self.handle_web_message(&message, cx),
-            Err(error) => eprintln!("loora: invalid canvas message: {error}"),
-        }
-    }
-
-    fn handle_web_message(&mut self, message: &serde_json::Value, cx: &mut Context<Self>) {
-        let Some(kind) = message.get("type").and_then(|value| value.as_str()) else {
-            return;
-        };
-        match kind {
-            "ready" => {
-                self.web_ready = true;
-                self.web_document_key = None;
-                self.web_state_key = None;
-                self.flush_pending_fit_all(cx);
-            }
-            // Canvas pointer hits the wry X11 child. On Linux the child receives
-            // pointer events but X keyboard focus stays on the GPUI toplevel;
-            // wry's grab_focus() does not deliver keys to WebKit in this embed.
-            // Keep (or restore) host keyboard so AppRoot/Workspace shortcuts work.
-            "canvas-pointer" => {
-                if !self.webview_text_editing {
-                    eprintln!("loora: canvas-pointer → reclaim host keyboard");
-                    self.webview.update(cx, |view, _| {
-                        view.reclaim_host_keyboard();
-                    });
-                    self.pending_keyboard_reclaim = true;
-                    // Force a render so reclaim_keyboard_if_needed focuses Workspace
-                    // before the next key arrives (IPC chrome token may be unchanged).
-                    cx.notify();
-                }
-            }
-            "webview-editing" => {
-                let active = message
-                    .get("active")
-                    .and_then(|value| value.as_bool())
-                    .unwrap_or(false);
-                self.webview_text_editing = active;
-                // Never grab_focus the child for editing — keys would vanish.
-                // Host keeps X focus; we forward keystrokes into contenteditable.
-                self.webview.update(cx, |view, _| {
-                    view.reclaim_host_keyboard();
-                });
-                self.pending_keyboard_reclaim = true;
-                cx.notify();
-            }
-            "export-png" => {
-                let Some(path) = self.pending_png_export.take() else {
-                    return;
-                };
-                if let Some(error) = message.get("error").and_then(|value| value.as_str()) {
-                    eprintln!("loora: export failed: {error}");
-                    cx.notify();
-                    return;
-                }
-                let Some(data_url) = message.get("dataUrl").and_then(|value| value.as_str()) else {
-                    eprintln!("loora: export failed: missing PNG payload");
-                    cx.notify();
-                    return;
-                };
-                match decode_data_url_png(data_url) {
-                    Ok(bytes) => match fs::write(&path, bytes) {
-                        Ok(()) => eprintln!("loora: exported {}", path.display()),
-                        Err(error) => eprintln!("loora: export failed: {error}"),
-                    },
-                    Err(error) => eprintln!("loora: export failed: {error}"),
-                }
-                cx.notify();
-            }
-            "camera" => {
-                let Some(x) = message.get("x").and_then(|value| value.as_f64()) else {
-                    return;
-                };
-                let Some(y) = message.get("y").and_then(|value| value.as_f64()) else {
-                    return;
-                };
-                let Some(zoom) = message.get("zoom").and_then(|value| value.as_f64()) else {
-                    return;
-                };
-                if x.is_finite() && y.is_finite() && zoom.is_finite() {
-                    self.camera = Camera::new(
-                        Vec2::new(x, y),
-                        zoom.clamp(Camera::MIN_ZOOM, Camera::MAX_ZOOM),
-                    );
-                    self.web_state_key = Some(self.current_web_state_key());
-                }
-            }
-            "select" if !self.preview_mode => {
-                self.blur_props_if_needed(cx);
-                let additive = message
-                    .get("additive")
-                    .and_then(|value| value.as_bool())
-                    .unwrap_or(false);
-                let mut ids: Vec<NodeId> = message
-                    .get("ids")
-                    .and_then(|value| value.as_array())
-                    .map(|values| {
-                        values
-                            .iter()
-                            .filter_map(|value| value.as_str().map(NodeId::from))
-                            .filter(|id| self.engine.node(id).is_some())
-                            .collect()
-                    })
-                    .unwrap_or_default();
-                // Dedup while preserving order.
-                {
-                    let mut seen = HashSet::new();
-                    ids.retain(|id| seen.insert(id.clone()));
-                }
-                if !ids.is_empty() {
-                    if additive {
-                        for id in ids {
-                            if !self.selection.contains(&id) {
-                                self.selection.push(id.clone());
-                                self.reveal_layer(&id);
-                            }
-                        }
-                    } else {
-                        self.selection = ids;
-                        if let Some(last) = self.selection.last().cloned() {
-                            self.reveal_layer(&last);
-                        }
-                    }
-                } else {
-                    let id = message
-                        .get("id")
-                        .and_then(|value| value.as_str())
-                        .map(NodeId::from);
-                    if additive {
-                        if let Some(id) = id {
-                            if self.engine.node(&id).is_some() {
-                                self.toggle_selection(id);
-                            }
-                        }
-                    } else if let Some(id) = id {
-                        if self.engine.node(&id).is_some() {
-                            self.select_only(id);
-                        }
-                    } else {
-                        self.clear_selection();
-                    }
-                }
-                self.clear_props_focus();
-                self.web_state_key = Some(self.current_web_state_key());
-            }
-            "bounds" if !self.preview_mode => {
-                let Some(id) = message
-                    .get("id")
-                    .and_then(|value| value.as_str())
-                    .map(NodeId::from)
-                else {
-                    return;
-                };
-                let Some(bounds) = message.get("bounds") else {
-                    return;
-                };
-                let read = |name| bounds.get(name).and_then(|value| value.as_f64());
-                let (Some(x), Some(y), Some(width), Some(height)) =
-                    (read("x"), read("y"), read("width"), read("height"))
-                else {
-                    return;
-                };
-                if ![x, y, width, height].into_iter().all(f64::is_finite) {
-                    return;
-                }
-                let parent_origin = message
-                    .get("parent")
-                    .and_then(|parent| {
-                        Some(Vec2::new(
-                            parent.get("x")?.as_f64()?,
-                            parent.get("y")?.as_f64()?,
-                        ))
-                    })
-                    .filter(|origin| origin.x.is_finite() && origin.y.is_finite());
-                let move_mode =
-                    message.get("mode").and_then(|value| value.as_str()) == Some("move");
-                let duplicate = message
-                    .get("duplicate")
-                    .and_then(|value| value.as_bool())
-                    .unwrap_or(false);
-                let dx = message.get("dx").and_then(|value| value.as_f64());
-                let dy = message.get("dy").and_then(|value| value.as_f64());
-                let mut ids: Vec<NodeId> = message
-                    .get("ids")
-                    .and_then(|value| value.as_array())
-                    .map(|values| {
-                        values
-                            .iter()
-                            .filter_map(|value| value.as_str().map(NodeId::from))
-                            .filter(|node_id| self.engine.node(node_id).is_some())
-                            .collect()
-                    })
-                    .unwrap_or_default();
-                if ids.is_empty() {
-                    ids.push(id.clone());
-                }
-                let rendered_drop = message.get("drop").and_then(|drop| {
-                    let id = NodeId::from(drop.get("id")?.as_str()?);
-                    let parent = drop.get("parent")?;
-                    let origin = Vec2::new(parent.get("x")?.as_f64()?, parent.get("y")?.as_f64()?);
-                    (origin.x.is_finite() && origin.y.is_finite()).then_some((id, origin))
-                });
-                let leading_edge_resize = message
-                    .get("handle")
-                    .and_then(|value| value.as_str())
-                    .is_some_and(|handle| handle.contains('n') || handle.contains('w'));
-
-                let mut working_ids = ids;
-                if move_mode && duplicate {
-                    match self
-                        .engine
-                        .duplicate_nodes(&working_ids, Vec2::new(0.0, 0.0))
-                    {
-                        Ok(new_ids) if !new_ids.is_empty() => working_ids = new_ids,
-                        _ => {}
-                    }
-                }
-
-                let multi_move = move_mode && working_ids.len() > 1;
-                let members = message.get("members").and_then(|value| value.as_array());
-                let changed = if multi_move {
-                    match (dx, dy) {
-                        (Some(dx), Some(dy)) if dx.is_finite() && dy.is_finite() => {
-                            self.engine.move_nodes(&working_ids, dx, dy, None).is_ok()
-                        }
-                        _ => false,
-                    }
-                } else if move_mode {
-                    let primary = working_ids.first().cloned().unwrap_or(id.clone());
-                    match parent_origin {
-                        Some(parent_origin) => self
-                            .engine
-                            .set_world_position_from_parent_origin(
-                                &primary,
-                                Vec2::new(x, y),
-                                parent_origin,
-                                None,
-                            )
-                            .is_ok(),
-                        None => self
-                            .engine
-                            .set_world_position(&primary, Vec2::new(x, y), None)
-                            .is_ok(),
-                    }
-                } else if let Some(members) = members {
-                    let mut any = false;
-                    let mut kept = Vec::new();
-                    for member in members {
-                        let Some(member_id) = member
-                            .get("id")
-                            .and_then(|value| value.as_str())
-                            .map(NodeId::from)
-                        else {
-                            continue;
-                        };
-                        let Some(member_bounds) = member.get("bounds") else {
-                            continue;
-                        };
-                        let read_m =
-                            |name| member_bounds.get(name).and_then(|value| value.as_f64());
-                        let (Some(mx), Some(my), Some(mw), Some(mh)) =
-                            (read_m("x"), read_m("y"), read_m("width"), read_m("height"))
-                        else {
-                            continue;
-                        };
-                        if ![mx, my, mw, mh].into_iter().all(f64::is_finite) {
-                            continue;
-                        }
-                        let member_parent = member.get("parent").and_then(|parent| {
-                            Some(Vec2::new(
-                                parent.get("x")?.as_f64()?,
-                                parent.get("y")?.as_f64()?,
-                            ))
-                        });
-                        let box_bounds = EngineBounds::new(mx, my, mw.max(1.0), mh.max(1.0));
-                        let ok = match member_parent {
-                            Some(origin) => self
-                                .engine
-                                .set_rendered_world_bounds(
-                                    &member_id,
-                                    box_bounds,
-                                    origin,
-                                    leading_edge_resize,
-                                    None,
-                                )
-                                .is_ok(),
-                            None => self
-                                .engine
-                                .set_world_bounds(&member_id, box_bounds, None)
-                                .is_ok(),
-                        };
-                        if ok {
-                            any = true;
-                            kept.push(member_id);
-                        }
-                    }
-                    if any {
-                        working_ids = kept;
-                    }
-                    any
-                } else {
-                    let bounds = EngineBounds::new(x, y, width.max(1.0), height.max(1.0));
-                    match parent_origin {
-                        Some(parent_origin) => self
-                            .engine
-                            .set_rendered_world_bounds(
-                                &id,
-                                bounds,
-                                parent_origin,
-                                leading_edge_resize,
-                                None,
-                            )
-                            .is_ok(),
-                        None => self.engine.set_world_bounds(&id, bounds, None).is_ok(),
-                    }
-                };
-                if changed {
-                    if move_mode && !multi_move {
-                        let primary = working_ids.first().cloned().unwrap_or(id.clone());
-                        if let Some((target, target_origin)) = rendered_drop {
-                            let current_parent = self
-                                .engine
-                                .node(&primary)
-                                .and_then(|node| node.parent_id.clone());
-                            let target_is_container =
-                                self.engine.node(&target).is_some_and(Node::is_container);
-                            if current_parent.as_ref() != Some(&target)
-                                && target != primary
-                                && target_is_container
-                            {
-                                let _ = self.engine.reparent_from_rendered_position(
-                                    &primary,
-                                    &target,
-                                    Vec2::new(x, y),
-                                    target_origin,
-                                );
-                            }
-                        }
-                    }
-                    if move_mode || members.is_some() {
-                        self.selection = working_ids;
-                        if let Some(last) = self.selection.last().cloned() {
-                            self.reveal_layer(&last);
-                        }
-                    } else {
-                        self.select_only(id);
-                    }
-                    self.note_change(cx);
-                }
-            }
-            "create" if !self.preview_mode => {
-                let Some(bounds) = message.get("bounds") else {
-                    return;
-                };
-                let read = |name| bounds.get(name).and_then(|value| value.as_f64());
-                let (Some(x), Some(y), Some(width), Some(height)) =
-                    (read("x"), read("y"), read("width"), read("height"))
-                else {
-                    return;
-                };
-                let Some(tool) = message
-                    .get("tool")
-                    .and_then(|value| value.as_str())
-                    .and_then(canvas_tool_from_name)
-                else {
-                    return;
-                };
-                if let Some(id) = self.commit_draw(tool, x, y, width, height, cx) {
-                    self.select_only(id.clone());
-                    self.tool = CanvasTool::Select;
-                    if tool == CanvasTool::Image {
-                        self.open_image_picker(id, cx);
-                    }
-                    self.note_change(cx);
-                }
-            }
-            "text" if !self.preview_mode => {
-                let Some(id) = message
-                    .get("id")
-                    .and_then(|value| value.as_str())
-                    .map(NodeId::from)
-                else {
-                    return;
-                };
-                let Some(text) = message.get("text").and_then(|value| value.as_str()) else {
-                    return;
-                };
-                if self.engine.set_text(&id, text.to_string()).is_ok() {
-                    if let Some(bounds) = message.get("bounds") {
-                        let read = |name| bounds.get(name).and_then(|value| value.as_f64());
-                        if let (Some(x), Some(y), Some(width), Some(height)) =
-                            (read("x"), read("y"), read("width"), read("height"))
-                        {
-                            if [x, y, width, height].into_iter().all(f64::is_finite) {
-                                let node = self.engine.node(&id).cloned();
-                                if let Some(node) = node {
-                                    let hug = node.layout.width_mode == SizeMode::Hug
-                                        || node.layout.height_mode == SizeMode::Hug;
-                                    if hug {
-                                        let _ = self.engine.set_world_bounds(
-                                            &id,
-                                            EngineBounds::new(
-                                                x,
-                                                y,
-                                                width.max(1.0),
-                                                height.max(1.0),
-                                            ),
-                                            Some(format!("edit-text-bounds:{id}")),
-                                        );
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    self.select_only(id.clone());
-                    self.soft_sync_text_edit(&id, text, cx);
-                }
-            }
-            "drop-files" if !self.preview_mode => {
-                let Some(paths) =
-                    message
-                        .get("paths")
-                        .and_then(|value| value.as_array())
-                        .map(|values| {
-                            values
-                                .iter()
-                                .filter_map(|value| value.as_str().map(PathBuf::from))
-                                .collect::<Vec<_>>()
-                        })
-                else {
-                    return;
-                };
-                let world = message.get("world").and_then(|point| {
-                    Some(Vec2::new(
-                        point.get("x")?.as_f64()?,
-                        point.get("y")?.as_f64()?,
-                    ))
-                });
-                if let Some(world) = world {
-                    self.context_world = Some(world);
-                    self.last_pointer_world = Some(world);
-                }
-                let mut imported = false;
-                for path in paths {
-                    if !is_pasteable_image_path(&path) {
-                        continue;
-                    }
-                    match self.store.import_asset_file(&path) {
-                        Ok(stored) => {
-                            if let Ok(bytes) = fs::read(&stored) {
-                                let format =
-                                    image_format_from_path(&stored).unwrap_or(ImageFormat::Png);
-                                let name = stored
-                                    .file_name()
-                                    .and_then(|n| n.to_str())
-                                    .map(|s| s.to_string());
-                                // Force paste at drop world by setting context_world.
-                                if self.paste_image_bytes(&bytes, format, name.as_deref(), cx) {
-                                    imported = true;
-                                }
-                            }
-                        }
-                        Err(error) => eprintln!("loora: drop import failed: {error}"),
-                    }
-                }
-                if !imported {
-                    cx.notify();
-                }
-            }
-            "edit-image" if !self.preview_mode => {
-                if let Some(id) = message
-                    .get("id")
-                    .and_then(|value| value.as_str())
-                    .map(NodeId::from)
-                {
-                    if self.engine.node(&id).is_some() {
-                        self.select_only(id.clone());
-                        self.open_image_picker(id, cx);
-                    }
-                }
-            }
-            "preview-trigger" if self.preview_mode => {
-                let Some(id) = message
-                    .get("id")
-                    .and_then(|value| value.as_str())
-                    .map(NodeId::from)
-                else {
-                    return;
-                };
-                let trigger = match message.get("trigger").and_then(|value| value.as_str()) {
-                    Some("click") => Some(InteractionTrigger::Click),
-                    Some("double_click") => Some(InteractionTrigger::DoubleClick),
-                    Some("hover") => {
-                        self.preview_hovered = Some(id.clone());
-                        self.preview_hover_started_at = Some(Instant::now());
-                        self.preview_hover_exited = None;
-                        Some(InteractionTrigger::Hover)
-                    }
-                    Some("hover_end") => {
-                        self.preview_hovered = None;
-                        self.preview_hover_exited = Some((id.clone(), Instant::now()));
-                        Some(InteractionTrigger::HoverEnd)
-                    }
-                    Some("focus") => {
-                        if let Some(previous) = self.preview_focused.replace(id.clone()) {
-                            if previous != id {
-                                self.dispatch_preview_trigger(
-                                    &previous,
-                                    InteractionTrigger::Blur,
-                                    None,
-                                    cx,
-                                );
-                            }
-                        }
-                        Some(InteractionTrigger::Focus)
-                    }
-                    Some("blur") => Some(InteractionTrigger::Blur),
-                    Some("submit") => Some(InteractionTrigger::Submit),
-                    Some("change") => Some(InteractionTrigger::Change),
-                    Some("input") => Some(InteractionTrigger::Input),
-                    _ => None,
-                };
-                if let Some(trigger) = trigger {
-                    self.dispatch_preview_trigger(&id, trigger, None, cx);
-                }
-            }
-            "context-menu" if !self.preview_mode => {
-                self.blur_props_if_needed(cx);
-                self.context_menu = None;
-                if let Some(id) = message
-                    .get("id")
-                    .and_then(|value| value.as_str())
-                    .map(NodeId::from)
-                {
-                    if self.engine.node(&id).is_some() && !self.selection.contains(&id) {
-                        self.select_only(id);
-                    }
-                } else {
-                    self.clear_selection();
-                }
-                if let Some(world) = message.get("world") {
-                    if let (Some(x), Some(y)) = (
-                        world.get("x").and_then(|value| value.as_f64()),
-                        world.get("y").and_then(|value| value.as_f64()),
-                    ) {
-                        self.context_world = Some(Vec2::new(x, y));
-                    }
-                }
-                let x = message
-                    .get("x")
-                    .and_then(|value| value.as_f64())
-                    .unwrap_or(0.0);
-                let y = message
-                    .get("y")
-                    .and_then(|value| value.as_f64())
-                    .unwrap_or(0.0);
-                let entries = self.context_menu_entries(cx);
-                let entries = web_context_menu_entries(&entries);
-                self.webview.update(cx, |view, _| {
-                    let _ = view.command(serde_json::json!({
-                        "type": "context-menu",
-                        "x": x,
-                        "y": y,
-                        "entries": entries,
-                    }));
-                });
-            }
-            "context-action" if !self.preview_mode => {
-                if let Some(action) = message.get("action").and_then(|value| value.as_str()) {
-                    self.run_context_action(action, cx);
-                }
-            }
-            "command" => {
-                if let Some(command) = message.get("command").and_then(|value| value.as_str()) {
-                    self.handle_web_command(command, cx);
-                }
-            }
-            "overlay-close" if self.preview_mode && self.preview_overlay.take().is_some() => {
-                self.preview_runtime_generation = self.preview_runtime_generation.wrapping_add(1);
-            }
-            _ => {}
-        }
-    }
-
-    fn handle_web_command(&mut self, command: &str, cx: &mut Context<Self>) {
-        match command {
-            "undo" => {
-                if self.engine.undo().unwrap_or(false) {
-                    self.note_change(cx);
-                }
-            }
-            "redo" => {
-                if self.engine.redo().unwrap_or(false) {
-                    self.note_change(cx);
-                }
-            }
-            "save" => self.save_now(cx),
-            "copy" if !self.preview_mode => self.copy_selection(cx),
-            "cut" if !self.preview_mode => {
-                self.copy_selection(cx);
-                self.delete_selection(cx);
-            }
-            "paste" if !self.preview_mode => self.paste_clipboard(cx),
-            "duplicate" if !self.preview_mode => self.duplicate_selection(cx),
-            "select-all" if !self.preview_mode => self.select_all_on_page(cx),
-            "lock" if !self.preview_mode => {
-                let lock = self
-                    .selection
-                    .iter()
-                    .filter_map(|id| self.engine.node(id))
-                    .any(|node| !node.locked);
-                let mut changed = false;
-                for id in self.selection.clone() {
-                    changed |= self.engine.set_locked(&id, lock).is_ok();
-                }
-                if changed {
-                    self.note_change(cx);
-                }
-            }
-            "group" if !self.preview_mode => self.group_selection(cx),
-            "ungroup" if !self.preview_mode => self.ungroup_selection(cx),
-            "bring-front" if !self.preview_mode => {
-                let mut changed = false;
-                for id in self.selection.clone() {
-                    changed |= self.engine.bring_to_front_history(&id).is_ok();
-                }
-                if changed {
-                    self.note_change(cx);
-                }
-            }
-            "send-back" if !self.preview_mode => {
-                let mut changed = false;
-                for id in self.selection.clone() {
-                    changed |= self.engine.send_to_back(&id).is_ok();
-                }
-                if changed {
-                    self.note_change(cx);
-                }
-            }
-            "zoom-in" => self.zoom_by(1.15, cx),
-            "zoom-out" => self.zoom_by(1.0 / 1.15, cx),
-            "zoom-reset" => {
-                let center = self.viewport_center();
-                self.camera.set_zoom_at(center, 1.0);
-            }
-            "fit-selection" => self.fit_selection_or_page(cx),
-            "fit-all" => self.fit_all_pages(cx),
-            "files" => self.toggle_files_panel(cx),
-            "sidebar" => self.toggle_sidebar(cx),
-            "properties" => self.toggle_properties(cx),
-            "new" => self.create_design(cx),
-            "delete" if !self.preview_mode => {
-                self.delete_selection(cx);
-            }
-            "escape" => {
-                if self.preview_mode {
-                    self.set_tool(CanvasTool::Preview, cx);
-                } else if self.tool != CanvasTool::Select {
-                    self.set_tool(CanvasTool::Select, cx);
-                } else {
-                    self.clear_selection();
-                }
-            }
-            "tool:v" | "tool:select" => self.set_tool(CanvasTool::Select, cx),
-            "tool:h" | "tool:hand" => self.set_tool(CanvasTool::Hand, cx),
-            "tool:preview" => self.set_tool(CanvasTool::Preview, cx),
-            "tool:f" | "tool:frame" => self.set_tool(CanvasTool::Frame, cx),
-            "tool:t" | "tool:text" => self.set_tool(CanvasTool::Text, cx),
-            "tool:r" | "tool:rectangle" => self.set_tool(CanvasTool::Rectangle, cx),
-            "tool:shapes" => self.set_tool(CanvasTool::Shapes, cx),
-            "tool:i" | "tool:image" => self.set_tool(CanvasTool::Image, cx),
-            "tool:component" => self.set_tool(CanvasTool::Component, cx),
-            _ if command.starts_with("nudge:") && !self.preview_mode => {
-                let parts: Vec<_> = command.split(':').collect();
-                let amount = parts
-                    .get(2)
-                    .and_then(|value| value.parse::<f64>().ok())
-                    .unwrap_or(1.0);
-                let (dx, dy) = match parts.get(1).copied() {
-                    Some("left") => (-amount, 0.0),
-                    Some("right") => (amount, 0.0),
-                    Some("up") => (0.0, -amount),
-                    Some("down") => (0.0, amount),
-                    _ => return,
-                };
-                if self
-                    .engine
-                    .move_nodes(
-                        &self.selection.clone(),
-                        dx,
-                        dy,
-                        Some("keyboard-nudge".into()),
-                    )
-                    .is_ok()
-                {
-                    self.note_change(cx);
-                }
-            }
-            _ => {}
-        }
-    }
-
-    fn current_web_document_key(&self) -> WebDocumentKey {
-        WebDocumentKey {
-            document_id: self.engine.document().id.clone(),
+    fn cached_runtime_document(&mut self) -> (Arc<loora_engine::Document>, u64) {
+        let key = RuntimeDocumentKey {
             revision: self.engine.revision(),
+            preview_generation: self.preview_runtime_generation,
             preview_mode: self.preview_mode,
-            preview_runtime_generation: self.preview_runtime_generation,
-            active_breakpoint_id: self.active_breakpoint_id.clone(),
-        }
-    }
-
-    fn current_web_state_key(&self) -> WebStateKey {
-        WebStateKey {
-            pan_x: self.camera.pan.x.to_bits(),
-            pan_y: self.camera.pan.y.to_bits(),
-            zoom: self.camera.zoom.to_bits(),
-            selection: self.selection.clone(),
-            agent_nodes: self
-                .mcp_activity
-                .as_ref()
-                .map(|activity| activity.node_ids.clone())
-                .unwrap_or_default(),
-            tool: self.tool,
-            preview_mode: self.preview_mode,
-            can_undo: self.engine.can_undo(),
-            can_redo: self.engine.can_redo(),
-            chrome: self.theme.kind,
-        }
-    }
-
-    fn web_runtime_document(&self) -> loora_engine::Document {
-        if self.preview_variants.is_empty() {
-            return self.engine.document().clone();
-        }
-        let mut runtime = CanvasEngine::new(self.engine.document().clone());
-        let mut variants: Vec<_> = self.preview_variants.iter().collect();
-        variants.sort_by(|left, right| left.0.as_str().cmp(right.0.as_str()));
-        for (id, variant) in variants {
-            let _ = runtime.apply_variant(id, variant.clone());
-        }
-        runtime.document().clone()
-    }
-
-    fn sync_native_canvas(&mut self, cx: &mut Context<Self>) {
-        if !self.native_canvas_active {
-            return;
-        }
-        let mut document = {
-            let runtime = self.web_runtime_document();
-            self.active_breakpoint_id
-                .as_ref()
-                .and_then(|id| {
-                    runtime
-                        .breakpoints
-                        .iter()
-                        .find(|breakpoint| &breakpoint.id == id)
-                        .map(|breakpoint| breakpoint.preview_width.max(1.0))
-                })
-                .map(|width| CanvasEngine::new(runtime.clone()).resolved_document_at_width(width))
-                .unwrap_or(runtime)
+            breakpoint_id: self.active_breakpoint_id.clone(),
         };
+        if let Some((cached_key, document)) = self.runtime_document_cache.as_ref() {
+            if cached_key == &key {
+                return (document.clone(), self.runtime_document_generation);
+            }
+        }
+
+        let mut document = if self.preview_variants.is_empty() {
+            self.engine.document().clone()
+        } else {
+            let mut runtime = CanvasEngine::new(self.engine.document().clone());
+            let mut variants: Vec<_> = self.preview_variants.iter().collect();
+            variants.sort_by(|left, right| left.0.as_str().cmp(right.0.as_str()));
+            for (id, variant) in variants {
+                let _ = runtime.apply_variant(id, variant.clone());
+            }
+            runtime.document().clone()
+        };
+        if let Some(width) = self.active_breakpoint_id.as_ref().and_then(|id| {
+            document
+                .breakpoints
+                .iter()
+                .find(|breakpoint| &breakpoint.id == id)
+                .map(|breakpoint| breakpoint.preview_width.max(1.0))
+        }) {
+            document = CanvasEngine::new(document).resolved_document_at_width(width);
+        }
         if self.preview_mode {
             let current_page = self
                 .preview_current_page
@@ -1536,10 +667,14 @@ impl CanvasWorkspace {
                 }
             }
         }
-        let revision = self
-            .engine
-            .revision()
-            .wrapping_add(self.preview_runtime_generation);
+        self.runtime_document_generation = self.runtime_document_generation.wrapping_add(1);
+        let document = Arc::new(document);
+        self.runtime_document_cache = Some((key, document.clone()));
+        (document, self.runtime_document_generation)
+    }
+
+    fn sync_native_canvas(&mut self, cx: &mut Context<Self>) {
+        let (document, revision) = self.cached_runtime_document();
         let camera = self.camera;
         let selection = self.selection.clone();
         let agent_nodes = self
@@ -1683,6 +818,43 @@ impl CanvasWorkspace {
                     self.note_change(cx);
                 }
             }
+            CanvasEvent::RotateCommitted(members) => {
+                let mut changed = false;
+                let mut selection = Vec::new();
+                for (id, rotation) in members {
+                    if self.engine.set_rotation(id, *rotation, None).is_ok() {
+                        changed = true;
+                        selection.push(id.clone());
+                    }
+                }
+                if changed {
+                    self.selection = selection;
+                    self.note_change(cx);
+                }
+            }
+            CanvasEvent::LayoutMetricsChanged { id, gap, padding } => {
+                if self.selection.as_slice() == std::slice::from_ref(id) {
+                    self.patch_selected_layout(
+                        |layout| {
+                            layout.gap = *gap;
+                            layout.padding = *padding;
+                        },
+                        cx,
+                    );
+                }
+            }
+            CanvasEvent::LayoutControlTriggered { id, control } => {
+                if self.selection.as_slice() != std::slice::from_ref(id) {
+                    return;
+                }
+                match control {
+                    LayoutControl::Direction => self.cycle_selection_direction(cx),
+                    LayoutControl::Wrap => self.toggle_selection_wrap(cx),
+                    LayoutControl::Align => self.cycle_selection_align(cx),
+                    LayoutControl::Justify => self.cycle_selection_justify(cx),
+                    LayoutControl::Columns => self.cycle_selection_columns(cx),
+                }
+            }
             CanvasEvent::CreateCommitted { tool, bounds } => {
                 if let Some(id) =
                     self.commit_draw(*tool, bounds.x, bounds.y, bounds.width, bounds.height, cx)
@@ -1758,135 +930,11 @@ impl CanvasWorkspace {
         _window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if !self.native_canvas_active {
-            return;
-        }
         let world = self.native_canvas.read(cx).pointer_world();
         self.context_world = world;
         self.last_pointer_world = world;
         if !self.paste_external_paths(paths.paths(), cx) {
             cx.notify();
-        }
-    }
-
-    fn sync_web_canvas(&mut self, cx: &mut Context<Self>) {
-        // Hide the native webview for settings and GPUI overlays that sit under wry.
-        // Canvas HTML menus stay in-webview and never set these flags.
-        let hide_webview = self.webview_should_be_hidden();
-        self.sync_webview_visibility(cx);
-        if !hide_webview {
-            self.flush_pending_fit_all(cx);
-        }
-        if self.native_canvas_active || !self.web_ready || hide_webview {
-            return;
-        }
-
-        let document_key = self.current_web_document_key();
-        let state_key = self.current_web_state_key();
-        if self.web_document_key.as_ref() != Some(&document_key) {
-            if self
-                .web_document_key
-                .as_ref()
-                .is_some_and(|previous| previous.document_id != document_key.document_id)
-            {
-                let _ = self
-                    .webview
-                    .update(cx, |view, _| view.invalidate_markup_cache());
-            }
-            let document = self.web_runtime_document();
-            let viewport_width = self.active_breakpoint_id.as_ref().and_then(|id| {
-                document
-                    .breakpoints
-                    .iter()
-                    .find(|breakpoint| &breakpoint.id == id)
-                    .map(|breakpoint| breakpoint.preview_width.max(1.0))
-            });
-            let options = HtmlCanvasOptions {
-                viewport_width,
-                theme_id: self.preview_mode.then(|| {
-                    self.preview_theme_id
-                        .clone()
-                        .unwrap_or_else(|| document.active_theme_id.clone())
-                }),
-                hidden_nodes: self.preview_hidden.clone(),
-                current_page_id: self.preview_mode.then(|| {
-                    self.preview_current_page
-                        .clone()
-                        .unwrap_or_else(|| self.engine.root_page_id().clone())
-                }),
-                overlay_page_id: self
-                    .preview_mode
-                    .then(|| self.preview_overlay.clone())
-                    .flatten(),
-                preview: self.preview_mode,
-            };
-            let compiled = compile_canvas(&document, &options);
-            let allowed_assets: Vec<PathBuf> = document
-                .nodes
-                .values()
-                .filter_map(|node| node.image_path.as_deref())
-                .filter(|path| !is_http_url(path) && !path.starts_with("data:"))
-                .map(PathBuf::from)
-                .collect();
-            let camera = self.camera;
-            let selection = self.selection.clone();
-            let agent_nodes = self
-                .mcp_activity
-                .as_ref()
-                .map(|activity| activity.node_ids.clone())
-                .unwrap_or_default();
-            let tool = self.tool.as_str();
-            let preview = self.preview_mode;
-            let can_undo = self.engine.can_undo();
-            let can_redo = self.engine.can_redo();
-            let chrome = self.theme.kind.as_str();
-            let result = self.webview.update(cx, |view, _| {
-                view.set_allowed_assets(allowed_assets);
-                view.apply_canvas(
-                    &compiled,
-                    camera,
-                    &selection,
-                    &agent_nodes,
-                    tool,
-                    preview,
-                    can_undo,
-                    can_redo,
-                    chrome,
-                )
-            });
-            match result {
-                Ok(()) => {
-                    self.web_document_key = Some(document_key);
-                    self.web_state_key = Some(state_key);
-                }
-                Err(error) => eprintln!("loora: {error}"),
-            }
-        } else if self.web_state_key.as_ref() != Some(&state_key) {
-            let command = serde_json::json!({
-                "type": "state",
-                "camera": {
-                    "x": self.camera.pan.x,
-                    "y": self.camera.pan.y,
-                    "zoom": self.camera.zoom,
-                },
-                "selection": self.selection.iter().map(NodeId::as_str).collect::<Vec<_>>(),
-                "agentNodes": self
-                    .mcp_activity
-                    .as_ref()
-                    .map(|activity| activity.node_ids.iter().map(NodeId::as_str).collect::<Vec<_>>())
-                    .unwrap_or_default(),
-                "tool": self.tool.as_str(),
-                "preview": self.preview_mode,
-                "canUndo": self.engine.can_undo(),
-                "canRedo": self.engine.can_redo(),
-                "chrome": self.theme.kind.as_str(),
-            });
-            let result = self.webview.update(cx, |view, _| view.command(command));
-            if let Err(error) = result {
-                eprintln!("loora: {error}");
-            } else {
-                self.web_state_key = Some(state_key);
-            }
         }
     }
 
@@ -2131,8 +1179,6 @@ impl CanvasWorkspace {
             self.shortcut_recording = None;
             self.shortcut_search_focused = false;
         }
-        // Route changes must not force-show over command/image/color/inspector overlays.
-        self.sync_webview_visibility(cx);
         cx.notify();
     }
 
@@ -2147,34 +1193,7 @@ impl CanvasWorkspace {
             return;
         }
         self.developer_inspector_open = open;
-        self.sync_webview_visibility(cx);
         cx.notify();
-    }
-
-    fn webview_should_be_hidden(&self) -> bool {
-        self.native_canvas_active
-            || self.settings_route_active
-            || canvas_webview_hidden_for_overlays(
-                self.command_open,
-                self.image_picker.is_some(),
-                self.color_picker.is_some(),
-                self.context_menu.is_some(),
-                self.developer_inspector_open,
-            )
-    }
-
-    fn sync_webview_visibility(&mut self, cx: &mut Context<Self>) {
-        let visible = !self.webview_should_be_hidden();
-        if !should_apply_visibility(
-            &mut self.webview_visible,
-            visible,
-            cfg!(target_os = "linux"),
-        ) {
-            return;
-        }
-        self.webview.update(cx, |view, _| {
-            view.set_visible(visible);
-        });
     }
 
     pub fn theme(&self) -> Theme {
@@ -2297,41 +1316,6 @@ impl CanvasWorkspace {
         }
     }
 
-    /// Forward host keystrokes into the webview contenteditable. Needed on Linux
-    /// where the wry child never reliably receives X11 keyboard focus.
-    fn forward_key_to_webview_editor(&self, event: &KeyDownEvent, cx: &mut Context<Self>) {
-        let mods = &event.keystroke.modifiers;
-        let key = event.keystroke.key.as_str();
-        let action = match key {
-            "backspace" => Some("backspace"),
-            "delete" => Some("delete"),
-            "enter" => Some("enter"),
-            "escape" => Some("escape"),
-            "left" => Some("left"),
-            "right" => Some("right"),
-            "up" => Some("up"),
-            "down" => Some("down"),
-            "home" => Some("home"),
-            "end" => Some("end"),
-            _ => None,
-        };
-        let payload = if let Some(action) = action {
-            serde_json::json!({
-                "type": "inject-key",
-                "action": action,
-                "shift": mods.shift,
-            })
-        } else if let Some(ch) = event.keystroke.key_char.as_deref() {
-            if mods.control || mods.platform || mods.alt || ch.is_empty() {
-                return;
-            }
-            serde_json::json!({ "type": "inject-key", "text": ch })
-        } else {
-            return;
-        };
-        let _ = self.webview.update(cx, |view, _| view.command(payload));
-    }
-
     pub fn open_design(&mut self, id: &str, cx: &mut Context<Self>) {
         if self.engine.document().id == id {
             return;
@@ -2402,17 +1386,8 @@ impl CanvasWorkspace {
                     .and_then(|e| e.to_str())
                     .unwrap_or("")
                     .to_ascii_lowercase();
-                if ext == "png" {
-                    this.pending_png_export = Some(path);
-                    let result = this.webview.update(cx, |view, _| view.request_png_export());
-                    if let Err(error) = result {
-                        this.pending_png_export = None;
-                        eprintln!("loora: export failed: {error}");
-                    }
-                    cx.notify();
-                    return;
-                }
                 let result = match ext.as_str() {
+                    "png" => export_page_png(this.engine.document(), &path),
                     "html" | "htm" => {
                         let html =
                             standalone_html(this.engine.document(), &HtmlCanvasOptions::default());
@@ -2618,67 +1593,6 @@ impl CanvasWorkspace {
         } else {
             false
         }
-    }
-
-    fn soft_sync_text_edit(&mut self, id: &NodeId, text: &str, cx: &mut Context<Self>) {
-        // Keep the live DOM node (caret/selection) and only refresh CSS + text.
-        let document = self.web_runtime_document();
-        let options = HtmlCanvasOptions {
-            viewport_width: self.active_breakpoint_id.as_ref().and_then(|bid| {
-                document
-                    .breakpoints
-                    .iter()
-                    .find(|breakpoint| &breakpoint.id == bid)
-                    .map(|breakpoint| breakpoint.preview_width.max(1.0))
-            }),
-            theme_id: self.preview_mode.then(|| {
-                self.preview_theme_id
-                    .clone()
-                    .unwrap_or_else(|| document.active_theme_id.clone())
-            }),
-            hidden_nodes: self.preview_hidden.clone(),
-            current_page_id: self.preview_mode.then(|| {
-                self.preview_current_page
-                    .clone()
-                    .unwrap_or_else(|| self.engine.root_page_id().clone())
-            }),
-            overlay_page_id: self
-                .preview_mode
-                .then(|| self.preview_overlay.clone())
-                .flatten(),
-            preview: self.preview_mode,
-        };
-        let compiled = compile_canvas(&document, &options);
-        let camera = self.camera;
-        let selection = self.selection.clone();
-        let tool = self.tool.as_str();
-        let preview = self.preview_mode;
-        let can_undo = self.engine.can_undo();
-        let can_redo = self.engine.can_redo();
-        let patch = serde_json::json!({
-            "type": "patch-text",
-            "id": id.as_str(),
-            "text": text,
-            "css": compiled.css,
-            "camera": {"x": camera.pan.x, "y": camera.pan.y, "zoom": camera.zoom},
-            "selection": selection.iter().map(NodeId::as_str).collect::<Vec<_>>(),
-            "tool": tool,
-            "preview": preview,
-            "canUndo": can_undo,
-            "canRedo": can_redo,
-        });
-        let result = self.webview.update(cx, |view, _| {
-            view.accept_markup_baseline(&compiled.markup);
-            view.command(patch)
-        });
-        if let Err(error) = result {
-            eprintln!("loora: {error}");
-            self.note_change(cx);
-            return;
-        }
-        self.web_document_key = Some(self.current_web_document_key());
-        self.web_state_key = Some(self.current_web_state_key());
-        self.note_change(cx);
     }
 
     fn open_image_picker(&mut self, id: NodeId, cx: &mut Context<Self>) {
@@ -3509,9 +2423,6 @@ impl CanvasWorkspace {
             highlight,
             entries,
         });
-        self.webview.update(cx, |view, _| {
-            let _ = view.command(serde_json::json!({ "type": "dismiss-context-menu" }));
-        });
         self.focus_handle.focus(window, cx);
         cx.notify();
     }
@@ -3859,6 +2770,7 @@ impl CanvasWorkspace {
         } else if let Some(axis) = action.strip_prefix("wmode:") {
             let mode = match axis {
                 "fixed" => SizeMode::Fixed,
+                "percent" => SizeMode::Percent,
                 "hug" => SizeMode::Hug,
                 "fill" => SizeMode::Fill,
                 _ => return,
@@ -3868,16 +2780,23 @@ impl CanvasWorkspace {
                 if mode == SizeMode::Fill {
                     layout.grow = layout.grow.max(1.0);
                 }
+                if mode == SizeMode::Percent && layout.width_percent.is_none() {
+                    layout.width_percent = Some(100.0);
+                }
             });
         } else if let Some(axis) = action.strip_prefix("hmode:") {
             let mode = match axis {
                 "fixed" => SizeMode::Fixed,
+                "percent" => SizeMode::Percent,
                 "hug" => SizeMode::Hug,
                 "fill" => SizeMode::Fill,
                 _ => return,
             };
             changed = self.patch_selected_layout_bool(|layout| {
                 layout.height_mode = mode;
+                if mode == SizeMode::Percent && layout.height_percent.is_none() {
+                    layout.height_percent = Some(100.0);
+                }
             });
         } else if let Some(name) = action.strip_prefix("variant:") {
             for id in self.selection.clone() {
@@ -4484,6 +3403,12 @@ impl CanvasWorkspace {
             PropsField::Gap => format_number(node.layout.gap as f64, 1),
             PropsField::Grow => format_number(node.layout.grow as f64, 2),
             PropsField::Shrink => format_number(node.layout.shrink.unwrap_or(1.0) as f64, 2),
+            PropsField::WidthPercent => {
+                format_number(node.layout.width_percent.unwrap_or(100.0), 1)
+            }
+            PropsField::HeightPercent => {
+                format_number(node.layout.height_percent.unwrap_or(100.0), 1)
+            }
             PropsField::PaddingTop => format_number(node.layout.padding.top as f64, 1),
             PropsField::PaddingRight => format_number(node.layout.padding.right as f64, 1),
             PropsField::PaddingBottom => format_number(node.layout.padding.bottom as f64, 1),
@@ -4600,6 +3525,20 @@ impl CanvasWorkspace {
                     .as_ref()
                     .map(|t| t.duration_ms as f64)
                     .unwrap_or(300.0),
+                0,
+            ),
+            PropsField::MotionDelay => format_number(
+                node.transition
+                    .as_ref()
+                    .map(|t| t.delay_ms as f64)
+                    .unwrap_or(0.0),
+                0,
+            ),
+            PropsField::AnimationDelay => format_number(
+                node.animations
+                    .first()
+                    .map(|animation| animation.delay_ms as f64)
+                    .unwrap_or(0.0),
                 0,
             ),
             PropsField::ActionUrl => node
@@ -4818,6 +3757,20 @@ impl CanvasWorkspace {
         );
     }
 
+    pub fn cycle_selection_columns(&mut self, cx: &mut Context<Self>) {
+        self.blur_props_if_needed(cx);
+        self.patch_selected_layout(
+            |layout| {
+                layout.columns = if layout.columns >= 6 {
+                    1
+                } else {
+                    layout.columns.max(1) + 1
+                };
+            },
+            cx,
+        );
+    }
+
     pub fn cycle_selection_stroke_style(&mut self, cx: &mut Context<Self>) {
         self.blur_props_if_needed(cx);
         if self.preview_mode {
@@ -4983,15 +3936,185 @@ impl CanvasWorkspace {
                     style: None,
                 });
             }
-            let visual_states = if states.hover.is_none() && states.press.is_none() {
-                None
-            } else {
-                Some(states)
-            };
+            let visual_states =
+                if states.hover.is_none() && states.press.is_none() && states.focus.is_none() {
+                    None
+                } else {
+                    Some(states)
+                };
             if node.transition.is_none() {
                 let _ = self.engine.set_transition(&id, Some(Transition::default()));
             }
             changed |= self.engine.set_visual_states(&id, visual_states).is_ok();
+        }
+        if changed {
+            self.note_change(cx);
+        }
+    }
+
+    pub fn toggle_press_preset(&mut self, cx: &mut Context<Self>) {
+        self.toggle_visual_state_preset("press", cx);
+    }
+
+    pub fn toggle_focus_preset(&mut self, cx: &mut Context<Self>) {
+        self.toggle_visual_state_preset("focus", cx);
+    }
+
+    fn toggle_visual_state_preset(&mut self, kind: &str, cx: &mut Context<Self>) {
+        self.blur_props_if_needed(cx);
+        if self.preview_mode {
+            return;
+        }
+        let mut changed = false;
+        for id in self.selection.clone() {
+            let Some(node) = self.engine.node(&id).cloned() else {
+                continue;
+            };
+            if node.locked {
+                continue;
+            }
+            let mut states = node.visual_states.unwrap_or_default();
+            match kind {
+                "press" => {
+                    states.press = states.press.is_none().then_some(VisualState {
+                        opacity: Some(0.94),
+                        scale: Some(0.97),
+                        fill: None,
+                        transform: None,
+                        style: None,
+                    });
+                }
+                "focus" => {
+                    states.focus = states.focus.is_none().then_some(VisualState {
+                        opacity: None,
+                        scale: Some(1.01),
+                        fill: None,
+                        transform: Some(MotionTransform {
+                            y: Some(-2.0),
+                            ..MotionTransform::default()
+                        }),
+                        style: None,
+                    });
+                }
+                _ => return,
+            }
+            let visual_states =
+                if states.hover.is_none() && states.press.is_none() && states.focus.is_none() {
+                    None
+                } else {
+                    Some(states)
+                };
+            if node.transition.is_none() {
+                let _ = self.engine.set_transition(&id, Some(Transition::default()));
+            }
+            changed |= self.engine.set_visual_states(&id, visual_states).is_ok();
+        }
+        if changed {
+            self.note_change(cx);
+        }
+    }
+
+    pub fn cycle_animation_preset(&mut self, cx: &mut Context<Self>) {
+        self.blur_props_if_needed(cx);
+        if self.preview_mode {
+            return;
+        }
+
+        let presets = animation_presets();
+        let mut library = self.engine.document().animations.clone();
+        let mut library_changed = false;
+        for preset in &presets {
+            if !library.iter().any(|animation| animation.id == preset.id) {
+                library.push(preset.clone());
+                library_changed = true;
+            }
+        }
+        if library_changed {
+            let _ = self.engine.set_document_animations(library);
+        }
+
+        let ids = ["loora-fade-up", "loora-scale-in", "loora-pulse"];
+        let mut changed = library_changed;
+        for id in self.selection.clone() {
+            let Some(node) = self.engine.node(&id).cloned() else {
+                continue;
+            };
+            if node.locked {
+                continue;
+            }
+            let mut attachments = node.animations;
+            let current = attachments.first().map(|a| a.animation_id.as_str());
+            let next = match current {
+                None => Some(ids[0]),
+                Some(current) if current == ids[0] => Some(ids[1]),
+                Some(current) if current == ids[1] => Some(ids[2]),
+                Some(current) if current == ids[2] => None,
+                Some(_) => Some(ids[0]),
+            };
+            match (attachments.first_mut(), next) {
+                (Some(attachment), Some(next)) => attachment.animation_id = next.into(),
+                (None, Some(next)) => attachments.push(NodeAnimation {
+                    animation_id: next.into(),
+                    trigger: AnimationTrigger::Load,
+                    delay_ms: 0.0,
+                    once: false,
+                }),
+                (Some(_), None) => {
+                    attachments.remove(0);
+                }
+                (None, None) => {}
+            }
+            changed |= self.engine.set_node_animations(&id, attachments).is_ok();
+        }
+        if changed {
+            self.note_change(cx);
+        }
+    }
+
+    pub fn cycle_animation_trigger(&mut self, cx: &mut Context<Self>) {
+        self.blur_props_if_needed(cx);
+        let triggers = [
+            AnimationTrigger::Load,
+            AnimationTrigger::InView,
+            AnimationTrigger::Hover,
+            AnimationTrigger::Press,
+            AnimationTrigger::Always,
+        ];
+        let mut changed = false;
+        for id in self.selection.clone() {
+            let Some(node) = self.engine.node(&id).cloned() else {
+                continue;
+            };
+            if node.locked || node.animations.is_empty() {
+                continue;
+            }
+            let mut attachments = node.animations;
+            let current = attachments[0].trigger;
+            let index = triggers
+                .iter()
+                .position(|trigger| *trigger == current)
+                .unwrap_or(0);
+            attachments[0].trigger = triggers[(index + 1) % triggers.len()];
+            changed |= self.engine.set_node_animations(&id, attachments).is_ok();
+        }
+        if changed {
+            self.note_change(cx);
+        }
+    }
+
+    pub fn toggle_animation_once(&mut self, cx: &mut Context<Self>) {
+        self.blur_props_if_needed(cx);
+        let mut changed = false;
+        for id in self.selection.clone() {
+            let Some(node) = self.engine.node(&id).cloned() else {
+                continue;
+            };
+            if node.locked || node.animations.is_empty() {
+                continue;
+            }
+            let mut attachments = node.animations;
+            attachments[0].once = !attachments[0].once;
+            changed |= self.engine.set_node_animations(&id, attachments).is_ok();
         }
         if changed {
             self.note_change(cx);
@@ -5283,6 +4406,8 @@ impl CanvasWorkspace {
                 PropsField::Gap
                 | PropsField::Grow
                 | PropsField::Shrink
+                | PropsField::WidthPercent
+                | PropsField::HeightPercent
                 | PropsField::PaddingTop
                 | PropsField::PaddingRight
                 | PropsField::PaddingBottom
@@ -5306,6 +4431,12 @@ impl CanvasWorkspace {
                         PropsField::MinHeight => layout.min_height = Some(value.max(0.0)),
                         PropsField::MaxHeight => layout.max_height = Some(value.max(0.0)),
                         PropsField::AspectRatio => layout.aspect_ratio = Some(value.max(0.01)),
+                        PropsField::WidthPercent => {
+                            layout.width_percent = Some(value.clamp(0.0, 1000.0))
+                        }
+                        PropsField::HeightPercent => {
+                            layout.height_percent = Some(value.clamp(0.0, 1000.0))
+                        }
                         _ => {}
                     }
                     self.engine
@@ -5394,6 +4525,19 @@ impl CanvasWorkspace {
                     let mut transition = node.transition.unwrap_or_default();
                     transition.duration_ms = value.max(0.0) as f32;
                     self.engine.set_transition(&id, Some(transition)).is_ok()
+                }
+                PropsField::MotionDelay => {
+                    let mut transition = node.transition.unwrap_or_default();
+                    transition.delay_ms = value.max(0.0) as f32;
+                    self.engine.set_transition(&id, Some(transition)).is_ok()
+                }
+                PropsField::AnimationDelay => {
+                    let mut animations = node.animations;
+                    let Some(animation) = animations.first_mut() else {
+                        continue;
+                    };
+                    animation.delay_ms = value.max(0.0) as f32;
+                    self.engine.set_node_animations(&id, animations).is_ok()
                 }
                 PropsField::VectorWeight => {
                     let mut paths = node.paths;
@@ -5641,6 +4785,8 @@ impl CanvasWorkspace {
             | PropsField::Gap
             | PropsField::Grow
             | PropsField::Shrink
+            | PropsField::WidthPercent
+            | PropsField::HeightPercent
             | PropsField::PaddingTop
             | PropsField::PaddingRight
             | PropsField::PaddingBottom
@@ -5664,6 +4810,8 @@ impl CanvasWorkspace {
             | PropsField::GradientAngle
             | PropsField::Columns
             | PropsField::MotionDuration
+            | PropsField::MotionDelay
+            | PropsField::AnimationDelay
             | PropsField::VectorWeight => {
                 if let Ok(value) = draft.trim().parse::<f64>() {
                     self.apply_props_number(field, value, false, cx);
@@ -6089,12 +5237,6 @@ impl CanvasWorkspace {
             return;
         }
 
-        if self.webview_text_editing {
-            self.forward_key_to_webview_editor(event, cx);
-            cx.stop_propagation();
-            return;
-        }
-
         if self.context_menu.is_some() {
             self.on_context_menu_key_down(event, cx);
             return;
@@ -6284,14 +5426,14 @@ impl CanvasWorkspace {
         }
 
         let key = event.keystroke.key.as_str();
-        if self.native_canvas_active && key == "space" {
+        if key == "space" {
             self.native_space_pan = true;
             self.native_canvas
                 .update(cx, |canvas, cx| canvas.set_space_pan(true, cx));
             cx.stop_propagation();
             return;
         }
-        if self.native_canvas_active && key == "escape" {
+        if key == "escape" {
             if self.preview_mode {
                 if self.preview_overlay.take().is_some() {
                     self.preview_runtime_generation =
@@ -6309,10 +5451,7 @@ impl CanvasWorkspace {
             cx.stop_propagation();
             return;
         }
-        if self.native_canvas_active
-            && matches!(key, "left" | "right" | "up" | "down")
-            && !self.selection.is_empty()
-        {
+        if matches!(key, "left" | "right" | "up" | "down") && !self.selection.is_empty() {
             let amount = if event.keystroke.modifiers.shift {
                 10.0
             } else {
@@ -6405,10 +5544,7 @@ impl CanvasWorkspace {
     }
 
     fn on_key_up(&mut self, event: &KeyUpEvent, _window: &mut Window, cx: &mut Context<Self>) {
-        if self.native_canvas_active
-            && self.native_space_pan
-            && event.keystroke.key.as_str() == "space"
-        {
+        if self.native_space_pan && event.keystroke.key.as_str() == "space" {
             self.native_space_pan = false;
             self.native_canvas
                 .update(cx, |canvas, cx| canvas.set_space_pan(false, cx));
@@ -6696,6 +5832,13 @@ impl CanvasWorkspace {
         self.set_tool(CanvasTool::Hand, cx);
     }
 
+    fn tool_preview(&mut self, _: &ToolPreview, _: &mut Window, cx: &mut Context<Self>) {
+        if self.capture_typing_char("p", cx) {
+            return;
+        }
+        self.set_tool(CanvasTool::Preview, cx);
+    }
+
     fn tool_rectangle(&mut self, _: &ToolRectangle, _: &mut Window, cx: &mut Context<Self>) {
         if self.capture_typing_char("r", cx) {
             return;
@@ -6842,44 +5985,6 @@ impl CanvasWorkspace {
         let _ = self.engine.resolve_stack(&parent);
         Some(id)
     }
-}
-
-fn canvas_webview_hidden_for_overlays(
-    command_open: bool,
-    image_picker_open: bool,
-    color_picker_open: bool,
-    inspector_menu_open: bool,
-    developer_inspector_open: bool,
-) -> bool {
-    // Full-window / properties GPUI chrome that can sit under the wry child,
-    // including the docked developer inspector.
-    // Canvas right-click menus render inside the WebView HTML and never set
-    // `inspector_menu_open` / `color_picker_open`.
-    command_open
-        || image_picker_open
-        || color_picker_open
-        || inspector_menu_open
-        || developer_inspector_open
-}
-
-fn native_canvas_active_from(renderer: Option<&str>) -> bool {
-    !renderer.is_some_and(|renderer| renderer.eq_ignore_ascii_case("web"))
-}
-
-fn web_context_menu_entries(entries: &[ContextMenuEntry]) -> Vec<serde_json::Value> {
-    entries
-        .iter()
-        .map(|entry| match entry {
-            ContextMenuEntry::Separator => serde_json::json!({ "separator": true }),
-            ContextMenuEntry::Action(action) => serde_json::json!({
-                "id": action.id.as_ref(),
-                "label": action.label.as_ref(),
-                "shortcut": action.shortcut.as_ref().map(|shortcut| shortcut.as_ref()),
-                "enabled": action.enabled,
-                "destructive": action.destructive,
-            }),
-        })
-        .collect()
 }
 
 fn mcp_argument_node_ids(
@@ -7110,15 +6215,13 @@ fn request_native_mcp_frame<T: 'static>(_: &Window, _: &Context<T>) {}
 #[cfg(test)]
 mod tests {
     use super::{
-        canvas_webview_hidden_for_overlays, command_action_count, mcp_activity_copy,
-        mcp_argument_node_ids, native_canvas_active_from, notify_mcp_window,
-        web_context_menu_entries,
+        command_action_count, mcp_activity_copy, mcp_argument_node_ids, notify_mcp_window,
+        raster_export_svg,
     };
-    use crate::context_menu::{ContextMenuAction, ContextMenuEntry};
     use gpui::{
         div, Context, Entity, IntoElement, Render, TestAppContext, VisualTestContext, Window,
     };
-    use loora_engine::{CanvasEngine, Document};
+    use loora_engine::{CanvasEngine, Color, Document, GradientStop, Layout, Node, Paint};
 
     struct WindowRefreshProbe {
         renders: usize,
@@ -7142,75 +6245,47 @@ mod tests {
     }
 
     #[test]
-    fn gpui_overlays_hide_the_canvas_webview() {
-        // command / image picker / color picker / inspector enum menu / DevTools
-        assert!(canvas_webview_hidden_for_overlays(
-            true, false, false, false, false
-        ));
-        assert!(canvas_webview_hidden_for_overlays(
-            false, true, false, false, false
-        ));
-        assert!(canvas_webview_hidden_for_overlays(
-            false, false, true, false, false
-        ));
-        assert!(canvas_webview_hidden_for_overlays(
-            false, false, false, true, false
-        ));
-        assert!(canvas_webview_hidden_for_overlays(
-            false, false, false, false, true
-        ));
-        // Idle canvas (HTML context menus do not use these flags)
-        assert!(!canvas_webview_hidden_for_overlays(
-            false, false, false, false, false
-        ));
-    }
+    fn native_raster_export_contains_real_svg_primitives() {
+        let mut document = Document::empty("Raster export");
+        let page = document.root_page_id.clone();
+        let mut card = Node::rectangle("Card", page.clone(), Layout::new(20.0, 30.0, 240.0, 120.0));
+        card.style.fills = vec![Paint::LinearGradient {
+            angle: 90.0,
+            stops: vec![
+                GradientStop {
+                    offset: 0.0,
+                    color: Color::rgb(255, 0, 0),
+                    token_id: None,
+                },
+                GradientStop {
+                    offset: 0.5,
+                    color: Color::rgb(0, 255, 0),
+                    token_id: None,
+                },
+                GradientStop {
+                    offset: 1.0,
+                    color: Color::rgb(0, 0, 255),
+                    token_id: None,
+                },
+            ],
+        }];
+        let label = Node::text(
+            "Label",
+            page,
+            Layout::new(32.0, 48.0, 180.0, 36.0),
+            "Native PNG",
+        );
+        document.nodes.insert(card.id.clone(), card);
+        document.nodes.insert(label.id.clone(), label);
 
-    #[test]
-    fn native_canvas_is_default_with_an_explicit_web_fallback() {
-        assert!(native_canvas_active_from(None));
-        assert!(native_canvas_active_from(Some("native")));
-        assert!(!native_canvas_active_from(Some("web")));
-        assert!(!native_canvas_active_from(Some("WEB")));
-    }
-
-    #[test]
-    fn settings_route_hides_webview_even_without_overlays() {
-        // Mirrors webview_should_be_hidden: settings_route_active ORs with overlay hides.
-        let settings_route_active = true;
-        let hide = settings_route_active
-            || canvas_webview_hidden_for_overlays(false, false, false, false, false);
-        assert!(hide);
-        assert!(!canvas_webview_hidden_for_overlays(
-            false, false, false, false, false
-        ));
-    }
-
-    #[test]
-    fn canvas_route_does_not_force_show_over_command_palette() {
-        // Returning to `/` must still hide while a full-window overlay is open.
-        let settings_route_active = false;
-        let hide = settings_route_active
-            || canvas_webview_hidden_for_overlays(true, false, false, false, false);
-        assert!(hide);
-    }
-
-    #[test]
-    fn web_context_menu_payload_preserves_action_state() {
-        let entries = vec![
-            ContextMenuEntry::Action(
-                ContextMenuAction::new("copy", "Copy")
-                    .shortcut("⌘C")
-                    .enabled(false),
-            ),
-            ContextMenuEntry::Separator,
-            ContextMenuEntry::Action(ContextMenuAction::new("delete", "Delete").destructive()),
-        ];
-        let payload = web_context_menu_entries(&entries);
-        assert_eq!(payload[0]["id"], "copy");
-        assert_eq!(payload[0]["shortcut"], "⌘C");
-        assert_eq!(payload[0]["enabled"], false);
-        assert_eq!(payload[1]["separator"], true);
-        assert_eq!(payload[2]["destructive"], true);
+        let svg = raster_export_svg(&document).unwrap();
+        assert!(svg.contains("<linearGradient"));
+        assert_eq!(svg.matches("<stop ").count(), 3);
+        assert!(svg.contains("<text "));
+        assert!(!svg.contains("foreignObject"));
+        let mut options = resvg::usvg::Options::default();
+        options.fontdb_mut().load_system_fonts();
+        assert!(resvg::usvg::Tree::from_str(&svg, &options).is_ok());
     }
 
     #[test]
@@ -7351,13 +6426,391 @@ fn is_http_url(value: &str) -> bool {
     lower.starts_with("http://") || lower.starts_with("https://")
 }
 
-fn decode_data_url_png(data_url: &str) -> Result<Vec<u8>, String> {
-    const PREFIX: &str = "data:image/png;base64,";
-    let encoded = data_url
-        .strip_prefix(PREFIX)
-        .ok_or_else(|| "expected a PNG data URL".to_string())?;
-    base64::Engine::decode(&base64::engine::general_purpose::STANDARD, encoded)
-        .map_err(|error| format!("decode PNG: {error}"))
+fn export_page_png(document: &loora_engine::Document, path: &Path) -> Result<(), String> {
+    let svg = raster_export_svg(document)?;
+    let mut options = resvg::usvg::Options::default();
+    options.fontdb_mut().load_system_fonts();
+    options.resources_dir = path.parent().map(Path::to_path_buf);
+    let tree = resvg::usvg::Tree::from_str(&svg, &options)
+        .map_err(|error| format!("parse native SVG: {error}"))?;
+    let size = tree.size().to_int_size();
+    let mut pixmap = resvg::tiny_skia::Pixmap::new(size.width(), size.height())
+        .ok_or_else(|| "page is too large to rasterize".to_string())?;
+    resvg::render(
+        &tree,
+        resvg::tiny_skia::Transform::default(),
+        &mut pixmap.as_mut(),
+    );
+    pixmap
+        .save_png(path)
+        .map_err(|error| format!("write PNG: {error}"))
+}
+
+fn raster_export_svg(document: &loora_engine::Document) -> Result<String, String> {
+    let engine = CanvasEngine::new(document.clone());
+    let page_id = engine.root_page_id().clone();
+    let page = engine
+        .node(&page_id)
+        .ok_or_else(|| "document has no active page".to_string())?;
+    let page_bounds = engine
+        .absolute_bounds(&page_id)
+        .unwrap_or_else(|| EngineBounds::new(0.0, 0.0, page.layout.width, page.layout.height));
+    let width = page_bounds.width.max(1.0);
+    let height = page_bounds.height.max(1.0);
+    let mut defs = String::new();
+    let mut body = String::new();
+    let mut gradient_index = 0usize;
+
+    fn visit(
+        engine: &CanvasEngine,
+        id: &NodeId,
+        page_origin: Vec2,
+        defs: &mut String,
+        body: &mut String,
+        gradient_index: &mut usize,
+    ) {
+        let Some(node) = engine.node(id) else {
+            return;
+        };
+        if node.hidden {
+            return;
+        }
+        let Some(bounds) = engine.absolute_bounds(id) else {
+            return;
+        };
+        let x = bounds.x - page_origin.x;
+        let y = bounds.y - page_origin.y;
+        let rotation = if node.rotation.abs() > f32::EPSILON {
+            format!(
+                " transform=\"rotate({} {} {})\"",
+                svg_number(node.rotation as f64),
+                svg_number(x + bounds.width * 0.5),
+                svg_number(y + bounds.height * 0.5)
+            )
+        } else {
+            String::new()
+        };
+        let opacity = node.style.opacity.clamp(0.0, 1.0);
+
+        match node.kind {
+            NodeKind::Text => body.push_str(&raster_text_markup(
+                node,
+                x,
+                y,
+                bounds.width,
+                opacity,
+                &rotation,
+            )),
+            NodeKind::Image => {
+                for paint in node.style.fills.iter().rev() {
+                    let fill = raster_fill(paint, defs, gradient_index);
+                    body.push_str(&raster_shape_markup(
+                        node,
+                        x,
+                        y,
+                        bounds.width,
+                        bounds.height,
+                        &fill,
+                        false,
+                        opacity,
+                        &rotation,
+                    ));
+                }
+                if let Some(source) = node.image_path.as_deref() {
+                    let preserve = match node.image_fit {
+                        loora_engine::ImageFit::Cover => "xMidYMid slice",
+                        loora_engine::ImageFit::Contain => "xMidYMid meet",
+                        loora_engine::ImageFit::Fill => "none",
+                    };
+                    body.push_str(&format!(
+                        "<image x=\"{}\" y=\"{}\" width=\"{}\" height=\"{}\" href=\"{}\" preserveAspectRatio=\"{}\" opacity=\"{}\"{}/>",
+                        svg_number(x),
+                        svg_number(y),
+                        svg_number(bounds.width),
+                        svg_number(bounds.height),
+                        xml_escape(source),
+                        preserve,
+                        svg_number(opacity as f64),
+                        rotation,
+                    ));
+                }
+            }
+            NodeKind::Vector if !node.paths.is_empty() => {
+                for path in &node.paths {
+                    let fill = path.fill.map(svg_color).unwrap_or_else(|| "none".into());
+                    let stroke = path
+                        .stroke
+                        .map(|color| {
+                            format!(
+                                " stroke=\"{}\" stroke-width=\"{}\"",
+                                svg_color(color),
+                                svg_number(path.stroke_width.unwrap_or(1.0) as f64)
+                            )
+                        })
+                        .unwrap_or_default();
+                    body.push_str(&format!(
+                        "<path d=\"{}\" fill=\"{}\"{} opacity=\"{}\" transform=\"translate({} {}) scale({} {}) rotate({} {} {})\"/>",
+                        xml_escape(&path.d),
+                        fill,
+                        stroke,
+                        svg_number(opacity as f64),
+                        svg_number(x),
+                        svg_number(y),
+                        svg_number(bounds.width / 100.0),
+                        svg_number(bounds.height / 100.0),
+                        svg_number(node.rotation as f64),
+                        50,
+                        50,
+                    ));
+                }
+            }
+            _ => {
+                if node.style.fills.is_empty() {
+                    body.push_str(&raster_shape_markup(
+                        node,
+                        x,
+                        y,
+                        bounds.width,
+                        bounds.height,
+                        "none",
+                        true,
+                        opacity,
+                        &rotation,
+                    ));
+                } else {
+                    for (index, paint) in node.style.fills.iter().rev().enumerate() {
+                        let fill = raster_fill(paint, defs, gradient_index);
+                        body.push_str(&raster_shape_markup(
+                            node,
+                            x,
+                            y,
+                            bounds.width,
+                            bounds.height,
+                            &fill,
+                            index + 1 == node.style.fills.len(),
+                            opacity,
+                            &rotation,
+                        ));
+                    }
+                }
+            }
+        }
+
+        for child in engine.children(Some(id)) {
+            visit(engine, &child.id, page_origin, defs, body, gradient_index);
+        }
+    }
+
+    visit(
+        &engine,
+        &page_id,
+        Vec2::new(page_bounds.x, page_bounds.y),
+        &mut defs,
+        &mut body,
+        &mut gradient_index,
+    );
+    Ok(format!(
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?><svg xmlns=\"http://www.w3.org/2000/svg\" xmlns:xlink=\"http://www.w3.org/1999/xlink\" width=\"{}\" height=\"{}\" viewBox=\"0 0 {} {}\"><defs>{}</defs>{}</svg>",
+        svg_number(width),
+        svg_number(height),
+        svg_number(width),
+        svg_number(height),
+        defs,
+        body,
+    ))
+}
+
+fn raster_fill(paint: &Paint, defs: &mut String, index: &mut usize) -> String {
+    match paint {
+        Paint::Solid { color, .. } => svg_color(*color),
+        Paint::LinearGradient { angle, stops } => {
+            let id = format!("gradient-{}", *index);
+            *index += 1;
+            let radians = angle.to_radians();
+            let dx = radians.sin() * 50.0;
+            let dy = -radians.cos() * 50.0;
+            defs.push_str(&format!(
+                "<linearGradient id=\"{}\" x1=\"{}%\" y1=\"{}%\" x2=\"{}%\" y2=\"{}%\">",
+                id,
+                svg_number((50.0 - dx) as f64),
+                svg_number((50.0 - dy) as f64),
+                svg_number((50.0 + dx) as f64),
+                svg_number((50.0 + dy) as f64),
+            ));
+            push_svg_stops(defs, stops);
+            defs.push_str("</linearGradient>");
+            format!("url(#{id})")
+        }
+        Paint::RadialGradient { cx, cy, stops, .. } => {
+            let id = format!("gradient-{}", *index);
+            *index += 1;
+            let position = |value: f32| {
+                if value.abs() <= 1.0 {
+                    value * 100.0
+                } else {
+                    value
+                }
+            };
+            defs.push_str(&format!(
+                "<radialGradient id=\"{}\" cx=\"{}%\" cy=\"{}%\" r=\"75%\">",
+                id,
+                svg_number(position(*cx) as f64),
+                svg_number(position(*cy) as f64),
+            ));
+            push_svg_stops(defs, stops);
+            defs.push_str("</radialGradient>");
+            format!("url(#{id})")
+        }
+    }
+}
+
+fn push_svg_stops(output: &mut String, stops: &[loora_engine::GradientStop]) {
+    for stop in stops {
+        output.push_str(&format!(
+            "<stop offset=\"{}%\" stop-color=\"{}\" stop-opacity=\"{}\"/>",
+            svg_number(stop.offset.clamp(0.0, 1.0) as f64 * 100.0),
+            svg_color_opaque(stop.color),
+            svg_number(stop.color.a.clamp(0.0, 1.0) as f64),
+        ));
+    }
+}
+
+fn raster_shape_markup(
+    node: &Node,
+    x: f64,
+    y: f64,
+    width: f64,
+    height: f64,
+    fill: &str,
+    stroke: bool,
+    opacity: f32,
+    rotation: &str,
+) -> String {
+    let stroke = stroke
+        .then(|| node.style.stroke.as_ref())
+        .flatten()
+        .map(|stroke| {
+            format!(
+                " stroke=\"{}\" stroke-width=\"{}\"",
+                svg_color(stroke.color),
+                svg_number(stroke.width as f64)
+            )
+        })
+        .unwrap_or_default();
+    let common = format!(
+        " fill=\"{}\"{} opacity=\"{}\"{}",
+        fill,
+        stroke,
+        svg_number(opacity as f64),
+        rotation,
+    );
+    match node.shape_kind {
+        loora_engine::ShapeKind::Ellipse => format!(
+            "<ellipse cx=\"{}\" cy=\"{}\" rx=\"{}\" ry=\"{}\"{}/>",
+            svg_number(x + width * 0.5),
+            svg_number(y + height * 0.5),
+            svg_number(width * 0.5),
+            svg_number(height * 0.5),
+            common,
+        ),
+        loora_engine::ShapeKind::Line => format!(
+            "<line x1=\"{}\" y1=\"{}\" x2=\"{}\" y2=\"{}\"{}/>",
+            svg_number(x),
+            svg_number(y + height * 0.5),
+            svg_number(x + width),
+            svg_number(y + height * 0.5),
+            common,
+        ),
+        _ => format!(
+            "<rect x=\"{}\" y=\"{}\" width=\"{}\" height=\"{}\" rx=\"{}\"{}/>",
+            svg_number(x),
+            svg_number(y),
+            svg_number(width),
+            svg_number(height),
+            svg_number(node.style.corners.tl as f64),
+            common,
+        ),
+    }
+}
+
+fn raster_text_markup(
+    node: &Node,
+    x: f64,
+    y: f64,
+    width: f64,
+    opacity: f32,
+    rotation: &str,
+) -> String {
+    let typography = node.effective_typography();
+    let (text_x, anchor) = match typography.align {
+        TextAlign::Left | TextAlign::Justify => (x, "start"),
+        TextAlign::Center => (x + width * 0.5, "middle"),
+        TextAlign::Right => (x + width, "end"),
+    };
+    let line_height = typography.line_height.unwrap_or(typography.size * 1.25);
+    let lines = node
+        .display_text()
+        .split('\n')
+        .enumerate()
+        .map(|(index, line)| {
+            format!(
+                "<tspan x=\"{}\" y=\"{}\">{}</tspan>",
+                svg_number(text_x),
+                svg_number(y + typography.size as f64 + line_height as f64 * index as f64),
+                xml_escape(line),
+            )
+        })
+        .collect::<String>();
+    format!(
+        "<text font-family=\"{}\" font-size=\"{}\" font-weight=\"{}\" text-anchor=\"{}\" fill=\"{}\" opacity=\"{}\"{}>{}</text>",
+        xml_escape(&typography.family),
+        svg_number(typography.size as f64),
+        typography.weight,
+        anchor,
+        svg_color(typography.color),
+        svg_number(opacity as f64),
+        rotation,
+        lines,
+    )
+}
+
+fn svg_color(color: Color) -> String {
+    format!(
+        "rgba({},{},{},{})",
+        (color.r.clamp(0.0, 1.0) * 255.0).round() as u8,
+        (color.g.clamp(0.0, 1.0) * 255.0).round() as u8,
+        (color.b.clamp(0.0, 1.0) * 255.0).round() as u8,
+        svg_number(color.a.clamp(0.0, 1.0) as f64),
+    )
+}
+
+fn svg_color_opaque(color: Color) -> String {
+    format!(
+        "rgb({},{},{})",
+        (color.r.clamp(0.0, 1.0) * 255.0).round() as u8,
+        (color.g.clamp(0.0, 1.0) * 255.0).round() as u8,
+        (color.b.clamp(0.0, 1.0) * 255.0).round() as u8,
+    )
+}
+
+fn svg_number(value: f64) -> String {
+    let mut value = format!("{value:.3}");
+    while value.contains('.') && value.ends_with('0') {
+        value.pop();
+    }
+    if value.ends_with('.') {
+        value.pop();
+    }
+    value
+}
+
+fn xml_escape(value: &str) -> String {
+    value
+        .replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+        .replace('\'', "&apos;")
 }
 
 fn is_pasteable_image_path(path: &Path) -> bool {
@@ -7399,47 +6852,6 @@ fn workspace_key_bindings(overrides: &HashMap<String, String>) -> Vec<KeyBinding
     bindings
 }
 
-/// Bounce X11 input focus so GPUI receives FocusIn after a wry child click.
-#[cfg(target_os = "linux")]
-fn force_x11_focus_reactivate(window: &Window) {
-    let Ok(handle) = HasWindowHandle::window_handle(window) else {
-        return;
-    };
-    let xid = match handle.as_raw() {
-        RawWindowHandle::Xlib(h) => h.window as x11_dl::xlib::Window,
-        RawWindowHandle::Xcb(h) => h.window.get() as x11_dl::xlib::Window,
-        _ => return,
-    };
-    let Ok(xlib) = x11_dl::xlib::Xlib::open() else {
-        return;
-    };
-    unsafe {
-        let display = (xlib.XOpenDisplay)(std::ptr::null());
-        if display.is_null() {
-            return;
-        }
-        // WebKit/GDK may hold a keyboard grab after child interaction.
-        (xlib.XUngrabKeyboard)(display, x11_dl::xlib::CurrentTime);
-        // PointerRoot briefly, then back to the GPUI toplevel.
-        (xlib.XSetInputFocus)(
-            display,
-            x11_dl::xlib::PointerRoot as x11_dl::xlib::Window,
-            x11_dl::xlib::RevertToPointerRoot,
-            x11_dl::xlib::CurrentTime,
-        );
-        (xlib.XFlush)(display);
-        (xlib.XSetInputFocus)(
-            display,
-            xid,
-            x11_dl::xlib::RevertToParent,
-            x11_dl::xlib::CurrentTime,
-        );
-        (xlib.XUngrabKeyboard)(display, x11_dl::xlib::CurrentTime);
-        (xlib.XFlush)(display);
-        (xlib.XCloseDisplay)(display);
-    }
-}
-
 fn binding_for_action(action_id: &str, keystroke: &str) -> Option<KeyBinding> {
     let context = Some("CanvasWorkspace");
     let binding = match action_id {
@@ -7461,6 +6873,7 @@ fn binding_for_action(action_id: &str, keystroke: &str) -> Option<KeyBinding> {
         "ungroup" => KeyBinding::new(keystroke, UngroupSelection, context),
         "tool_select" => KeyBinding::new(keystroke, ToolSelect, context),
         "tool_hand" => KeyBinding::new(keystroke, ToolHand, context),
+        "tool_preview" => KeyBinding::new(keystroke, ToolPreview, context),
         "tool_rectangle" => KeyBinding::new(keystroke, ToolRectangle, context),
         "tool_frame" => KeyBinding::new(keystroke, ToolFrame, context),
         "tool_text" => KeyBinding::new(keystroke, ToolText, context),
@@ -7577,7 +6990,7 @@ fn native_canvas_toolbar(
             "native-tool-preview",
             IconName::View,
             "Preview",
-            None,
+            Some("P"),
             selected_tool == CanvasTool::Preview,
             true,
             theme,
@@ -7758,18 +7171,121 @@ fn native_zoom_chip(entity: Entity<CanvasWorkspace>, zoom: f64, theme: Theme) ->
         .child(format!("{:.0}%", zoom * 100.0))
 }
 
+fn animation_presets() -> [DocumentAnimation; 3] {
+    let keyframe = |offset, opacity, transform| AnimationKeyframe {
+        offset,
+        opacity,
+        transform,
+    };
+    [
+        DocumentAnimation {
+            id: "loora-fade-up".into(),
+            name: "Fade up".into(),
+            duration_ms: 300.0,
+            easing: "ease-out".into(),
+            cubic_bezier: None,
+            delay_ms: 0.0,
+            keyframes: vec![
+                keyframe(
+                    0.0,
+                    Some(0.0),
+                    Some(MotionTransform {
+                        y: Some(16.0),
+                        ..MotionTransform::default()
+                    }),
+                ),
+                keyframe(
+                    1.0,
+                    Some(1.0),
+                    Some(MotionTransform {
+                        y: Some(0.0),
+                        ..MotionTransform::default()
+                    }),
+                ),
+            ],
+            iterations: 1.0,
+            infinite: false,
+            direction: "normal".into(),
+            fill: "both".into(),
+        },
+        DocumentAnimation {
+            id: "loora-scale-in".into(),
+            name: "Scale in".into(),
+            duration_ms: 240.0,
+            easing: "ease-out".into(),
+            cubic_bezier: None,
+            delay_ms: 0.0,
+            keyframes: vec![
+                keyframe(
+                    0.0,
+                    Some(0.0),
+                    Some(MotionTransform {
+                        scale: Some(0.94),
+                        ..MotionTransform::default()
+                    }),
+                ),
+                keyframe(
+                    1.0,
+                    Some(1.0),
+                    Some(MotionTransform {
+                        scale: Some(1.0),
+                        ..MotionTransform::default()
+                    }),
+                ),
+            ],
+            iterations: 1.0,
+            infinite: false,
+            direction: "normal".into(),
+            fill: "both".into(),
+        },
+        DocumentAnimation {
+            id: "loora-pulse".into(),
+            name: "Pulse".into(),
+            duration_ms: 900.0,
+            easing: "ease-in-out".into(),
+            cubic_bezier: None,
+            delay_ms: 0.0,
+            keyframes: vec![
+                keyframe(
+                    0.0,
+                    None,
+                    Some(MotionTransform {
+                        scale: Some(1.0),
+                        ..MotionTransform::default()
+                    }),
+                ),
+                keyframe(
+                    0.5,
+                    None,
+                    Some(MotionTransform {
+                        scale: Some(1.04),
+                        ..MotionTransform::default()
+                    }),
+                ),
+                keyframe(
+                    1.0,
+                    None,
+                    Some(MotionTransform {
+                        scale: Some(1.0),
+                        ..MotionTransform::default()
+                    }),
+                ),
+            ],
+            iterations: 1.0,
+            infinite: true,
+            direction: "normal".into(),
+            fill: "both".into(),
+        },
+    ]
+}
+
 impl Render for CanvasWorkspace {
-    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        if self.pending_keyboard_reclaim {
-            self.reclaim_keyboard_if_needed(window, cx);
-        }
+    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        self.flush_pending_fit_all(cx);
         self.sync_native_canvas(cx);
-        self.sync_web_canvas(cx);
         let theme = self.theme;
         let entity = cx.entity();
-        let webview = self.webview.clone();
         let native_canvas = self.native_canvas.clone();
-        let native_canvas_active = self.native_canvas_active;
         let native_tool = self.tool;
         let native_zoom = self.camera.zoom;
         let native_can_undo = self.engine.can_undo();
@@ -7869,11 +7385,7 @@ impl Render for CanvasWorkspace {
             .size_full()
             .bg(theme.window_fill())
             .text_color(theme.foreground)
-            .key_context(if self.webview_text_editing {
-                "WebviewTextEditing"
-            } else {
-                "CanvasWorkspace"
-            })
+            .key_context("CanvasWorkspace")
             .track_focus(&self.focus_handle)
             .on_action(cx.listener(Self::undo))
             .on_action(cx.listener(Self::redo))
@@ -7886,6 +7398,7 @@ impl Render for CanvasWorkspace {
             .on_action(cx.listener(Self::workspace_quit))
             .on_action(cx.listener(Self::tool_select))
             .on_action(cx.listener(Self::tool_hand))
+            .on_action(cx.listener(Self::tool_preview))
             .on_action(cx.listener(Self::tool_rectangle))
             .on_action(cx.listener(Self::tool_frame))
             .on_action(cx.listener(Self::tool_text))
@@ -8108,20 +7621,16 @@ impl Render for CanvasWorkspace {
                             .min_h_0()
                             .overflow_hidden()
                             .bg(theme.canvas_bg())
-                            .when(native_canvas_active, |this| {
-                                this.child(native_canvas)
-                                    .child(native_canvas_toolbar(
-                                        entity.clone(),
-                                        native_tool,
-                                        native_can_undo,
-                                        native_can_redo,
-                                        native_empty_page,
-                                        theme,
-                                    ))
-                                    .child(native_zoom_chip(entity.clone(), native_zoom, theme))
-                            })
-                            // Full-bleed fallback while native parity is being verified.
-                            .when(!native_canvas_active, |this| this.child(webview)),
+                            .child(native_canvas)
+                            .child(native_canvas_toolbar(
+                                entity.clone(),
+                                native_tool,
+                                native_can_undo,
+                                native_can_redo,
+                                native_empty_page,
+                                theme,
+                            ))
+                            .child(native_zoom_chip(entity.clone(), native_zoom, theme)),
                     ),
             )
             .when(properties_visible, |this| {

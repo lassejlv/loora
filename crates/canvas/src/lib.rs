@@ -14,16 +14,19 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use gpui::{
-    canvas, div, fill, font, linear_color_stop, linear_gradient, outline, point, px, quad, size,
-    App, Background, BorderStyle, Bounds as GpBounds, BoxShadow, ContentMask, Context,
-    Corners as GpCorners, Edges, EventEmitter, FontWeight, Hsla, InteractiveElement, IntoElement,
-    MouseButton, MouseDownEvent, MouseExitEvent, MouseMoveEvent, MouseUpEvent, ParentElement,
-    Path as GpPath, PathBuilder, PinchEvent, Pixels, Point, Render, RenderImage, Rgba,
-    ScrollWheelEvent, ShapedLine, SharedString, Styled, TextAlign as GpTextAlign, TextRun, Window,
+    canvas, div, fill, font, outline, point, prelude::FluentBuilder, px, quad, relative, size, App,
+    Background, BorderStyle, Bounds as GpBounds, BoxShadow, ContentMask, Context,
+    Corners as GpCorners, Edges, Entity, EventEmitter, FontWeight, Hsla, InteractiveElement,
+    IntoElement, MouseButton, MouseDownEvent, MouseExitEvent, MouseMoveEvent, MouseUpEvent,
+    ParentElement, Path as GpPath, PathBuilder, PinchEvent, Pixels, Point, Render, RenderImage,
+    Rgba, ScrollWheelEvent, ShapedLine, SharedString, StatefulInteractiveElement,
+    StrikethroughStyle, Styled, TextAlign as GpTextAlign, TextRun, TransformationMatrix,
+    UnderlineStyle, Window,
 };
 use loora_engine::{
-    Bounds, Camera, Color, Document, ImageFit, Node, NodeId, NodeKind, Overflow, Paint, ShapeKind,
-    TextAlign as EngineTextAlign, Vec2,
+    AnimationTrigger, Bounds, Camera, Color, Document, FlexDirection, ImageFit, Insets,
+    LayoutAlign, LayoutJustify, LayoutMode, Node, NodeId, NodeKind, Overflow, Paint, ShapeKind,
+    TextAlign as EngineTextAlign, TextDecoration, Vec2,
 };
 use svgtypes::{PathParser, PathSegment};
 
@@ -31,6 +34,7 @@ use motion::{MotionFrame, MotionRuntime};
 
 const SNAP_SCREEN_PX: f64 = 6.0;
 const HANDLE_SCREEN_PX: f64 = 8.0;
+const ROTATION_HANDLE_SCREEN_PX: f64 = 24.0;
 const MIN_NODE_SIZE: f64 = 1.0;
 
 fn apply_scroll_delta(camera: &mut Camera, local: Vec2, delta: Vec2, zoom: bool) {
@@ -99,6 +103,7 @@ impl CanvasTool {
         match self {
             Self::Select => Some("V"),
             Self::Hand => Some("H"),
+            Self::Preview => Some("P"),
             Self::Frame => Some("F"),
             Self::Text => Some("T"),
             Self::Rectangle => Some("R"),
@@ -159,6 +164,16 @@ pub enum CanvasEvent {
         drop_world: Vec2,
     },
     ResizeCommitted(Vec<(NodeId, Bounds)>),
+    RotateCommitted(Vec<(NodeId, f32)>),
+    LayoutMetricsChanged {
+        id: NodeId,
+        gap: f32,
+        padding: Insets,
+    },
+    LayoutControlTriggered {
+        id: NodeId,
+        control: LayoutControl,
+    },
     CreateCommitted {
         tool: CanvasTool,
         bounds: Bounds,
@@ -176,6 +191,15 @@ pub enum CanvasEvent {
     OverlayCloseRequested,
     BeginTextEdit(NodeId),
     ChooseImage(NodeId),
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum LayoutControl {
+    Direction,
+    Wrap,
+    Align,
+    Justify,
+    Columns,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -221,6 +245,7 @@ struct Guide {
     position: f64,
     from: f64,
     to: f64,
+    label: Option<f64>,
 }
 
 #[derive(Clone, Debug)]
@@ -243,6 +268,29 @@ enum DragState {
         group: Bounds,
         current: HashMap<NodeId, Bounds>,
     },
+    Rotate {
+        center: Vec2,
+        start_angle: f64,
+        originals: HashMap<NodeId, f32>,
+        current: HashMap<NodeId, f32>,
+    },
+    LayoutGap {
+        id: NodeId,
+        direction: FlexDirection,
+        start_world: Vec2,
+        start_gap: f32,
+        current_gap: f32,
+        padding: Insets,
+    },
+    LayoutPadding {
+        id: NodeId,
+        edge: PaddingEdge,
+        start_world: Vec2,
+        gap: f32,
+        start_padding: Insets,
+        current_padding: Insets,
+        container: Bounds,
+    },
     Marquee {
         start_world: Vec2,
         current_world: Vec2,
@@ -254,8 +302,32 @@ enum DragState {
     },
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum PaddingEdge {
+    Top,
+    Right,
+    Bottom,
+    Left,
+}
+
+#[derive(Clone, Debug)]
+enum LayoutBadgeKind {
+    Command(LayoutControl),
+    Gap(FlexDirection),
+    Padding(PaddingEdge),
+}
+
+#[derive(Clone, Debug)]
+struct LayoutBadge {
+    bounds: Bounds,
+    label: String,
+    kind: LayoutBadgeKind,
+}
+
 pub struct NativeCanvas {
-    document: Document,
+    document: Arc<Document>,
+    world_bounds: HashMap<NodeId, Bounds>,
+    paint_order: Arc<Vec<NodeId>>,
     revision: u64,
     camera: Camera,
     selection: Vec<NodeId>,
@@ -266,6 +338,8 @@ pub struct NativeCanvas {
     text_edit: Option<NativeTextEdit>,
     palette: CanvasPalette,
     images: HashMap<String, Arc<RenderImage>>,
+    gradient_fills: HashMap<(NodeId, usize), Arc<RenderImage>>,
+    rotated_images: HashMap<NodeId, RotatedImage>,
     viewport: Rc<Cell<GpBounds<Pixels>>>,
     drag: Option<DragState>,
     guides: Vec<Guide>,
@@ -273,6 +347,8 @@ pub struct NativeCanvas {
     pressed: Option<NodeId>,
     focused: Option<NodeId>,
     motion: MotionRuntime,
+    timeline_bounds: Rc<Cell<GpBounds<Pixels>>>,
+    timeline_scrubbing: bool,
     space_pan: bool,
     pointer_world: Option<Vec2>,
 }
@@ -289,8 +365,12 @@ impl NativeCanvas {
         camera: Camera,
         viewport: Rc<Cell<GpBounds<Pixels>>>,
     ) -> Self {
+        let world_bounds = absolute_bounds(&document);
+        let paint_order = Arc::new(paint_order(&document));
         Self {
-            document,
+            document: Arc::new(document),
+            world_bounds,
+            paint_order,
             revision: 0,
             camera,
             selection: Vec::new(),
@@ -301,6 +381,8 @@ impl NativeCanvas {
             text_edit: None,
             palette: CanvasPalette::default(),
             images: HashMap::new(),
+            gradient_fills: HashMap::new(),
+            rotated_images: HashMap::new(),
             viewport,
             drag: None,
             guides: Vec::new(),
@@ -308,6 +390,8 @@ impl NativeCanvas {
             pressed: None,
             focused: None,
             motion: MotionRuntime::default(),
+            timeline_bounds: Rc::new(Cell::new(GpBounds::default())),
+            timeline_scrubbing: false,
             space_pan: false,
             pointer_world: None,
         }
@@ -316,7 +400,7 @@ impl NativeCanvas {
     #[allow(clippy::too_many_arguments)]
     pub fn set_scene(
         &mut self,
-        document: Document,
+        document: Arc<Document>,
         revision: u64,
         camera: Camera,
         selection: Vec<NodeId>,
@@ -328,7 +412,7 @@ impl NativeCanvas {
         palette: CanvasPalette,
         cx: &mut Context<Self>,
     ) {
-        let document_changed = self.revision != revision || self.document != document;
+        let document_changed = self.revision != revision;
         let changed = document_changed
             || self.camera != camera
             || self.selection != selection
@@ -340,6 +424,10 @@ impl NativeCanvas {
             || self.palette != palette;
         if document_changed {
             self.sync_images(&document);
+            self.sync_gradient_fills(&document);
+            self.sync_rotated_images(&document);
+            self.world_bounds = absolute_bounds(&document);
+            self.paint_order = Arc::new(paint_order(&document));
             self.document = document;
             self.revision = revision;
         }
@@ -376,6 +464,57 @@ impl NativeCanvas {
         self.pointer_world
     }
 
+    fn toggle_motion_playback(&mut self, cx: &mut Context<Self>) {
+        self.motion.toggle_playback(Instant::now());
+        cx.notify();
+    }
+
+    fn restart_motion_playback(&mut self, cx: &mut Context<Self>) {
+        self.motion.restart(Instant::now());
+        cx.notify();
+    }
+
+    fn scrub_motion_at(&mut self, position: Point<Pixels>, cx: &mut Context<Self>) {
+        let bounds = self.timeline_bounds.get();
+        let width = f32::from(bounds.size.width).max(1.0);
+        let progress = (f32::from(position.x - bounds.origin.x) / width).clamp(0.0, 1.0);
+        self.motion.scrub(&self.document, progress, Instant::now());
+        cx.notify();
+    }
+
+    fn on_timeline_down(
+        &mut self,
+        event: &MouseDownEvent,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.timeline_scrubbing = true;
+        self.scrub_motion_at(event.position, cx);
+        cx.stop_propagation();
+    }
+
+    fn on_timeline_move(
+        &mut self,
+        event: &MouseMoveEvent,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.timeline_scrubbing && event.dragging() {
+            self.scrub_motion_at(event.position, cx);
+            cx.stop_propagation();
+        }
+    }
+
+    fn on_timeline_up(
+        &mut self,
+        _event: &MouseUpEvent,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.timeline_scrubbing = false;
+        cx.stop_propagation();
+    }
+
     fn sync_images(&mut self, document: &Document) {
         let paths = document
             .nodes
@@ -395,12 +534,78 @@ impl NativeCanvas {
         }
     }
 
+    fn sync_gradient_fills(&mut self, document: &Document) {
+        self.gradient_fills.clear();
+        for node in document.nodes.values() {
+            for (index, paint) in node.style.fills.iter().enumerate() {
+                if matches!(
+                    paint,
+                    Paint::LinearGradient { .. } | Paint::RadialGradient { .. }
+                ) {
+                    if let Some(image) = render_gradient_image(paint, node.style.opacity) {
+                        self.gradient_fills.insert((node.id.clone(), index), image);
+                    }
+                }
+            }
+        }
+    }
+
+    fn sync_rotated_images(&mut self, document: &Document) {
+        self.rotated_images.clear();
+        for node in document.nodes.values() {
+            if node.kind != NodeKind::Image || node.rotation.abs() <= f32::EPSILON {
+                continue;
+            }
+            let Some(path) = node.image_path.as_deref() else {
+                continue;
+            };
+            if path.starts_with("http://") || path.starts_with("https://") {
+                continue;
+            }
+            if let Some(image) = load_rotated_image(
+                Path::new(path),
+                node.layout.width.max(1.0) as f32 / node.layout.height.max(1.0) as f32,
+                node.image_fit,
+                node.rotation,
+            ) {
+                self.rotated_images.insert(node.id.clone(), image);
+            }
+        }
+    }
+
     fn viewport_local(&self, position: Point<Pixels>) -> Vec2 {
         let viewport = self.viewport.get();
         Vec2::new(
             f32::from(position.x - viewport.origin.x) as f64,
             f32::from(position.y - viewport.origin.y) as f64,
         )
+    }
+
+    fn preview_world_at(&self, screen: Vec2, all_bounds: &HashMap<NodeId, Bounds>) -> Option<Vec2> {
+        let Some(overlay) = self.preview_overlay.as_ref() else {
+            return Some(self.camera.screen_to_world(screen));
+        };
+        let overlay_bounds = all_bounds.get(overlay).copied()?;
+        let viewport = self.viewport.get();
+        let overlay_width = (overlay_bounds.width * self.camera.zoom).max(1.0);
+        let overlay_height = (overlay_bounds.height * self.camera.zoom).max(1.0);
+        let scale = 1.0_f64
+            .min(f32::from(viewport.size.width) as f64 * 0.86 / overlay_width)
+            .min(f32::from(viewport.size.height) as f64 * 0.86 / overlay_height);
+        let viewport_center = Vec2::new(
+            f32::from(viewport.size.width) as f64 * 0.5,
+            f32::from(viewport.size.height) as f64 * 0.5,
+        );
+        let overlay_center = self.camera.world_to_screen(Vec2::new(
+            overlay_bounds.x + overlay_bounds.width * 0.5,
+            overlay_bounds.y + overlay_bounds.height * 0.5,
+        ));
+        let original_screen = Vec2::new(
+            overlay_center.x + (screen.x - viewport_center.x) / scale,
+            overlay_center.y + (screen.y - viewport_center.y) / scale,
+        );
+        let world = self.camera.screen_to_world(original_screen);
+        overlay_bounds.contains(world).then_some(world)
     }
 
     fn on_mouse_down(
@@ -412,43 +617,16 @@ impl NativeCanvas {
         let screen = self.viewport_local(event.position);
         let world = self.camera.screen_to_world(screen);
         self.pointer_world = Some(world);
-        let all_bounds = absolute_bounds(&self.document);
+        let all_bounds = &self.world_bounds;
 
         if self.preview {
             if event.button == MouseButton::Left {
-                let preview_world = if let Some(overlay) = self.preview_overlay.as_ref() {
-                    let Some(overlay_bounds) = all_bounds.get(overlay).copied() else {
-                        return;
-                    };
-                    let viewport = self.viewport.get();
-                    let overlay_width = (overlay_bounds.width * self.camera.zoom).max(1.0);
-                    let overlay_height = (overlay_bounds.height * self.camera.zoom).max(1.0);
-                    let scale = 1.0_f64
-                        .min(f32::from(viewport.size.width) as f64 * 0.86 / overlay_width)
-                        .min(f32::from(viewport.size.height) as f64 * 0.86 / overlay_height);
-                    let viewport_center = Vec2::new(
-                        f32::from(viewport.size.width) as f64 * 0.5,
-                        f32::from(viewport.size.height) as f64 * 0.5,
-                    );
-                    let overlay_center = self.camera.world_to_screen(Vec2::new(
-                        overlay_bounds.x + overlay_bounds.width * 0.5,
-                        overlay_bounds.y + overlay_bounds.height * 0.5,
-                    ));
-                    let original_screen = Vec2::new(
-                        overlay_center.x + (screen.x - viewport_center.x) / scale,
-                        overlay_center.y + (screen.y - viewport_center.y) / scale,
-                    );
-                    let overlay_world = self.camera.screen_to_world(original_screen);
-                    if !overlay_bounds.contains(overlay_world) {
-                        cx.emit(CanvasEvent::OverlayCloseRequested);
-                        cx.stop_propagation();
-                        return;
-                    }
-                    overlay_world
-                } else {
-                    world
+                let Some(preview_world) = self.preview_world_at(screen, all_bounds) else {
+                    cx.emit(CanvasEvent::OverlayCloseRequested);
+                    cx.stop_propagation();
+                    return;
                 };
-                let hit = hit_test(&self.document, &all_bounds, preview_world);
+                let hit = hit_test(&self.document, all_bounds, &self.paint_order, preview_world);
                 self.pressed = hit.clone();
                 self.focused = hit.clone();
                 if let Some(id) = hit {
@@ -471,7 +649,7 @@ impl NativeCanvas {
             cx.emit(CanvasEvent::ContextMenuRequested {
                 position: event.position,
                 world,
-                hit: hit_test(&self.document, &all_bounds, world),
+                hit: hit_test(&self.document, all_bounds, &self.paint_order, world),
             });
             cx.stop_propagation();
             return;
@@ -500,10 +678,77 @@ impl NativeCanvas {
             return;
         }
 
+        if let Some((id, badge)) = hit_layout_badge(
+            world,
+            &self.selection,
+            &self.document,
+            all_bounds,
+            self.camera.zoom,
+        ) {
+            let node = self.document.nodes.get(&id).expect("selected layout node");
+            match badge.kind {
+                LayoutBadgeKind::Command(control) => {
+                    cx.emit(CanvasEvent::LayoutControlTriggered { id, control });
+                }
+                LayoutBadgeKind::Gap(direction) => {
+                    self.drag = Some(DragState::LayoutGap {
+                        id,
+                        direction,
+                        start_world: world,
+                        start_gap: node.layout.gap,
+                        current_gap: node.layout.gap,
+                        padding: node.layout.padding,
+                    });
+                }
+                LayoutBadgeKind::Padding(edge) => {
+                    self.drag = Some(DragState::LayoutPadding {
+                        id,
+                        edge,
+                        start_world: world,
+                        gap: node.layout.gap,
+                        start_padding: node.layout.padding,
+                        current_padding: node.layout.padding,
+                        container: all_bounds[&node.id],
+                    });
+                }
+            }
+            cx.stop_propagation();
+            cx.notify();
+            return;
+        }
+
+        if let Some(group) = hit_rotation_handle(
+            world,
+            &self.selection,
+            all_bounds,
+            HANDLE_SCREEN_PX / self.camera.zoom,
+            ROTATION_HANDLE_SCREEN_PX / self.camera.zoom,
+        ) {
+            let center = Vec2::new(group.x + group.width * 0.5, group.y + group.height * 0.5);
+            let originals = self
+                .selection
+                .iter()
+                .filter_map(|id| {
+                    self.document
+                        .nodes
+                        .get(id)
+                        .map(|node| (id.clone(), node.rotation))
+                })
+                .collect::<HashMap<_, _>>();
+            self.drag = Some(DragState::Rotate {
+                center,
+                start_angle: angle_from(center, world),
+                current: originals.clone(),
+                originals,
+            });
+            cx.stop_propagation();
+            return;
+        }
+
         if let Some((handle, group)) = hit_resize_handle(
             world,
             &self.selection,
-            &all_bounds,
+            all_bounds,
             HANDLE_SCREEN_PX / self.camera.zoom,
         ) {
             let originals = self
@@ -527,7 +772,7 @@ impl NativeCanvas {
             return;
         }
 
-        if let Some(hit) = hit_test(&self.document, &all_bounds, world) {
+        if let Some(hit) = hit_test(&self.document, all_bounds, &self.paint_order, world) {
             if event.click_count >= 2 {
                 if let Some(node) = self.document.nodes.get(&hit) {
                     match node.kind {
@@ -591,9 +836,12 @@ impl NativeCanvas {
         let screen = self.viewport_local(event.position);
         let world = self.camera.screen_to_world(screen);
         self.pointer_world = Some(world);
-        let all_bounds = absolute_bounds(&self.document);
+        let all_bounds = &self.world_bounds;
         if self.preview {
-            let hit = hit_test(&self.document, &all_bounds, world);
+            let preview_world = self.preview_world_at(screen, all_bounds);
+            self.pointer_world = preview_world;
+            let hit = preview_world
+                .and_then(|world| hit_test(&self.document, all_bounds, &self.paint_order, world));
             if hit != self.hovered {
                 if let Some(id) = self.hovered.take() {
                     cx.emit(CanvasEvent::PreviewTriggered {
@@ -674,6 +922,51 @@ impl NativeCanvas {
                 };
                 *current = scale_group(originals, *group, resized_group);
             }
+            Some(DragState::Rotate {
+                center,
+                start_angle,
+                originals,
+                current,
+            }) => {
+                let mut delta = angle_delta(*start_angle, angle_from(*center, world));
+                if event.modifiers.shift {
+                    delta = (delta / 15.0).round() * 15.0;
+                }
+                *current = originals
+                    .iter()
+                    .map(|(id, rotation)| (id.clone(), normalize_degrees(*rotation + delta as f32)))
+                    .collect();
+            }
+            Some(DragState::LayoutGap {
+                direction,
+                start_world,
+                start_gap,
+                current_gap,
+                ..
+            }) => {
+                let delta = match direction {
+                    FlexDirection::Row => world.x - start_world.x,
+                    FlexDirection::Column => world.y - start_world.y,
+                };
+                *current_gap = (*start_gap as f64 + delta).max(0.0) as f32;
+            }
+            Some(DragState::LayoutPadding {
+                edge,
+                start_world,
+                start_padding,
+                current_padding,
+                container,
+                ..
+            }) => {
+                let delta = Vec2::new(world.x - start_world.x, world.y - start_world.y);
+                *current_padding = resized_padding(
+                    *start_padding,
+                    *edge,
+                    delta,
+                    container.width,
+                    container.height,
+                );
+            }
             Some(DragState::Marquee { current_world, .. }) => *current_world = world,
             Some(DragState::Create {
                 start_world,
@@ -696,7 +989,9 @@ impl NativeCanvas {
         }
         if let Some(DragState::Move { ids, .. }) = &self.drag {
             if let [id] = ids.as_slice() {
-                if let Some(guide) = flow_drop_guide(&self.document, id, world, &all_bounds) {
+                if let Some(guide) =
+                    flow_drop_guide(&self.document, &self.paint_order, id, world, all_bounds)
+                {
                     self.guides.push(guide);
                 }
             }
@@ -739,12 +1034,37 @@ impl NativeCanvas {
                 members.sort_by(|left, right| left.0.as_str().cmp(right.0.as_str()));
                 cx.emit(CanvasEvent::ResizeCommitted(members));
             }
+            Some(DragState::Rotate { current, .. }) => {
+                let mut members = current.into_iter().collect::<Vec<_>>();
+                members.sort_by(|left, right| left.0.as_str().cmp(right.0.as_str()));
+                cx.emit(CanvasEvent::RotateCommitted(members));
+            }
+            Some(DragState::LayoutGap {
+                id,
+                current_gap,
+                padding,
+                ..
+            }) => cx.emit(CanvasEvent::LayoutMetricsChanged {
+                id,
+                gap: current_gap,
+                padding,
+            }),
+            Some(DragState::LayoutPadding {
+                id,
+                gap,
+                current_padding,
+                ..
+            }) => cx.emit(CanvasEvent::LayoutMetricsChanged {
+                id,
+                gap,
+                padding: current_padding,
+            }),
             Some(DragState::Marquee {
                 start_world,
                 current_world,
             }) => {
                 let marquee = normalized_bounds(start_world, current_world);
-                let all_bounds = absolute_bounds(&self.document);
+                let all_bounds = &self.world_bounds;
                 let mut selection = selectable_nodes(&self.document)
                     .into_iter()
                     .filter(|id| {
@@ -820,7 +1140,7 @@ impl NativeCanvas {
     }
 
     fn preview_bounds(&self) -> HashMap<NodeId, Bounds> {
-        let mut bounds = absolute_bounds(&self.document);
+        let mut bounds = self.world_bounds.clone();
         match &self.drag {
             Some(DragState::Move {
                 ids,
@@ -855,6 +1175,15 @@ impl NativeCanvas {
 impl Render for NativeCanvas {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let now = Instant::now();
+        let preview_bounds = self.preview_bounds();
+        let viewport_bounds = self.viewport.get();
+        let in_view = in_view_nodes(
+            &self.document,
+            &preview_bounds,
+            self.camera,
+            viewport_bounds,
+            self.preview_overlay.as_ref(),
+        );
         let animating = self.motion.tick(
             &self.document,
             self.revision,
@@ -862,26 +1191,42 @@ impl Render for NativeCanvas {
             self.hovered.as_ref(),
             self.pressed.as_ref(),
             self.focused.as_ref(),
+            &in_view,
             now,
             cx.reduce_motion(),
         );
-        if animating {
+        let playback = self.motion.snapshot(&self.document);
+        let trigger_state = active_trigger_state(
+            &self.document,
+            self.hovered.as_ref(),
+            self.pressed.as_ref(),
+            self.focused.as_ref(),
+            &in_view,
+        );
+        if animating
+            || viewport_bounds.size.width <= px(0.0)
+            || viewport_bounds.size.height <= px(0.0)
+        {
             window.request_animation_frame();
         }
         let document = self.document.clone();
+        let paint_order = self.paint_order.clone();
         let motion_frames = self.motion.frames().clone();
         let camera = self.camera;
         let selection = self.selection.clone();
         let agent_nodes = self.agent_nodes.clone();
         let palette = self.palette;
         let guides = self.guides.clone();
-        let preview_bounds = self.preview_bounds();
         let images = self.images.clone();
+        let gradient_fills = self.gradient_fills.clone();
+        let rotated_images = self.rotated_images.clone();
         let drag = self.drag.clone();
         let viewport = self.viewport.clone();
         let preview = self.preview;
         let preview_overlay = self.preview_overlay.clone();
         let text_edit = self.text_edit.clone();
+        let entity = cx.entity();
+        let timeline_bounds = self.timeline_bounds.clone();
 
         div()
             .id("native-canvas")
@@ -906,6 +1251,7 @@ impl Render for NativeCanvas {
                         viewport.set(bounds);
                         prepare_scene(
                             &document,
+                            &paint_order,
                             &motion_frames,
                             &preview_bounds,
                             camera,
@@ -915,6 +1261,8 @@ impl Render for NativeCanvas {
                             drag,
                             palette,
                             &images,
+                            &gradient_fills,
+                            &rotated_images,
                             preview,
                             preview_overlay,
                             text_edit,
@@ -926,7 +1274,224 @@ impl Render for NativeCanvas {
                 )
                 .size_full(),
             )
+            .when(preview, |this| {
+                this.child(preview_playback_controls(
+                    entity,
+                    playback,
+                    trigger_state,
+                    timeline_bounds,
+                ))
+            })
     }
+}
+
+fn active_trigger_state(
+    document: &Document,
+    hovered: Option<&NodeId>,
+    pressed: Option<&NodeId>,
+    focused: Option<&NodeId>,
+    in_view: &HashSet<NodeId>,
+) -> String {
+    if pressed.is_some_and(|id| {
+        document.nodes.get(id).is_some_and(|node| {
+            node.visual_states
+                .as_ref()
+                .is_some_and(|states| states.press.is_some())
+                || node
+                    .animations
+                    .iter()
+                    .any(|animation| animation.trigger == AnimationTrigger::Press)
+        })
+    }) {
+        return "Press active".into();
+    }
+    if hovered.is_some_and(|id| {
+        document.nodes.get(id).is_some_and(|node| {
+            node.visual_states
+                .as_ref()
+                .is_some_and(|states| states.hover.is_some())
+                || node
+                    .animations
+                    .iter()
+                    .any(|animation| animation.trigger == AnimationTrigger::Hover)
+        })
+    }) {
+        return "Hover active".into();
+    }
+    if focused.is_some_and(|id| {
+        document.nodes.get(id).is_some_and(|node| {
+            node.visual_states
+                .as_ref()
+                .is_some_and(|states| states.focus.is_some())
+        })
+    }) {
+        return "Focus active".into();
+    }
+    let visible = in_view
+        .iter()
+        .filter(|id| {
+            document.nodes.get(*id).is_some_and(|node| {
+                node.animations
+                    .iter()
+                    .any(|animation| animation.trigger == AnimationTrigger::InView)
+            })
+        })
+        .count();
+    if visible > 0 {
+        format!("In view · {visible}")
+    } else {
+        "Load".into()
+    }
+}
+
+fn preview_playback_button(
+    entity: Entity<NativeCanvas>,
+    id: &'static str,
+    label: impl Into<SharedString>,
+    action: fn(&mut NativeCanvas, &mut Context<NativeCanvas>),
+) -> impl IntoElement {
+    div()
+        .id(id)
+        .h(px(24.0))
+        .px(px(8.0))
+        .flex()
+        .items_center()
+        .justify_center()
+        .rounded(px(6.0))
+        .bg(rgba(0x2a, 0x2a, 0x2e, 0xff))
+        .text_size(px(10.0))
+        .text_color(rgba(0xe8, 0xe8, 0xec, 0xff))
+        .cursor_pointer()
+        .hover(|style| style.bg(rgba(0x3a, 0x3a, 0x40, 0xff)))
+        .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+        .on_click(move |_, _, cx| {
+            cx.stop_propagation();
+            entity.update(cx, action);
+        })
+        .child(label.into())
+}
+
+fn preview_playback_controls(
+    entity: Entity<NativeCanvas>,
+    playback: motion::PlaybackSnapshot,
+    trigger_state: String,
+    timeline_bounds: Rc<Cell<GpBounds<Pixels>>>,
+) -> impl IntoElement {
+    let down = entity.clone();
+    let moved = entity.clone();
+    let up = entity.clone();
+    let track_bounds = timeline_bounds.clone();
+    div()
+        .id("native-motion-controls")
+        .absolute()
+        .left(relative(0.5))
+        .ml(px(-218.0))
+        .bottom(px(68.0))
+        .w(px(436.0))
+        .h(px(38.0))
+        .px(px(7.0))
+        .flex()
+        .items_center()
+        .gap(px(6.0))
+        .rounded(px(10.0))
+        .border_1()
+        .border_color(rgba(0x4a, 0x4a, 0x50, 0xff))
+        .bg(rgba(0x18, 0x18, 0x1b, 0xf2))
+        .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+        .child(preview_playback_button(
+            entity.clone(),
+            "native-motion-play",
+            if playback.playing { "Pause" } else { "Play" },
+            NativeCanvas::toggle_motion_playback,
+        ))
+        .child(preview_playback_button(
+            entity.clone(),
+            "native-motion-restart",
+            "Restart",
+            NativeCanvas::restart_motion_playback,
+        ))
+        .child(
+            div()
+                .id("native-motion-scrubber")
+                .relative()
+                .w(px(156.0))
+                .h(px(20.0))
+                .cursor_pointer()
+                .on_mouse_down(MouseButton::Left, move |event, window, cx| {
+                    down.update(cx, |canvas, cx| canvas.on_timeline_down(event, window, cx));
+                })
+                .on_mouse_move(move |event, window, cx| {
+                    moved.update(cx, |canvas, cx| canvas.on_timeline_move(event, window, cx));
+                })
+                .on_mouse_up(MouseButton::Left, move |event, window, cx| {
+                    up.update(cx, |canvas, cx| canvas.on_timeline_up(event, window, cx));
+                })
+                .on_mouse_up_out(MouseButton::Left, {
+                    let up = entity.clone();
+                    move |event, window, cx| {
+                        up.update(cx, |canvas, cx| canvas.on_timeline_up(event, window, cx));
+                    }
+                })
+                .child(
+                    div()
+                        .absolute()
+                        .left_0()
+                        .right_0()
+                        .top(px(8.0))
+                        .h(px(4.0))
+                        .rounded(px(2.0))
+                        .bg(rgba(0x3a, 0x3a, 0x40, 0xff)),
+                )
+                .child(
+                    div()
+                        .absolute()
+                        .left_0()
+                        .top(px(8.0))
+                        .w(relative(playback.progress))
+                        .h(px(4.0))
+                        .rounded(px(2.0))
+                        .bg(rgba(0x7a, 0xa2, 0xf7, 0xff)),
+                )
+                .child(
+                    div()
+                        .absolute()
+                        .left(relative(playback.progress))
+                        .top(px(5.0))
+                        .ml(px(-5.0))
+                        .size(px(10.0))
+                        .rounded(px(5.0))
+                        .bg(rgba(0xff, 0xff, 0xff, 0xff)),
+                )
+                .child(
+                    canvas(
+                        move |bounds, _, _| {
+                            track_bounds.set(bounds);
+                        },
+                        |_, _, _, _| {},
+                    )
+                    .absolute()
+                    .inset_0()
+                    .size_full(),
+                ),
+        )
+        .child(
+            div()
+                .w(px(58.0))
+                .text_size(px(9.0))
+                .text_color(rgba(0xa8, 0xa8, 0xb0, 0xff))
+                .child(format!(
+                    "{:.1}/{:.1}s",
+                    playback.elapsed_ms / 1000.0,
+                    playback.duration_ms / 1000.0
+                )),
+        )
+        .child(
+            div()
+                .flex_1()
+                .text_size(px(9.0))
+                .text_color(rgba(0xc4, 0xb5, 0xfd, 0xff))
+                .child(trigger_state),
+        )
 }
 
 #[derive(Clone)]
@@ -939,6 +1504,10 @@ struct PreparedText {
     clip: GpBounds<Pixels>,
     selection: Option<GpBounds<Pixels>>,
     caret: Option<GpBounds<Pixels>>,
+    rotation: f32,
+    rotation_center: Point<Pixels>,
+    svg: Option<SharedString>,
+    svg_color: Hsla,
 }
 
 #[derive(Clone)]
@@ -948,16 +1517,24 @@ struct PreparedVectorPath {
 }
 
 #[derive(Clone)]
+struct RotatedImage {
+    image: Arc<RenderImage>,
+    width_ratio: f32,
+    height_ratio: f32,
+}
+
+#[derive(Clone)]
 struct PreparedNode {
     kind: NodeKind,
     shape_kind: ShapeKind,
     bounds: GpBounds<Pixels>,
     clip: GpBounds<Pixels>,
-    fill: Background,
+    fills: Vec<PreparedFill>,
     border: Option<(Hsla, Pixels, BorderStyle)>,
     corners: GpCorners<Pixels>,
     text: Vec<PreparedText>,
     image: Option<Arc<RenderImage>>,
+    image_bounds: Option<GpBounds<Pixels>>,
     image_fit: ImageFit,
     shadows: Vec<BoxShadow>,
     vector_paths: Vec<PreparedVectorPath>,
@@ -965,12 +1542,34 @@ struct PreparedNode {
     overlay_root: bool,
 }
 
+#[derive(Clone)]
+enum PreparedFill {
+    Background(Background),
+    Image(Arc<RenderImage>),
+}
+
+struct PreparedGuideLabel {
+    line: ShapedLine,
+    origin: Point<Pixels>,
+    background: GpBounds<Pixels>,
+}
+
+struct PreparedLayoutBadge {
+    bounds: GpBounds<Pixels>,
+    line: ShapedLine,
+    origin: Point<Pixels>,
+    metric: bool,
+}
+
 struct PreparedScene {
     nodes: Vec<PreparedNode>,
     labels: Vec<PreparedText>,
     selection: Vec<GpBounds<Pixels>>,
+    rotation_handle: Option<(Point<Pixels>, Point<Pixels>)>,
     agents: Vec<GpBounds<Pixels>>,
     guides: Vec<(GuideAxis, Pixels, Pixels, Pixels)>,
+    guide_labels: Vec<PreparedGuideLabel>,
+    layout_badges: Vec<PreparedLayoutBadge>,
     marquee: Option<GpBounds<Pixels>>,
     create: Option<GpBounds<Pixels>>,
     overlay_scrim: bool,
@@ -978,9 +1577,52 @@ struct PreparedScene {
     viewport: GpBounds<Pixels>,
 }
 
+fn in_view_nodes(
+    document: &Document,
+    world_bounds: &HashMap<NodeId, Bounds>,
+    camera: Camera,
+    viewport: GpBounds<Pixels>,
+    preview_overlay: Option<&NodeId>,
+) -> HashSet<NodeId> {
+    if viewport.size.width <= px(0.0) || viewport.size.height <= px(0.0) {
+        return HashSet::new();
+    }
+    let overlay_transform = preview_overlay.and_then(|overlay| {
+        let bounds = world_bounds.get(overlay).copied()?;
+        let screen = world_to_screen(bounds, camera, viewport);
+        let width = f32::from(screen.size.width).max(1.0);
+        let height = f32::from(screen.size.height).max(1.0);
+        let scale = 1.0_f32
+            .min(f32::from(viewport.size.width) * 0.86 / width)
+            .min(f32::from(viewport.size.height) * 0.86 / height);
+        Some((screen.center(), scale))
+    });
+
+    world_bounds
+        .iter()
+        .filter_map(|(id, bounds)| {
+            let node = document.nodes.get(id)?;
+            if node_or_ancestor_hidden(document, node) {
+                return None;
+            }
+            let mut screen = world_to_screen(*bounds, camera, viewport);
+            if preview_overlay
+                .is_some_and(|overlay| id == overlay || is_descendant_of(document, id, overlay))
+            {
+                if let Some((overlay_center, scale)) = overlay_transform {
+                    screen =
+                        overlay_screen_bounds(screen, overlay_center, scale, viewport.center());
+                }
+            }
+            screen.intersects(&viewport).then(|| id.clone())
+        })
+        .collect()
+}
+
 #[allow(clippy::too_many_arguments)]
 fn prepare_scene(
     document: &Document,
+    paint_order: &[NodeId],
     motion_frames: &HashMap<NodeId, MotionFrame>,
     world_bounds: &HashMap<NodeId, Bounds>,
     camera: Camera,
@@ -990,6 +1632,8 @@ fn prepare_scene(
     drag: Option<DragState>,
     palette: CanvasPalette,
     images: &HashMap<String, Arc<RenderImage>>,
+    gradient_fills: &HashMap<(NodeId, usize), Arc<RenderImage>>,
+    rotated_images: &HashMap<NodeId, RotatedImage>,
     preview: bool,
     preview_overlay: Option<NodeId>,
     text_edit: Option<NativeTextEdit>,
@@ -1008,7 +1652,7 @@ fn prepare_scene(
             .min(f32::from(viewport.size.height) * 0.86 / height);
         Some((screen.center(), scale))
     });
-    for id in paint_order_with_overlay(document, preview_overlay.as_ref()) {
+    for id in paint_order_with_overlay(document, paint_order, preview_overlay.as_ref()) {
         let Some(node) = document.nodes.get(&id) else {
             continue;
         };
@@ -1072,12 +1716,14 @@ fn prepare_scene(
             .map_or(node.style.opacity, |motion| motion.opacity)
             .clamp(0.0, 1.0);
         let motion_fill = motion.and_then(|motion| motion.fill);
-        let fill = if node.kind == NodeKind::Text {
-            color_hsla(fallback_fill(node.kind), opacity).into()
+        let fills = if node.kind == NodeKind::Text {
+            vec![PreparedFill::Background(
+                color_hsla(fallback_fill(node.kind), opacity).into(),
+            )]
         } else {
             motion_fill
-                .map(|color| color_hsla(color, opacity).into())
-                .unwrap_or_else(|| node_background(node, opacity))
+                .map(|color| vec![PreparedFill::Background(color_hsla(color, opacity).into())])
+                .unwrap_or_else(|| node_fills(node, opacity, gradient_fills))
         };
         let border = motion
             .and_then(|motion| motion.stroke.as_ref())
@@ -1105,6 +1751,13 @@ fn prepare_scene(
                 bottom_left: px(motion_corners.bl * scale),
             }
         };
+        let base_rotation = match &drag {
+            Some(DragState::Rotate { current, .. }) => {
+                current.get(&id).copied().unwrap_or(node.rotation)
+            }
+            _ => node.rotation,
+        };
+        let rotation = base_rotation + motion.map_or(0.0, |motion| motion.rotate);
         let text = prepare_node_text(
             node,
             screen,
@@ -1112,6 +1765,7 @@ fn prepare_scene(
             scale,
             (motion_fill, opacity),
             text_edit.as_ref().filter(|edit| edit.id == id),
+            rotation,
             window,
         );
         if node.is_root_frame() {
@@ -1133,6 +1787,10 @@ fn prepare_scene(
                 clip: viewport,
                 selection: None,
                 caret: None,
+                rotation: 0.0,
+                rotation_center: screen.center(),
+                svg: None,
+                svg_color: palette.page_label,
             });
         }
         let shadows = node
@@ -1147,27 +1805,52 @@ fn prepare_scene(
                 inset: shadow.inset,
             })
             .collect();
-        let rotation = node.rotation + motion.map_or(0.0, |motion| motion.rotate);
         let vector_paths = if node.kind == NodeKind::Vector {
             prepare_vector_paths(node, screen, opacity, rotation)
         } else {
             Vec::new()
         };
+        let rotated_image = (!matches!(&drag, Some(DragState::Rotate { .. }))
+            && motion.map_or(0.0, |motion| motion.rotate).abs() <= f32::EPSILON)
+            .then(|| rotated_images.get(&id))
+            .flatten();
+        let image = rotated_image
+            .map(|rotated| rotated.image.clone())
+            .or_else(|| {
+                node.image_path
+                    .as_ref()
+                    .and_then(|path| images.get(path))
+                    .cloned()
+            });
+        let image_bounds = rotated_image.map(|rotated| {
+            let expanded = size(
+                screen.size.width * rotated.width_ratio,
+                screen.size.height * rotated.height_ratio,
+            );
+            GpBounds::new(
+                point(
+                    screen.center().x - expanded.width / 2.0,
+                    screen.center().y - expanded.height / 2.0,
+                ),
+                expanded,
+            )
+        });
         nodes.push(PreparedNode {
             kind: node.kind,
             shape_kind: node.shape_kind,
             bounds: screen,
             clip,
-            fill,
+            fills,
             border,
             corners,
             text,
-            image: node
-                .image_path
-                .as_ref()
-                .and_then(|path| images.get(path))
-                .cloned(),
-            image_fit: node.image_fit,
+            image,
+            image_bounds,
+            image_fit: if rotated_image.is_some() {
+                ImageFit::Fill
+            } else {
+                node.image_fit
+            },
             shadows,
             vector_paths,
             rotation,
@@ -1175,6 +1858,85 @@ fn prepare_scene(
         });
     }
 
+    let layout_badges = if preview {
+        Vec::new()
+    } else {
+        layout_badges(&selection, document, world_bounds, camera.zoom)
+            .map(|(layout_id, mut badges)| {
+                match &drag {
+                    Some(DragState::LayoutGap {
+                        id, current_gap, ..
+                    }) if id == &layout_id => {
+                        for badge in &mut badges {
+                            if matches!(badge.kind, LayoutBadgeKind::Gap(_)) {
+                                badge.label = format!("G {current_gap:.0}");
+                            }
+                        }
+                    }
+                    Some(DragState::LayoutPadding {
+                        id,
+                        edge,
+                        current_padding,
+                        ..
+                    }) if id == &layout_id => {
+                        let value = match edge {
+                            PaddingEdge::Top => current_padding.top,
+                            PaddingEdge::Right => current_padding.right,
+                            PaddingEdge::Bottom => current_padding.bottom,
+                            PaddingEdge::Left => current_padding.left,
+                        };
+                        for badge in &mut badges {
+                            if matches!(badge.kind, LayoutBadgeKind::Padding(candidate) if candidate == *edge)
+                            {
+                                badge.label = format!("{} {value:.0}", padding_edge_label(*edge));
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+                badges
+                    .into_iter()
+                    .map(|badge| {
+                        let bounds = world_to_screen(badge.bounds, camera, viewport);
+                        let text = SharedString::from(badge.label);
+                        let run = TextRun {
+                            len: text.len(),
+                            font: font(".SystemUIFont"),
+                            color: rgba(0xff, 0xff, 0xff, 0xff),
+                            ..Default::default()
+                        };
+                        let line = window
+                            .text_system()
+                            .shape_line(text, px(9.0), &[run], None);
+                        let origin = point(
+                            bounds.center().x - line.width() / 2.0,
+                            bounds.center().y - px(5.5),
+                        );
+                        PreparedLayoutBadge {
+                            bounds,
+                            line,
+                            origin,
+                            metric: matches!(
+                                badge.kind,
+                                LayoutBadgeKind::Gap(_) | LayoutBadgeKind::Padding(_)
+                            ),
+                        }
+                    })
+                    .collect()
+            })
+            .unwrap_or_default()
+    };
+    let selection_world = selection_bounds(&selection, world_bounds);
+    let rotation_handle = selection_world.map(|bounds| {
+        let screen = world_to_screen(bounds, camera, viewport);
+        (
+            point(
+                screen.center().x,
+                screen.top() - px(ROTATION_HANDLE_SCREEN_PX as f32),
+            ),
+            point(screen.center().x, screen.top()),
+        )
+    });
     let selection = selection
         .iter()
         .filter_map(|id| world_bounds.get(id).copied())
@@ -1184,6 +1946,44 @@ fn prepare_scene(
         .iter()
         .filter_map(|id| world_bounds.get(id).copied())
         .map(|bounds| world_to_screen(bounds, camera, viewport))
+        .collect();
+    let guide_labels = guides
+        .iter()
+        .filter_map(|guide| {
+            let value = guide.label?;
+            let text = SharedString::from(format!("{value:.0}"));
+            let run = TextRun {
+                len: text.len(),
+                font: font(".SystemUIFont"),
+                color: rgba(0xff, 0xff, 0xff, 0xff),
+                ..Default::default()
+            };
+            let line = window
+                .text_system()
+                .shape_line(text, px(10.0), &[run], None);
+            let (x, y) = match guide.axis {
+                GuideAxis::Vertical => (
+                    world_x(guide.position, camera, viewport) + px(6.0),
+                    (world_y(guide.from, camera, viewport) + world_y(guide.to, camera, viewport))
+                        / 2.0,
+                ),
+                GuideAxis::Horizontal => (
+                    (world_x(guide.from, camera, viewport) + world_x(guide.to, camera, viewport))
+                        / 2.0,
+                    world_y(guide.position, camera, viewport) - px(18.0),
+                ),
+            };
+            let origin = point(x, y);
+            let background = GpBounds::new(
+                origin - point(px(4.0), px(2.0)),
+                size(line.width() + px(8.0), px(15.0)),
+            );
+            Some(PreparedGuideLabel {
+                line,
+                origin,
+                background,
+            })
+        })
         .collect();
     let guides = guides
         .into_iter()
@@ -1229,8 +2029,11 @@ fn prepare_scene(
         nodes,
         labels,
         selection,
+        rotation_handle,
         agents,
         guides,
+        guide_labels,
+        layout_badges,
         marquee,
         create,
         overlay_scrim: preview && preview_overlay.is_some(),
@@ -1271,14 +2074,42 @@ fn paint_scene(_bounds: GpBounds<Pixels>, scene: PreparedScene, window: &mut Win
                                     window
                                         .paint_quad(fill(selection, rgba(0x4a, 0x86, 0xe8, 0x66)));
                                 }
-                                let _ = text.line.paint(
-                                    text.origin,
-                                    text.line_height,
-                                    text.align,
-                                    Some(text.width),
-                                    window,
-                                    cx,
-                                );
+                                if let Some(svg) = &text.svg {
+                                    let scale_factor = window.scale_factor();
+                                    let radians = text.rotation.to_radians();
+                                    let cos = radians.cos();
+                                    let sin = radians.sin();
+                                    let center_x = f32::from(text.rotation_center.x) * scale_factor;
+                                    let center_y = f32::from(text.rotation_center.y) * scale_factor;
+                                    let transform = TransformationMatrix {
+                                        rotation_scale: [[cos, -sin], [sin, cos]],
+                                        translation: [
+                                            center_x - cos * center_x + sin * center_y,
+                                            center_y - sin * center_x - cos * center_y,
+                                        ],
+                                    };
+                                    let bounds = GpBounds::new(
+                                        text.origin,
+                                        size(text.width, text.line_height),
+                                    );
+                                    let _ = window.paint_svg(
+                                        bounds,
+                                        svg.clone(),
+                                        Some(svg.as_bytes()),
+                                        transform,
+                                        text.svg_color,
+                                        cx,
+                                    );
+                                } else {
+                                    let _ = text.line.paint(
+                                        text.origin,
+                                        text.line_height,
+                                        text.align,
+                                        Some(text.width),
+                                        window,
+                                        cx,
+                                    );
+                                }
                                 if let Some(caret) = text.caret {
                                     window.paint_quad(fill(caret, rgba(0xff, 0xff, 0xff, 0xff)));
                                 }
@@ -1293,6 +2124,45 @@ fn paint_scene(_bounds: GpBounds<Pixels>, scene: PreparedScene, window: &mut Win
             for bounds in scene.selection {
                 paint_selection(bounds, scene.palette.selection, window);
             }
+            for badge in scene.layout_badges {
+                window.paint_quad(quad(
+                    badge.bounds,
+                    px(5.0),
+                    if badge.metric {
+                        rgba(0x2b, 0x18, 0x32, 0xf2)
+                    } else {
+                        rgba(0x1d, 0x1d, 0x20, 0xf2)
+                    },
+                    px(1.0),
+                    if badge.metric {
+                        scene.palette.guide
+                    } else {
+                        scene.palette.selection
+                    },
+                    BorderStyle::Solid,
+                ));
+                let _ =
+                    badge
+                        .line
+                        .paint(badge.origin, px(11.0), GpTextAlign::Left, None, window, cx);
+            }
+            if let Some((handle, anchor)) = scene.rotation_handle {
+                window.paint_quad(fill(
+                    GpBounds::from_corners(
+                        point(handle.x - px(0.5), handle.y),
+                        point(anchor.x + px(0.5), anchor.y),
+                    ),
+                    scene.palette.selection,
+                ));
+                window.paint_quad(quad(
+                    GpBounds::new(handle - point(px(5.0), px(5.0)), size(px(10.0), px(10.0))),
+                    px(5.0),
+                    rgba(0xff, 0xff, 0xff, 0xff),
+                    px(1.0),
+                    scene.palette.selection,
+                    BorderStyle::Solid,
+                ));
+            }
             for (axis, position, from, to) in scene.guides {
                 let bounds = match axis {
                     GuideAxis::Vertical => GpBounds::from_corners(
@@ -1305,6 +2175,20 @@ fn paint_scene(_bounds: GpBounds<Pixels>, scene: PreparedScene, window: &mut Win
                     ),
                 };
                 window.paint_quad(fill(bounds, scene.palette.guide));
+            }
+            for label in scene.guide_labels {
+                window.paint_quad(quad(
+                    label.background,
+                    px(4.0),
+                    scene.palette.guide,
+                    px(0.0),
+                    gpui::transparent_black(),
+                    BorderStyle::Solid,
+                ));
+                let _ =
+                    label
+                        .line
+                        .paint(label.origin, px(12.0), GpTextAlign::Left, None, window, cx);
             }
             if let Some(bounds) = scene.marquee {
                 window.paint_quad(quad(
@@ -1374,42 +2258,71 @@ fn paint_node(node: &PreparedNode, window: &mut Window) {
     let (border_color, border_width, border_style) =
         node.border
             .unwrap_or((gpui::transparent_black(), px(0.), BorderStyle::Solid));
-    if node.rotation.abs() > f32::EPSILON && node.kind != NodeKind::Image {
-        let points = rotated_rect_points(node.bounds, node.rotation);
-        let mut fill_builder = PathBuilder::fill();
-        fill_builder.add_polygon(&points, true);
-        if let Ok(path) = fill_builder.build() {
-            window.paint_path(path, node.fill);
-        }
-        if border_width > px(0.0) {
-            let mut stroke_builder = PathBuilder::stroke(border_width);
-            stroke_builder.add_polygon(&points, true);
-            if let Ok(path) = stroke_builder.build() {
-                window.paint_path(path, border_color);
+    for fill in node.fills.iter().rev() {
+        match fill {
+            PreparedFill::Background(fill) => {
+                if node.rotation.abs() > f32::EPSILON {
+                    let points = rotated_rect_points(node.bounds, node.rotation);
+                    let mut builder = PathBuilder::fill();
+                    builder.add_polygon(&points, true);
+                    if let Ok(path) = builder.build() {
+                        window.paint_path(path, *fill);
+                    }
+                } else {
+                    window.paint_quad(quad(
+                        node.bounds,
+                        node.corners,
+                        *fill,
+                        Edges::all(px(0.0)),
+                        gpui::transparent_black(),
+                        BorderStyle::Solid,
+                    ));
+                }
+            }
+            PreparedFill::Image(image) => {
+                let _ = window.paint_image(
+                    node.bounds,
+                    node.bounds,
+                    node.corners,
+                    image.clone(),
+                    0,
+                    false,
+                );
             }
         }
-    } else {
-        window.paint_quad(quad(
-            node.bounds,
-            node.corners,
-            node.fill,
-            Edges::all(border_width),
-            border_color,
-            border_style,
-        ));
+    }
+    if border_width > px(0.0) {
+        if node.rotation.abs() > f32::EPSILON {
+            let points = rotated_rect_points(node.bounds, node.rotation);
+            let mut builder = PathBuilder::stroke(border_width);
+            builder.add_polygon(&points, true);
+            if let Ok(path) = builder.build() {
+                window.paint_path(path, border_color);
+            }
+        } else {
+            window.paint_quad(quad(
+                node.bounds,
+                node.corners,
+                gpui::transparent_black(),
+                Edges::all(border_width),
+                border_color,
+                border_style,
+            ));
+        }
     }
 
     if node.kind == NodeKind::Image {
         if let Some(image) = &node.image {
-            let image_bounds = fitted_image_bounds(node.bounds, image, node.image_fit);
-            let _ = window.paint_image(
-                node.bounds,
-                image_bounds,
-                node.corners,
-                image.clone(),
-                0,
-                false,
-            );
+            let image_bounds = node
+                .image_bounds
+                .unwrap_or_else(|| fitted_image_bounds(node.bounds, image, node.image_fit));
+            let clip_bounds = node.image_bounds.unwrap_or(node.bounds);
+            let corners = if node.image_bounds.is_some() {
+                GpCorners::all(px(0.0))
+            } else {
+                node.corners
+            };
+            let _ = window.paint_image(clip_bounds, image_bounds, corners, image.clone(), 0, false);
         } else {
             let inset = px(8.);
             let inner = GpBounds::from_corners(
@@ -1701,6 +2614,7 @@ fn prepare_node_text(
     scale: f32,
     paint: (Option<Color>, f32),
     text_edit: Option<&NativeTextEdit>,
+    rotation: f32,
     window: &mut Window,
 ) -> Vec<PreparedText> {
     if node.kind != NodeKind::Text {
@@ -1725,28 +2639,20 @@ fn prepare_node_text(
         node.display_text()
     };
     let mut byte_offset = 0;
+    let mut char_offset = 0;
     text.split('\n')
         .enumerate()
         .map(|(index, line)| {
             let line_start = byte_offset;
             let line_end = line_start + line.len();
             byte_offset = line_end + 1;
+            let line_start_char = char_offset;
+            char_offset += line.chars().count() + 1;
             let shared = SharedString::from(line.to_owned());
-            let mut text_font = font(if typography.family == "System" {
-                ".SystemUIFont"
-            } else {
-                typography.family.as_str()
-            });
-            text_font.weight = FontWeight(typography.weight as f32);
-            let run = TextRun {
-                len: shared.len(),
-                font: text_font,
-                color: color_hsla(color.unwrap_or(typography.color), opacity),
-                ..Default::default()
-            };
+            let runs = text_runs_for_line(node, &typography, line, line_start_char, color, opacity);
             let line = window
                 .text_system()
-                .shape_line(shared, font_size, &[run], None);
+                .shape_line(shared, font_size, &runs, None);
             let origin = point(
                 bounds.origin.x,
                 bounds.origin.y + line_height * index as f32,
@@ -1784,6 +2690,17 @@ fn prepare_node_text(
                     },
                 )
             });
+            let svg = (rotation.abs() > f32::EPSILON && text_edit.is_none()).then(|| {
+                SharedString::from(rotated_text_svg(
+                    line.text.as_ref(),
+                    f32::from(bounds.size.width),
+                    f32::from(line_height),
+                    f32::from(font_size),
+                    &typography.family,
+                    typography.weight,
+                    typography.align,
+                ))
+            });
             PreparedText {
                 line,
                 origin,
@@ -1793,9 +2710,141 @@ fn prepare_node_text(
                 clip,
                 selection,
                 caret,
+                rotation,
+                rotation_center: bounds.center(),
+                svg,
+                svg_color: color_hsla(color.unwrap_or(typography.color), opacity),
             }
         })
         .collect()
+}
+
+fn rotated_text_svg(
+    text: &str,
+    width: f32,
+    height: f32,
+    font_size: f32,
+    family: &str,
+    weight: u16,
+    align: EngineTextAlign,
+) -> String {
+    let (x, anchor) = match align {
+        EngineTextAlign::Left | EngineTextAlign::Justify => (0.0, "start"),
+        EngineTextAlign::Center => (width * 0.5, "middle"),
+        EngineTextAlign::Right => (width, "end"),
+    };
+    let escape = |value: &str| {
+        value
+            .replace('&', "&amp;")
+            .replace('<', "&lt;")
+            .replace('>', "&gt;")
+            .replace('"', "&quot;")
+            .replace('\'', "&apos;")
+    };
+    format!(
+        "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"{width}\" height=\"{height}\" viewBox=\"0 0 {width} {height}\"><text x=\"{x}\" y=\"{font_size}\" text-anchor=\"{anchor}\" font-family=\"{}\" font-size=\"{font_size}\" font-weight=\"{weight}\" fill=\"white\">{}</text></svg>",
+        escape(family),
+        escape(text),
+    )
+}
+
+fn text_runs_for_line(
+    node: &Node,
+    typography: &loora_engine::Typography,
+    line: &str,
+    line_start_char: usize,
+    override_color: Option<Color>,
+    opacity: f32,
+) -> Vec<TextRun> {
+    let line_chars = line.chars().count();
+    let line_end_char = line_start_char + line_chars;
+    let mut boundaries = vec![0, line_chars];
+    for run in &node.text_runs {
+        let start = run.start.max(line_start_char).min(line_end_char);
+        let end = run.end.max(line_start_char).min(line_end_char);
+        boundaries.push(start.saturating_sub(line_start_char));
+        boundaries.push(end.saturating_sub(line_start_char));
+    }
+    boundaries.sort_unstable();
+    boundaries.dedup();
+
+    let byte_at_char = |index: usize| {
+        line.char_indices()
+            .nth(index)
+            .map(|(byte, _)| byte)
+            .unwrap_or(line.len())
+    };
+    let base_color = override_color.unwrap_or(typography.color);
+    let mut runs = Vec::new();
+    for range in boundaries.windows(2) {
+        let local_start = range[0];
+        let local_end = range[1];
+        if local_start >= local_end {
+            continue;
+        }
+        let global_start = line_start_char + local_start;
+        let global_end = line_start_char + local_end;
+        let styled = node
+            .text_runs
+            .iter()
+            .rev()
+            .find(|run| run.start <= global_start && run.end >= global_end);
+        let patch = styled.and_then(|run| run.typography.as_ref());
+        let family = patch
+            .and_then(|patch| patch.family.as_deref())
+            .unwrap_or(&typography.family);
+        let mut text_font = font(if family == "System" {
+            ".SystemUIFont"
+        } else {
+            family
+        });
+        text_font.weight = FontWeight(
+            patch
+                .and_then(|patch| patch.weight)
+                .unwrap_or(typography.weight) as f32,
+        );
+        let color = styled.and_then(|run| run.color).unwrap_or(base_color);
+        let decoration = patch
+            .and_then(|patch| patch.decoration.as_deref())
+            .map(str::to_owned)
+            .unwrap_or_else(|| match typography.decoration {
+                TextDecoration::None => "none".into(),
+                TextDecoration::Underline => "underline".into(),
+                TextDecoration::LineThrough => "line-through".into(),
+            });
+        let byte_start = byte_at_char(local_start);
+        let byte_end = byte_at_char(local_end);
+        runs.push(TextRun {
+            len: byte_end - byte_start,
+            font: text_font,
+            color: color_hsla(color, opacity),
+            underline: (decoration == "underline").then_some(UnderlineStyle {
+                thickness: px(1.0),
+                color: None,
+                wavy: false,
+            }),
+            strikethrough: (decoration == "line-through").then_some(StrikethroughStyle {
+                thickness: px(1.0),
+                color: None,
+            }),
+            ..Default::default()
+        });
+    }
+    if runs.is_empty() {
+        let mut text_font = font(if typography.family == "System" {
+            ".SystemUIFont"
+        } else {
+            typography.family.as_str()
+        });
+        text_font.weight = FontWeight(typography.weight as f32);
+        runs.push(TextRun {
+            len: line.len(),
+            font: text_font,
+            color: color_hsla(base_color, opacity),
+            ..Default::default()
+        });
+    }
+    runs
 }
 
 fn fallback_fill(kind: NodeKind) -> Color {
@@ -1806,26 +2855,109 @@ fn fallback_fill(kind: NodeKind) -> Color {
     }
 }
 
-fn node_background(node: &Node, opacity: f32) -> Background {
-    match node.style.fills.first() {
-        Some(Paint::Solid { color, .. }) => color_hsla(*color, opacity).into(),
-        Some(Paint::LinearGradient { angle, stops }) if stops.len() >= 2 => {
-            let first = &stops[0];
-            let last = &stops[stops.len() - 1];
-            linear_gradient(
-                *angle,
-                linear_color_stop(color_hsla(first.color, opacity), first.offset),
-                linear_color_stop(color_hsla(last.color, opacity), last.offset),
-            )
-        }
-        Some(Paint::LinearGradient { stops, .. }) | Some(Paint::RadialGradient { stops, .. }) => {
-            stops
-                .first()
-                .map(|stop| color_hsla(stop.color, opacity).into())
-                .unwrap_or_else(|| color_hsla(fallback_fill(node.kind), opacity).into())
-        }
-        None => color_hsla(fallback_fill(node.kind), opacity).into(),
+fn node_fills(
+    node: &Node,
+    opacity: f32,
+    gradients: &HashMap<(NodeId, usize), Arc<RenderImage>>,
+) -> Vec<PreparedFill> {
+    let fills = node
+        .style
+        .fills
+        .iter()
+        .enumerate()
+        .filter_map(|(index, paint)| match paint {
+            Paint::Solid { color, .. } => {
+                Some(PreparedFill::Background(color_hsla(*color, opacity).into()))
+            }
+            Paint::LinearGradient { .. } | Paint::RadialGradient { .. } => gradients
+                .get(&(node.id.clone(), index))
+                .cloned()
+                .map(PreparedFill::Image),
+        })
+        .collect::<Vec<_>>();
+    if fills.is_empty() {
+        vec![PreparedFill::Background(
+            color_hsla(fallback_fill(node.kind), opacity).into(),
+        )]
+    } else {
+        fills
     }
+}
+
+const GRADIENT_RASTER_SIZE: u32 = 192;
+
+fn render_gradient_image(paint: &Paint, opacity: f32) -> Option<Arc<RenderImage>> {
+    let mut raster = image::RgbaImage::new(GRADIENT_RASTER_SIZE, GRADIENT_RASTER_SIZE);
+    for (x, y, pixel) in raster.enumerate_pixels_mut() {
+        let u = x as f32 / (GRADIENT_RASTER_SIZE - 1) as f32;
+        let v = y as f32 / (GRADIENT_RASTER_SIZE - 1) as f32;
+        let color = match paint {
+            Paint::LinearGradient { angle, stops } => {
+                let radians = angle.to_radians();
+                let dx = radians.sin();
+                let dy = -radians.cos();
+                let span = (dx.abs() + dy.abs()).max(f32::EPSILON);
+                let offset = 0.5 + ((u - 0.5) * dx + (v - 0.5) * dy) / span;
+                sample_gradient(stops, offset)
+            }
+            Paint::RadialGradient { cx, cy, stops, .. } => {
+                let cx = normalize_gradient_position(*cx);
+                let cy = normalize_gradient_position(*cy);
+                let radius = [
+                    (cx * cx + cy * cy).sqrt(),
+                    ((1.0 - cx).powi(2) + cy.powi(2)).sqrt(),
+                    (cx.powi(2) + (1.0 - cy).powi(2)).sqrt(),
+                    ((1.0 - cx).powi(2) + (1.0 - cy).powi(2)).sqrt(),
+                ]
+                .into_iter()
+                .fold(0.0_f32, f32::max)
+                .max(f32::EPSILON);
+                let offset =
+                    (((u - cx).powi(2) + (v - cy).powi(2)).sqrt() / radius).clamp(0.0, 1.0);
+                sample_gradient(stops, offset)
+            }
+            Paint::Solid { .. } => return None,
+        }?;
+        *pixel = image::Rgba([
+            (color.b.clamp(0.0, 1.0) * 255.0).round() as u8,
+            (color.g.clamp(0.0, 1.0) * 255.0).round() as u8,
+            (color.r.clamp(0.0, 1.0) * 255.0).round() as u8,
+            (color.a.clamp(0.0, 1.0) * opacity.clamp(0.0, 1.0) * 255.0).round() as u8,
+        ]);
+    }
+    let frame = image::Frame::new(raster);
+    Some(Arc::new(RenderImage::new(smallvec::smallvec![frame])))
+}
+
+fn normalize_gradient_position(value: f32) -> f32 {
+    if value.abs() > 1.0 {
+        value / 100.0
+    } else {
+        value
+    }
+    .clamp(0.0, 1.0)
+}
+
+fn sample_gradient(stops: &[loora_engine::GradientStop], offset: f32) -> Option<Color> {
+    let first = stops.first()?;
+    let last = stops.last()?;
+    let offset = offset.clamp(0.0, 1.0);
+    if offset <= first.offset {
+        return Some(first.color);
+    }
+    for pair in stops.windows(2) {
+        if offset <= pair[1].offset {
+            let width = (pair[1].offset - pair[0].offset).max(f32::EPSILON);
+            let progress = ((offset - pair[0].offset) / width).clamp(0.0, 1.0);
+            return Some(Color::rgba(
+                pair[0].color.r + (pair[1].color.r - pair[0].color.r) * progress,
+                pair[0].color.g + (pair[1].color.g - pair[0].color.g) * progress,
+                pair[0].color.b + (pair[1].color.b - pair[0].color.b) * progress,
+                pair[0].color.a + (pair[1].color.a - pair[0].color.a) * progress,
+            ));
+        }
+    }
+    Some(last.color)
 }
 
 fn load_render_image(path: &Path) -> Option<Arc<RenderImage>> {
@@ -1835,6 +2967,94 @@ fn load_render_image(path: &Path) -> Option<Arc<RenderImage>> {
     }
     let frame = image::Frame::new(image);
     Some(Arc::new(RenderImage::new(smallvec::smallvec![frame])))
+}
+
+fn load_rotated_image(
+    path: &Path,
+    aspect_ratio: f32,
+    fit: ImageFit,
+    rotation: f32,
+) -> Option<RotatedImage> {
+    let source = image::open(path).ok()?.into_rgba8();
+    let aspect_ratio = aspect_ratio.clamp(0.1, 10.0);
+    let (base_width, base_height) = if aspect_ratio >= 1.0 {
+        (384_u32, (384.0 / aspect_ratio).round().max(16.0) as u32)
+    } else {
+        ((384.0 * aspect_ratio).round().max(16.0) as u32, 384_u32)
+    };
+    let source_width = source.width().max(1) as f32;
+    let source_height = source.height().max(1) as f32;
+    let fit_scale = match fit {
+        ImageFit::Cover => {
+            (base_width as f32 / source_width).max(base_height as f32 / source_height)
+        }
+        ImageFit::Contain => {
+            (base_width as f32 / source_width).min(base_height as f32 / source_height)
+        }
+        ImageFit::Fill => 0.0,
+    };
+    let (scaled_width, scaled_height) = if fit == ImageFit::Fill {
+        (base_width, base_height)
+    } else {
+        (
+            (source_width * fit_scale).round().max(1.0) as u32,
+            (source_height * fit_scale).round().max(1.0) as u32,
+        )
+    };
+    let scaled = image::imageops::resize(
+        &source,
+        scaled_width,
+        scaled_height,
+        image::imageops::FilterType::Lanczos3,
+    );
+    let mut fitted = image::RgbaImage::new(base_width, base_height);
+    image::imageops::overlay(
+        &mut fitted,
+        &scaled,
+        (base_width as i64 - scaled_width as i64) / 2,
+        (base_height as i64 - scaled_height as i64) / 2,
+    );
+    let mut rotated = rotate_rgba(&fitted, rotation);
+    let width_ratio = rotated.width() as f32 / base_width as f32;
+    let height_ratio = rotated.height() as f32 / base_height as f32;
+    for pixel in rotated.as_mut().chunks_exact_mut(4) {
+        pixel.swap(0, 2);
+    }
+    let frame = image::Frame::new(rotated);
+    Some(RotatedImage {
+        image: Arc::new(RenderImage::new(smallvec::smallvec![frame])),
+        width_ratio,
+        height_ratio,
+    })
+}
+
+fn rotate_rgba(source: &image::RgbaImage, rotation: f32) -> image::RgbaImage {
+    let radians = rotation.to_radians();
+    let cos = radians.cos();
+    let sin = radians.sin();
+    let width = source.width() as f32;
+    let height = source.height() as f32;
+    let output_width = (width * cos.abs() + height * sin.abs()).ceil().max(1.0) as u32;
+    let output_height = (width * sin.abs() + height * cos.abs()).ceil().max(1.0) as u32;
+    let source_center = ((width - 1.0) * 0.5, (height - 1.0) * 0.5);
+    let output_center = (
+        (output_width as f32 - 1.0) * 0.5,
+        (output_height as f32 - 1.0) * 0.5,
+    );
+    image::RgbaImage::from_fn(output_width, output_height, |x, y| {
+        let dx = x as f32 - output_center.0;
+        let dy = y as f32 - output_center.1;
+        let source_x = cos * dx + sin * dy + source_center.0;
+        let source_y = -sin * dx + cos * dy + source_center.1;
+        if source_x >= 0.0 && source_x < width && source_y >= 0.0 && source_y < height {
+            *source.get_pixel(
+                source_x.round().clamp(0.0, width - 1.0) as u32,
+                source_y.round().clamp(0.0, height - 1.0) as u32,
+            )
+        } else {
+            image::Rgba([0, 0, 0, 0])
+        }
+    })
 }
 
 fn rgba(r: u8, g: u8, b: u8, a: u8) -> Hsla {
@@ -1913,29 +3133,46 @@ fn resolve_absolute(
 }
 
 fn paint_order(document: &Document) -> Vec<NodeId> {
-    fn visit(document: &Document, parent: Option<&NodeId>, output: &mut Vec<NodeId>) {
-        let mut children = document
-            .nodes
-            .values()
-            .filter(|node| node.parent_id.as_ref() == parent)
-            .collect::<Vec<_>>();
+    fn visit(
+        parent: Option<&NodeId>,
+        children_by_parent: &HashMap<Option<NodeId>, Vec<&Node>>,
+        output: &mut Vec<NodeId>,
+    ) {
+        let Some(children) = children_by_parent.get(&parent.cloned()) else {
+            return;
+        };
+        for node in children {
+            output.push(node.id.clone());
+            visit(Some(&node.id), children_by_parent, output);
+        }
+    }
+
+    let mut children_by_parent = HashMap::<Option<NodeId>, Vec<&Node>>::new();
+    for node in document.nodes.values() {
+        children_by_parent
+            .entry(node.parent_id.clone())
+            .or_default()
+            .push(node);
+    }
+    for children in children_by_parent.values_mut() {
         children.sort_by(|left, right| {
             left.order
                 .total_cmp(&right.order)
                 .then_with(|| left.id.as_str().cmp(right.id.as_str()))
         });
-        for node in children {
-            output.push(node.id.clone());
-            visit(document, Some(&node.id), output);
-        }
     }
-    let mut output = Vec::new();
-    visit(document, None, &mut output);
+
+    let mut output = Vec::with_capacity(document.nodes.len());
+    visit(None, &children_by_parent, &mut output);
     output
 }
 
-fn paint_order_with_overlay(document: &Document, overlay: Option<&NodeId>) -> Vec<NodeId> {
-    let mut order = paint_order(document);
+fn paint_order_with_overlay(
+    document: &Document,
+    paint_order: &[NodeId],
+    overlay: Option<&NodeId>,
+) -> Vec<NodeId> {
+    let mut order = paint_order.to_vec();
     let Some(overlay) = overlay else {
         return order;
     };
@@ -2006,9 +3243,14 @@ fn node_or_ancestor_hidden(document: &Document, node: &Node) -> bool {
     false
 }
 
-fn hit_test(document: &Document, bounds: &HashMap<NodeId, Bounds>, world: Vec2) -> Option<NodeId> {
-    paint_order(document)
-        .into_iter()
+fn hit_test(
+    document: &Document,
+    bounds: &HashMap<NodeId, Bounds>,
+    paint_order: &[NodeId],
+    world: Vec2,
+) -> Option<NodeId> {
+    paint_order
+        .iter()
         .rev()
         .find(|id| {
             document.nodes.get(id).is_some_and(|node| {
@@ -2018,32 +3260,38 @@ fn hit_test(document: &Document, bounds: &HashMap<NodeId, Bounds>, world: Vec2) 
                     && bounds.get(id).is_some_and(|bounds| bounds.contains(world))
             })
         })
+        .cloned()
         .or_else(|| {
-            paint_order(document).into_iter().rev().find(|id| {
-                document.nodes.get(id).is_some_and(|node| {
-                    !node_or_ancestor_hidden(document, node)
-                        && !node.locked
-                        && bounds.get(id).is_some_and(|bounds| bounds.contains(world))
+            paint_order
+                .iter()
+                .rev()
+                .find(|id| {
+                    document.nodes.get(id).is_some_and(|node| {
+                        !node_or_ancestor_hidden(document, node)
+                            && !node.locked
+                            && bounds.get(id).is_some_and(|bounds| bounds.contains(world))
+                    })
                 })
-            })
+                .cloned()
         })
 }
 
 fn flow_drop_guide(
     document: &Document,
+    paint_order: &[NodeId],
     dragged: &NodeId,
     world: Vec2,
     bounds: &HashMap<NodeId, Bounds>,
 ) -> Option<Guide> {
-    let stack = paint_order(document).into_iter().rev().find_map(|id| {
-        let node = document.nodes.get(&id)?;
+    let stack = paint_order.iter().rev().find_map(|id| {
+        let node = document.nodes.get(id)?;
         (node.is_container()
             && matches!(
                 node.layout.mode,
                 loora_engine::LayoutMode::Flex | loora_engine::LayoutMode::Grid
             )
-            && !is_descendant_or_self(&id, dragged, document)
-            && bounds.get(&id).is_some_and(|bounds| bounds.contains(world)))
+            && !is_descendant_or_self(id, dragged, document)
+            && bounds.get(id).is_some_and(|bounds| bounds.contains(world)))
         .then_some(node)
     })?;
     let stack_bounds = *bounds.get(&stack.id)?;
@@ -2107,6 +3355,7 @@ fn flow_drop_guide(
                 position,
                 from: stack_bounds.x + padding.left as f64,
                 to: stack_bounds.right() - padding.right as f64,
+                label: None,
             })
         }
         loora_engine::LayoutMode::Flex | loora_engine::LayoutMode::Grid => {
@@ -2135,6 +3384,7 @@ fn flow_drop_guide(
                 position,
                 from,
                 to,
+                label: None,
             })
         }
         loora_engine::LayoutMode::Absolute => None,
@@ -2225,6 +3475,252 @@ fn selection_bounds(ids: &[NodeId], bounds: &HashMap<NodeId, Bounds>) -> Option<
         .reduce(union_bounds)
 }
 
+fn layout_badges(
+    selection: &[NodeId],
+    document: &Document,
+    bounds: &HashMap<NodeId, Bounds>,
+    zoom: f64,
+) -> Option<(NodeId, Vec<LayoutBadge>)> {
+    let [id] = selection else {
+        return None;
+    };
+    let node = document.nodes.get(id)?;
+    if node.locked || !matches!(node.layout.mode, LayoutMode::Flex | LayoutMode::Grid) {
+        return None;
+    }
+    let container = *bounds.get(id)?;
+    let zoom = zoom.max(Camera::MIN_ZOOM);
+    let badge_height = 20.0 / zoom;
+    let badge_gap = 4.0 / zoom;
+    let mut badges = Vec::new();
+    let mut x = container.x;
+    let y = container.bottom() + 12.0 / zoom;
+    let commands: Vec<(LayoutControl, String)> = match node.layout.mode {
+        LayoutMode::Flex => vec![
+            (
+                LayoutControl::Direction,
+                match node.layout.direction {
+                    FlexDirection::Row => "Row",
+                    FlexDirection::Column => "Column",
+                }
+                .into(),
+            ),
+            (
+                LayoutControl::Wrap,
+                if node.layout.wrap { "Wrap" } else { "No wrap" }.into(),
+            ),
+            (LayoutControl::Align, align_label(node.layout.align).into()),
+            (
+                LayoutControl::Justify,
+                justify_label(node.layout.justify).into(),
+            ),
+        ],
+        LayoutMode::Grid => vec![
+            (
+                LayoutControl::Columns,
+                format!("{} cols", node.layout.columns.max(1)),
+            ),
+            (LayoutControl::Align, align_label(node.layout.align).into()),
+            (
+                LayoutControl::Justify,
+                justify_label(node.layout.justify).into(),
+            ),
+        ],
+        LayoutMode::Absolute => Vec::new(),
+    };
+    for (control, label) in commands {
+        let width = (label.chars().count() as f64 * 6.0 + 14.0) / zoom;
+        badges.push(LayoutBadge {
+            bounds: Bounds::new(x, y, width, badge_height),
+            label,
+            kind: LayoutBadgeKind::Command(control),
+        });
+        x += width + badge_gap;
+    }
+
+    if let Some((position, direction)) = gap_badge_position(node, document, bounds) {
+        let label = format!("G {:.0}", node.layout.gap);
+        badges.push(metric_badge(
+            position,
+            label,
+            LayoutBadgeKind::Gap(direction),
+            zoom,
+        ));
+    }
+
+    let padding = node.layout.padding;
+    let handles = [
+        (
+            PaddingEdge::Top,
+            Vec2::new(
+                container.x + container.width * 0.25,
+                container.y + padding.top as f64,
+            ),
+            format!("T {:.0}", padding.top),
+        ),
+        (
+            PaddingEdge::Right,
+            Vec2::new(
+                container.right() - padding.right as f64,
+                container.y + container.height * 0.25,
+            ),
+            format!("R {:.0}", padding.right),
+        ),
+        (
+            PaddingEdge::Bottom,
+            Vec2::new(
+                container.x + container.width * 0.75,
+                container.bottom() - padding.bottom as f64,
+            ),
+            format!("B {:.0}", padding.bottom),
+        ),
+        (
+            PaddingEdge::Left,
+            Vec2::new(
+                container.x + padding.left as f64,
+                container.y + container.height * 0.75,
+            ),
+            format!("L {:.0}", padding.left),
+        ),
+    ];
+    badges.extend(handles.into_iter().map(|(edge, position, label)| {
+        metric_badge(position, label, LayoutBadgeKind::Padding(edge), zoom)
+    }));
+    Some((id.clone(), badges))
+}
+
+fn metric_badge(center: Vec2, label: String, kind: LayoutBadgeKind, zoom: f64) -> LayoutBadge {
+    let width = (label.chars().count() as f64 * 6.0 + 12.0) / zoom;
+    let height = 18.0 / zoom;
+    LayoutBadge {
+        bounds: Bounds::new(
+            center.x - width * 0.5,
+            center.y - height * 0.5,
+            width,
+            height,
+        ),
+        label,
+        kind,
+    }
+}
+
+fn gap_badge_position(
+    container: &Node,
+    document: &Document,
+    bounds: &HashMap<NodeId, Bounds>,
+) -> Option<(Vec2, FlexDirection)> {
+    let mut children = document
+        .nodes
+        .values()
+        .filter(|node| {
+            node.parent_id.as_ref() == Some(&container.id)
+                && !node.hidden
+                && node.layout.position == loora_engine::LayoutPosition::Flow
+        })
+        .collect::<Vec<_>>();
+    children.sort_by(|left, right| {
+        left.order
+            .total_cmp(&right.order)
+            .then_with(|| left.id.as_str().cmp(right.id.as_str()))
+    });
+    let first = bounds.get(&children.first()?.id)?;
+    let second = bounds.get(&children.get(1)?.id)?;
+    let direction = if container.layout.mode == LayoutMode::Flex {
+        container.layout.direction
+    } else if (second.x - first.x).abs() >= (second.y - first.y).abs() {
+        FlexDirection::Row
+    } else {
+        FlexDirection::Column
+    };
+    Some(match direction {
+        FlexDirection::Row => (
+            Vec2::new(
+                (first.right() + second.x) * 0.5,
+                (first.y.max(second.y) + first.bottom().min(second.bottom())) * 0.5,
+            ),
+            direction,
+        ),
+        FlexDirection::Column => (
+            Vec2::new(
+                (first.x.max(second.x) + first.right().min(second.right())) * 0.5,
+                (first.bottom() + second.y) * 0.5,
+            ),
+            direction,
+        ),
+    })
+}
+
+fn align_label(value: LayoutAlign) -> &'static str {
+    match value {
+        LayoutAlign::Start => "Start",
+        LayoutAlign::Center => "Center",
+        LayoutAlign::End => "End",
+        LayoutAlign::Stretch => "Stretch",
+    }
+}
+
+fn justify_label(value: LayoutJustify) -> &'static str {
+    match value {
+        LayoutJustify::Start => "Start",
+        LayoutJustify::Center => "Center",
+        LayoutJustify::End => "End",
+        LayoutJustify::SpaceBetween => "Between",
+        LayoutJustify::SpaceAround => "Around",
+    }
+}
+
+fn padding_edge_label(edge: PaddingEdge) -> &'static str {
+    match edge {
+        PaddingEdge::Top => "T",
+        PaddingEdge::Right => "R",
+        PaddingEdge::Bottom => "B",
+        PaddingEdge::Left => "L",
+    }
+}
+
+fn hit_layout_badge(
+    world: Vec2,
+    selection: &[NodeId],
+    document: &Document,
+    bounds: &HashMap<NodeId, Bounds>,
+    zoom: f64,
+) -> Option<(NodeId, LayoutBadge)> {
+    let (id, badges) = layout_badges(selection, document, bounds, zoom)?;
+    badges
+        .into_iter()
+        .rev()
+        .find(|badge| badge.bounds.contains(world))
+        .map(|badge| (id, badge))
+}
+
+fn resized_padding(
+    mut padding: Insets,
+    edge: PaddingEdge,
+    delta: Vec2,
+    width: f64,
+    height: f64,
+) -> Insets {
+    match edge {
+        PaddingEdge::Top => {
+            let max = (height - padding.bottom as f64 - 1.0).max(0.0);
+            padding.top = (padding.top as f64 + delta.y).clamp(0.0, max) as f32;
+        }
+        PaddingEdge::Right => {
+            let max = (width - padding.left as f64 - 1.0).max(0.0);
+            padding.right = (padding.right as f64 - delta.x).clamp(0.0, max) as f32;
+        }
+        PaddingEdge::Bottom => {
+            let max = (height - padding.top as f64 - 1.0).max(0.0);
+            padding.bottom = (padding.bottom as f64 - delta.y).clamp(0.0, max) as f32;
+        }
+        PaddingEdge::Left => {
+            let max = (width - padding.right as f64 - 1.0).max(0.0);
+            padding.left = (padding.left as f64 + delta.x).clamp(0.0, max) as f32;
+        }
+    }
+    padding
+}
+
 fn hit_resize_handle(
     world: Vec2,
     selection: &[NodeId],
@@ -2263,6 +3759,44 @@ fn hit_resize_handle(
             (world.x - point.x).abs() <= radius && (world.y - point.y).abs() <= radius
         })
         .map(|(handle, _)| (handle, group))
+}
+
+fn hit_rotation_handle(
+    world: Vec2,
+    selection: &[NodeId],
+    bounds: &HashMap<NodeId, Bounds>,
+    radius: f64,
+    offset: f64,
+) -> Option<Bounds> {
+    let group = selection_bounds(selection, bounds)?;
+    let handle = Vec2::new(group.x + group.width * 0.5, group.y - offset);
+    ((world.x - handle.x).abs() <= radius && (world.y - handle.y).abs() <= radius).then_some(group)
+}
+
+fn angle_from(center: Vec2, point: Vec2) -> f64 {
+    (point.y - center.y).atan2(point.x - center.x).to_degrees()
+}
+
+fn angle_delta(start: f64, current: f64) -> f64 {
+    let mut delta = current - start;
+    while delta > 180.0 {
+        delta -= 360.0;
+    }
+    while delta < -180.0 {
+        delta += 360.0;
+    }
+    delta
+}
+
+fn normalize_degrees(value: f32) -> f32 {
+    let value = value % 360.0;
+    if value > 180.0 {
+        value - 360.0
+    } else if value <= -180.0 {
+        value + 360.0
+    } else {
+        value
+    }
 }
 
 fn resize_bounds(bounds: Bounds, handle: ResizeHandle, delta: Vec2) -> Bounds {
@@ -2406,6 +3940,7 @@ fn snap_move(
             position,
             from: moved.y.min(target.y),
             to: moved.bottom().max(target.bottom()),
+            label: axis_gap(moved.y, moved.bottom(), target.y, target.bottom()),
         });
     }
     if let Some((_, position, target)) = best_y {
@@ -2414,9 +3949,20 @@ fn snap_move(
             position,
             from: moved.x.min(target.x),
             to: moved.right().max(target.right()),
+            label: axis_gap(moved.x, moved.right(), target.x, target.right()),
         });
     }
     (snapped, guides)
+}
+
+fn axis_gap(first_start: f64, first_end: f64, second_start: f64, second_end: f64) -> Option<f64> {
+    if first_end <= second_start {
+        Some(second_start - first_end)
+    } else if second_end <= first_start {
+        Some(first_start - second_end)
+    } else {
+        None
+    }
 }
 
 fn normalized_bounds(first: Vec2, second: Vec2) -> Bounds {
@@ -2496,6 +4042,65 @@ mod tests {
     use loora_engine::{Layout, Node};
 
     #[test]
+    fn gradient_sampling_preserves_middle_stops() {
+        let stops = vec![
+            loora_engine::GradientStop {
+                offset: 0.0,
+                color: Color::rgb(255, 0, 0),
+                token_id: None,
+            },
+            loora_engine::GradientStop {
+                offset: 0.5,
+                color: Color::rgb(0, 255, 0),
+                token_id: None,
+            },
+            loora_engine::GradientStop {
+                offset: 1.0,
+                color: Color::rgb(0, 0, 255),
+                token_id: None,
+            },
+        ];
+        let middle = sample_gradient(&stops, 0.5).unwrap();
+        assert!(middle.g > 0.99);
+        assert!(middle.r < 0.01);
+        assert!(middle.b < 0.01);
+    }
+
+    #[test]
+    fn image_rotation_expands_the_raster_without_losing_pixels() {
+        let mut source = image::RgbaImage::new(4, 2);
+        for pixel in source.pixels_mut() {
+            *pixel = image::Rgba([255, 255, 255, 255]);
+        }
+        let rotated = rotate_rgba(&source, 90.0);
+        assert_eq!((rotated.width(), rotated.height()), (3, 4));
+        assert!(rotated.pixels().any(|pixel| pixel.0[3] == 255));
+    }
+
+    #[test]
+    fn rich_text_runs_use_character_ranges_and_utf8_byte_lengths() {
+        let page = NodeId::from("page");
+        let mut node = Node::text("Rich", page, Layout::new(0.0, 0.0, 200.0, 40.0), "AéB");
+        node.text_runs.push(loora_engine::TextRun {
+            start: 1,
+            end: 2,
+            typography: Some(loora_engine::TypographyPatch {
+                family: Some("Courier".into()),
+                weight: Some(700),
+                ..loora_engine::TypographyPatch::default()
+            }),
+            color: Some(Color::rgb(255, 0, 0)),
+            color_token: None,
+        });
+        let runs = text_runs_for_line(&node, &node.effective_typography(), "AéB", 0, None, 1.0);
+        assert_eq!(runs.iter().map(|run| run.len).sum::<usize>(), "AéB".len());
+        assert_eq!(runs.len(), 3);
+        assert_eq!(runs[1].len, "é".len());
+        assert_eq!(runs[1].font.family.as_ref(), "Courier");
+        assert_eq!(runs[1].font.weight, FontWeight(700.0));
+    }
+
+    #[test]
     fn resize_group_scales_every_member_from_shared_origin() {
         let first = NodeId::from("first");
         let second = NodeId::from("second");
@@ -2542,6 +4147,29 @@ mod tests {
         let (delta, guides) = snap_move(Vec2::new(100.0, 0.0), &[moving], &originals, &all, 1.0);
         assert_eq!(delta.x, 102.0);
         assert!(guides.iter().any(|guide| guide.axis == GuideAxis::Vertical));
+    }
+
+    #[test]
+    fn smart_guides_report_non_overlapping_distance() {
+        let moving = NodeId::from("moving");
+        let target = NodeId::from("target");
+        let originals = HashMap::from([(moving.clone(), Bounds::new(0.0, 0.0, 100.0, 50.0))]);
+        let all = HashMap::from([
+            (moving.clone(), originals[&moving]),
+            (target, Bounds::new(202.0, 150.0, 100.0, 50.0)),
+        ]);
+        let (_, guides) = snap_move(Vec2::new(102.0, 0.0), &[moving], &originals, &all, 1.0);
+        assert_eq!(guides[0].label, Some(100.0));
+    }
+
+    #[test]
+    fn rotation_handle_hit_and_wrapped_angle_are_stable() {
+        let id = NodeId::from("selected");
+        let bounds = HashMap::from([(id.clone(), Bounds::new(100.0, 100.0, 80.0, 40.0))]);
+        let group = hit_rotation_handle(Vec2::new(140.0, 76.0), &[id], &bounds, 8.0, 24.0);
+        assert!(group.is_some());
+        assert!((angle_delta(170.0, -170.0) - 20.0).abs() < f64::EPSILON);
+        assert_eq!(normalize_degrees(375.0), 15.0);
     }
 
     #[test]
@@ -2592,9 +4220,52 @@ mod tests {
         );
         document.nodes.insert(overlay.id.clone(), overlay.clone());
         document.nodes.insert(child.id.clone(), child.clone());
-        let order = paint_order_with_overlay(&document, Some(&overlay.id));
+        let base_order = paint_order(&document);
+        let order = paint_order_with_overlay(&document, &base_order, Some(&overlay.id));
         assert!(order.iter().position(|id| id == &current).unwrap() < order.len() - 2);
         assert_eq!(order[order.len() - 2..], [overlay.id, child.id]);
+    }
+
+    #[test]
+    fn overlay_preview_maps_hover_and_click_to_the_centered_artboard() {
+        let mut document = Document::empty("Test");
+        let mut overlay = Node::root_frame("Overlay");
+        overlay.layout.x = 1_000.0;
+        overlay.layout.y = 800.0;
+        overlay.layout.width = 400.0;
+        overlay.layout.height = 200.0;
+        let overlay_id = overlay.id.clone();
+        document.nodes.insert(overlay_id.clone(), overlay);
+        let viewport = Rc::new(Cell::new(GpBounds::new(
+            point(px(0.0), px(0.0)),
+            size(px(1_000.0), px(800.0)),
+        )));
+        let mut canvas = NativeCanvas::new_with_viewport(document, Camera::default(), viewport);
+        canvas.preview = true;
+        canvas.preview_overlay = Some(overlay_id);
+        let bounds = absolute_bounds(&canvas.document);
+
+        let world = canvas
+            .preview_world_at(Vec2::new(500.0, 400.0), &bounds)
+            .unwrap();
+        assert!((world.x - 1_200.0).abs() < 0.01);
+        assert!((world.y - 900.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn in_view_nodes_excludes_offscreen_layers() {
+        let mut document = Document::empty("Test");
+        let page = document.root_page_id.clone();
+        let visible = Node::rectangle("Visible", page.clone(), Layout::new(20.0, 20.0, 80.0, 40.0));
+        let outside = Node::rectangle("Outside", page, Layout::new(900.0, 20.0, 80.0, 40.0));
+        document.nodes.insert(visible.id.clone(), visible.clone());
+        document.nodes.insert(outside.id.clone(), outside.clone());
+        let bounds = absolute_bounds(&document);
+        let viewport = GpBounds::new(point(px(0.0), px(0.0)), size(px(500.0), px(400.0)));
+
+        let nodes = in_view_nodes(&document, &bounds, Camera::default(), viewport, None);
+        assert!(nodes.contains(&visible.id));
+        assert!(!nodes.contains(&outside.id));
     }
 
     #[test]
@@ -2640,6 +4311,116 @@ mod tests {
     }
 
     #[test]
+    fn selection_and_transform_handles_stay_screen_sized_across_zoom_levels() {
+        let mut document = Document::empty("Zoom interaction");
+        let page = document.root_page_id.clone();
+        let node = Node::rectangle("Card", page, Layout::new(120.0, 90.0, 160.0, 80.0));
+        let id = node.id.clone();
+        document.nodes.insert(id.clone(), node);
+        let bounds = absolute_bounds(&document);
+        let order = paint_order(&document);
+
+        for zoom in [0.1, 0.25, 0.5, 1.0, 2.0, 4.0] {
+            let camera = Camera::new(Vec2::new(37.0, -19.0), zoom);
+            let world = Vec2::new(180.0, 120.0);
+            let screen = camera.world_to_screen(world);
+            let mapped = camera.screen_to_world(screen);
+            assert!((mapped.x - world.x).abs() < 1e-8);
+            assert!((mapped.y - world.y).abs() < 1e-8);
+            assert_eq!(
+                hit_test(&document, &bounds, &order, mapped),
+                Some(id.clone())
+            );
+
+            let east = Vec2::new(280.0 + HANDLE_SCREEN_PX * 0.4 / zoom, 130.0);
+            assert!(hit_resize_handle(
+                east,
+                std::slice::from_ref(&id),
+                &bounds,
+                HANDLE_SCREEN_PX / zoom,
+            )
+            .is_some());
+        }
+    }
+
+    #[test]
+    fn direct_layout_badges_cover_flex_controls_and_drag_metrics() {
+        let mut document = Document::empty("Layout controls");
+        let page = document.root_page_id.clone();
+        let mut stack = Node::frame("Stack", page, Layout::new(100.0, 80.0, 320.0, 180.0));
+        stack.layout.mode = LayoutMode::Flex;
+        stack.layout.gap = 16.0;
+        stack.layout.padding = Insets::uniform(12.0);
+        let stack_id = stack.id.clone();
+        document.nodes.insert(stack_id.clone(), stack);
+        for (index, x) in [12.0, 88.0].into_iter().enumerate() {
+            let mut child = Node::rectangle(
+                format!("Child {index}"),
+                stack_id.clone(),
+                Layout::new(x, 12.0, 60.0, 48.0),
+            );
+            child.layout.position = loora_engine::LayoutPosition::Flow;
+            child.order = index as f64 * 1024.0;
+            document.nodes.insert(child.id.clone(), child);
+        }
+        let bounds = absolute_bounds(&document);
+        let (_, at_half) =
+            layout_badges(std::slice::from_ref(&stack_id), &document, &bounds, 0.5).unwrap();
+        let (_, at_double) =
+            layout_badges(std::slice::from_ref(&stack_id), &document, &bounds, 2.0).unwrap();
+
+        assert_eq!(at_half.len(), 9);
+        assert_eq!(at_double.len(), 9);
+        assert!((at_half[0].bounds.width * 0.5 - at_double[0].bounds.width * 2.0).abs() < 0.01);
+        assert!(at_half
+            .iter()
+            .any(|badge| matches!(badge.kind, LayoutBadgeKind::Gap(FlexDirection::Row))));
+        assert_eq!(
+            resized_padding(
+                Insets::uniform(12.0),
+                PaddingEdge::Left,
+                Vec2::new(18.0, 50.0),
+                320.0,
+                180.0,
+            ),
+            Insets {
+                left: 30.0,
+                ..Insets::uniform(12.0)
+            }
+        );
+    }
+
+    #[test]
+    fn large_scene_index_covers_every_node_without_quadratic_tree_scans() {
+        let mut document = Document::empty("Large scene");
+        let page = document.root_page_id.clone();
+        for index in 0..5_000 {
+            let mut node = Node::rectangle(
+                format!("Node {index}"),
+                page.clone(),
+                Layout::new(
+                    (index % 100) as f64 * 12.0,
+                    (index / 100) as f64 * 12.0,
+                    10.0,
+                    10.0,
+                ),
+            );
+            node.order = index as f64;
+            document.nodes.insert(node.id.clone(), node);
+        }
+        let started = Instant::now();
+        let order = paint_order(&document);
+        let bounds = absolute_bounds(&document);
+        eprintln!(
+            "indexed {} nodes in {:?}",
+            document.nodes.len(),
+            started.elapsed()
+        );
+        assert_eq!(order.len(), document.nodes.len());
+        assert_eq!(bounds.len(), document.nodes.len());
+    }
+
+    #[test]
     fn flex_drag_shows_an_insertion_guide_before_the_target_child() {
         let mut document = Document::empty("Guide");
         let page = document.root_page_id.clone();
@@ -2658,8 +4439,15 @@ mod tests {
         document.nodes.insert(target.id.clone(), target);
         let bounds = absolute_bounds(&document);
 
-        let guide =
-            flow_drop_guide(&document, &dragged_id, Vec2::new(170.0, 110.0), &bounds).unwrap();
+        let order = paint_order(&document);
+        let guide = flow_drop_guide(
+            &document,
+            &order,
+            &dragged_id,
+            Vec2::new(170.0, 110.0),
+            &bounds,
+        )
+        .unwrap();
         assert_eq!(guide.axis, GuideAxis::Vertical);
         assert!((guide.position - 180.0).abs() < f64::EPSILON);
     }

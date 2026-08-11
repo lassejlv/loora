@@ -1,5 +1,6 @@
 use crate::extras::{
-    Interaction, NodeAnimation, OverrideMap, ResponsiveMap, Transition, VectorPath, VisualStates,
+    DocumentAnimation, Interaction, NodeAnimation, OverrideMap, ResponsiveMap, Transition,
+    VectorPath, VisualStates,
 };
 use crate::id::NodeId;
 use crate::model::{Layout, Node, Style, Typography};
@@ -33,6 +34,9 @@ pub struct NodePatch {
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Operation {
+    SetAnimations {
+        animations: Vec<DocumentAnimation>,
+    },
     Insert {
         node: Node,
     },

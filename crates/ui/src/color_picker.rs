@@ -287,9 +287,8 @@ impl RenderOnce for ColorPickerPopover {
         let on_change = self.on_change;
         let on_dismiss = self.on_dismiss;
 
-        // Keep the popover in the properties column. While open, the workspace
-        // also hides the wry child so the full-window dismiss catcher works and
-        // the native canvas cannot paint over the panel.
+        // Keep the popover above the canvas while its full-window dismiss
+        // catcher is active.
         div()
             .id("color-picker-root")
             .absolute()

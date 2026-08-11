@@ -10,20 +10,14 @@ use loora_inspector::ToggleInspector;
 use loora_ui::{
     Assets, FitAll, FitSelection, GroupSelection, NewDesign, Redo, SaveDesign, ToggleFiles,
     ToggleLayersSidebar, TogglePropertiesSidebar, ToggleSettings, ToolFrame, ToolHand, ToolImage,
-    ToolRectangle, ToolSelect, ToolText, Undo, UngroupSelection, ZoomIn, ZoomOut, ZoomReset,
+    ToolPreview, ToolRectangle, ToolSelect, ToolText, Undo, UngroupSelection, ZoomIn, ZoomOut,
+    ZoomReset,
 };
 use std::sync::Arc;
 
 actions!(loora, [Quit]);
 
 fn main() {
-    #[cfg(target_os = "linux")]
-    {
-        // Prefer X11/XWayland before GPUI's compositor guess and GTK init.
-        loora_ui::prefer_x11_for_canvas();
-        loora_ui::init_linux_canvas();
-    }
-
     application()
         .with_assets(Assets)
         .with_quit_mode(QuitMode::LastWindowClosed)
@@ -75,6 +69,7 @@ fn main() {
                 Menu::new("Tools").items([
                     MenuItem::action("Select", ToolSelect),
                     MenuItem::action("Hand", ToolHand),
+                    MenuItem::action("Preview", ToolPreview),
                     MenuItem::action("Rectangle", ToolRectangle),
                     MenuItem::action("Frame", ToolFrame),
                     MenuItem::action("Text", ToolText),
