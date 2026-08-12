@@ -1,6 +1,7 @@
 use std::cell::Cell;
 use std::collections::{HashMap, HashSet};
 use std::fs;
+use std::ops::Range;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::sync::Arc;
@@ -21,7 +22,8 @@ use loora_engine::{
     DocumentAnimation, FlexDirection, HtmlCanvasOptions, ImportReport, Interaction,
     InteractionTrigger, Layout, LayoutAlign, LayoutJustify, LayoutMode, LayoutPosition,
     MotionTransform, Node, NodeAnimation, NodeId, NodeKind, Overflow, Paint, Shadow, SizeMode,
-    StateCondition, StateValue, Stroke, StrokeStyle, TextAlign, Transition, Vec2, VisualState,
+    StateCondition, StateValue, Stroke, StrokeStyle, TextAlign, TextRun, Transition,
+    TypographyPatch, Vec2, VisualState,
 };
 use loora_mcp::{McpClient, ToolCallReceiver, UiEffect};
 
@@ -295,7 +297,13 @@ impl CanvasWorkspace {
         let native_canvas = cx.new({
             let document = engine.document().clone();
             let viewport_bounds = viewport_bounds.clone();
-            move |_cx| NativeCanvas::new_with_viewport(document, initial_camera, viewport_bounds)
+            let input_focus = focus_handle.clone();
+            move |_cx| {
+                let mut canvas =
+                    NativeCanvas::new_with_viewport(document, initial_camera, viewport_bounds);
+                canvas.set_input_focus(input_focus);
+                canvas
+            }
         });
         let native_canvas_subscription =
             cx.subscribe(&native_canvas, |workspace, _, event: &CanvasEvent, cx| {
@@ -700,6 +708,7 @@ impl CanvasWorkspace {
             anchor: session.anchor,
             caret: session.caret,
             caret_visible: self.native_caret_visible,
+            marked_range: session.marked_range.clone(),
         });
         self.native_canvas.update(cx, |canvas, cx| {
             canvas.set_scene(
@@ -845,6 +854,8 @@ impl CanvasWorkspace {
                     self.tool = CanvasTool::Select;
                     if *tool == CanvasTool::Image {
                         self.open_image_picker(id, cx);
+                    } else if *tool == CanvasTool::Text {
+                        self.begin_edit_text(id, cx);
                     }
                     self.note_change(cx);
                 }
@@ -897,7 +908,37 @@ impl CanvasWorkspace {
                         self.preview_runtime_generation.wrapping_add(1);
                 }
             }
-            CanvasEvent::BeginTextEdit(id) => self.begin_edit_text(id.clone(), cx),
+            CanvasEvent::BeginTextEdit { id, anchor, caret } => {
+                self.begin_edit_text(id.clone(), cx);
+                if let Some(session) = self.text_edit.as_mut() {
+                    session.anchor = *anchor;
+                    session.caret = *caret;
+                }
+            }
+            CanvasEvent::EndTextEdit => self.end_edit_text(cx),
+            CanvasEvent::TextSelectionChanged { id, anchor, caret } => {
+                if let Some(session) = self.text_edit.as_mut().filter(|session| &session.id == id) {
+                    session.anchor = *anchor;
+                    session.caret = *caret;
+                    session.marked_range = None;
+                    self.native_caret_visible = true;
+                }
+            }
+            CanvasEvent::TextEdited {
+                id,
+                text,
+                anchor,
+                caret,
+                marked_range,
+            } => {
+                if let Some(session) = self.text_edit.as_mut().filter(|session| &session.id == id) {
+                    session.anchor = *anchor;
+                    session.caret = *caret;
+                    session.marked_range = marked_range.clone();
+                    self.native_caret_visible = true;
+                    let _ = self.apply_text_edit(text.clone(), cx);
+                }
+            }
             CanvasEvent::ChooseImage(id) => {
                 self.select_only(id.clone());
                 self.open_image_picker(id.clone(), cx);
@@ -1575,6 +1616,24 @@ impl CanvasWorkspace {
         } else {
             false
         }
+    }
+
+    fn apply_inline_text_style(
+        &mut self,
+        id: &NodeId,
+        typography: TypographyPatch,
+        color: Option<Color>,
+        coalesce_key: Option<String>,
+    ) -> Option<bool> {
+        let session = self
+            .text_edit
+            .as_ref()
+            .filter(|session| &session.id == id && session.has_selection())?;
+        let node = self.engine.node(id)?.clone();
+        let text = node.text.as_deref().unwrap_or("");
+        let (start, end) = session.sorted();
+        let runs = patch_text_runs(text, &node.text_runs, start..end, typography, color);
+        Some(self.engine.set_text_runs(id, runs, coalesce_key).is_ok())
     }
 
     fn open_image_picker(&mut self, id: NodeId, cx: &mut Context<Self>) {
@@ -3315,11 +3374,20 @@ impl CanvasWorkspace {
                     self.engine.set_shadows(&id, shadows, coalesce).is_ok()
                 }
                 PropsField::TextColor if node.kind == NodeKind::Text => {
-                    let mut typography = node.effective_typography();
-                    typography.color = color;
-                    self.engine
-                        .set_typography(&id, typography, coalesce)
-                        .is_ok()
+                    if let Some(changed) = self.apply_inline_text_style(
+                        &id,
+                        TypographyPatch::default(),
+                        Some(color),
+                        coalesce.clone(),
+                    ) {
+                        changed
+                    } else {
+                        let mut typography = node.effective_typography();
+                        typography.color = color;
+                        self.engine
+                            .set_typography(&id, typography, coalesce)
+                            .is_ok()
+                    }
                 }
                 PropsField::VectorFill => {
                     let mut paths = node.paths;
@@ -4377,10 +4445,23 @@ impl CanvasWorkspace {
                         )
                         .is_ok()
                 }
-                PropsField::FontSize => self
-                    .engine
-                    .set_font_size(&id, value.max(1.0) as f32, coalesce("font-size"))
-                    .is_ok(),
+                PropsField::FontSize => {
+                    let size = value.max(1.0) as f32;
+                    self.apply_inline_text_style(
+                        &id,
+                        TypographyPatch {
+                            size: Some(size),
+                            ..TypographyPatch::default()
+                        },
+                        None,
+                        coalesce("font-size"),
+                    )
+                    .unwrap_or_else(|| {
+                        self.engine
+                            .set_font_size(&id, size, coalesce("font-size"))
+                            .is_ok()
+                    })
+                }
                 PropsField::Rotation => self
                     .engine
                     .set_rotation(&id, value as f32, coalesce("property:rotation"))
@@ -4465,20 +4546,40 @@ impl CanvasWorkspace {
                     if node.kind != NodeKind::Text {
                         false
                     } else {
-                        let mut typography = node.effective_typography();
-                        match field {
-                            PropsField::FontWeight => {
-                                typography.weight = value.clamp(1.0, 1000.0) as u16
-                            }
-                            PropsField::LineHeight => {
-                                typography.line_height = Some(value.max(0.0) as f32)
-                            }
-                            PropsField::LetterSpacing => typography.letter_spacing = value as f32,
-                            _ => {}
-                        }
-                        self.engine
-                            .set_typography(&id, typography, coalesce("property:type"))
-                            .is_ok()
+                        let patch = match field {
+                            PropsField::FontWeight => TypographyPatch {
+                                weight: Some(value.clamp(1.0, 1000.0) as u16),
+                                ..TypographyPatch::default()
+                            },
+                            PropsField::LineHeight => TypographyPatch {
+                                line_height: Some(value.max(0.0) as f32),
+                                ..TypographyPatch::default()
+                            },
+                            PropsField::LetterSpacing => TypographyPatch {
+                                letter_spacing: Some(value as f32),
+                                ..TypographyPatch::default()
+                            },
+                            _ => TypographyPatch::default(),
+                        };
+                        self.apply_inline_text_style(&id, patch, None, coalesce("property:type"))
+                            .unwrap_or_else(|| {
+                                let mut typography = node.effective_typography();
+                                match field {
+                                    PropsField::FontWeight => {
+                                        typography.weight = value.clamp(1.0, 1000.0) as u16
+                                    }
+                                    PropsField::LineHeight => {
+                                        typography.line_height = Some(value.max(0.0) as f32)
+                                    }
+                                    PropsField::LetterSpacing => {
+                                        typography.letter_spacing = value as f32
+                                    }
+                                    _ => {}
+                                }
+                                self.engine
+                                    .set_typography(&id, typography, coalesce("property:type"))
+                                    .is_ok()
+                            })
                     }
                 }
                 PropsField::GradientAngle => {
@@ -4651,12 +4752,20 @@ impl CanvasWorkspace {
                             shadows[0].color = color;
                             changed |= self.engine.set_shadows(&selected, shadows, None).is_ok();
                         } else if selected_node.kind == NodeKind::Text {
-                            let mut typography = selected_node.effective_typography();
-                            typography.color = color;
                             changed |= self
-                                .engine
-                                .set_typography(&selected, typography, None)
-                                .is_ok();
+                                .apply_inline_text_style(
+                                    &selected,
+                                    TypographyPatch::default(),
+                                    Some(color),
+                                    None,
+                                )
+                                .unwrap_or_else(|| {
+                                    let mut typography = selected_node.effective_typography();
+                                    typography.color = color;
+                                    self.engine
+                                        .set_typography(&selected, typography, None)
+                                        .is_ok()
+                                });
                         }
                     }
                 }
@@ -4667,12 +4776,23 @@ impl CanvasWorkspace {
                     for selected in self.selection.clone() {
                         if let Some(selected_node) = self.engine.node(&selected).cloned() {
                             if selected_node.kind == NodeKind::Text {
-                                let mut typography = selected_node.effective_typography();
-                                typography.family = family.into();
                                 changed |= self
-                                    .engine
-                                    .set_typography(&selected, typography, None)
-                                    .is_ok();
+                                    .apply_inline_text_style(
+                                        &selected,
+                                        TypographyPatch {
+                                            family: Some(family.into()),
+                                            ..TypographyPatch::default()
+                                        },
+                                        None,
+                                        None,
+                                    )
+                                    .unwrap_or_else(|| {
+                                        let mut typography = selected_node.effective_typography();
+                                        typography.family = family.into();
+                                        self.engine
+                                            .set_typography(&selected, typography, None)
+                                            .is_ok()
+                                    });
                             }
                         }
                     }
@@ -5339,14 +5459,24 @@ impl CanvasWorkspace {
                         changed = text_edit::delete_forward(&mut text, &mut session);
                     }
                     "left" => {
-                        text_edit::move_left(&mut session, &text, extend);
+                        if mods.alt {
+                            text_edit::move_word_left(&mut session, &text, extend);
+                        } else {
+                            text_edit::move_left(&mut session, &text, extend);
+                        }
+                        session.marked_range = None;
                         self.text_edit = Some(session);
                         cx.stop_propagation();
                         cx.notify();
                         return;
                     }
                     "right" => {
-                        text_edit::move_right(&mut session, &text, extend);
+                        if mods.alt {
+                            text_edit::move_word_right(&mut session, &text, extend);
+                        } else {
+                            text_edit::move_right(&mut session, &text, extend);
+                        }
+                        session.marked_range = None;
                         self.text_edit = Some(session);
                         cx.stop_propagation();
                         cx.notify();
@@ -5383,8 +5513,10 @@ impl CanvasWorkspace {
                     _ => {
                         if let Some(ch) = event.keystroke.key_char.as_deref() {
                             if !mods.modified() && !ch.is_empty() {
-                                text_edit::insert(&mut text, &mut session, ch);
-                                changed = true;
+                                self.text_edit = Some(session);
+                                // Printable text goes through GPUI's input handler so IME,
+                                // dead keys and composed Unicode all share one path.
+                                return;
                             } else {
                                 self.text_edit = Some(session);
                                 return;
@@ -6198,12 +6330,14 @@ fn request_native_mcp_frame<T: 'static>(_: &Window, _: &Context<T>) {}
 mod tests {
     use super::{
         command_action_count, mcp_activity_copy, mcp_argument_node_ids, notify_mcp_window,
-        raster_export_svg,
+        patch_text_runs, raster_export_svg,
     };
     use gpui::{
         div, Context, Entity, IntoElement, Render, TestAppContext, VisualTestContext, Window,
     };
-    use loora_engine::{CanvasEngine, Color, Document, GradientStop, Layout, Node, Paint};
+    use loora_engine::{
+        CanvasEngine, Color, Document, GradientStop, Layout, Node, Paint, TextRun, TypographyPatch,
+    };
 
     struct WindowRefreshProbe {
         renders: usize,
@@ -6294,6 +6428,35 @@ mod tests {
         assert_eq!(command_action_count(false, false), 5);
         assert_eq!(command_action_count(true, false), 6);
         assert_eq!(command_action_count(true, true), 5);
+    }
+
+    #[test]
+    fn inline_style_splits_and_preserves_existing_text_runs() {
+        let existing = TextRun {
+            start: 0,
+            end: 11,
+            typography: Some(TypographyPatch {
+                weight: Some(700),
+                ..TypographyPatch::default()
+            }),
+            color: None,
+            color_token: None,
+        };
+
+        let runs = patch_text_runs(
+            "hello world",
+            &[existing],
+            6..11,
+            TypographyPatch::default(),
+            Some(Color::rgb(255, 0, 0)),
+        );
+
+        assert_eq!(runs.len(), 2);
+        assert_eq!((runs[0].start, runs[0].end), (0, 6));
+        assert_eq!(runs[0].typography.as_ref().unwrap().weight, Some(700));
+        assert_eq!((runs[1].start, runs[1].end), (6, 11));
+        assert_eq!(runs[1].typography.as_ref().unwrap().weight, Some(700));
+        assert_eq!(runs[1].color, Some(Color::rgb(255, 0, 0)));
     }
 }
 
@@ -6401,6 +6564,108 @@ fn edit_text_input_key(
         }
     }
     true
+}
+
+fn patch_text_runs(
+    text: &str,
+    runs: &[TextRun],
+    selection: Range<usize>,
+    typography: TypographyPatch,
+    color: Option<Color>,
+) -> Vec<TextRun> {
+    let selection = text_edit::clamp_boundary(text, selection.start)
+        ..text_edit::clamp_boundary(text, selection.end);
+    let selection_chars =
+        text[..selection.start].chars().count()..text[..selection.end].chars().count();
+    if selection_chars.is_empty() {
+        return runs.to_vec();
+    }
+    let text_chars = text.chars().count();
+    let mut boundaries = vec![0, text_chars, selection_chars.start, selection_chars.end];
+    for run in runs {
+        boundaries.push(run.start.min(text_chars));
+        boundaries.push(run.end.min(text_chars));
+    }
+    boundaries.sort_unstable();
+    boundaries.dedup();
+
+    let mut normalized = Vec::<TextRun>::new();
+    for boundary in boundaries.windows(2) {
+        let start = boundary[0];
+        let end = boundary[1];
+        if start >= end {
+            continue;
+        }
+        let existing = runs
+            .iter()
+            .rev()
+            .find(|run| run.start <= start && run.end >= end);
+        let selected = start >= selection_chars.start && end <= selection_chars.end;
+        let mut run = existing.cloned().unwrap_or(TextRun {
+            start,
+            end,
+            typography: None,
+            color: None,
+            color_token: None,
+        });
+        run.start = start;
+        run.end = end;
+        if selected {
+            merge_typography_patch(&mut run.typography, &typography);
+            if let Some(color) = color {
+                run.color = Some(color);
+                run.color_token = None;
+            }
+        }
+        if run.typography.is_none() && run.color.is_none() && run.color_token.is_none() {
+            continue;
+        }
+        if let Some(previous) = normalized.last_mut().filter(|previous| {
+            previous.end == run.start
+                && previous.typography == run.typography
+                && previous.color == run.color
+                && previous.color_token == run.color_token
+        }) {
+            previous.end = run.end;
+        } else {
+            normalized.push(run);
+        }
+    }
+    normalized
+}
+
+fn merge_typography_patch(target: &mut Option<TypographyPatch>, patch: &TypographyPatch) {
+    if patch == &TypographyPatch::default() {
+        return;
+    }
+    let target = target.get_or_insert_with(TypographyPatch::default);
+    if patch.family.is_some() {
+        target.family.clone_from(&patch.family);
+    }
+    if patch.size.is_some() {
+        target.size = patch.size;
+    }
+    if patch.weight.is_some() {
+        target.weight = patch.weight;
+    }
+    if patch.line_height.is_some() {
+        target.line_height = patch.line_height;
+    }
+    if patch.letter_spacing.is_some() {
+        target.letter_spacing = patch.letter_spacing;
+    }
+    if patch.align.is_some() {
+        target.align.clone_from(&patch.align);
+    }
+    if patch.wrap.is_some() {
+        target.wrap = patch.wrap;
+    }
+    if patch.decoration.is_some() {
+        target.decoration.clone_from(&patch.decoration);
+    }
+    if patch.transform.is_some() {
+        target.transform.clone_from(&patch.transform);
+    }
 }
 
 fn is_http_url(value: &str) -> bool {

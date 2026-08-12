@@ -1,6 +1,6 @@
 //! In-canvas text editing helpers (caret / selection / mutations).
 
-use std::ops::{Deref, DerefMut};
+use std::ops::{Deref, DerefMut, Range};
 
 use loora_engine::NodeId;
 
@@ -67,6 +67,7 @@ impl TextCursor {
 pub struct TextEditSession {
     pub id: NodeId,
     pub cursor: TextCursor,
+    pub marked_range: Option<Range<usize>>,
 }
 
 impl TextEditSession {
@@ -75,7 +76,31 @@ impl TextEditSession {
         Self {
             id,
             cursor: TextCursor::selecting_all(text_len),
+            marked_range: None,
         }
+    }
+
+    #[cfg(test)]
+    pub fn replace_and_mark(
+        &mut self,
+        text: &mut String,
+        replacement_range_utf16: Option<Range<usize>>,
+        new_text: &str,
+        selected_range_utf16: Range<usize>,
+    ) {
+        let range = replacement_range_utf16
+            .map(|range| range_from_utf16(text, range))
+            .or_else(|| self.marked_range.take())
+            .unwrap_or_else(|| {
+                let (start, end) = self.sorted();
+                start..end
+            });
+        text.replace_range(range.clone(), new_text);
+        let marked = range.start..range.start + new_text.len();
+        let selected = range_from_utf16(new_text, selected_range_utf16);
+        self.anchor = marked.start + selected.start;
+        self.caret = marked.start + selected.end;
+        self.marked_range = (!new_text.is_empty()).then_some(marked);
     }
 }
 
@@ -129,6 +154,79 @@ pub fn next_boundary(text: &str, i: usize) -> usize {
         p += 1;
     }
     p
+}
+
+#[cfg(test)]
+fn offset_from_utf16(text: &str, offset: usize) -> usize {
+    let mut utf8 = 0;
+    let mut utf16 = 0;
+    for ch in text.chars() {
+        if utf16 >= offset {
+            break;
+        }
+        utf16 += ch.len_utf16();
+        utf8 += ch.len_utf8();
+    }
+    utf8
+}
+
+#[cfg(test)]
+fn range_from_utf16(text: &str, range: Range<usize>) -> Range<usize> {
+    offset_from_utf16(text, range.start)..offset_from_utf16(text, range.end)
+}
+
+pub fn move_word_left(session: &mut TextCursor, text: &str, extend: bool) {
+    session.clamp_in_text(text);
+    if session.has_selection() && !extend {
+        let (start, _) = session.sorted();
+        session.set_caret(start, false);
+        return;
+    }
+    let mut offset = session.caret;
+    while offset > 0 {
+        let previous = prev_boundary(text, offset);
+        let ch = text[previous..offset].chars().next().unwrap();
+        if !ch.is_whitespace() {
+            break;
+        }
+        offset = previous;
+    }
+    while offset > 0 {
+        let previous = prev_boundary(text, offset);
+        let ch = text[previous..offset].chars().next().unwrap();
+        if ch.is_whitespace() {
+            break;
+        }
+        offset = previous;
+    }
+    session.set_caret(offset, extend);
+}
+
+pub fn move_word_right(session: &mut TextCursor, text: &str, extend: bool) {
+    session.clamp_in_text(text);
+    if session.has_selection() && !extend {
+        let (_, end) = session.sorted();
+        session.set_caret(end, false);
+        return;
+    }
+    let mut offset = session.caret;
+    while offset < text.len() {
+        let next = next_boundary(text, offset);
+        let ch = text[offset..next].chars().next().unwrap();
+        if ch.is_whitespace() {
+            break;
+        }
+        offset = next;
+    }
+    while offset < text.len() {
+        let next = next_boundary(text, offset);
+        let ch = text[offset..next].chars().next().unwrap();
+        if !ch.is_whitespace() {
+            break;
+        }
+        offset = next;
+    }
+    session.set_caret(offset, extend);
 }
 
 /// Move caret one grapheme-ish (char) left. Extends selection when `extend`.
@@ -344,5 +442,30 @@ mod tests {
         move_left(&mut session, &text, true);
 
         assert_eq!(session.sorted(), (1, 3));
+    }
+
+    #[test]
+    fn option_arrow_moves_across_a_word() {
+        let text = "one two three";
+        let mut session = TextCursor::at_end(text.len());
+
+        move_word_left(&mut session, text, false);
+
+        assert_eq!(session.sorted(), (8, 8));
+    }
+
+    #[test]
+    fn marked_text_replaces_the_active_composition() {
+        let mut text = String::from("Cafe");
+        let mut session = TextEditSession::new(NodeId::from("text"), text.len());
+        session.set_caret(text.len(), false);
+
+        session.replace_and_mark(&mut text, None, "é", 2..2);
+        assert_eq!(text, "Cafeé");
+        assert_eq!(session.marked_range, Some(4..7));
+
+        session.replace_and_mark(&mut text, None, "é", 1..1);
+        assert_eq!(text, "Cafeé");
+        assert_eq!(session.marked_range, Some(4..6));
     }
 }

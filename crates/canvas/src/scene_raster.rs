@@ -5,8 +5,8 @@ use std::sync::{Arc, OnceLock};
 use base64::Engine as _;
 use image::RgbaImage;
 use loora_engine::{
-    Color, Document, Node, NodeId, NodeKind, Overflow, Paint, ShapeKind, StrokeStyle, TextAlign,
-    TextDecoration,
+    Bounds, Color, Document, Node, NodeId, NodeKind, Overflow, Paint, ShapeKind, StrokeStyle,
+    TextAlign, TextDecoration,
 };
 
 use crate::motion::MotionFrame;
@@ -54,6 +54,7 @@ pub(crate) fn page_needs_raster(
     })
 }
 
+#[cfg(test)]
 pub(crate) fn render_page(
     document: &Document,
     page_id: &NodeId,
@@ -64,6 +65,18 @@ pub(crate) fn render_page(
     rasterize_page(document, page_id, scale, &svg)
 }
 
+pub(crate) fn render_page_regions(
+    document: &Document,
+    page_id: &NodeId,
+    motion_frames: &HashMap<NodeId, MotionFrame>,
+    scale: f32,
+    regions: &[Bounds],
+) -> Result<Vec<RgbaImage>, String> {
+    let svg = render_page_svg(document, page_id, motion_frames)?;
+    rasterize_page_regions(document, page_id, scale, &svg, regions)
+}
+
+#[cfg(test)]
 pub(crate) fn render_page_layers(
     document: &Document,
     page_id: &NodeId,
@@ -90,13 +103,41 @@ pub(crate) fn render_page_layers(
     ))
 }
 
-pub(crate) fn render_page_without_subtrees(
+pub(crate) fn render_page_layer_regions(
     document: &Document,
     page_id: &NodeId,
     motion_frames: &HashMap<NodeId, MotionFrame>,
     scale: f32,
     roots: &[NodeId],
-) -> Result<RgbaImage, String> {
+    regions: &[Bounds],
+) -> Result<(Vec<RgbaImage>, Vec<RgbaImage>), String> {
+    let (subtree, ancestors) = interaction_sets(document, page_id, roots);
+    let background = render_page_svg_with_filter(
+        document,
+        page_id,
+        motion_frames,
+        SceneFilter::Exclude(subtree.clone()),
+    )?;
+    let overlay = render_page_svg_with_filter(
+        document,
+        page_id,
+        motion_frames,
+        SceneFilter::Isolate { subtree, ancestors },
+    )?;
+    Ok((
+        rasterize_page_regions(document, page_id, scale, &background, regions)?,
+        rasterize_page_regions(document, page_id, scale, &overlay, regions)?,
+    ))
+}
+
+pub(crate) fn render_page_regions_without_subtrees(
+    document: &Document,
+    page_id: &NodeId,
+    motion_frames: &HashMap<NodeId, MotionFrame>,
+    scale: f32,
+    roots: &[NodeId],
+    regions: &[Bounds],
+) -> Result<Vec<RgbaImage>, String> {
     let (subtree, _) = interaction_sets(document, page_id, roots);
     let svg = render_page_svg_with_filter(
         document,
@@ -104,9 +145,10 @@ pub(crate) fn render_page_without_subtrees(
         motion_frames,
         SceneFilter::Exclude(subtree),
     )?;
-    rasterize_page(document, page_id, scale, &svg)
+    rasterize_page_regions(document, page_id, scale, &svg, regions)
 }
 
+#[cfg(test)]
 fn rasterize_page(
     document: &Document,
     page_id: &NodeId,
@@ -117,28 +159,78 @@ fn rasterize_page(
         .nodes
         .get(page_id)
         .ok_or_else(|| format!("missing page {page_id}"))?;
-    let width = page.layout.width.max(1.0);
-    let height = page.layout.height.max(1.0);
+    let region = Bounds::new(
+        0.0,
+        0.0,
+        page.layout.width.max(1.0),
+        page.layout.height.max(1.0),
+    );
+    rasterize_page_regions(document, page_id, scale, svg, &[region])?
+        .into_iter()
+        .next()
+        .ok_or_else(|| "canvas raster produced no pixels".to_string())
+}
+
+fn rasterize_page_regions(
+    document: &Document,
+    page_id: &NodeId,
+    scale: f32,
+    svg: &str,
+    regions: &[Bounds],
+) -> Result<Vec<RgbaImage>, String> {
+    let page = document
+        .nodes
+        .get(page_id)
+        .ok_or_else(|| format!("missing page {page_id}"))?;
     let options = resvg::usvg::Options {
         fontdb: shared_font_database(),
         ..resvg::usvg::Options::default()
     };
     let tree = resvg::usvg::Tree::from_str(svg, &options)
         .map_err(|error| format!("parse canvas SVG: {error}"))?;
-    let raster_scale = scale.clamp(0.5, 4.0);
-    let pixel_width = (width * raster_scale as f64).ceil().clamp(1.0, 8192.0) as u32;
-    let pixel_height = (height * raster_scale as f64).ceil().clamp(1.0, 8192.0) as u32;
-    let mut pixmap = resvg::tiny_skia::Pixmap::new(pixel_width, pixel_height)
-        .ok_or_else(|| "canvas page is too large to rasterize".to_string())?;
-    resvg::render(
-        &tree,
-        resvg::tiny_skia::Transform::from_scale(raster_scale, raster_scale),
-        &mut pixmap.as_mut(),
+    let raster_scale = scale.clamp(0.5, 16.0);
+    let page_bounds = Bounds::new(
+        0.0,
+        0.0,
+        page.layout.width.max(1.0),
+        page.layout.height.max(1.0),
     );
-    let mut bytes = pixmap.data().to_vec();
-    unpremultiply_rgba(&mut bytes);
-    RgbaImage::from_raw(pixel_width, pixel_height, bytes)
-        .ok_or_else(|| "invalid canvas raster buffer".to_string())
+    regions
+        .iter()
+        .map(|region| {
+            let region = intersect_region(*region, page_bounds)
+                .ok_or_else(|| "canvas raster region is outside the page".to_string())?;
+            let pixel_width = (region.width * raster_scale as f64)
+                .ceil()
+                .clamp(1.0, 8192.0) as u32;
+            let pixel_height = (region.height * raster_scale as f64)
+                .ceil()
+                .clamp(1.0, 8192.0) as u32;
+            let mut pixmap = resvg::tiny_skia::Pixmap::new(pixel_width, pixel_height)
+                .ok_or_else(|| "canvas page region is too large to rasterize".to_string())?;
+            let transform = resvg::tiny_skia::Transform::from_row(
+                raster_scale,
+                0.0,
+                0.0,
+                raster_scale,
+                -(region.x as f32) * raster_scale,
+                -(region.y as f32) * raster_scale,
+            );
+            resvg::render(&tree, transform, &mut pixmap.as_mut());
+            let mut bytes = pixmap.data().to_vec();
+            unpremultiply_rgba(&mut bytes);
+            RgbaImage::from_raw(pixel_width, pixel_height, bytes)
+                .ok_or_else(|| "invalid canvas raster buffer".to_string())
+        })
+        .collect()
+}
+
+fn intersect_region(left: Bounds, right: Bounds) -> Option<Bounds> {
+    let x = left.x.max(right.x);
+    let y = left.y.max(right.y);
+    let right_edge = (left.x + left.width).min(right.x + right.width);
+    let bottom = (left.y + left.height).min(right.y + right.height);
+    (right_edge > x && bottom > y).then(|| Bounds::new(x, y, right_edge - x, bottom - y))
 }
 
 fn shared_font_database() -> Arc<resvg::usvg::fontdb::Database> {
@@ -926,6 +1018,8 @@ fn unpremultiply_rgba(bytes: &mut [u8]) {
 mod tests {
     use super::*;
     use loora_engine::{Corners, GradientStop, Layout, Shadow, TextRun, TypographyPatch};
+    #[cfg(target_os = "macos")]
+    use std::fs;
 
     #[test]
     fn complex_svg_keeps_clip_blend_gradient_and_rich_text() {
@@ -1174,5 +1268,85 @@ mod tests {
 
         assert_eq!((image.width(), image.height()), (600, 380));
         assert!(image.pixels().filter(|pixel| pixel.0[3] > 0).count() > 150_000);
+    }
+
+    #[test]
+    fn raster_region_pixels_match_the_same_full_page_coordinates() {
+        let mut document = Document::empty("Raster crop");
+        let page = document.root_page_id.clone();
+        document.nodes.get_mut(&page).unwrap().layout = Layout::new(0.0, 0.0, 400.0, 200.0);
+        let mut card =
+            Node::rectangle("Card", page.clone(), Layout::new(240.0, 30.0, 120.0, 100.0));
+        card.style.set_solid_fill(Some(Color::rgb(220, 70, 40)));
+        document.nodes.insert(card.id.clone(), card);
+        let full = render_page(&document, &page, &HashMap::new(), 1.0).unwrap();
+        let tile = render_page_regions(
+            &document,
+            &page,
+            &HashMap::new(),
+            1.0,
+            &[Bounds::new(200.0, 0.0, 200.0, 200.0)],
+        )
+        .unwrap()
+        .remove(0);
+
+        assert_eq!(tile.get_pixel(80, 60), full.get_pixel(280, 60));
+        assert_eq!(tile.get_pixel(10, 10), full.get_pixel(210, 10));
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn permanent_style_fixture_matches_the_visual_golden() {
+        let document = crate::style_fixture::style_fixture_document();
+        let page = document.root_page_id.clone();
+        let actual = render_page(&document, &page, &HashMap::new(), 0.5).unwrap();
+        let golden_path =
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/goldens/style_fixture-macos.png");
+        if std::env::var_os("UPDATE_GOLDENS").is_some() {
+            fs::create_dir_all(golden_path.parent().unwrap()).unwrap();
+            actual.save(&golden_path).unwrap();
+            return;
+        }
+        let expected = image::open(&golden_path)
+            .unwrap_or_else(|error| panic!("read {}: {error}", golden_path.display()))
+            .to_rgba8();
+        assert_eq!(actual.dimensions(), expected.dimensions());
+        let mut changed = 0_u64;
+        let mut total_error = 0_u64;
+        let mut diff = RgbaImage::new(actual.width(), actual.height());
+        for ((actual, expected), diff) in actual
+            .pixels()
+            .zip(expected.pixels())
+            .zip(diff.pixels_mut())
+        {
+            let error = actual
+                .0
+                .iter()
+                .zip(expected.0)
+                .map(|(actual, expected)| actual.abs_diff(expected))
+                .collect::<Vec<_>>();
+            total_error += error.iter().map(|value| u64::from(*value)).sum::<u64>();
+            if error.iter().any(|value| *value > 12) {
+                changed += 1;
+            }
+            *diff = image::Rgba([error[0], error[1], error[2], 255]);
+        }
+        let pixels = u64::from(actual.width()) * u64::from(actual.height());
+        let changed_ratio = changed as f64 / pixels as f64;
+        let mean_error = total_error as f64 / (pixels * 4) as f64;
+        if changed_ratio > 0.005 || mean_error > 1.0 {
+            let output = Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../../target/visual-diffs/style_fixture-macos-actual.png");
+            fs::create_dir_all(output.parent().unwrap()).unwrap();
+            actual.save(&output).unwrap();
+            diff.save(output.with_file_name("style_fixture-macos-diff.png"))
+                .unwrap();
+            panic!(
+                "style fixture drifted: {:.2}% pixels changed, mean error {:.2}; see {}",
+                changed_ratio * 100.0,
+                mean_error,
+                output.display()
+            );
+        }
     }
 }

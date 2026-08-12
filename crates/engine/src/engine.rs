@@ -2634,6 +2634,36 @@ impl CanvasEngine {
         Ok(())
     }
 
+    pub fn set_text_runs(
+        &mut self,
+        id: &NodeId,
+        text_runs: Vec<TextRun>,
+        coalesce_key: Option<String>,
+    ) -> Result<(), EngineError> {
+        let Some(node) = self.node(id) else {
+            return Err(EngineError::NodeMissing(id.to_string()));
+        };
+        if node.kind != NodeKind::Text {
+            return Err(EngineError::InvalidParent("not a text node".into()));
+        }
+        if node.locked {
+            return Err(EngineError::InvalidParent("node is locked".into()));
+        }
+        let mut tx = Transaction::new(
+            "Rich text",
+            vec![Operation::Patch {
+                id: id.clone(),
+                patch: NodePatch {
+                    text_runs: Some(text_runs),
+                    ..NodePatch::default()
+                },
+            }],
+        );
+        tx = tx.with_coalesce_key(coalesce_key.unwrap_or_else(|| format!("text-runs:{id}")));
+        self.apply(tx, ApplyOptions::with_history())?;
+        Ok(())
+    }
+
     pub fn set_font_size(
         &mut self,
         id: &NodeId,
@@ -3602,6 +3632,32 @@ mod tests {
         assert_eq!(engine.node(&id).unwrap().text.as_deref(), Some("AéB"));
         assert_eq!(engine.node(&id).unwrap().text_runs[0].start, 1);
         assert_eq!(engine.node(&id).unwrap().text_runs[0].end, 2);
+    }
+
+    #[test]
+    fn rich_text_run_changes_are_one_undoable_transaction() {
+        let mut document = Document::empty("rich text transaction");
+        let page = document.root_page_id.clone();
+        let mut text = Node::text("Rich", page, Layout::new(0.0, 0.0, 200.0, 40.0), "Hello");
+        text.id = NodeId::from("rich_text");
+        let id = text.id.clone();
+        document.nodes.insert(id.clone(), text);
+        let mut engine = CanvasEngine::new(document);
+        let runs = vec![crate::TextRun {
+            start: 0,
+            end: 5,
+            typography: Some(crate::TypographyPatch {
+                weight: Some(700),
+                ..crate::TypographyPatch::default()
+            }),
+            color: None,
+            color_token: None,
+        }];
+
+        engine.set_text_runs(&id, runs.clone(), None).unwrap();
+        assert_eq!(engine.node(&id).unwrap().text_runs, runs);
+        engine.undo().unwrap();
+        assert!(engine.node(&id).unwrap().text_runs.is_empty());
     }
 
     fn component_fixture() -> (CanvasEngine, NodeId, NodeId) {
