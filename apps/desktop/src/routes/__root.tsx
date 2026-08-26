@@ -1,6 +1,7 @@
 import { Outlet, createRootRoute } from '@tanstack/react-router'
 import { NuqsAdapter } from 'nuqs/adapters/tanstack-router'
 import { useEffect } from 'react'
+import { ShutdownBanner } from '@loora/shell/shutdown-banner'
 import { syncThemePreference } from '@loora/shell/lib/theme'
 import { syncUiScale } from '@loora/shell/lib/ui-scale'
 
@@ -18,7 +19,12 @@ function RootLayout() {
 
   return (
     <NuqsAdapter>
-      <Outlet />
+      <div className="flex h-dvh flex-col overflow-hidden">
+        <ShutdownBanner />
+        <div className="min-h-0 flex-1 overflow-y-auto">
+          <Outlet />
+        </div>
+      </div>
     </NuqsAdapter>
   )
 }

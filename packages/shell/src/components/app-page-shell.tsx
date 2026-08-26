@@ -36,7 +36,7 @@ export function AppShell({ children }: { children: ReactNode }) {
   }
 
   return (
-    <div className="flex h-screen min-h-0 bg-cx-canvas text-foreground">
+    <div className="flex h-full min-h-0 bg-cx-canvas text-foreground">
       <aside className="hidden w-48 shrink-0 flex-col border-e border-line bg-surface md:flex">
         <Link to="/app" preload="intent" className="flex h-10 shrink-0 items-center gap-2 px-3">
           <img

@@ -6,6 +6,7 @@ import { NuqsAdapter } from "nuqs/adapters/tanstack-router";
 import { useEffect } from "react";
 
 import appCss from "../styles.css?url";
+import { ShutdownBanner } from '@loora/shell/shutdown-banner';
 import { syncThemePreference, THEME_INIT_SCRIPT } from '@loora/shell/lib/theme';
 import { syncUiScale, UI_SCALE_INIT_SCRIPT } from '@loora/shell/lib/ui-scale';
 
@@ -109,7 +110,12 @@ function RootDocument({ children }: { children: React.ReactNode }) {
             trackInteractions={true}
           />
         )}
-        <NuqsAdapter>{children}</NuqsAdapter>
+        <NuqsAdapter>
+          <div className="flex h-dvh flex-col overflow-hidden">
+            <ShutdownBanner />
+            <div className="min-h-0 flex-1 overflow-y-auto">{children}</div>
+          </div>
+        </NuqsAdapter>
         <TanStackDevtools
           config={{
             position: "bottom-right",

@@ -11,7 +11,7 @@ import { MCP_CLIENTS } from '#/components/landing/mcp-clients'
  */
 
 /** Bumped when the hand-written marketing pages change materially. */
-export const SITE_UPDATED = '2026-08-02'
+export const SITE_UPDATED = '2026-08-26'
 
 export type SitemapEntry = {
   path: string
@@ -84,6 +84,15 @@ const STATIC_PAGES: SitemapEntry[] = [
     title: 'Launch week',
     summary:
       'One new Loora release a day — the schedule, what shipped, and what is still to come.',
+  },
+  {
+    path: '/shutdown',
+    priority: 0.9,
+    changefreq: 'daily',
+    lastmod: SITE_UPDATED,
+    title: 'Loora is shutting down',
+    summary:
+      'Hosted Loora ends on 1 September 2026. Accounts and stored data are deleted after that date. The repository stays open source.',
   },
   {
     path: '/terms',

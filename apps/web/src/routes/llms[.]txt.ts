@@ -25,7 +25,7 @@ function renderLlmsTxt() {
     if (entry.path.startsWith('/mcp')) grouped['MCP setup'].push(line)
     else if (entry.path.startsWith('/learn')) grouped.Learn.push(line)
     else if (entry.path.startsWith('/compare')) grouped.Comparisons.push(line)
-    else if (entry.path === '/terms' || entry.path === '/privacy') grouped.Legal.push(line)
+    else if (entry.path === '/terms' || entry.path === '/privacy' || entry.path === '/shutdown') grouped.Legal.push(line)
     else grouped.Product.push(line)
   }
 

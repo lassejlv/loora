@@ -322,7 +322,7 @@ export function CanvasApp({
 
   if (error) {
     return (
-      <main className="grid h-screen place-items-center bg-cx-canvas p-4">
+      <main className="grid h-full place-items-center bg-cx-canvas p-4">
         <div className="max-w-sm rounded-lg border bg-card p-4 text-center">
           <h1 className="text-base font-semibold">Canvas could not open</h1>
           <p className="mt-2 text-sm text-muted-foreground">{error}</p>
@@ -347,7 +347,7 @@ export function CanvasApp({
 
   if (loading || !activeId || !controller) {
     return (
-      <main className="grid h-screen place-items-center bg-cx-canvas">
+      <main className="grid h-full place-items-center bg-cx-canvas">
         <div className="flex flex-col items-center gap-5">
           <img
             src="/logo-removebg-preview.png"
@@ -415,7 +415,7 @@ export function CanvasApp({
     )
   }
   return (
-    <div className="h-screen min-h-0">
+    <div className="h-full min-h-0">
       <CanvasEditor
         controller={controller}
         renderSettings={renderSettings}

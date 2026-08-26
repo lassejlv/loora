@@ -1,4 +1,3 @@
-import { useEffect } from 'react'
 import { Link } from '@tanstack/react-router'
 import { LIGHT, PaletteContext, usePalette } from '#/components/landing/palette'
 
@@ -105,6 +104,10 @@ function SiteFooter() {
         >
           Status
         </a>
+        <NavSep />
+        <Link to="/shutdown" className="transition-colors hover:text-foreground">
+          Shutdown
+        </Link>
       </div>
     </footer>
   )
@@ -113,24 +116,12 @@ function SiteFooter() {
 /**
  * Shared chrome for the public pages: palette, document scroll, nav, footer.
  *
- * The app shell locks body scroll for the canvas editor (`overflow: hidden` in
- * styles.css). Clearing the inline style is a no-op — the stylesheet still
- * wins. Force document scroll while a marketing route is mounted, then restore.
+ * Scroll lives on the root content pane (below the shutdown banner). Marketing
+ * routes used to unlock `body` overflow so the editor's `overflow: hidden`
+ * would not trap them; that pane is now the scroller, so this shell only
+ * has to fill it.
  */
 export function LandingShell({ children }: { children: React.ReactNode }) {
-  useEffect(() => {
-    const html = document.documentElement
-    const body = document.body
-    const prevHtml = html.style.overflow
-    const prevBody = body.style.overflow
-    html.style.overflow = 'auto'
-    body.style.overflow = 'auto'
-    return () => {
-      html.style.overflow = prevHtml
-      body.style.overflow = prevBody
-    }
-  }, [])
-
   return (
     <PaletteContext.Provider value={LIGHT}>
       {/* The marketing pages are typeset in px and are not part of the app's
@@ -138,7 +129,7 @@ export function LandingShell({ children }: { children: React.ReactNode }) {
           them. */}
       <div
         style={{ fontSize: '16px' }}
-        className="min-h-dvh bg-background font-mono text-[14px] leading-[1.7] text-foreground antialiased"
+        className="min-h-full bg-background font-mono text-[14px] leading-[1.7] text-foreground antialiased"
       >
         <a
           href="#main"
