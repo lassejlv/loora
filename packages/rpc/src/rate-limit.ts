@@ -1,11 +1,10 @@
 /**
  * Request rate limiting, shared by the web API routes and the MCP server.
  *
- * Counting lives in its own Redis (`REDIS_RATELIMIT_URL`) rather than the
- * realtime one, so a burst of counter writes cannot slow the room bus down and
- * losing one does not take the other with it. Every instance counts against the
- * same keys, which is what makes a limit mean anything once more than one web
- * container is running.
+ * Counting lives in the same Redis as the realtime bus (`REDIS_URL`). Keys are
+ * prefixed `ratelimit:` so they never collide with room, presence, or ticket
+ * keys. Every instance counts against the same keys, which is what makes a
+ * limit mean anything once more than one web container is running.
  *
  * Without that URL — local development, or a Redis that has gone away — the
  * count falls back to this process's memory. That is weaker (an attacker spread
@@ -69,7 +68,7 @@ const UNAVAILABLE_COOLDOWN_MS = 10_000
 const MEMORY_TRACKED_KEYS = 50_000
 
 function redisUrl() {
-  return process.env.REDIS_RATELIMIT_URL?.trim() || null
+  return process.env.REDIS_URL?.trim() || null
 }
 
 let client: BunRedisClient | null = null

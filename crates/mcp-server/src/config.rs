@@ -62,7 +62,7 @@ impl Config {
             internal_api_url,
             internal_token: optional(&get, "MCP_INTERNAL_TOKEN")
                 .ok_or(ConfigError::InternalToken)?,
-            rate_limit_redis_url: optional(&get, "REDIS_RATELIMIT_URL"),
+            rate_limit_redis_url: optional(&get, "REDIS_URL"),
         })
     }
 }
@@ -149,5 +149,18 @@ mod tests {
             Config::from_values(|_| None),
             Err(ConfigError::InternalToken)
         ));
+    }
+
+    #[test]
+    fn rate_limit_uses_the_shared_redis_url() {
+        let values = HashMap::from([
+            ("MCP_INTERNAL_TOKEN", "secret".to_owned()),
+            ("REDIS_URL", " redis://localhost:6379 ".to_owned()),
+        ]);
+        let config = Config::from_values(|key| values.get(key).cloned()).unwrap();
+        assert_eq!(
+            config.rate_limit_redis_url.as_deref(),
+            Some("redis://localhost:6379")
+        );
     }
 }

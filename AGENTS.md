@@ -368,13 +368,15 @@ One protocol, two transports, and one gate in front of both.
 Env: `REALTIME_WS_URL` and `REALTIME_TICKET_SECRET` on web; `REALTIME_INGEST_URL`
 and `REALTIME_INTERNAL_TOKEN` on web and MCP; `REALTIME_TICKET_SECRET`,
 `REALTIME_INTERNAL_TOKEN`, and optional `REDIS_URL` /
-`REALTIME_ALLOWED_ORIGINS` on `crates/ws-server`.
+`REALTIME_ALLOWED_ORIGINS` on `crates/ws-server`. Web and MCP also read
+`REDIS_URL` for rate-limit counters. Keys are prefixed `ratelimit:` so they
+do not collide with room, presence, or ticket keys.
 
 ### Rate limiting
 
 `@loora/rpc/rate-limit` is the one limiter, used by the web API routes and the
 MCP server. `rateLimit(bucket, identity, rule)` counts a fixed window in Redis
-(`REDIS_RATELIMIT_URL`, separate from the realtime one) with a single `EVAL`
+(`REDIS_URL`, the same instance as the realtime bus) with a single `EVAL`
 per check, and falls back to counting in this process's memory when that Redis
 is unset or unreachable — with a cooldown, so an outage never adds a connect
 timeout to a request. Every limit lives in the `rateLimits` table in that

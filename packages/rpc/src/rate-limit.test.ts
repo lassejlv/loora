@@ -12,16 +12,16 @@ import {
 
 // No Redis in the suite: these cover the in-memory path every deployment falls
 // back to, which is the one that has to stay correct when Redis is missing.
-const url = process.env.REDIS_RATELIMIT_URL
+const url = process.env.REDIS_URL
 
 beforeEach(() => {
-  delete process.env.REDIS_RATELIMIT_URL
+  delete process.env.REDIS_URL
   resetRateLimitClient()
 })
 
 afterEach(() => {
-  if (url === undefined) delete process.env.REDIS_RATELIMIT_URL
-  else process.env.REDIS_RATELIMIT_URL = url
+  if (url === undefined) delete process.env.REDIS_URL
+  else process.env.REDIS_URL = url
 })
 
 function identity(name: string) {
@@ -67,7 +67,7 @@ describe('rateLimit', () => {
   it('keeps counting when Redis cannot be reached', async () => {
     // Nothing is listening on port 1, so this is what an outage looks like:
     // the limiter has to keep answering, and keep counting, without it.
-    process.env.REDIS_RATELIMIT_URL = 'redis://127.0.0.1:1'
+    process.env.REDIS_URL = 'redis://127.0.0.1:1'
     resetRateLimitClient()
     const who = identity('caller')
     const rule = { limit: 1, windowMs: 60_000 }
