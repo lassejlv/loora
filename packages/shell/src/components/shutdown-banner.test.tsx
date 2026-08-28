@@ -1,25 +1,28 @@
-import { cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, test, vi } from 'vitest'
 import { configureRuntime } from '@loora/platform'
-import { ShutdownBanner } from './shutdown-banner'
+import {
+  CLOUD_BANNER_DISMISSED_KEY,
+  ShutdownBanner,
+} from './shutdown-banner'
 
 const openExternal = vi.fn()
 
 afterEach(() => {
   cleanup()
   openExternal.mockReset()
+  window.localStorage.clear()
   configureRuntime({ platform: 'web', openExternal: (url) => window.location.assign(url) })
 })
 
 describe('ShutdownBanner', () => {
-  test('alerts that the service ends and data will be deleted', () => {
+  test('alerts that the cloud version continues', () => {
     render(<ShutdownBanner />)
     const alert = screen.getByRole('alert')
-    expect(alert.textContent).toMatch(/ending on 1 September 2026/i)
-    expect(alert.textContent).toMatch(/all user and customer data will be deleted/i)
-    expect(alert.textContent).toMatch(/the project stays open source/i)
-    expect(screen.getByRole('link', { name: 'Read the notice' }).getAttribute('href')).toBe(
-      '/shutdown',
+    expect(alert.textContent).toMatch(/loora will continue its cloud version/i)
+    expect(alert.textContent).toMatch(/your files and accounts stay/i)
+    expect(screen.getByRole('link', { name: 'Read more' }).getAttribute('href')).toBe(
+      '/cloud',
     )
   })
 
@@ -30,9 +33,22 @@ describe('ShutdownBanner', () => {
       openExternal,
     })
     render(<ShutdownBanner />)
-    const link = screen.getByRole('link', { name: 'Read the notice' })
-    expect(link.getAttribute('href')).toBe('https://loora.design/shutdown')
+    const link = screen.getByRole('link', { name: 'Read more' })
+    expect(link.getAttribute('href')).toBe('https://loora.design/cloud')
     fireEvent.click(link)
-    expect(openExternal).toHaveBeenCalledWith('https://loora.design/shutdown')
+    expect(openExternal).toHaveBeenCalledWith('https://loora.design/cloud')
+  })
+
+  test('dismisses the alert and remembers it', async () => {
+    render(<ShutdownBanner />)
+    fireEvent.click(screen.getByRole('button', { name: 'Dismiss' }))
+    expect(screen.queryByRole('alert')).toBeNull()
+    expect(window.localStorage.getItem(CLOUD_BANNER_DISMISSED_KEY)).toBe('1')
+
+    cleanup()
+    render(<ShutdownBanner />)
+    await waitFor(() => {
+      expect(screen.queryByRole('alert')).toBeNull()
+    })
   })
 })

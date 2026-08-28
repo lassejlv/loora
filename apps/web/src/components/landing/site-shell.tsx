@@ -105,8 +105,8 @@ function SiteFooter() {
           Status
         </a>
         <NavSep />
-        <Link to="/shutdown" className="transition-colors hover:text-foreground">
-          Shutdown
+        <Link to="/cloud" className="transition-colors hover:text-foreground">
+          Cloud
         </Link>
       </div>
     </footer>
@@ -116,7 +116,7 @@ function SiteFooter() {
 /**
  * Shared chrome for the public pages: palette, document scroll, nav, footer.
  *
- * Scroll lives on the root content pane (below the shutdown banner). Marketing
+ * Scroll lives on the root content pane (below the site banner). Marketing
  * routes used to unlock `body` overflow so the editor's `overflow: hidden`
  * would not trap them; that pane is now the scroller, so this shell only
  * has to fill it.

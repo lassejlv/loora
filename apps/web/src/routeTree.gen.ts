@@ -11,6 +11,7 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as AppRouteImport } from './routes/app'
+import { Route as CloudRouteImport } from './routes/cloud'
 import { Route as FeaturesRouteImport } from './routes/features'
 import { Route as LaunchWeekRouteImport } from './routes/launch-week'
 import { Route as LlmsDottxtRouteImport } from './routes/llms[.]txt'
@@ -18,8 +19,8 @@ import { Route as McpConsentRouteImport } from './routes/mcp-consent'
 import { Route as PricingRouteImport } from './routes/pricing'
 import { Route as PrivacyRouteImport } from './routes/privacy'
 import { Route as ResetPasswordRouteImport } from './routes/reset-password'
-import { Route as SitemapDotxmlRouteImport } from './routes/sitemap[.]xml'
 import { Route as ShutdownRouteImport } from './routes/shutdown'
+import { Route as SitemapDotxmlRouteImport } from './routes/sitemap[.]xml'
 import { Route as TermsRouteImport } from './routes/terms'
 import { Route as DotwellKnownOauthAuthorizationServerRouteImport } from './routes/[.]well-known.oauth-authorization-server'
 import { Route as ApiCanvasEventsRouteImport } from './routes/api.canvas-events'
@@ -70,6 +71,11 @@ const AppRoute = AppRouteImport.update({
   path: '/app',
   getParentRoute: () => rootRouteImport,
 } as any)
+const CloudRoute = CloudRouteImport.update({
+  id: '/cloud',
+  path: '/cloud',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const FeaturesRoute = FeaturesRouteImport.update({
   id: '/features',
   path: '/features',
@@ -105,14 +111,14 @@ const ResetPasswordRoute = ResetPasswordRouteImport.update({
   path: '/reset-password',
   getParentRoute: () => rootRouteImport,
 } as any)
-const SitemapDotxmlRoute = SitemapDotxmlRouteImport.update({
-  id: '/sitemap.xml',
-  path: '/sitemap.xml',
-  getParentRoute: () => rootRouteImport,
-} as any)
 const ShutdownRoute = ShutdownRouteImport.update({
   id: '/shutdown',
   path: '/shutdown',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const SitemapDotxmlRoute = SitemapDotxmlRouteImport.update({
+  id: '/sitemap.xml',
+  path: '/sitemap.xml',
   getParentRoute: () => rootRouteImport,
 } as any)
 const TermsRoute = TermsRouteImport.update({
@@ -316,6 +322,7 @@ const ApiHandoffTokenAssetIdRoute = ApiHandoffTokenAssetIdRouteImport.update({
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/app': typeof AppRouteWithChildren
+  '/cloud': typeof CloudRoute
   '/features': typeof FeaturesRoute
   '/launch-week': typeof LaunchWeekRoute
   '/llms.txt': typeof LlmsDottxtRoute
@@ -323,8 +330,8 @@ export interface FileRoutesByFullPath {
   '/pricing': typeof PricingRoute
   '/privacy': typeof PrivacyRoute
   '/reset-password': typeof ResetPasswordRoute
-  '/sitemap.xml': typeof SitemapDotxmlRoute
   '/shutdown': typeof ShutdownRoute
+  '/sitemap.xml': typeof SitemapDotxmlRoute
   '/terms': typeof TermsRoute
   '/.well-known/oauth-authorization-server': typeof DotwellKnownOauthAuthorizationServerRoute
   '/api/canvas-events': typeof ApiCanvasEventsRoute
@@ -367,6 +374,7 @@ export interface FileRoutesByFullPath {
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/cloud': typeof CloudRoute
   '/features': typeof FeaturesRoute
   '/launch-week': typeof LaunchWeekRoute
   '/llms.txt': typeof LlmsDottxtRoute
@@ -374,8 +382,8 @@ export interface FileRoutesByTo {
   '/pricing': typeof PricingRoute
   '/privacy': typeof PrivacyRoute
   '/reset-password': typeof ResetPasswordRoute
-  '/sitemap.xml': typeof SitemapDotxmlRoute
   '/shutdown': typeof ShutdownRoute
+  '/sitemap.xml': typeof SitemapDotxmlRoute
   '/terms': typeof TermsRoute
   '/.well-known/oauth-authorization-server': typeof DotwellKnownOauthAuthorizationServerRoute
   '/api/canvas-events': typeof ApiCanvasEventsRoute
@@ -420,6 +428,7 @@ export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/app': typeof AppRouteWithChildren
+  '/cloud': typeof CloudRoute
   '/features': typeof FeaturesRoute
   '/launch-week': typeof LaunchWeekRoute
   '/llms.txt': typeof LlmsDottxtRoute
@@ -427,8 +436,8 @@ export interface FileRoutesById {
   '/pricing': typeof PricingRoute
   '/privacy': typeof PrivacyRoute
   '/reset-password': typeof ResetPasswordRoute
-  '/sitemap.xml': typeof SitemapDotxmlRoute
   '/shutdown': typeof ShutdownRoute
+  '/sitemap.xml': typeof SitemapDotxmlRoute
   '/terms': typeof TermsRoute
   '/.well-known/oauth-authorization-server': typeof DotwellKnownOauthAuthorizationServerRoute
   '/api/canvas-events': typeof ApiCanvasEventsRoute
@@ -474,6 +483,7 @@ export interface FileRouteTypes {
   fullPaths:
     | '/'
     | '/app'
+    | '/cloud'
     | '/features'
     | '/launch-week'
     | '/llms.txt'
@@ -481,8 +491,8 @@ export interface FileRouteTypes {
     | '/pricing'
     | '/privacy'
     | '/reset-password'
-    | '/sitemap.xml'
     | '/shutdown'
+    | '/sitemap.xml'
     | '/terms'
     | '/.well-known/oauth-authorization-server'
     | '/api/canvas-events'
@@ -525,6 +535,7 @@ export interface FileRouteTypes {
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
+    | '/cloud'
     | '/features'
     | '/launch-week'
     | '/llms.txt'
@@ -532,8 +543,8 @@ export interface FileRouteTypes {
     | '/pricing'
     | '/privacy'
     | '/reset-password'
-    | '/sitemap.xml'
     | '/shutdown'
+    | '/sitemap.xml'
     | '/terms'
     | '/.well-known/oauth-authorization-server'
     | '/api/canvas-events'
@@ -577,6 +588,7 @@ export interface FileRouteTypes {
     | '__root__'
     | '/'
     | '/app'
+    | '/cloud'
     | '/features'
     | '/launch-week'
     | '/llms.txt'
@@ -584,8 +596,8 @@ export interface FileRouteTypes {
     | '/pricing'
     | '/privacy'
     | '/reset-password'
-    | '/sitemap.xml'
     | '/shutdown'
+    | '/sitemap.xml'
     | '/terms'
     | '/.well-known/oauth-authorization-server'
     | '/api/canvas-events'
@@ -630,6 +642,7 @@ export interface FileRouteTypes {
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AppRoute: typeof AppRouteWithChildren
+  CloudRoute: typeof CloudRoute
   FeaturesRoute: typeof FeaturesRoute
   LaunchWeekRoute: typeof LaunchWeekRoute
   LlmsDottxtRoute: typeof LlmsDottxtRoute
@@ -637,8 +650,8 @@ export interface RootRouteChildren {
   PricingRoute: typeof PricingRoute
   PrivacyRoute: typeof PrivacyRoute
   ResetPasswordRoute: typeof ResetPasswordRoute
-  SitemapDotxmlRoute: typeof SitemapDotxmlRoute
   ShutdownRoute: typeof ShutdownRoute
+  SitemapDotxmlRoute: typeof SitemapDotxmlRoute
   TermsRoute: typeof TermsRoute
   DotwellKnownOauthAuthorizationServerRoute: typeof DotwellKnownOauthAuthorizationServerRoute
   ApiCanvasEventsRoute: typeof ApiCanvasEventsRoute
@@ -685,6 +698,13 @@ declare module '@tanstack/react-router' {
       path: '/app'
       fullPath: '/app'
       preLoaderRoute: typeof AppRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/cloud': {
+      id: '/cloud'
+      path: '/cloud'
+      fullPath: '/cloud'
+      preLoaderRoute: typeof CloudRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/features': {
@@ -736,18 +756,18 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ResetPasswordRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/sitemap.xml': {
-      id: '/sitemap.xml'
-      path: '/sitemap.xml'
-      fullPath: '/sitemap.xml'
-      preLoaderRoute: typeof SitemapDotxmlRouteImport
-      parentRoute: typeof rootRouteImport
-    }
     '/shutdown': {
       id: '/shutdown'
       path: '/shutdown'
       fullPath: '/shutdown'
       preLoaderRoute: typeof ShutdownRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/sitemap.xml': {
+      id: '/sitemap.xml'
+      path: '/sitemap.xml'
+      fullPath: '/sitemap.xml'
+      preLoaderRoute: typeof SitemapDotxmlRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/terms': {
@@ -1075,6 +1095,7 @@ const ApiHandoffTokenRouteWithChildren = ApiHandoffTokenRoute._addFileChildren(
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AppRoute: AppRouteWithChildren,
+  CloudRoute: CloudRoute,
   FeaturesRoute: FeaturesRoute,
   LaunchWeekRoute: LaunchWeekRoute,
   LlmsDottxtRoute: LlmsDottxtRoute,
@@ -1082,8 +1103,8 @@ const rootRouteChildren: RootRouteChildren = {
   PricingRoute: PricingRoute,
   PrivacyRoute: PrivacyRoute,
   ResetPasswordRoute: ResetPasswordRoute,
-  SitemapDotxmlRoute: SitemapDotxmlRoute,
   ShutdownRoute: ShutdownRoute,
+  SitemapDotxmlRoute: SitemapDotxmlRoute,
   TermsRoute: TermsRoute,
   DotwellKnownOauthAuthorizationServerRoute:
     DotwellKnownOauthAuthorizationServerRoute,

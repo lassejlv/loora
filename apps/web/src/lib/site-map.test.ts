@@ -69,7 +69,7 @@ describe('sitemapEntries', () => {
     for (const client of MCP_CLIENTS) expect(paths).toContain(`/mcp/${client.slug}`)
     for (const article of LEARN_ARTICLES) expect(paths).toContain(`/learn/${article.slug}`)
     for (const comparison of COMPARISONS) expect(paths).toContain(`/compare/${comparison.slug}`)
-    for (const hub of ['/', '/features', '/mcp', '/pricing', '/learn', '/compare', '/shutdown'])
+    for (const hub of ['/', '/features', '/mcp', '/pricing', '/learn', '/compare', '/cloud'])
       expect(paths).toContain(hub)
   })
 
