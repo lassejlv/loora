@@ -1,8 +1,6 @@
-import pg from 'pg'
-import { drizzle } from 'drizzle-orm/node-postgres'
+import { Pool, neonConfig } from '@neondatabase/serverless'
+import { drizzle } from 'drizzle-orm/neon-serverless'
 import * as schema from './schema'
-
-const { Pool } = pg
 
 const databaseUrl = process.env.DATABASE_URL
 
@@ -25,6 +23,10 @@ function integerEnvironment(
 export const databaseClient = new Pool({
   connectionString: databaseUrl,
   max: integerEnvironment('DATABASE_POOL_MAX', 10, 1, 50),
+  // A Worker isolate can outlive the request that opened a socket. Retiring a
+  // client when a transaction releases it prevents a later request from
+  // inheriting a connection owned by the earlier request.
+  maxUses: 1,
   idleTimeoutMillis:
     integerEnvironment(
       'DATABASE_IDLE_TIMEOUT_SECONDS',
@@ -52,6 +54,11 @@ export const databaseClient = new Pool({
     120_000,
   ),
 })
+
+// Pool.query() is the path used by Drizzle outside interactive transactions.
+// Route those one-shot queries over Neon's stateless HTTP transport so they do
+// not leave request-scoped WebSockets in a reused Worker isolate.
+neonConfig.poolQueryViaFetch = true
 
 export const db = drizzle({ client: databaseClient, schema })
 

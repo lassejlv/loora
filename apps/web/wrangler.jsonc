@@ -6,6 +6,16 @@
   "compatibility_flags": ["nodejs_compat"],
   "preview_urls": false,
   "workers_dev": true,
+  "vars": {
+    "REALTIME_WS_URL": "wss://ws.loora.design",
+    "REALTIME_INGEST_URL": "https://ws.loora.design"
+  },
+  "routes": [
+    {
+      "pattern": "loora.design/*",
+      "zone_name": "loora.design"
+    }
+  ],
   "browser": {
     "binding": "BROWSER",
     "remote": true
