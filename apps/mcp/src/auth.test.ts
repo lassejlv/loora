@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'vitest'
+import { afterEach, describe, expect, test, vi } from 'vitest'
 import { AuthVerifier } from './auth'
 import type { FetchImpl } from './env'
 
@@ -18,6 +18,28 @@ function authFetch(handler: (request: Request) => Response | Promise<Response>):
 }
 
 describe('MCP auth verifier', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
+  test('does not rebind the platform fetch receiver', async () => {
+    let receiver: unknown = Symbol('not-called')
+    vi.stubGlobal('fetch', function (this: unknown) {
+      receiver = this
+      return Promise.resolve(Response.json({ userId: 'user-id' }))
+    })
+    const verifier = new AuthVerifier({
+      authOrigin: 'https://auth.test',
+      timeoutMs: 5_000,
+      cacheTtlMs: 0,
+    })
+
+    await expect(verifier.verifyToken('token')).resolves.toMatchObject({
+      userId: 'user-id',
+    })
+    expect(receiver).toBeUndefined()
+  })
+
   test('verifies and caches successful sessions', async () => {
     let requests = 0
     const verifier = new AuthVerifier({
@@ -67,6 +89,19 @@ describe('MCP auth verifier', () => {
       userId: 'user-id',
     })
     expect(requests).toBe(4)
+  })
+
+  test('treats Better Auth null sessions as invalid tokens', async () => {
+    const verifier = new AuthVerifier({
+      authOrigin: 'https://auth.test',
+      timeoutMs: 5_000,
+      cacheTtlMs: 60_000,
+      fetchImpl: authFetch(() => Response.json(null)),
+    })
+
+    await expect(verifier.verifyToken('token')).rejects.toMatchObject({
+      code: 'invalid-token',
+    })
   })
 
   test('treats invalid upstream responses as service failures', async () => {

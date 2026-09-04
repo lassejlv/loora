@@ -1,4 +1,3 @@
-export { flags } from 'railway'
 export {
   isInAppAgentEnabled,
   isPublishSitesEnabled,

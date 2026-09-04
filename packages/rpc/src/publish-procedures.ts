@@ -29,7 +29,7 @@ import {
   requireDesignAccess,
 } from './procedures'
 import { rateLimit, rateLimits } from './rate-limit'
-import { assetPublicUrl, s3 } from './storage'
+import { assetPublicUrl, s3 } from '@loora/rpc/storage'
 import {
   canUseCustomDomains,
   customDomainClient,

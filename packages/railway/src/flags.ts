@@ -1,18 +1,4 @@
-import { flags } from 'railway'
-
-let initPromise: Promise<void> | null = null
-
-function ensureInit() {
-  if (initPromise) return initPromise
-  if (!process.env.RAILWAY_TOKEN) return Promise.resolve()
-  initPromise = flags
-    .init({
-      refresh: false,
-      timeoutMs: 2000,
-    })
-    .catch(() => undefined)
-  return initPromise
-}
+import { evaluateFlag } from './graphql'
 
 export type FeatureFlagUser = {
   id: string
@@ -21,9 +7,16 @@ export type FeatureFlagUser = {
 
 export async function isPublishSitesEnabled(user: FeatureFlagUser) {
   if (user.isAdmin) return true
-  if (!process.env.RAILWAY_TOKEN) return false
-  await ensureInit()
-  return flags.getBoolean('publish-sites', { key: user.id, is_admin: false }, false)
+  if (!process.env.RAILWAY_TOKEN || !process.env.RAILWAY_PROJECT_ID) return false
+  try {
+    const result = await evaluateFlag('publish-sites', {
+      key: user.id,
+      is_admin: false,
+    })
+    return result.value === true
+  } catch {
+    return false
+  }
 }
 
 /** The agent chat is open to every account. */

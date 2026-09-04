@@ -19,7 +19,7 @@ import {
   hasAcceptedCurrentLegal,
 } from '@loora/auth/legal-consent'
 import { githubEnabled } from '@loora/auth/github'
-import { s3 } from './storage'
+import { s3 } from '@loora/rpc/storage'
 import { cleanupPublishedSiteArtifacts } from './published-site-artifacts'
 import {
   consentedProcedure,

@@ -1,12 +1,11 @@
-import { existsSync } from 'node:fs'
-import { and, eq, inArray } from 'drizzle-orm'
-import {
-  chromium,
+import { Buffer } from 'node:buffer'
+import puppeteer, {
   type Browser,
   type ElementHandle,
-} from 'playwright-core'
-import { db } from '@loora/db'
-import { asset } from '@loora/db/schema'
+} from '@cloudflare/puppeteer'
+import { env } from 'cloudflare:workers'
+import { and, eq, inArray } from 'drizzle-orm'
+import { readCanvasNodeRef } from '@loora/agent/canvas-tools'
 import { compileStandaloneHtml } from '@loora/canvas/export'
 import {
   orderedChildren,
@@ -14,11 +13,11 @@ import {
   type NodeId,
   type NodeRef,
 } from '@loora/canvas/model'
-import { readCanvasNodeRef } from '@loora/agent/canvas-tools'
+import { db } from '@loora/db'
+import { asset } from '@loora/db/schema'
+import { assetIdFromSrc } from '@loora/rpc/asset-url'
+import { BoundedConcurrencyGate } from '@loora/rpc/mcp-concurrency'
 import { s3 } from '@loora/rpc/storage'
-import { assetIdFromSrc } from './asset-url'
-import { BoundedConcurrencyGate } from './mcp-concurrency'
-import { IdleResource } from './mcp-idle-resource'
 
 const BLANK_IMAGE =
   'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7'
@@ -37,8 +36,24 @@ const SAFE_IMAGE_TYPES = new Set([
 ])
 
 interface LoadedAsset {
-  data: Buffer
+  data: Uint8Array
   mediaType: string
+}
+
+export interface CanvasScreenshotOptions {
+  pageId?: NodeId
+  ref?: NodeRef
+  width?: number
+  pixelRatio?: number
+}
+
+export interface CanvasScreenshot {
+  png: Uint8Array
+  width: number
+  height: number
+  pageId: NodeId | null
+  ref: NodeRef | null
+  skippedImages: string[]
 }
 
 function integerEnvironment(
@@ -58,22 +73,6 @@ const screenshotGate = new BoundedConcurrencyGate(
   integerEnvironment('MCP_SCREENSHOT_QUEUE_LIMIT', 2, 0, 100),
   integerEnvironment('MCP_SCREENSHOT_QUEUE_TIMEOUT_MS', 20_000, 1_000, 120_000),
 )
-
-export interface CanvasScreenshotOptions {
-  pageId?: NodeId
-  ref?: NodeRef
-  width?: number
-  pixelRatio?: number
-}
-
-export interface CanvasScreenshot {
-  png: Uint8Array
-  width: number
-  height: number
-  pageId: NodeId | null
-  ref: NodeRef | null
-  skippedImages: string[]
-}
 
 async function loadAssets(userId: string, ids: string[]) {
   if (ids.length === 0) return new Map<string, LoadedAsset>()
@@ -117,7 +116,7 @@ async function loadAssets(userId: string, ids: string[]) {
     if (bytes.byteLength > MAX_ASSET_BYTES) continue
     if (bytes.byteLength > remainingBytes) continue
     output.set(row.id, {
-      data: Buffer.from(bytes),
+      data: bytes,
       mediaType: row.mediaType,
     })
     remainingBytes -= bytes.byteLength
@@ -155,47 +154,6 @@ async function prepareDocument(userId: string, source: CanvasDocument) {
   return { assetsByUrl, document, skippedImages }
 }
 
-function chromiumExecutable() {
-  const configured =
-    process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH?.trim() ||
-    process.env.CHROMIUM_PATH?.trim()
-  const candidates = [
-    configured,
-    '/usr/bin/chromium',
-    '/usr/bin/chromium-browser',
-    '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
-    '/Applications/Chromium.app/Contents/MacOS/Chromium',
-    chromium.executablePath(),
-  ].filter((value): value is string => Boolean(value))
-  return candidates.find((candidate) => existsSync(candidate)) ?? null
-}
-
-const screenshotBrowser = new IdleResource(
-  async () => {
-    const executablePath = chromiumExecutable()
-    if (!executablePath) {
-      throw new Error(
-        'Screenshot rendering needs Chromium. Set PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH.',
-      )
-    }
-    const launched = await chromium.launch({
-      executablePath,
-      headless: true,
-      args: ['--disable-dev-shm-usage', '--no-sandbox'],
-    })
-    launched.on('disconnected', () => {
-      screenshotBrowser.invalidate(launched)
-    })
-    return launched
-  },
-  integerEnvironment(
-    'MCP_SCREENSHOT_IDLE_TIMEOUT_MS',
-    5_000,
-    5_000,
-    30 * 60_000,
-  ),
-)
-
 function screenshotTarget(
   document: CanvasDocument,
   options: CanvasScreenshotOptions,
@@ -229,13 +187,37 @@ function screenshotTarget(
   }
 }
 
+async function resolveScreenshotHandle(
+  page: Awaited<ReturnType<Browser['newPage']>>,
+  exportNodeId: NodeId,
+  targetNodeId: NodeId,
+) {
+  const root = await page.waitForSelector(
+    '[data-loora-export-root="true"]',
+    { visible: true },
+  )
+  if (!root) throw new Error('Canvas export root did not render')
+  if (targetNodeId === exportNodeId) return root
+  return (
+    await root.evaluateHandle(
+      (element, nodeId) =>
+        [...element.querySelectorAll('[data-loora-node]')].find(
+          (node) => node.getAttribute('data-loora-node') === nodeId,
+        ) ?? null,
+      targetNodeId,
+    )
+  ).asElement()
+}
+
 async function renderCanvasScreenshotWithBrowser(
   activeBrowser: Browser,
   userId: string,
   source: CanvasDocument,
-  options: CanvasScreenshotOptions = {},
+  options: CanvasScreenshotOptions,
 ): Promise<CanvasScreenshot> {
-  const width = Math.round(Math.max(200, Math.min(options.width ?? 1_440, 3_840)))
+  const width = Math.round(
+    Math.max(200, Math.min(options.width ?? 1_440, 3_840)),
+  )
   const pixelRatio = Math.max(1, Math.min(options.pixelRatio ?? 1, 2))
   const prepared = await prepareDocument(userId, source)
   const target = screenshotTarget(prepared.document, options)
@@ -244,25 +226,27 @@ async function renderCanvasScreenshotWithBrowser(
     width,
     title: prepared.document.name,
   })
-  const context = await activeBrowser.newContext({
-    viewport: { width, height: 900 },
-    deviceScaleFactor: pixelRatio,
-  })
+  const page = await activeBrowser.newPage()
   try {
-    await context.route('**/*', async (route) => {
-      const loaded = prepared.assetsByUrl.get(route.request().url())
+    page.setDefaultTimeout(15_000)
+    await page.setViewport({
+      width,
+      height: 900,
+      deviceScaleFactor: pixelRatio,
+    })
+    await page.setRequestInterception(true)
+    page.on('request', async (request) => {
+      const loaded = prepared.assetsByUrl.get(request.url())
       if (!loaded) {
-        await route.abort()
+        await request.abort()
         return
       }
-      await route.fulfill({
+      await request.respond({
         body: loaded.data,
         contentType: loaded.mediaType,
         status: 200,
       })
     })
-    const page = await context.newPage()
-    page.setDefaultTimeout(15_000)
     await page.setContent(html, { waitUntil: 'load' })
     await page.evaluate(async () => {
       await document.fonts?.ready
@@ -278,34 +262,20 @@ async function renderCanvasScreenshotWithBrowser(
       )
     })
 
-    const root = page.locator('[data-loora-export-root="true"]').first()
-    await root.waitFor({ state: 'visible' })
-    const handle = (
-      target.targetNodeId === target.exportNodeId
-        ? await root.elementHandle()
-        : (
-            await root.evaluateHandle(
-              (element, nodeId) =>
-                [...element.querySelectorAll('[data-loora-node]')].find(
-                  (node) => node.getAttribute('data-loora-node') === nodeId,
-                ) ?? null,
-              target.targetNodeId,
-            )
-          ).asElement()
-    ) as ElementHandle<HTMLElement> | null
+    const handle = (await resolveScreenshotHandle(
+      page,
+      target.exportNodeId,
+      target.targetNodeId,
+    )) as ElementHandle<Element> | null
     if (!handle) {
-      throw new Error(
-        `Canvas node "${target.targetNodeId}" did not render`,
-      )
+      throw new Error(`Canvas node "${target.targetNodeId}" did not render`)
     }
-
     await handle.evaluate(
       (element, limits) => {
         const htmlElement = element as HTMLElement
         const bounds = htmlElement.getBoundingClientRect()
         const areaScale = Math.sqrt(
-          limits.maxArea /
-            Math.max(1, bounds.width * bounds.height),
+          limits.maxArea / Math.max(1, bounds.width * bounds.height),
         )
         const scale = Math.min(
           1,
@@ -325,11 +295,7 @@ async function renderCanvasScreenshotWithBrowser(
     )
     const bounds = await handle.boundingBox()
     if (!bounds) throw new Error('Canvas screenshot target has no visible bounds')
-    const png = await handle.screenshot({
-      type: 'png',
-      animations: 'disabled',
-      caret: 'hide',
-    })
+    const png = await handle.screenshot({ type: 'png' })
     if (png.byteLength > MAX_PNG_BYTES) {
       throw new Error(
         'The PNG is too large for one MCP response. Use a smaller width, pixelRatio, Page, or NodeRef.',
@@ -344,23 +310,26 @@ async function renderCanvasScreenshotWithBrowser(
       skippedImages: prepared.skippedImages,
     }
   } finally {
-    await context.close()
+    await page.close()
   }
 }
 
-function renderCanvasScreenshotInternal(
+async function renderCanvasScreenshotInternal(
   userId: string,
   source: CanvasDocument,
-  options: CanvasScreenshotOptions = {},
+  options: CanvasScreenshotOptions,
 ) {
-  return screenshotBrowser.run((activeBrowser) =>
-    renderCanvasScreenshotWithBrowser(
-      activeBrowser,
+  const browser = await puppeteer.launch(env.BROWSER)
+  try {
+    return await renderCanvasScreenshotWithBrowser(
+      browser,
       userId,
       source,
       options,
-    ),
-  )
+    )
+  } finally {
+    await browser.close()
+  }
 }
 
 export function renderCanvasScreenshot(

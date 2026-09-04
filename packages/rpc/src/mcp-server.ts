@@ -995,7 +995,9 @@ function createLooraRuntime(
           throw new Error('Choose either pageId or ref, not both')
         }
         const found = await getCanvasTarget(userId, args)
-        const { renderCanvasScreenshot } = await import('./mcp-screenshot')
+        const { renderCanvasScreenshot } = await import(
+          '@loora/rpc/mcp-screenshot'
+        )
         const screenshot = await renderCanvasScreenshot(
           userId,
           found.document,

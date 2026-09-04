@@ -32,7 +32,8 @@ export class AuthVerifier {
     fetchImpl?: FetchImpl
   }) {
     this.authUrl = `${options.authOrigin.replace(/\/+$/, '')}/api/auth/mcp/get-session`
-    this.fetchImpl = options.fetchImpl ?? fetch
+    const fetchImpl = options.fetchImpl ?? fetch
+    this.fetchImpl = (input, init) => fetchImpl(input, init)
     this.timeoutMs = options.timeoutMs
     this.cacheTtlMs = options.cacheTtlMs
   }
@@ -71,22 +72,30 @@ export class AuthVerifier {
     }
     if (!response.ok) throw tokenError('unavailable')
 
-    let body: { userId?: unknown; accessTokenExpiresAt?: unknown }
+    let body: unknown
     try {
-      body = (await response.json()) as {
-        userId?: unknown
-        accessTokenExpiresAt?: unknown
-      }
+      body = await response.json()
     } catch {
       throw tokenError('unavailable')
     }
-    if (typeof body.userId !== 'string' || body.userId.length === 0) {
+    if (body === null) throw tokenError('invalid-token')
+    if (typeof body !== 'object' || Array.isArray(body)) {
+      throw tokenError('unavailable')
+    }
+    const sessionBody = body as {
+      userId?: unknown
+      accessTokenExpiresAt?: unknown
+    }
+    if (
+      typeof sessionBody.userId !== 'string' ||
+      sessionBody.userId.length === 0
+    ) {
       throw tokenError('unavailable')
     }
 
-    const accessTokenExpiresAt = parseExpiry(body.accessTokenExpiresAt)
+    const accessTokenExpiresAt = parseExpiry(sessionBody.accessTokenExpiresAt)
     const session: VerifiedSession = {
-      userId: body.userId,
+      userId: sessionBody.userId,
       accessTokenExpiresAt,
     }
     if (this.cacheTtlMs === 0) return session

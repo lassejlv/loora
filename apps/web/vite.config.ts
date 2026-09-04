@@ -1,8 +1,9 @@
 import { readFile } from 'node:fs/promises'
+import { fileURLToPath } from 'node:url'
 import { defineConfig, type Plugin } from 'vite'
+import { cloudflare } from '@cloudflare/vite-plugin'
 import { devtools } from '@tanstack/devtools-vite'
 import { tanstackStart } from '@tanstack/react-start/plugin/vite'
-import { nitro } from 'nitro/vite'
 import viteReact from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 
@@ -23,18 +24,23 @@ function txtAsText(): Plugin {
 }
 
 const config = defineConfig({
-  build: {
-    rolldownOptions: {
-      external: ['bun'],
+  resolve: {
+    tsconfigPaths: true,
+    alias: {
+      '@loora/rpc/mcp-screenshot': fileURLToPath(
+        new URL('./src/server/mcp-screenshot.mts', import.meta.url),
+      ),
+      '@loora/rpc/storage': fileURLToPath(
+        new URL('./src/server/storage.mts', import.meta.url),
+      ),
     },
   },
-  resolve: { tsconfigPaths: true },
   plugins: [
+    cloudflare({ viteEnvironment: { name: 'ssr' } }),
     txtAsText(),
     devtools(),
     tailwindcss(),
-    tanstackStart({ router: { quoteStyle: "single" }}),
-    nitro({ preset: 'bun' }),
+    tanstackStart({ router: { quoteStyle: 'single' } }),
     viteReact(),
   ],
 })

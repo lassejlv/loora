@@ -1,5 +1,5 @@
 import { customDomainClient } from './publish-domain'
-import { s3 } from './storage'
+import { s3 } from '@loora/rpc/storage'
 
 export interface PublishedSiteArtifact {
   customDomain: string | null

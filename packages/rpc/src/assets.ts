@@ -7,7 +7,7 @@ import {
 import { z } from 'zod'
 import { db } from '@loora/db'
 import { asset } from '@loora/db/schema'
-import { assetKey, assetUrl, s3 } from './storage'
+import { assetKey, assetUrl, s3 } from '@loora/rpc/storage'
 import {
   ensureStorageRoom,
   protectedProcedure,

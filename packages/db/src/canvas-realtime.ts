@@ -1,4 +1,3 @@
-import { RedisClient } from 'bun'
 import {
   canvasRealtimeChannel,
   isCanvasPresencePeer,
@@ -18,6 +17,24 @@ import {
   realtimeIngestConfig,
   sendRealtimeIngest,
 } from '@loora/realtime/ingest'
+
+interface RuntimeRedisClient {
+  connect(): Promise<unknown>
+  close(): void
+  publish(channel: string, message: string): Promise<unknown>
+  send(command: string, args: string[]): Promise<unknown>
+  get(key: string): Promise<unknown>
+  subscribe(
+    channel: string,
+    listener: (message: string) => void,
+  ): Promise<unknown>
+  unsubscribe(channel: string): Promise<unknown>
+  onclose: ((error: Error) => void) | null
+}
+
+declare const Bun:
+  | { RedisClient?: new (url: string) => RuntimeRedisClient }
+  | undefined
 
 /**
  * Server-side realtime plumbing.
@@ -48,7 +65,14 @@ function redisUrl() {
   return process.env.REDIS_URL?.trim() || null
 }
 
-async function connect(client: RedisClient) {
+function createRedisClient(url: string) {
+  if (typeof Bun === 'undefined' || !Bun?.RedisClient) {
+    throw new Error('Bun.RedisClient is unavailable in this runtime')
+  }
+  return new Bun.RedisClient(url)
+}
+
+async function connect(client: RuntimeRedisClient) {
   let timer: ReturnType<typeof setTimeout> | null = null
   try {
     await Promise.race([
@@ -65,14 +89,14 @@ async function connect(client: RedisClient) {
   }
 }
 
-let publisher: RedisClient | null = null
-let publisherConnection: Promise<RedisClient> | null = null
+let publisher: RuntimeRedisClient | null = null
+let publisherConnection: Promise<RuntimeRedisClient> | null = null
 
 async function connectedPublisher(url: string) {
   if (publisher) return publisher
   if (publisherConnection) return publisherConnection
   publisherConnection = (async () => {
-    const client = new RedisClient(url)
+    const client = createRedisClient(url)
     client.onclose = () => {
       if (publisher === client) publisher = null
     }
@@ -369,8 +393,8 @@ export async function subscribeCanvasRealtimeEvents(
   onClose: (error?: Error) => void,
 ): Promise<CanvasRealtimeSubscription | null> {
   const url = redisUrl()
-  if (!url) return null
-  const client = new RedisClient(url)
+  if (!url || typeof Bun === 'undefined' || !Bun?.RedisClient) return null
+  const client = createRedisClient(url)
   let closed = false
   client.onclose = (error) => {
     if (!closed) onClose(error)

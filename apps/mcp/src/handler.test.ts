@@ -124,6 +124,34 @@ describe('MCP worker HTTP contract', () => {
     )
   })
 
+  test('invalid auth sessions restart the OAuth flow', async () => {
+    const state = createAppState(
+      configWith({
+        MCP_INTERNAL_TOKEN: 'shared-secret',
+        BETTER_AUTH_URL: 'https://auth.test',
+        MCP_AUTHORIZATION_SERVER_URL: 'https://loora.test',
+        MCP_INTERNAL_API_URL: 'https://auth.test/api/internal/mcp',
+        MCP_PUBLIC_URL: 'http://localhost:4100',
+      }),
+      {
+        fetchImpl: backendFetch(() => Response.json(null)),
+      },
+    )
+    const response = await mcpCall(
+      state,
+      { jsonrpc: '2.0', id: 1, method: 'initialize' },
+      { headers: { authorization: 'Bearer expired-oauth-token' } },
+    )
+
+    expect(response.status).toBe(401)
+    expect(response.headers.get('retry-after')).toBeNull()
+    expect(response.headers.get('www-authenticate')).toBe(
+      'Bearer resource_metadata="http://localhost:4100/.well-known/oauth-protected-resource"',
+    )
+    const body = await response.json()
+    expect(body.error.message).toBe('Unauthorized: Authentication required')
+  })
+
   test('advertises the pinned authorization server', async () => {
     const state = createAppState(
       configWith({
