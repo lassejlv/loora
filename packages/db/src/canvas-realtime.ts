@@ -23,10 +23,10 @@ import {
  * Server-side realtime plumbing.
  *
  * The wire protocol itself lives in `@loora/realtime`; this module is the part
- * that talks to infrastructure. Publishes prefer the WebSocket service's ingest
- * endpoint when one is configured — that service owns the room state and the
- * Redis bus — and fall back to publishing on Redis directly so a deployment
- * without the socket service keeps working.
+ * that talks to infrastructure. Publishes go to the WebSocket Worker's ingest
+ * endpoint and, when configured, Redis as well. The Worker owns WebSocket room
+ * state while Redis keeps the SSE fallback and multi-instance web subscribers
+ * in sync. Either destination may be absent or temporarily unavailable.
  */
 
 export {
@@ -102,13 +102,14 @@ export async function publishCanvasRealtimeEvent(
   target: CanvasRealtimeTarget,
   event: CanvasRealtimeEventInput,
 ) {
-  if (
-    await sendRealtimeIngest({ kind: 'event', ownerUserId: userId, target, event })
-  ) {
-    return true
-  }
+  const ingested = await sendRealtimeIngest({
+    kind: 'event',
+    ownerUserId: userId,
+    target,
+    event,
+  })
   const url = redisUrl()
-  if (!url) return false
+  if (!url) return ingested
   try {
     const client = await connectedPublisher(url)
     await client.publish(
@@ -118,8 +119,8 @@ export async function publishCanvasRealtimeEvent(
     return true
   } catch {
     dropPublisher()
-    console.error('[canvas-realtime] Could not publish event')
-    return false
+    if (!ingested) console.error('[canvas-realtime] Could not publish event')
+    return ingested
   }
 }
 
@@ -169,18 +170,14 @@ export async function publishCanvasAgentActivity(
   target: CanvasRealtimeTarget,
   current: CanvasRealtimeActivity | null,
 ) {
-  if (
-    await sendRealtimeIngest({
-      kind: 'activity',
-      ownerUserId: userId,
-      target,
-      activity: current,
-    })
-  ) {
-    return true
-  }
+  const ingested = await sendRealtimeIngest({
+    kind: 'activity',
+    ownerUserId: userId,
+    target,
+    activity: current,
+  })
   const url = redisUrl()
-  if (!url) return false
+  if (!url) return ingested
   const key = agentActivityKey(userId, target)
   try {
     const client = await connectedPublisher(url)
@@ -208,7 +205,7 @@ export async function publishCanvasAgentActivity(
     return true
   } catch {
     dropPublisher()
-    return false
+    return ingested
   }
 }
 
@@ -300,18 +297,14 @@ export async function publishCanvasPresence(
   target: CanvasRealtimeTarget,
   peer: CanvasPresencePeer,
 ) {
-  if (
-    await sendRealtimeIngest({
-      kind: 'presence',
-      ownerUserId: userId,
-      target,
-      peer,
-    })
-  ) {
-    return true
-  }
+  const ingested = await sendRealtimeIngest({
+    kind: 'presence',
+    ownerUserId: userId,
+    target,
+    peer,
+  })
   const url = redisUrl()
-  if (!url) return false
+  if (!url) return ingested
   const key = presenceKey(userId, target)
   try {
     const client = await connectedPublisher(url)
@@ -329,7 +322,7 @@ export async function publishCanvasPresence(
     return true
   } catch {
     dropPublisher()
-    return false
+    return ingested
   }
 }
 
@@ -338,18 +331,14 @@ export async function clearCanvasPresence(
   target: CanvasRealtimeTarget,
   sessionId: string,
 ) {
-  if (
-    await sendRealtimeIngest({
-      kind: 'presence.clear',
-      ownerUserId: userId,
-      target,
-      sessionId,
-    })
-  ) {
-    return true
-  }
+  const ingested = await sendRealtimeIngest({
+    kind: 'presence.clear',
+    ownerUserId: userId,
+    target,
+    sessionId,
+  })
   const url = redisUrl()
-  if (!url) return false
+  if (!url) return ingested
   try {
     const client = await connectedPublisher(url)
     await client.send('HDEL', [presenceKey(userId, target), sessionId])
@@ -365,7 +354,7 @@ export async function clearCanvasPresence(
     return true
   } catch {
     dropPublisher()
-    return false
+    return ingested
   }
 }
 

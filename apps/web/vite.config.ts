@@ -23,6 +23,11 @@ function txtAsText(): Plugin {
 }
 
 const config = defineConfig({
+  build: {
+    rolldownOptions: {
+      external: ['bun'],
+    },
+  },
   resolve: { tsconfigPaths: true },
   plugins: [
     txtAsText(),

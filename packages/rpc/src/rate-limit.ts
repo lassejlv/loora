@@ -1,5 +1,7 @@
 /**
- * Request rate limiting, shared by the web API routes and the MCP server.
+ * Request rate limiting for the web API routes. MCP burst limits live in
+ * `apps/mcp` (Cloudflare Rate Limiting in production; Redis/memory locally)
+ * and keep the same numbers as `rateLimits.mcp*` below.
  *
  * Counting lives in the same Redis as the realtime bus (`REDIS_URL`). Keys are
  * prefixed `ratelimit:` so they never collide with room, presence, or ticket

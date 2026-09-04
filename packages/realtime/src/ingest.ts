@@ -1,11 +1,10 @@
 /**
  * The service-to-service door into realtime.
  *
- * Web request handlers and the MCP server produce events; the WebSocket service
- * owns the room state and the Redis bus. Posting through this client means a
- * publisher only needs one HTTP endpoint and a shared token — not a Redis URL
- * of its own, which is exactly the configuration that used to fail silently on
- * whichever service was missing it.
+ * Web request handlers and the MCP server produce events; the WebSocket Worker
+ * owns its Durable Object room state. Posting through this client keeps the
+ * Worker transport behind one HTTP endpoint and a shared token. The web app
+ * may also publish to Redis so its SSE fallback receives the same events.
  */
 
 import type {
@@ -89,7 +88,7 @@ async function post(
   }
 }
 
-/** `false` means the caller should fall back to publishing on Redis itself. */
+/** `false` means the Worker ingest was not configured or could not be reached. */
 export async function sendRealtimeIngest(
   message: RealtimeIngestMessage,
   config = realtimeIngestConfig(),

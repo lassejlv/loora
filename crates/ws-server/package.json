@@ -1,0 +1,23 @@
+{
+  "name": "@loora/ws-server",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "check": "tsc --noEmit",
+    "deploy": "wrangler deploy",
+    "deploy:dry-run": "wrangler deploy --dry-run",
+    "dev": "wrangler dev --port 4200",
+    "test": "vitest run --config vitest.config.ts",
+    "types": "wrangler types --env-interface Env --env-file .dev.vars.example --strict-vars false --include-runtime false"
+  },
+  "dependencies": {
+    "@loora/realtime": "workspace:*"
+  },
+  "devDependencies": {
+    "@cloudflare/vitest-pool-workers": "^0.22.0",
+    "@cloudflare/workers-types": "^5.20260904.1",
+    "typescript": "catalog:",
+    "vitest": "4.1.6",
+    "wrangler": "^4.129.0"
+  }
+}

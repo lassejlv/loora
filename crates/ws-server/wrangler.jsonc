@@ -1,0 +1,55 @@
+{
+  "$schema": "../../node_modules/wrangler/config-schema.json",
+  "name": "loora-ws",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-08-22",
+  "compatibility_flags": ["nodejs_compat"],
+  "preview_urls": false,
+  "routes": [
+    {
+      "pattern": "ws.loora.design",
+      "custom_domain": true
+    }
+  ],
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "REALTIME_ROOMS",
+        "class_name": "RealtimeRoom"
+      },
+      {
+        "name": "REALTIME_USERS",
+        "class_name": "RealtimeUser"
+      },
+      {
+        "name": "REALTIME_INGRESS",
+        "class_name": "RealtimeIngress"
+      }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": [
+        "RealtimeRoom",
+        "RealtimeUser",
+        "RealtimeIngress"
+      ]
+    }
+  ],
+  "vars": {
+    "BETTER_AUTH_URL": "https://loora.design",
+    "REALTIME_ALLOWED_ORIGINS": "https://loora.design"
+  },
+  "observability": {
+    "enabled": true,
+    "logs": {
+      "enabled": true,
+      "head_sampling_rate": 1,
+      "invocation_logs": true
+    }
+  },
+  "dev": {
+    "port": 4200
+  }
+}

@@ -1,0 +1,21 @@
+{
+  "name": "@loora/mcp",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "bun --env-file=../../.env run src/local.ts",
+    "dev:stdio": "bun --env-file=../../.env run src/stdio.ts",
+    "dev:worker": "wrangler dev --port 4100",
+    "deploy": "wrangler deploy",
+    "test": "bun run --cwd ../.. test apps/mcp"
+  },
+  "dependencies": {
+    "@cfworker/json-schema": "^4.1.1",
+    "@modelcontextprotocol/sdk": "^1.21.0"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.3.14",
+    "typescript": "catalog:",
+    "wrangler": "^4.34.0"
+  }
+}

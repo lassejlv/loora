@@ -3,9 +3,9 @@
  *
  * Every side of realtime speaks these shapes: the WebSocket service that fans
  * them out, the web app that renders them, the MCP server that emits them, and
- * the Redis bus that carries them between service instances. Keeping the
- * definitions here — free of database, auth, and canvas imports — is what lets
- * the Rust socket service stay a small process that never opens a database connection.
+ * the Redis bus used by the SSE fallback. Keeping the definitions here — free
+ * of database, auth, and canvas imports — lets the Worker stay independent of
+ * the product database.
  */
 
 export interface CanvasRealtimeTarget {

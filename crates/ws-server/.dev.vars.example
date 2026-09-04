@@ -1,0 +1,5 @@
+BETTER_AUTH_URL=http://localhost:3000
+REALTIME_ALLOWED_ORIGINS=http://localhost:3000
+REALTIME_INTERNAL_TOKEN=replace-with-at-least-32-random-characters
+REALTIME_TICKET_SECRET=replace-with-at-least-32-random-characters
+REALTIME_TICKET_SECRET_PREVIOUS=

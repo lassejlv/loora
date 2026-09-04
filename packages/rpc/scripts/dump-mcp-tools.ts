@@ -1,6 +1,6 @@
 /**
- * Writes the registered MCP tool manifest to `crates/mcp-server/src/tools.json`,
- * which the Rust transport serves verbatim for `tools/list`. `mcp-server.test.ts`
+ * Writes the registered MCP tool manifest to `apps/mcp/src/tools.json`,
+ * which the Worker transport serves verbatim for `tools/list`. `mcp-server.test.ts`
  * asserts the two match, so run this after changing any tool's schema,
  * description, or annotations.
  *
@@ -21,7 +21,7 @@ const usage = {
 }
 
 const target = new URL(
-  '../../../crates/mcp-server/src/tools.json',
+  '../../../apps/mcp/src/tools.json',
   import.meta.url,
 )
 

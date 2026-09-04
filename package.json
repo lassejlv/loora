@@ -15,9 +15,11 @@
   "scripts": {
     "dev": "bun run --cwd apps/web dev",
     "dev:desktop": "bun run --cwd apps/desktop dev",
-    "dev:ws": "cargo run -p loora-ws-server",
-    "dev:mcp": "cargo run -p loora-mcp-server",
-    "dev:mcp:stdio": "cargo run -p loora-mcp-server -- --stdio",
+    "dev:ws": "bun run --cwd crates/ws-server dev -- --env-file ../../.env",
+    "dev:mcp": "bun run --cwd apps/mcp dev",
+    "dev:mcp:stdio": "bun run --cwd apps/mcp dev:stdio",
+    "deploy:ws": "bun run --cwd crates/ws-server deploy",
+    "deploy:mcp": "bun run --cwd apps/mcp deploy",
     "build": "bun run --cwd apps/web build",
     "build:desktop": "bun run --cwd apps/desktop build",
     "check:desktop": "bun run --cwd apps/desktop check",
@@ -27,7 +29,8 @@
     "docs:build": "bun run --cwd apps/docs build",
     "preview": "bun run --cwd apps/web preview",
     "start": "bun run --cwd apps/web start",
-    "test": "vitest run",
+    "test": "vitest run && bun run --cwd crates/ws-server test",
+    "test:ws": "bun run --cwd crates/ws-server test",
     "generate-routes": "bun run --cwd apps/web generate-routes",
     "db:generate": "bun run --cwd packages/db generate",
     "db:migrate": "bun run --cwd packages/db migrate",
@@ -40,7 +43,7 @@
   "trustedDependencies": ["esbuild", "lightningcss"],
   "type": "module",
   "workspaces": {
-    "packages": ["apps/*", "packages/*"],
+    "packages": ["apps/*", "packages/*", "crates/ws-server"],
     "catalog": {
       "better-auth": "^1.6.23",
       "drizzle-orm": "^0.45.2",

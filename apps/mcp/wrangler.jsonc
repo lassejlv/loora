@@ -1,0 +1,48 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "loora-mcp",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-09-04",
+  "compatibility_flags": ["nodejs_compat"],
+  "observability": {
+    "enabled": true,
+  },
+  "preview_urls": false,
+  "workers_dev": true,
+  "routes": [
+    {
+      "pattern": "mcp.loora.design",
+      "zone_name": "loora.design",
+    },
+    {
+      "pattern": "mcp.loora.design/*",
+      "zone_name": "loora.design",
+    },
+  ],
+  "vars": {
+    "MCP_PUBLIC_URL": "https://mcp.loora.design",
+    "BETTER_AUTH_URL": "https://loora.design",
+    "MCP_AUTHORIZATION_SERVER_URL": "https://loora.design",
+    "MCP_INTERNAL_API_URL": "https://loora.design/api/internal/mcp",
+  },
+  "ratelimits": [
+    {
+      "name": "MCP_ADDRESS",
+      "namespace_id": "1001",
+      "simple": { "limit": 600, "period": 60 },
+    },
+    {
+      "name": "MCP_ANONYMOUS",
+      "namespace_id": "1002",
+      "simple": { "limit": 60, "period": 60 },
+    },
+    {
+      "name": "MCP_ACCOUNT",
+      "namespace_id": "1003",
+      "simple": { "limit": 240, "period": 60 },
+    },
+  ],
+  "dev": {
+    "port": 4100,
+  },
+}

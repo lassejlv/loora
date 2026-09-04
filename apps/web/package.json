@@ -16,6 +16,7 @@
     "generate-routes": "tsr generate"
   },
   "dependencies": {
+    "@ai-sdk/provider-utils": "5.0.20",
     "@databuddy/sdk": "^2.6.0",
     "@loora/assistant": "workspace:*",
     "@loora/auth": "workspace:*",
@@ -29,6 +30,7 @@
     "@loora/rpc": "workspace:*",
     "@loora/shell": "workspace:*",
     "@loora/ui": "workspace:*",
+    "@orpc/client": "^1.14.8",
     "@orpc/server": "^1.14.8",
     "@tailwindcss/vite": "^4.3.3",
     "@tanstack/react-devtools": "latest",
@@ -36,9 +38,11 @@
     "@tanstack/react-router-devtools": "latest",
     "@tanstack/react-router-ssr-query": "latest",
     "@tanstack/react-start": "latest",
+    "@tanstack/router-core": "1.171.27",
     "@tanstack/router-plugin": "^1.168.22",
     "better-auth": "catalog:",
     "drizzle-orm": "catalog:",
+    "ai": "^7.0.51",
     "motion": "^12.42.2",
     "nanoid": "^6.0.0",
     "nitro": "^3.0.260610-beta",

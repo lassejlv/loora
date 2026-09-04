@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, test } from 'vitest'
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js'
-import rustToolManifest from '../../../crates/mcp-server/src/tools.json'
+import mcpToolManifest from '../../../apps/mcp/src/tools.json'
 import {
   createCanvasDocument,
   createPageNode,
@@ -208,7 +208,7 @@ describe('MCP agent workflow', () => {
     await client.connect(clientTransport)
     try {
       const { tools } = await client.listTools()
-      expect(tools as unknown).toEqual(rustToolManifest)
+      expect(tools as unknown).toEqual(mcpToolManifest)
       expect(tools.length).toBeGreaterThanOrEqual(30)
       // The raw zod conversion inlined every shared shape into every tool
       // (~156KB total, patchNodes alone 43KB). The custom tools/list handler

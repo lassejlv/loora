@@ -14,7 +14,7 @@ packages, over a native window.
 
 **Stack:** Bun workspaces monorepo · TanStack Start / React 19 · Vite + Tauri
 (desktop) · Drizzle + Neon Postgres · Better Auth · Polar billing (plan
-access) · oRPC · Railway (Dockerfile).
+access) · oRPC · Railway (web) · Cloudflare Workers (MCP + realtime).
 
 ---
 
@@ -23,8 +23,8 @@ access) · oRPC · Railway (Dockerfile).
 ```
 apps/web          TanStack Start app (UI, API route handlers, canvas editor shell)
 apps/desktop      Tauri host + Vite interface for the desktop app
-crates/mcp-server Remote MCP transport (Streamable HTTP, OAuth resource server)
-crates/ws-server  Realtime WebSocket service (rooms, presence, MCP agent events)
+apps/mcp          Cloudflare Worker MCP transport (Streamable HTTP, OAuth resource server)
+crates/ws-server  Cloudflare Worker realtime service (Durable Object rooms)
 packages/ui       Shared design-system primitives, tokens, icon barrel, `cn` (`@loora/ui`)
 packages/shell    Signed-in product surfaces shared by web and desktop (`@loora/shell`)
 packages/platform Which client this is, and where its API and links point (`@loora/platform`)
@@ -207,17 +207,24 @@ the ChatGPT connection and the threads.
 The browser client is `@loora/rpc/client` (`orpc`). It imports `appRouter` as a
 type only, so no server implementation follows it into the bundle.
 
-### `crates/mcp-server`
+### `apps/mcp`
 
-Remote MCP at `mcp.loora.design` (local default port `4100`). This pure Rust service owns OAuth verification, rate limiting, and stateless Streamable HTTP/stdio transport. It sends authenticated tool calls over the private, shared-secret `POST /api/internal/mcp` web endpoint; `@loora/rpc/mcp-server` executes the 33 canonical handlers, preserving CanvasEngine validation, persistence, Polar usage, realtime, exports, screenshots, and asset isolation.
+Remote MCP at `mcp.loora.design` (local default port `4100`). This Cloudflare
+Worker owns OAuth verification, rate limiting, and stateless Streamable HTTP
+transport (stdio is a local Bun adapter). It sends authenticated tool calls
+over the private, shared-secret `POST /api/internal/mcp` web endpoint;
+`@loora/rpc/mcp-server` executes the 33 canonical handlers, preserving
+CanvasEngine validation, persistence, Polar usage, realtime, exports,
+screenshots, and asset isolation.
 
 ### `crates/ws-server`
 
-Realtime service at `ws.loora.design` (local default port `4200`). One socket
+Realtime Worker at `ws.loora.design` (local default port `4200`). One socket
 per open document; carries canvas invalidations, agent activity from MCP tool
-calls, and collaborator cursors. It never opens the database: the web app runs
-the access checks and mints a short-lived signed ticket, and this service only
-verifies it. See `crates/ws-server/README.md` for endpoints and configuration.
+calls, and collaborator cursors. Durable Objects own rooms, account connection
+limits, ticket replay protection, and ingest limits. The Worker never opens the
+database: the web app runs the access checks and mints a short-lived signed
+ticket, and the Worker only verifies it. See `crates/ws-server/README.md`.
 
 ### `apps/desktop`
 
@@ -278,7 +285,9 @@ Root scripts (from repo root; env loaded from `.env` where needed):
 | `bun run dev` | Web app on `http://localhost:3000` |
 | `bun run dev:desktop` | Desktop app: Vite on `:1421`, host on `:4300`, window opens |
 | `bun run dev:ws` | Realtime WebSocket service on `:4200` |
-| `bun run dev:mcp` | Remote MCP server on `:4100` |
+| `bun run deploy:ws` | Deploy the realtime Worker (`wrangler deploy`) |
+| `bun run dev:mcp` | Remote MCP Worker on `:4100` |
+| `bun run deploy:mcp` | Deploy the MCP Worker (`wrangler deploy`) |
 | `bun run build` | Production bundle → `apps/web/.output/` |
 | `bun run start` | Serve production build |
 | `bun run build:desktop` | Desktop interface → `apps/desktop/dist/app`, then the app bundle |
@@ -299,17 +308,15 @@ MCP local: `bun run dev:mcp` (or `bun run dev:mcp:stdio`). The web app must be r
 
 Copy `.env.example` → `.env` before dev. Required pieces typically include `DATABASE_URL`, `BETTER_AUTH_SECRET`, `BETTER_AUTH_URL`; optional billing/OAuth/storage keys as needed.
 
-Deploy: Railway via root `Dockerfile` / `railway.json`, with `crates/mcp-server` and
-`crates/ws-server` carrying their own `Dockerfile` + `railway.json` for the MCP and
-realtime services.
+Deploy: Railway via root `Dockerfile` / `railway.json` for the web app. MCP and
+realtime deploy as Cloudflare Workers from `apps/mcp` and `crates/ws-server`.
 
 A **new workspace package** has to be added to the root `Dockerfile` in all
 three places it lists members: the manifest copies before `bun install
 --frozen-lockfile`, the `node_modules` copies into the runtime stage, and the
 source/manifest copies after them. A member the image never copies cannot
 resolve — the build fails at install, before any app code compiles. Local
-installs succeed either way, so this only ever shows up on Railway. (The two
-crate Dockerfiles build Rust only and copy no workspace manifests.)
+installs succeed either way, so this only ever shows up on Railway.
 
 ---
 
@@ -333,7 +340,7 @@ Keep MCP tools and handoff consumers aligned on the shared `@loora/agent` vocabu
 
 `createPage` · `insertNodes` · `patchNodes` · `moveNodes` · `deleteNodes` · `readNode` · `readTree` · `searchNodes` · `createComponent` · `createInstance` · `setTokens` · `setAnimations` · `animateNodes` · `viewNode` · `viewPage` · `viewCanvas`
 
-Implementation: `packages/agent/src/canvas-tools.ts`, canonical MCP execution in `packages/rpc/src/mcp-server.ts`, and Rust transport in `crates/mcp-server/src/`.
+Implementation: `packages/agent/src/canvas-tools.ts`, canonical MCP execution in `packages/rpc/src/mcp-server.ts`, and Worker transport in `apps/mcp/src/`.
 
 ### Realtime
 
@@ -358,28 +365,33 @@ One protocol, two transports, and one gate in front of both.
   Both transports carry identical events. Presence uses one of them at a time:
   the HTTP post is only for the SSE path, never while a socket is connecting.
 - Server-side publishers (oRPC, MCP tools) call the same
-  `@loora/db/canvas-realtime` functions as before. Those now post to the socket
-  service's `/publish` when `REALTIME_INGEST_URL` is set and fall back to
-  publishing on Redis, so a service missing one of the two still works.
-- Redis carries events between instances and holds room state (presence hash,
-  agent-activity key). Without it, `crates/ws-server` runs as a single instance with
-  rooms in memory — enough for local development.
+  `@loora/db/canvas-realtime` functions as before. Those post to the Worker's
+  `/publish` and also publish on Redis when it is configured, so WebSocket and
+  SSE viewers receive the same events. Either destination may fail independently.
+- Durable Objects carry WebSocket room state, presence, activity, ticket replay
+  protection, connection caps, and ingest rate state. Redis remains the web
+  app's SSE fallback bus and its separate copy of ephemeral presence/activity.
 
 Env: `REALTIME_WS_URL` and `REALTIME_TICKET_SECRET` on web; `REALTIME_INGEST_URL`
 and `REALTIME_INTERNAL_TOKEN` on web and MCP; `REALTIME_TICKET_SECRET`,
-`REALTIME_INTERNAL_TOKEN`, and optional `REDIS_URL` /
-`REALTIME_ALLOWED_ORIGINS` on `crates/ws-server`. Web and MCP also read
-`REDIS_URL` for rate-limit counters. Keys are prefixed `ratelimit:` so they
-do not collide with room, presence, or ticket keys.
+`REALTIME_INTERNAL_TOKEN`, and `REALTIME_ALLOWED_ORIGINS` on
+`crates/ws-server`. The web app reads `REDIS_URL`
+for rate-limit counters. The MCP Worker uses Cloudflare Rate Limiting bindings
+in production and the same `ratelimit:` Redis keys (or in-memory fallback)
+when running locally on Bun. Keys are prefixed `ratelimit:` so they do not
+collide with room, presence, or ticket keys.
 
 ### Rate limiting
 
-`@loora/rpc/rate-limit` is the one limiter, used by the web API routes and the
-MCP server. `rateLimit(bucket, identity, rule)` counts a fixed window in Redis
-(`REDIS_URL`, the same instance as the realtime bus) with a single `EVAL`
+`@loora/rpc/rate-limit` is the limiter for the web API routes. The MCP Worker
+counts the `mcp` / `mcp-address` / `mcp-anonymous` buckets itself (Cloudflare
+Rate Limiting bindings in production; Redis `EVAL` or memory locally) using
+the same numbers as the `rateLimits` table here. `rateLimit(bucket, identity, rule)`
+counts a fixed window in Redis
+(`REDIS_URL`, the same instance as the SSE fallback bus) with a single `EVAL`
 per check, and falls back to counting in this process's memory when that Redis
 is unset or unreachable — with a cooldown, so an outage never adds a connect
-timeout to a request. Every limit lives in the `rateLimits` table in that
+timeout to a request. Every web limit lives in the `rateLimits` table in that
 module; add a new one there rather than inlining numbers at a call site.
 
 Count a signed-in caller as `user:<id>` and everyone else by address
@@ -521,7 +533,7 @@ History uses Conventional Commits with scopes when useful:
 | Agent chat box | `packages/editor/src/components/agent-chat.tsx` |
 | Sign in with ChatGPT | `packages/auth/src/chatgpt.ts` |
 | Feature flags (`publish-sites`, `in-app-agent`) | `packages/railway/src/flags.ts` |
-| MCP tools / transport | `packages/rpc/src/mcp-server.ts` / `crates/mcp-server/src/` |
+| MCP tools / transport | `packages/rpc/src/mcp-server.ts` / `apps/mcp/src/` |
 | Realtime transport, rooms, presence | `crates/ws-server/src/` (protocol in `packages/realtime/src/`) |
 | Schema / migrations | `packages/db/src/schema.ts` → `db:generate` |
 | Auth / OAuth integrations | `packages/auth/src/` |

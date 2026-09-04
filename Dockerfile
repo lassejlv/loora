@@ -6,8 +6,10 @@ WORKDIR /app
 # Workspace manifests only, so dependency layers cache until a package.json,
 # the lockfile, or bunfig (isolated linker config) changes.
 COPY package.json bun.lock bunfig.toml ./
+COPY crates/ws-server/package.json crates/ws-server/
 COPY apps/desktop/package.json apps/desktop/
 COPY apps/web/package.json apps/web/
+COPY apps/mcp/package.json apps/mcp/
 COPY packages/db/package.json packages/db/
 COPY packages/auth/package.json packages/auth/
 COPY packages/email/package.json packages/email/
@@ -49,8 +51,8 @@ ENV HOST=0.0.0.0
 ENV PORT=3000
 ENV PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=/usr/bin/chromium
 
-# The internal MCP executor owns canonical screenshots after the Rust MCP
-# transport hands a tool call to the web service.
+# The internal MCP executor owns canonical screenshots after the MCP Worker
+# hands a tool call to the web service.
 USER root
 RUN apt-get update \
   && apt-get install -y --no-install-recommends chromium fonts-liberation tini \
@@ -60,7 +62,9 @@ RUN apt-get update \
 # into it from each workspace's node_modules, so the runtime stage must mirror
 # the full workspace topology (root store + every per-package node_modules).
 COPY --from=deps /app/node_modules ./node_modules
+COPY --from=deps /app/crates/ws-server/node_modules ./crates/ws-server/node_modules
 COPY --from=deps /app/apps/web/node_modules ./apps/web/node_modules
+COPY --from=deps /app/apps/mcp/node_modules ./apps/mcp/node_modules
 COPY --from=deps /app/packages/db/node_modules ./packages/db/node_modules
 COPY --from=deps /app/packages/auth/node_modules ./packages/auth/node_modules
 COPY --from=deps /app/packages/email/node_modules ./packages/email/node_modules
@@ -76,7 +80,9 @@ COPY --from=deps /app/packages/railway/node_modules ./packages/railway/node_modu
 COPY --from=deps /app/packages/editor/node_modules ./packages/editor/node_modules
 COPY --from=deps /app/packages/ui/node_modules ./packages/ui/node_modules
 COPY package.json bun.lock bunfig.toml ./
+COPY crates/ws-server ./crates/ws-server
 COPY apps/web/package.json apps/web/
+COPY apps/mcp/package.json apps/mcp/
 COPY packages/auth/package.json packages/auth/
 COPY packages/email ./packages/email
 COPY packages/billing/package.json packages/billing/
