@@ -24,7 +24,7 @@ access) · oRPC · Railway (web) · Cloudflare Workers (MCP + realtime).
 apps/web          TanStack Start app (UI, API route handlers, canvas editor shell)
 apps/desktop      Tauri host + Vite interface for the desktop app
 apps/mcp          Cloudflare Worker MCP transport (Streamable HTTP, OAuth resource server)
-crates/ws-server  Cloudflare Worker realtime service (Durable Object rooms)
+apps/ws-server    Cloudflare Worker realtime service (Durable Object rooms)
 packages/ui       Shared design-system primitives, tokens, icon barrel, `cn` (`@loora/ui`)
 packages/shell    Signed-in product surfaces shared by web and desktop (`@loora/shell`)
 packages/platform Which client this is, and where its API and links point (`@loora/platform`)
@@ -217,14 +217,14 @@ over the private, shared-secret `POST /api/internal/mcp` web endpoint;
 CanvasEngine validation, persistence, Polar usage, realtime, exports,
 screenshots, and asset isolation.
 
-### `crates/ws-server`
+### `apps/ws-server`
 
 Realtime Worker at `ws.loora.design` (local default port `4200`). One socket
 per open document; carries canvas invalidations, agent activity from MCP tool
 calls, and collaborator cursors. Durable Objects own rooms, account connection
 limits, ticket replay protection, and ingest limits. The Worker never opens the
 database: the web app runs the access checks and mints a short-lived signed
-ticket, and the Worker only verifies it. See `crates/ws-server/README.md`.
+ticket, and the Worker only verifies it. See `apps/ws-server/README.md`.
 
 ### `apps/desktop`
 
@@ -309,7 +309,7 @@ MCP local: `bun run dev:mcp` (or `bun run dev:mcp:stdio`). The web app must be r
 Copy `.env.example` → `.env` before dev. Required pieces typically include `DATABASE_URL`, `BETTER_AUTH_SECRET`, `BETTER_AUTH_URL`; optional billing/OAuth/storage keys as needed.
 
 Deploy: Railway via root `Dockerfile` / `railway.json` for the web app. MCP and
-realtime deploy as Cloudflare Workers from `apps/mcp` and `crates/ws-server`.
+realtime deploy as Cloudflare Workers from `apps/mcp` and `apps/ws-server`.
 
 A **new workspace package** has to be added to the root `Dockerfile` in all
 three places it lists members: the manifest copies before `bun install
@@ -349,7 +349,7 @@ One protocol, two transports, and one gate in front of both.
 - `@loora/realtime` holds the wire protocol (`canvas.changed`, `agent.activity`,
   `presence.peer`, `presence.state`), the HMAC connection tickets, and the
   ingest client. It imports nothing from db, auth, or canvas.
-- Browsers prefer a WebSocket to `crates/ws-server`. `/api/realtime-ticket` runs the
+- Browsers prefer a WebSocket to `apps/ws-server`. `/api/realtime-ticket` runs the
   same checks as the editor (session, legal consent, design access, preview
   access, plan) and signs a 60-second ticket; the socket service verifies it and
   stamps presence identity from those claims. Tickets are single use (`jti`
@@ -375,7 +375,7 @@ One protocol, two transports, and one gate in front of both.
 Env: `REALTIME_WS_URL` and `REALTIME_TICKET_SECRET` on web; `REALTIME_INGEST_URL`
 and `REALTIME_INTERNAL_TOKEN` on web and MCP; `REALTIME_TICKET_SECRET`,
 `REALTIME_INTERNAL_TOKEN`, and `REALTIME_ALLOWED_ORIGINS` on
-`crates/ws-server`. The web app reads `REDIS_URL`
+`apps/ws-server`. The web app reads `REDIS_URL`
 for rate-limit counters. The MCP Worker uses Cloudflare Rate Limiting bindings
 in production and the same `ratelimit:` Redis keys (or in-memory fallback)
 when running locally on Bun. Keys are prefixed `ratelimit:` so they do not
@@ -534,7 +534,7 @@ History uses Conventional Commits with scopes when useful:
 | Sign in with ChatGPT | `packages/auth/src/chatgpt.ts` |
 | Feature flags (`publish-sites`, `in-app-agent`) | `packages/railway/src/flags.ts` |
 | MCP tools / transport | `packages/rpc/src/mcp-server.ts` / `apps/mcp/src/` |
-| Realtime transport, rooms, presence | `crates/ws-server/src/` (protocol in `packages/realtime/src/`) |
+| Realtime transport, rooms, presence | `apps/ws-server/src/` (protocol in `packages/realtime/src/`) |
 | Schema / migrations | `packages/db/src/schema.ts` → `db:generate` |
 | Auth / OAuth integrations | `packages/auth/src/` |
 | Plans / entitlements | `packages/billing/src/` |

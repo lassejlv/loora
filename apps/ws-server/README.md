@@ -49,9 +49,9 @@ The root `.env` supplies `REALTIME_TICKET_SECRET`,
 ## Validate and deploy
 
 ```sh
-bun run --cwd crates/ws-server check
+bun run --cwd apps/ws-server check
 bun run test:ws
-bun run --cwd crates/ws-server deploy:dry-run
+bun run --cwd apps/ws-server deploy:dry-run
 bun run deploy:ws
 ```
 

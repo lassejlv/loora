@@ -1,6 +1,6 @@
 {
   "include": ["apps/**/*.ts", "apps/**/*.tsx", "packages/**/*.ts", "packages/**/*.tsx"],
-  "exclude": ["apps/desktop/dist"],
+  "exclude": ["apps/desktop/dist", "apps/ws-server"],
   "compilerOptions": {
     "target": "ES2022",
     "jsx": "react-jsx",

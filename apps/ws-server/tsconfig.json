@@ -8,5 +8,6 @@
       "./worker-configuration.d.ts"
     ]
   },
-  "include": ["src/**/*.ts", "tests/**/*.ts", "vitest.config.ts"]
+  "include": ["src/**/*.ts", "tests/**/*.ts", "vitest.config.ts"],
+  "exclude": []
 }

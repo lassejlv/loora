@@ -6,7 +6,7 @@ WORKDIR /app
 # Workspace manifests only, so dependency layers cache until a package.json,
 # the lockfile, or bunfig (isolated linker config) changes.
 COPY package.json bun.lock bunfig.toml ./
-COPY crates/ws-server/package.json crates/ws-server/
+COPY apps/ws-server/package.json apps/ws-server/
 COPY apps/desktop/package.json apps/desktop/
 COPY apps/web/package.json apps/web/
 COPY apps/mcp/package.json apps/mcp/
@@ -62,7 +62,7 @@ RUN apt-get update \
 # into it from each workspace's node_modules, so the runtime stage must mirror
 # the full workspace topology (root store + every per-package node_modules).
 COPY --from=deps /app/node_modules ./node_modules
-COPY --from=deps /app/crates/ws-server/node_modules ./crates/ws-server/node_modules
+COPY --from=deps /app/apps/ws-server/node_modules ./apps/ws-server/node_modules
 COPY --from=deps /app/apps/web/node_modules ./apps/web/node_modules
 COPY --from=deps /app/apps/mcp/node_modules ./apps/mcp/node_modules
 COPY --from=deps /app/packages/db/node_modules ./packages/db/node_modules
@@ -80,7 +80,7 @@ COPY --from=deps /app/packages/railway/node_modules ./packages/railway/node_modu
 COPY --from=deps /app/packages/editor/node_modules ./packages/editor/node_modules
 COPY --from=deps /app/packages/ui/node_modules ./packages/ui/node_modules
 COPY package.json bun.lock bunfig.toml ./
-COPY crates/ws-server ./crates/ws-server
+COPY apps/ws-server ./apps/ws-server
 COPY apps/web/package.json apps/web/
 COPY apps/mcp/package.json apps/mcp/
 COPY packages/auth/package.json packages/auth/
